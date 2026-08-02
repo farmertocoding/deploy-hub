@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+dev.sqlite3
+staticfiles/
+.venv*/
+node_modules/
+frontend/dist/
+conformance/matrix.json
+.pytest_cache/
+.ruff_cache/

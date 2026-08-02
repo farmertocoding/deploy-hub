@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest>=8,<9
+pytest-django>=4.9,<5
+ruff>=0.6
+bandit[toml]>=1.7
+pip-audit>=2.7
+PyYAML>=6

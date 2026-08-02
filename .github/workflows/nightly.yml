@@ -1,0 +1,21 @@
+# CI workflow 2 — nightly. T3 live e2e (Multipass/QEMU VM, test DNS zone, LE
+# staging) lands in Phase 2.5; this stub keeps the schedule slot warm and runs
+# the full suite + conformance until then.
+name: nightly
+on:
+  schedule:
+    - cron: "17 18 * * *"   # 02:17 Asia/Taipei
+  workflow_dispatch:
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+      - run: python conformance/check.py --phase 0

@@ -1,0 +1,14 @@
+# Sensitive paths — always human-merged, no exceptions (build-process.md §5,
+# as extended by review3). One path-glob check enforces this in CI.
+sensitive:
+  - vault/**
+  - core/views.py            # auth/session code
+  - realtime/authorize.py    # topic authz choke point
+  - catalog/**
+  - core/transport.py        # SSH transport seam
+  - providers/**
+  - .github/workflows/**
+  - conformance/requirements.yaml
+  - conformance/check.py
+  - scripts/**
+  - intake/**

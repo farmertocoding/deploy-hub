@@ -1,0 +1,13 @@
+# Pinned majors, mockup-first. pip-compile --generate-hashes lands with the CI
+# hardening pass (§B1 requires hash-pinned installs in generated Dockerfiles;
+# the Hub itself gets the same treatment before Phase 2 exit).
+Django>=5.1,<5.3
+djangorestframework>=3.15,<4
+drf-spectacular>=0.28,<1
+channels[daphne]>=4.1,<5
+channels-redis>=4.2,<5
+celery[redis]>=5.4,<6
+redis>=5,<7
+django-otp>=1.5,<2
+qrcode>=7,<9
+psycopg[binary]>=3.2,<4

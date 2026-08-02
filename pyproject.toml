@@ -1,0 +1,25 @@
+[project]
+name = "deploy-hub"
+version = "0.0.1"
+description = "Deploy Hub — self-hosted deployment control plane (Phase 0 skeleton)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "hub.settings.dev"
+testpaths = ["tests"]
+markers = [
+    "acceptance(phase): phase acceptance test (review3 §Q4)",
+    "req(id): ties a test to a conformance requirement id (review3 §Q2)",
+    "demo: clause verified by a recorded demo, not this test body",
+    "flaky_quarantine: quarantined flaky test (cap: 5 — PROC-FLAKE-CAP)",
+]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["*/migrations/*", ".venv-scaffold", "frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv-scaffold", "frontend"]

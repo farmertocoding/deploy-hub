@@ -1,0 +1,64 @@
+# Requirements registry (review3 §Q1). NEVER edited in the round judged by it
+# (anti-gaming rule, build-process.md §4). Sensitive path: human-merge only.
+#
+# verify: test  -> >=1 collected test carries @pytest.mark.req("<id>")
+# verify: demo  -> a checked-in record under conformance/demos/phase-N.md
+schema_version: 1
+requirements:
+  - id: P0-LOGIN
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §A1
+    text: Session-cookie login (no JWT); invalid credentials rejected with 400.
+  - id: P0-2FA-TOTP
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §I Phase 0 / §E9
+    text: TOTP second factor enforced for enrolled users at login.
+  - id: P0-VALIDATION
+    phase: 0
+    verify: test
+    source: deploy-system-plan.md §4.5
+    text: >
+      First form validates via DRF serializer; errors block with
+      {field:[{code,message,hint}]}; warnings return 409 and require
+      confirm_warnings to proceed.
+  - id: P0-REALTIME
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §D7
+    text: >
+      publish() assigns per-topic monotonic seq; demo Celery job streams events
+      through the channel layer; snapshot endpoints return {seq, data}.
+  - id: P0-AUTHZ-TOPIC
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §A1/§D7
+    text: Every topic subscribe passes authorize_topic(); anonymous sockets rejected.
+  - id: P0-AUDIT
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §D1
+    text: AuditEvent model + one-line audit() helper; security-relevant actions audited.
+  - id: P0-IMPORT-RULE
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §D4
+    text: boto3/azure/cloudflare imports only under providers/ (grep test).
+  - id: P0-SEAMS
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §A7/§D5
+    text: Transport + provider interfaces exist with in-memory fakes; fakes idempotent.
+  - id: P0-WS-DEMO
+    phase: 0
+    verify: demo
+    source: plan-addendum-2026-07-30.md §D7 / build-process.md §2④
+    text: >
+      Exit demo recorded: login → demo panel → live stream → socket kill →
+      snapshot-then-stream reconnect with no gap.
+  - id: PROC-FLAKE-CAP
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §Q6(b)
+    text: Flake-quarantine marker count red at >5.

@@ -1,0 +1,36 @@
+# CI workflow 1 — on-push gates (<2 min target). T2 container-tier job lands Phase 2.5.
+name: push-checks
+on: [push, pull_request]
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: ruff
+        run: ruff check .
+      - name: bandit
+        run: bandit -q -c pyproject.toml -r core vault catalog scanner provision deploys reconcile providers monitor scaling realtime hub
+      - name: pip-audit (advisory in Phase 0)
+        run: pip-audit -r requirements.txt || true
+      - name: log-scrubber grep
+        run: |
+          ! grep -rn "SECRET_KEY\s*=" --include="*.py" core vault deploys realtime | grep -v "settings" || (echo "possible secret in code" && exit 1)
+      - name: T1 unit tests
+        run: pytest -q
+      - name: conformance-check
+        run: python conformance/check.py --phase 0
+
+  sensitive-path-guard:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: label PRs touching sensitive paths (human-merge only)
+        run: |
+          echo "Sensitive-path enforcement: wire branch-protection + CODEOWNERS when repo moves to GitHub (D-001)."
