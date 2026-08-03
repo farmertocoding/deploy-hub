@@ -9,3 +9,4 @@ frontend/dist/
 conformance/matrix.json
 .pytest_cache/
 .ruff_cache/
+dump.rdb

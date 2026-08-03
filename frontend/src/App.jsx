@@ -173,8 +173,16 @@ function snapshotFailedLine(status) {
 }
 
 function DemoPanel({ user }) {
-  const { status, subscribe } = useEvents();
+  const { status, subscribe, unsubscribe } = useEvents();
   const [lines, setLines] = useState([]);
+  // The pane shows one mode at a time; switching modes unsubscribes the previous
+  // topics so stale streams can't interleave and snapshots can't clobber
+  // the other mode's lines (round-3 finding).
+  const [paneTopics, setPaneTopics] = useState([]);
+  function takePane(topics) {
+    paneTopics.forEach((t) => unsubscribe(t));
+    setPaneTopics(topics);
+  }
   const [warnings, setWarnings] = useState(null);
   const [busy, setBusy] = useState(false); // covers the 409-confirm relaunch too
   const {
@@ -217,6 +225,7 @@ function DemoPanel({ user }) {
       // Non-contract statuses (0 network, 403 CSRF/session, 500…) never go silent.
       setError("root", { type: String(st), message: data.detail ?? `Unexpected ${st} response.` });
     } else {
+      takePane([data.topic]);
       setLines([`— launching ${values.name}… waiting for first log line —`]);
       subscribe(
         data.topic,
@@ -238,6 +247,7 @@ function DemoPanel({ user }) {
   // §F8 v0: watch the simulation replayer (manage.py replay_simulation) through the
   // same multiplexed socket — two topics, one panel, real publish() path.
   function watchSimulation() {
+    takePane(["demo.sim.log", "alerts"]);
     setLines(["— watching simulation topics (run: manage.py replay_simulation) —"]);
     const synced = new Set(); // first snapshot per topic = initial load, not a resync
     const simHandler = (topic, render) => (event) => {
@@ -268,6 +278,11 @@ function DemoPanel({ user }) {
         <small style={{ color: status === "live" ? "#7ee787" : "#f0b72f" }}>({status})</small>
       </h2>
       <p>Signed in as {user.username}.</p>
+      {status === "auth-required" && (
+        <div style={{ color: "#ff7b72" }}>
+          Session expired or enrollment required — reload and log in again.
+        </div>
+      )}
       <form onSubmit={handleSubmit((v) => launch(v, false))}
         style={{ display: "flex", gap: 8, alignItems: "end" }}>
         <label style={{ display: "grid", gap: 4 }}>

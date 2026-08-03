@@ -44,6 +44,11 @@ def test_enrollment_flow_qr_confirm_recovery_codes(client):
     assert r.status_code == 200
     codes = r.json()["recovery_codes"]
     assert len(codes) == 8
+    # 16 chars over the 31-symbol alphabet (~79 bits) — the round-2 defense
+    # against offline brute-force of a leaked hash table must not silently revert.
+    import re as _re
+
+    assert all(_re.fullmatch(r"[abcdefghjkmnpqrstuvwxyz23456789]{16}", c) for c in codes)
     stored = list(RecoveryCode.objects.filter(user__username="joseph")
                   .values_list("code_hash", flat=True))
     assert len(stored) == 8

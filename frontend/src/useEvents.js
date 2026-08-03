@@ -57,7 +57,14 @@ export function useEvents() {
         seqRef.current.set(msg.topic, msg.seq);
         sub.handler(msg.event, msg.seq);
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        // 4401/4403 are terminal (unauthenticated / enrollment required): retrying
+        // can never succeed and would grind out a security AuditEvent every 1.5s
+        // (round-3 finding). Surface auth-required instead.
+        if (e.code === 4401 || e.code === 4403) {
+          setStatus("auth-required");
+          return;
+        }
         setStatus("reconnecting");
         if (!closed) setTimeout(connect, 1500);
       };
