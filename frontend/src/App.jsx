@@ -230,14 +230,19 @@ function DemoPanel({ user }) {
       setError("root", { type: String(st), message: data.detail ?? `Unexpected ${st} response.` });
     } else {
       takePane([data.topic]);
-      setLines([`— launching ${values.name}… waiting for first log line —`]);
+      const seed = `— launching ${values.name}… waiting for first log line —`;
+      setLines([seed]);
       subscribe(
         data.topic,
         (event) => {
           if (event.__snapshot) {
             // §D7 repaint: snapshot data is the capped history [{seq, event}] — a
             // socket killed mid-stream recovers every line published while dead.
-            return setLines(event.data.map((e) => e.event.line ?? "✔ done"));
+            // An EMPTY first snapshot must keep the seed line, not blank the pane
+            // (round-5 finding: the happy path regressed the pending-feedback fix).
+            return setLines(
+              event.data.length ? event.data.map((e) => e.event.line ?? "✔ done") : [seed]
+            );
           }
           if (event.__snapshot_failed)
             return setLines((p) => [...p, snapshotFailedLine(event.status)]);
