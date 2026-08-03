@@ -17,13 +17,19 @@ export function useEvents() {
     const sub = subsRef.current.get(topic);
     if (!sub) return;
     if (sub.snapshotFn) {
+      // The catch must wrap ONLY the fetch: a handler exception misreported as a
+      // "snapshot failed" both hides the bug and skips the repaint (live-demo
+      // finding, 2026-08-03 — intermittent lost-lines after reconnect).
+      let snap = null;
       try {
-        const snap = await sub.snapshotFn(topic); // {seq, data}
-        seqRef.current.set(topic, snap.seq ?? 0);
-        sub.handler({ __snapshot: true, data: snap.data }, snap.seq ?? 0);
+        snap = await sub.snapshotFn(topic); // {seq, data}
       } catch (err) {
         sub.handler({ __snapshot_failed: true, status: err?.status },
           seqRef.current.get(topic) ?? 0);
+      }
+      if (snap) {
+        seqRef.current.set(topic, snap.seq ?? 0);
+        sub.handler({ __snapshot: true, data: snap.data ?? [] }, snap.seq ?? 0);
       }
     }
     if (wsRef.current?.readyState === 1) {

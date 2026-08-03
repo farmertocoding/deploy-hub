@@ -202,7 +202,9 @@ function DemoPanel({ user }) {
   // Non-OK snapshot responses carry their status into the failure line.
   const snapshotFn = async (topic) => {
     const { status: st, data } = await api(`topics/${topic}/snapshot/`);
-    if (st !== 200) throw { status: st };
+    // Shape-validate: a 200 with an unparseable/foreign body must count as a
+    // failed snapshot, not crash the repaint (live-demo finding).
+    if (st !== 200 || !Array.isArray(data.data)) throw { status: st };
     return data;
   };
 
