@@ -1,7 +1,7 @@
 // Phase 0 UI: login (password + TOTP) → forced TOTP enrollment (§6.10 mandatory-2FA)
 // → demo log panel on the multiplexed socket. shadcn/Tailwind (§A8) arrive with the
 // first real screen; this stays plain so the demo proves plumbing, not styling.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { schemas } from "./api/zod.ts";
@@ -176,12 +176,14 @@ function DemoPanel({ user }) {
   const { status, subscribe, unsubscribe } = useEvents();
   const [lines, setLines] = useState([]);
   // The pane shows one mode at a time; switching modes unsubscribes the previous
-  // topics so stale streams can't interleave and snapshots can't clobber
-  // the other mode's lines (round-3 finding).
-  const [paneTopics, setPaneTopics] = useState([]);
+  // topics so stale streams can't interleave and snapshots can't clobber the
+  // other mode's lines (round-3 finding). A ref, not state: an async launch
+  // resolving after a mode switch must swap the ACTUAL current topics, not a
+  // click-time closure (round-4 finding).
+  const paneTopicsRef = useRef([]);
   function takePane(topics) {
-    paneTopics.forEach((t) => unsubscribe(t));
-    setPaneTopics(topics);
+    paneTopicsRef.current.forEach((t) => unsubscribe(t));
+    paneTopicsRef.current = topics;
   }
   const [warnings, setWarnings] = useState(null);
   const [busy, setBusy] = useState(false); // covers the 409-confirm relaunch too

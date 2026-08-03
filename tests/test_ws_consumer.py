@@ -42,18 +42,22 @@ async def test_unenrolled_session_rejected_on_ws_plane():
     sessions of not-yet-enrolled users — both planes must enforce §6.10."""
     comm = WebsocketCommunicator(APP, "/ws/events/")
     comm.scope["user"] = await _make_user(enrolled=False, username="ws-unenrolled")
-    connected, close_code = await comm.connect()
-    assert not connected
-    assert close_code == 4403
+    connected, _ = await comm.connect()
+    assert connected  # accept-then-close (round-4): code must reach the browser
+    close = await comm.receive_output()
+    assert close["type"] == "websocket.close" and close["code"] == 4403
     await comm.disconnect()
 
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")
 async def test_anonymous_socket_rejected_with_4401():
     comm = WebsocketCommunicator(APP, "/ws/events/")  # no session → AnonymousUser
-    connected, close_code = await comm.connect()
-    assert not connected
-    assert close_code == 4401
+    connected, _ = await comm.connect()
+    # Accept-then-close (round-4): the handshake succeeds so the app close code
+    # actually reaches a real browser instead of a daphne-level HTTP 403 → 1006.
+    assert connected
+    close = await comm.receive_output()
+    assert close["type"] == "websocket.close" and close["code"] == 4401
     await comm.disconnect()
     # The reject is audited like HTTP-side authz failures (round-1 finding).
     from core.models import AuditEvent

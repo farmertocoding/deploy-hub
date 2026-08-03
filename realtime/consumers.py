@@ -15,11 +15,16 @@ from .authorize import authorize_topic
 
 class EventsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        # Rejections ACCEPT first, then close with the app code: close() before
+        # accept() becomes an HTTP 403 handshake rejection at daphne, the browser
+        # sees 1006, and the client's terminal-code handling never fires
+        # (round-4 finding, verified against the live wire).
         user = self.scope.get("user")
         if user is None or not user.is_authenticated:
             # Same audit discipline as HTTP-side authz failures (round-1 finding).
             await database_sync_to_async(audit)(
                 "ws_connect_rejected", source="ws", severity="security")
+            await self.accept()
             await self.close(code=4401)
             return
         # §6.10 mandatory-2FA covers BOTH planes (round-2 finding: the HTTP
@@ -29,6 +34,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
             await database_sync_to_async(audit)(
                 "ws_connect_rejected", source="ws", severity="security",
                 actor=user, reason="enrollment_required")
+            await self.accept()
             await self.close(code=4403)
             return
         self.topics = set()
