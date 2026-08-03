@@ -62,3 +62,10 @@ requirements:
     verify: test
     source: plan-addendum-2026-08-02-review3.md §Q6(b)
     text: Flake-quarantine marker count red at >5.
+  - id: P0-SIM-REPLAYER
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §F8 / phase-0 design note item 10
+    text: >
+      Simulation seed v0 loads; replayer publishes scripted events through the
+      real publish() path; every scripted topic passes authorize_topic().

@@ -160,6 +160,21 @@ function DemoPanel({ user }) {
     }
   }
 
+  // §F8 v0: watch the simulation replayer (manage.py replay_simulation) through the
+  // same multiplexed socket — two topics, one panel, real publish() path.
+  function watchSimulation() {
+    setLines(["— watching simulation topics (run: manage.py replay_simulation) —"]);
+    const snapshot = async (topic) => (await api(`topics/${topic}/snapshot/`)).data;
+    subscribe("demo.sim.log", (event) => {
+      if (event.__snapshot || event.__snapshot_failed) return;
+      setLines((p) => [...p, event.line ?? JSON.stringify(event)]);
+    }, snapshot);
+    subscribe("alerts", (event) => {
+      if (event.__snapshot || event.__snapshot_failed) return;
+      setLines((p) => [...p, `⚠ ${event.kind} ${event.site ?? ""} ${event.state ?? ""}`]);
+    }, snapshot);
+  }
+
   return (
     <div style={{ maxWidth: 720, margin: "5vh auto", padding: 16 }}>
       <h2>
@@ -173,6 +188,9 @@ function DemoPanel({ user }) {
         <input {...register("delay", { valueAsNumber: true })} type="number" step="0.05"
           style={{ ...box, width: 80 }} aria-invalid={!!errors.delay} title="delay (s)" />
         <button style={{ padding: 8 }}>Launch</button>
+        <button type="button" onClick={watchSimulation} style={{ padding: 8 }}>
+          Watch simulation
+        </button>
       </form>
       {Object.entries(errors).map(([field, e]) => (
         <div key={field} style={{ color: "#ff7b72", marginTop: 8 }}>
