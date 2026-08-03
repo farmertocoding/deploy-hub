@@ -114,3 +114,22 @@ async def test_unsubscribe_stops_delivery_and_bad_messages_answered():
     await sync_to_async(publish)("demo.wstest2.log", {"line": "after-unsub"})
     assert await comm.receive_nothing(timeout=0.3)
     await comm.disconnect()
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("P0-AUTHZ-TOPIC")
+async def test_post_reject_frames_are_dropped():
+    """Round-6 finding (empirical): after the accept-then-close(4403) rejection, a
+    subscribe frame racing the close was honored (group_add executed) because the
+    gate relied on transport timing. receive() must fail closed by flag."""
+    comm = WebsocketCommunicator(APP, "/ws/events/")
+    comm.scope["user"] = await _make_user(enrolled=False, username="ws-racer")
+    connected, _ = await comm.connect()
+    assert connected
+    close = await comm.receive_output()
+    assert close["type"] == "websocket.close" and close["code"] == 4403
+
+    # The racing frame: must be silently dropped — no subscribed ack, no group_add.
+    await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.race.log"]}))
+    assert await comm.receive_nothing(timeout=0.3)
+    await comm.disconnect()

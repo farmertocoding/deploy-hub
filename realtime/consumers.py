@@ -15,8 +15,11 @@ from .authorize import authorize_topic
 
 class EventsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.topics = set()  # before any branch: a frame racing the close must
-        # deny cleanly, not AttributeError (round-5 reviewer hygiene note)
+        self.topics = set()
+        # Fail CLOSED by flag, not by timing (round-6 finding: relying on the
+        # uninitialized set / transport teardown let a subscribe frame racing the
+        # 4403 close be honored). receive() drops everything until this is True.
+        self.authorized = False
         # Rejections ACCEPT first, then close with the app code: close() before
         # accept() becomes an HTTP 403 handshake rejection at daphne, the browser
         # sees 1006, and the client's terminal-code handling never fires
@@ -39,6 +42,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
             await self.accept()
             await self.close(code=4403)
             return
+        self.authorized = True
         await self.accept()
 
     async def disconnect(self, code):
@@ -46,6 +50,10 @@ class EventsConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard(topic, self.channel_name)
 
     async def receive(self, text_data=None, bytes_data=None):
+        # True denial for rejected connections (round-6): frames arriving after an
+        # accept-then-close rejection are dropped, never processed.
+        if not getattr(self, "authorized", False):
+            return
         try:
             msg = json.loads(text_data)
             action, topics = msg["action"], msg["topics"]
