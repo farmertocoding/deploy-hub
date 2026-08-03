@@ -3,7 +3,10 @@
 sensitive:
   - vault/**
   - core/views.py            # auth/session code
+  - core/otp.py              # 2FA enrollment + recovery codes
+  - core/middleware.py       # mandatory-2FA gate
   - realtime/authorize.py    # topic authz choke point
+  - realtime/consumers.py    # the only group_add call site
   - catalog/**
   - core/transport.py        # SSH transport seam
   - providers/**

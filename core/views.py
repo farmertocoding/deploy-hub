@@ -5,6 +5,8 @@ Mockup-first: one endpoint takes password + TOTP code together. Split ceremony
 """
 from django.contrib.auth import authenticate, login, logout
 from django.middleware.csrf import get_token
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_protect
 from django_otp import devices_for_user, match_token
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
@@ -13,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audit import audit
+from .otp import consume_recovery_code
 
 
 class LoginSerializer(serializers.Serializer):
@@ -21,7 +24,12 @@ class LoginSerializer(serializers.Serializer):
     otp_code = serializers.CharField(required=False, allow_blank=True)
 
 
+@method_decorator(csrf_protect, name="post")
 class LoginView(APIView):
+    """CSRF-protected even though unauthenticated (round-1 finding: login-CSRF —
+    a cross-site page must not be able to log the victim into an attacker account).
+    The SPA fetches /api/auth/me/ on load, which plants the CSRF cookie."""
+
     authentication_classes = []
     permission_classes = [AllowAny]
 
@@ -42,8 +50,9 @@ class LoginView(APIView):
 
         has_device = any(devices_for_user(user, confirmed=True))
         if has_device:
-            device = match_token(user, ser.validated_data.get("otp_code", ""))
-            if device is None:
+            code = ser.validated_data.get("otp_code", "")
+            device = match_token(user, code)
+            if device is None and not consume_recovery_code(user, code):
                 audit("otp_failed", source="api", severity="security", actor=user,
                       source_ip=request.META.get("REMOTE_ADDR"))
                 return Response({"detail": "Invalid or missing OTP code."},
@@ -68,11 +77,19 @@ class LogoutView(APIView):
 
 
 class MeView(APIView):
-    permission_classes = [IsAuthenticated]
+    """Session hydration for the SPA. AllowAny: the anonymous response is the
+    SPA's pre-login bootstrap and plants the CSRF cookie (get_token) so the
+    login POST itself can be CSRF-checked."""
+
+    permission_classes = [AllowAny]
 
     def get(self, request):
+        get_token(request)
+        if not request.user.is_authenticated:
+            return Response({"authenticated": False})
         return Response(
             {
+                "authenticated": True,
                 "username": request.user.username,
                 "otp_enrolled": any(devices_for_user(request.user, confirmed=True)),
             }

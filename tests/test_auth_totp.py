@@ -17,8 +17,9 @@ def _current_code(device):
 @pytest.mark.django_db
 def test_enrollment_flow_qr_confirm_recovery_codes(client):
     from django.contrib.auth.models import User
-    from django_otp.plugins.otp_static.models import StaticToken
     from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from core.models import RecoveryCode
 
     User.objects.create_user("joseph", password="a-long-dev-password")
     client.login(username="joseph", password="a-long-dev-password")
@@ -43,7 +44,12 @@ def test_enrollment_flow_qr_confirm_recovery_codes(client):
     assert r.status_code == 200
     codes = r.json()["recovery_codes"]
     assert len(codes) == 8
-    assert StaticToken.objects.filter(device__user__username="joseph").count() == 8
+    stored = list(RecoveryCode.objects.filter(user__username="joseph")
+                  .values_list("code_hash", flat=True))
+    assert len(stored) == 8
+    # Never plaintext at rest (round-1 security finding).
+    assert not set(codes) & set(stored)
+    assert all(len(h) == 64 for h in stored)
 
     # Second enrollment attempt is refused while a confirmed device exists.
     assert client.post("/api/auth/totp/enroll/").status_code == 409
@@ -53,13 +59,14 @@ def test_enrollment_flow_qr_confirm_recovery_codes(client):
 @pytest.mark.django_db
 def test_recovery_code_works_as_second_factor_once(client):
     from django.contrib.auth.models import User
-    from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
     from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from core.models import RecoveryCode
+    from core.otp import hash_recovery_code
 
     user = User.objects.create_user("joseph", password="a-long-dev-password")
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
-    static = StaticDevice.objects.create(user=user, name="recovery", confirmed=True)
-    StaticToken.objects.create(device=static, token="rescue12345")
+    RecoveryCode.objects.create(user=user, code_hash=hash_recovery_code("rescue12345"))
 
     payload = {"username": "joseph", "password": "a-long-dev-password",
                "otp_code": "rescue12345"}

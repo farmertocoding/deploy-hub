@@ -2,8 +2,9 @@
 
 Flow: POST enroll → unconfirmed device + otpauth URI + QR SVG → user scans →
 POST confirm with a live code → device confirmed + one-time recovery codes
-(shown exactly once, stored hashed-equivalent as StaticTokens).
+(shown exactly once, stored as sha256 hashes in core.RecoveryCode — never plaintext).
 """
+import hashlib
 import io
 
 import qrcode
@@ -62,8 +63,9 @@ class ConfirmView(APIView):
     @extend_schema(request=ConfirmSerializer, responses={200: dict})
     def post(self, request):
         from django.utils.crypto import get_random_string
-        from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
         from django_otp.plugins.otp_totp.models import TOTPDevice
+
+        from .models import RecoveryCode
 
         ser = ConfirmSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -77,15 +79,33 @@ class ConfirmView(APIView):
         device.confirmed = True
         device.save(update_fields=["confirmed"])
 
-        # Recovery codes: shown once, usable once each (§6.10 resilience rules).
-        static, _ = StaticDevice.objects.get_or_create(
-            user=request.user, name="recovery", defaults={"confirmed": True}
-        )
-        static.token_set.all().delete()
+        # Recovery codes: shown once, usable once each (§6.10 resilience rules);
+        # only sha256 hashes are stored (round-1 finding: plaintext at rest).
+        RecoveryCode.objects.filter(user=request.user).delete()
         codes = [get_random_string(10, "abcdefghjkmnpqrstuvwxyz23456789")
                  for _ in range(RECOVERY_CODE_COUNT)]
-        StaticToken.objects.bulk_create(
-            [StaticToken(device=static, token=c) for c in codes]
+        RecoveryCode.objects.bulk_create(
+            [RecoveryCode(user=request.user, code_hash=hash_recovery_code(c))
+             for c in codes]
         )
         audit("totp_enrolled", source="api", actor=request.user, severity="security")
         return Response({"enrolled": True, "recovery_codes": codes})
+
+
+def hash_recovery_code(raw):
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def consume_recovery_code(user, raw):
+    """Burn a recovery code: returns True and marks it used, exactly once."""
+    from django.utils import timezone
+
+    from .models import RecoveryCode
+
+    updated = RecoveryCode.objects.filter(
+        user=user, code_hash=hash_recovery_code(raw), used_at__isnull=True
+    ).update(used_at=timezone.now())
+    if updated:
+        audit("recovery_code_used", source="api", actor=user, severity="security")
+        return True
+    return False

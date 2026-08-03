@@ -29,8 +29,10 @@ def test_login_requires_valid_credentials(client):
 @pytest.mark.django_db
 def test_demo_form_errors_block_and_warnings_ask(client):
     from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
 
-    User.objects.create_user("joseph", password="a-long-dev-password")
+    u = User.objects.create_user("joseph", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=u, name="phone", confirmed=True)  # §6.10 gate
     client.login(username="joseph", password="a-long-dev-password")
 
     # Error blocks with the §4.5 contract shape.
@@ -65,10 +67,12 @@ def test_demo_job_publishes_sequenced_events(client, settings):
 @pytest.mark.django_db
 def test_demo_job_start_is_audited(client):
     from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
 
     from core.models import AuditEvent
 
-    User.objects.create_user("joseph", password="a-long-dev-password")
+    u = User.objects.create_user("joseph", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=u, name="phone", confirmed=True)  # §6.10 gate
     client.login(username="joseph", password="a-long-dev-password")
     client.post("/api/demo-jobs/", data=json.dumps({"name": "demo"}),
                 content_type="application/json")

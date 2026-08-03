@@ -34,6 +34,7 @@ def test_fake_transport_rejects_shell_strings():
     assert t.mutating_calls() == [("run", ["echo", "hello"])]
 
 
+@pytest.mark.req("P0-SEAMS")
 def test_fake_dns_upsert_is_idempotent():
     dns = FakeDnsProvider()
     rid1 = dns.upsert_record("example.com", "www", "A", ["1.2.3.4"], proxied=True)
@@ -42,6 +43,7 @@ def test_fake_dns_upsert_is_idempotent():
     assert len(dns.list_records("example.com")) == 1
 
 
+@pytest.mark.req("P0-SEAMS")
 def test_fake_cloud_terminate_is_idempotent():
     cloud = FakeCloudProvider()
     inst = cloud.create_instance({"size": "t3.small"})

@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 
 from core.audit import audit
 
+from .authorize import authorize_topic
 from .publish import current_seq, topic_history
 from .tasks import demo_stream_logs
 
@@ -72,6 +73,10 @@ class TopicSnapshotView(APIView):
     """Snapshot-then-stream (§D7): every snapshot returns {seq, data} from the same counter."""
 
     def get(self, request, topic):
-        # data = capped history for log-style topics (empty for topics without
-        # history); reconnecting panels repaint from it, then stream from seq.
+        # Same choke point as the socket (§D7): snapshot is just the read half of
+        # subscribe — an unauthorized topic must fail here exactly as it does there.
+        if not authorize_topic(request.user, topic):
+            return Response({"detail": "Topic not authorized."}, status=403)
+        # data = capped history entries [{seq, event}] for log-style topics (empty
+        # for topics without history); panels repaint from it, then stream from seq.
         return Response({"seq": current_seq(topic), "data": topic_history(topic)})

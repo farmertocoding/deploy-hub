@@ -5,7 +5,10 @@ Session-authenticated at connect (reject anonymous); client protocol
 """
 import json
 
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+
+from core.audit import audit
 
 from .authorize import authorize_topic
 
@@ -14,6 +17,9 @@ class EventsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         user = self.scope.get("user")
         if user is None or not user.is_authenticated:
+            # Same audit discipline as HTTP-side authz failures (round-1 finding).
+            await database_sync_to_async(audit)(
+                "ws_connect_rejected", source="ws", severity="security")
             await self.close(code=4401)
             return
         self.topics = set()
@@ -39,6 +45,9 @@ class EventsConsumer(AsyncWebsocketConsumer):
                     await self.channel_layer.group_add(topic, self.channel_name)
                     await self.send(json.dumps({"subscribed": topic}))
                 else:
+                    await database_sync_to_async(audit)(
+                        "ws_topic_denied", source="ws", severity="security",
+                        actor=user if user.is_authenticated else None, topic=topic)
                     await self.send(json.dumps({"denied": topic}))
         elif action == "unsubscribe":
             for topic in topics:

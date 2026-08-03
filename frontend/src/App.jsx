@@ -1,7 +1,7 @@
 // Phase 0 UI: login (password + TOTP) → forced TOTP enrollment (§6.10 mandatory-2FA)
 // → demo log panel on the multiplexed socket. shadcn/Tailwind (§A8) arrive with the
 // first real screen; this stays plain so the demo proves plumbing, not styling.
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { schemas } from "./api/zod.ts";
@@ -13,19 +13,32 @@ function getCookie(name) {
 }
 
 async function api(path, body) {
-  const res = await fetch(`/api/${path}`, {
-    method: body !== undefined ? "POST" : "GET",
-    headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
-    credentials: "include",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  return { status: res.status, data: await res.json().catch(() => ({})) };
+  // A down/unreachable server must surface, never reject unhandled (round-1 UX
+  // finding): status 0 routes into every existing error branch via data.detail.
+  try {
+    const res = await fetch(`/api/${path}`, {
+      method: body !== undefined ? "POST" : "GET",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+      credentials: "include",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, data: await res.json().catch(() => ({})) };
+  } catch {
+    return { status: 0, data: { detail: "Cannot reach server — check your connection and retry." } };
+  }
 }
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  // Hydrate the session on load: restores login state across reloads AND plants
+  // the CSRF cookie the (CSRF-protected) login POST needs.
+  const [user, setUser] = useState(undefined); // undefined = loading
+  useEffect(() => {
+    api("auth/me/").then(({ status, data }) =>
+      setUser(status === 200 && data.authenticated ? data : null));
+  }, []);
+  if (user === undefined) return <p style={{ margin: "15vh auto", width: "fit-content" }}>Loading…</p>;
   if (!user) return <Login onLogin={setUser} />;
   if (!user.otp_enrolled) return <Enroll onDone={() => setUser({ ...user, otp_enrolled: true })} />;
   return <DemoPanel user={user} />;
@@ -34,11 +47,14 @@ export default function App() {
 function Login({ onLogin }) {
   const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
+    setBusy(true);
     const { status, data } = await api("auth/login/", form);
-    if (status === 200) onLogin(data);
+    setBusy(false);
+    if (status === 200) onLogin({ ...data, authenticated: true });
     else setError(data.detail || "Login failed");
   }
 
@@ -47,10 +63,11 @@ function Login({ onLogin }) {
       <h2>Deploy Hub</h2>
       {["username", "password", "otp_code"].map((f) => (
         <input key={f} type={f === "password" ? "password" : "text"} style={box}
+          aria-label={f === "otp_code" ? "TOTP or recovery code" : f}
           placeholder={f === "otp_code" ? "TOTP or recovery code (if enrolled)" : f}
           value={form[f]} onChange={(e) => setForm({ ...form, [f]: e.target.value })} />
       ))}
-      <button style={{ padding: 8 }}>Log in</button>
+      <button style={{ padding: 8 }} disabled={busy}>{busy ? "Signing in…" : "Log in"}</button>
       {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
     </form>
   );
@@ -61,6 +78,16 @@ function Enroll({ onDone }) {
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState(null);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  // The codes are shown exactly once — losing the tab before saving them must
+  // not be silent (round-1 UX finding).
+  useEffect(() => {
+    if (!recovery) return;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [recovery]);
 
   async function start() {
     const { status, data } = await api("auth/totp/enroll/", {});
@@ -81,6 +108,10 @@ function Enroll({ onDone }) {
         <h2>Recovery codes — shown once</h2>
         <p>Store these offline (password manager / paper). Each works exactly once.</p>
         <pre style={{ ...box, lineHeight: 1.8 }}>{recovery.join("\n")}</pre>
+        <button style={{ padding: 8, marginRight: 8 }}
+          onClick={() => navigator.clipboard.writeText(recovery.join("\n")).then(() => setCopied(true))}>
+          {copied ? "Copied ✔" : "Copy to clipboard"}
+        </button>
         <button style={{ padding: 8 }} onClick={onDone}>I saved them — continue</button>
       </div>
     );
@@ -96,7 +127,7 @@ function Enroll({ onDone }) {
           <div style={{ background: "#fff", padding: 12, width: "fit-content" }}
             dangerouslySetInnerHTML={{ __html: qr.qr_svg }} />
           <small style={{ wordBreak: "break-all", color: "#8b949e" }}>{qr.otpauth_url}</small>
-          <input style={box} placeholder="6-digit code" value={code}
+          <input style={box} aria-label="6-digit code" placeholder="6-digit code" value={code}
             onChange={(e) => setCode(e.target.value)} />
           <button style={{ padding: 8 }}>Confirm</button>
         </form>
@@ -119,6 +150,11 @@ const demoJobErrorMap = (issue, ctx) => {
   return { message: ctx.defaultError };
 };
 
+function snapshotFailedLine(status) {
+  if (status === 403) return "⚠ snapshot refused — session expired? Log in again.";
+  return "⚠ snapshot refetch failed — will retry on next reconnect.";
+}
+
 function DemoPanel({ user }) {
   const { status, subscribe } = useEvents();
   const [lines, setLines] = useState([]);
@@ -127,14 +163,24 @@ function DemoPanel({ user }) {
     register,
     handleSubmit,
     setError,
-    formState: { errors },
+    clearErrors,
+    formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schemas.DemoJob, { errorMap: demoJobErrorMap }),
     defaultValues: { name: "demo", delay: 0.5, confirm_warnings: false },
   });
 
+  // Snapshot-then-stream (§D7): same fetch on first load and on every reconnect.
+  // Non-OK snapshot responses carry their status into the failure line.
+  const snapshotFn = async (topic) => {
+    const { status: st, data } = await api(`topics/${topic}/snapshot/`);
+    if (st !== 200) throw { status: st };
+    return data;
+  };
+
   async function launch(values, confirm = false) {
     setWarnings(null);
+    clearErrors();
     const { status: st, data } = await api("demo-jobs/", {
       ...values, confirm_warnings: confirm,
     });
@@ -144,25 +190,26 @@ function DemoPanel({ user }) {
         const e = errs[0];
         setError(field, { type: e.code, message: [e.message, e.hint].filter(Boolean).join(" ") });
       }
-    } else if (st === 409) setWarnings({ values, body: data.warnings });
-    else if (st !== 201) {
-      // Non-contract statuses (403 CSRF/session-expiry, 500…) must never be silent.
+    } else if (st === 409 && (data.warnings ?? []).length) {
+      setWarnings({ values, body: data.warnings });
+    } else if (st !== 201) {
+      // Non-contract statuses (0 network, 403 CSRF/session, 500…) never go silent.
       setError("root", { type: String(st), message: data.detail ?? `Unexpected ${st} response.` });
     } else {
-      setLines([]);
+      setLines([`— launching ${values.name}… waiting for first log line —`]);
       subscribe(
         data.topic,
         (event) => {
           if (event.__snapshot) {
-            // §D7 repaint: snapshot data is the capped history — a socket killed
-            // mid-stream recovers every line published while it was dead.
-            return setLines(event.data.map((e) => e.line ?? "✔ done"));
+            // §D7 repaint: snapshot data is the capped history [{seq, event}] — a
+            // socket killed mid-stream recovers every line published while dead.
+            return setLines(event.data.map((e) => e.event.line ?? "✔ done"));
           }
-          if (event.__snapshot_failed) return setLines((p) => [...p, "⚠ snapshot refetch failed"]);
+          if (event.__snapshot_failed)
+            return setLines((p) => [...p, snapshotFailedLine(event.status)]);
           setLines((p) => [...p, event.line ?? "✔ done"]);
         },
-        // Snapshot-then-stream (§D7): same fetch on first load and on every reconnect.
-        async (topic) => (await api(`topics/${topic}/snapshot/`)).data
+        snapshotFn
       );
     }
   }
@@ -171,15 +218,19 @@ function DemoPanel({ user }) {
   // same multiplexed socket — two topics, one panel, real publish() path.
   function watchSimulation() {
     setLines(["— watching simulation topics (run: manage.py replay_simulation) —"]);
-    const snapshot = async (topic) => (await api(`topics/${topic}/snapshot/`)).data;
-    subscribe("demo.sim.log", (event) => {
-      if (event.__snapshot || event.__snapshot_failed) return;
-      setLines((p) => [...p, event.line ?? JSON.stringify(event)]);
-    }, snapshot);
-    subscribe("alerts", (event) => {
-      if (event.__snapshot || event.__snapshot_failed) return;
-      setLines((p) => [...p, `⚠ ${event.kind} ${event.site ?? ""} ${event.state ?? ""}`]);
-    }, snapshot);
+    const simHandler = (render) => (event) => {
+      if (event.__snapshot) {
+        // Sim topics carry no history; keep the resync visible rather than silent.
+        if (event.data.length) return setLines(event.data.map((e) => render(e.event)));
+        return setLines((p) => [...p, "— resynced —"]);
+      }
+      if (event.__snapshot_failed)
+        return setLines((p) => [...p, snapshotFailedLine(event.status)]);
+      setLines((p) => [...p, render(event)]);
+    };
+    subscribe("demo.sim.log", simHandler((e) => e.line ?? JSON.stringify(e)), snapshotFn);
+    subscribe("alerts",
+      simHandler((e) => `⚠ ${e.kind} ${e.site ?? ""} ${e.state ?? ""}`), snapshotFn);
   }
 
   return (
@@ -190,18 +241,27 @@ function DemoPanel({ user }) {
       </h2>
       <p>Signed in as {user.username}.</p>
       <form onSubmit={handleSubmit((v) => launch(v, false))}
-        style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input {...register("name")} style={box} aria-invalid={!!errors.name} />
-        <input {...register("delay", { valueAsNumber: true })} type="number" step="0.05"
-          style={{ ...box, width: 80 }} aria-invalid={!!errors.delay} title="delay (s)" />
-        <button style={{ padding: 8 }}>Launch</button>
+        style={{ display: "flex", gap: 8, alignItems: "end" }}>
+        <label style={{ display: "grid", gap: 4 }}>
+          <small>job name</small>
+          <input {...register("name")} style={box} placeholder="demo"
+            aria-invalid={!!errors.name} />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <small>delay (s)</small>
+          <input {...register("delay", { valueAsNumber: true })} type="number" step="0.05"
+            style={{ ...box, width: 80 }} aria-invalid={!!errors.delay} />
+        </label>
+        <button style={{ padding: 8 }} disabled={isSubmitting}>
+          {isSubmitting ? "Launching…" : "Launch"}
+        </button>
         <button type="button" onClick={watchSimulation} style={{ padding: 8 }}>
           Watch simulation
         </button>
       </form>
       {Object.entries(errors).map(([field, e]) => (
         <div key={field} style={{ color: "#ff7b72", marginTop: 8 }}>
-          {field}: {e.message}
+          {field === "root" ? "" : `${field}: `}{e.message}
         </div>
       ))}
       {warnings && (

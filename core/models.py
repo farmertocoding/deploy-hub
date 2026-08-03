@@ -13,6 +13,7 @@ class AuditEvent(models.Model):
         CELERY = "celery"
         RECONCILER = "reconciler"
         SYSTEM = "system"
+        WS = "ws"
 
     class Severity(models.TextChoices):
         INFO = "info"
@@ -39,3 +40,20 @@ class AuditEvent(models.Model):
 
     def __str__(self):
         return f"{self.ts:%Y-%m-%d %H:%M:%S} {self.action}"
+
+
+class RecoveryCode(models.Model):
+    """One-time 2FA recovery codes, stored as sha256 hashes — a DB read (backup
+    leak, SQL access) must never yield working second factors (round-1 finding;
+    replaces the plaintext django-otp StaticToken storage)."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="recovery_codes")
+    code_hash = models.CharField(max_length=64, db_index=True)  # sha256 hex
+    created = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "code_hash"], name="uniq_user_code_hash")
+        ]

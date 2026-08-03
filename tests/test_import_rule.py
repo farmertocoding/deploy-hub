@@ -9,8 +9,11 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 FORBIDDEN = re.compile(r"^\s*(import|from)\s+(boto3|botocore|azure|cloudflare|CloudFlare)\b", re.M)
+# tests/, scripts_dev/ and conformance/ are scanned too (round-1 finding): an SDK
+# import hiding in test or process code still violates the seam.
 APPS = ["core", "vault", "catalog", "scanner", "provision", "deploys",
-        "reconcile", "monitor", "scaling", "realtime", "hub"]
+        "reconcile", "monitor", "scaling", "realtime", "hub",
+        "tests", "scripts_dev", "conformance"]
 
 
 @pytest.mark.req("P0-IMPORT-RULE")

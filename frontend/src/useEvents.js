@@ -21,8 +21,9 @@ export function useEvents() {
         const snap = await sub.snapshotFn(topic); // {seq, data}
         seqRef.current.set(topic, snap.seq ?? 0);
         sub.handler({ __snapshot: true, data: snap.data }, snap.seq ?? 0);
-      } catch {
-        sub.handler({ __snapshot_failed: true }, seqRef.current.get(topic) ?? 0);
+      } catch (err) {
+        sub.handler({ __snapshot_failed: true, status: err?.status },
+          seqRef.current.get(topic) ?? 0);
       }
     }
     if (wsRef.current?.readyState === 1) {

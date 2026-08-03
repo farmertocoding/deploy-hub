@@ -13,8 +13,10 @@ pytestmark = pytest.mark.django_db
 @pytest.mark.req("P0-REALTIME")
 def test_snapshot_data_carries_history_for_log_topics(client):
     from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
 
-    User.objects.create_user("joseph", password="a-long-dev-password")
+    u = User.objects.create_user("joseph", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=u, name="phone", confirmed=True)  # §6.10 gate
     client.login(username="joseph", password="a-long-dev-password")
 
     demo_stream_logs("hist-x", delay=0)
@@ -24,8 +26,8 @@ def test_snapshot_data_carries_history_for_log_topics(client):
     assert body["seq"] == current_seq("demo.hist-x.log")
     # 8 lines + done event, oldest first — the reconnect repaint has no gap.
     assert len(body["data"]) == 9
-    assert body["data"][0]["line"].startswith("cloning")
-    assert body["data"][-1]["done"] is True
+    assert body["data"][0]["event"]["line"].startswith("cloning")
+    assert body["data"][-1]["event"]["done"] is True
 
 
 @pytest.mark.req("P0-REALTIME")

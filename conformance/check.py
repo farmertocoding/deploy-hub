@@ -10,10 +10,10 @@ Checks:
 Emits conformance/matrix.json. Exits non-zero on any violation.
 """
 import argparse
+import ast
 import json
 import pathlib
 import re
-import subprocess
 import sys
 
 import yaml
@@ -26,22 +26,57 @@ def load_registry():
     return {r["id"]: r for r in data["requirements"]}
 
 
+def _req_ids_from_decorators(node):
+    """String args of @pytest.mark.req(...) decorators on a function def."""
+    ids = []
+    for dec in node.decorator_list:
+        if not isinstance(dec, ast.Call):
+            continue
+        func = dec.func
+        # match pytest.mark.req / mark.req
+        parts = []
+        while isinstance(func, ast.Attribute):
+            parts.append(func.attr)
+            func = func.value
+        if isinstance(func, ast.Name):
+            parts.append(func.id)
+        if parts and parts[0] == "req" and "mark" in parts:
+            for arg in dec.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    ids.append(arg.value)
+    return ids
+
+
 def collect_markers():
-    """Map req id -> [test ids] by scanning test files (cheap and dependency-free)."""
-    marker_re = re.compile(r"@pytest\.mark\.req\(\s*[\"']([A-Z0-9-]+)[\"']\s*\)")
+    """Map req id -> [test node ids] by AST walk (round-1 finding: a text grep
+    counted markers in comments/docstrings/dead code as coverage, and silently
+    ignored malformed ids). Only decorators attached to test functions count;
+    ANY string arg is captured so typos are flagged, not skipped."""
     found = {}
     for py in (REPO / "tests").rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
-        for m in marker_re.finditer(text):
-            found.setdefault(m.group(1), []).append(str(py.relative_to(REPO)))
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not node.name.startswith("test"):
+                    continue
+                for req_id in _req_ids_from_decorators(node):
+                    found.setdefault(req_id, []).append(
+                        f"{py.relative_to(REPO)}::{node.name}")
     return found
 
 
 def waived_ids():
+    """Only structured `WAIVED: <id> — reason (date)` lines count (round-1 finding:
+    a bare word-boundary regex let prose mentioning an id silently waive it)."""
     waivers = REPO / "WAIVERS.md"
     if not waivers.exists():
         return set()
-    return set(re.findall(r"\b([A-Z][A-Z0-9]+-[A-Z0-9-]+)\b", waivers.read_text()))
+    out = set()
+    for line in waivers.read_text().splitlines():
+        m = re.match(r"^WAIVED:\s*(\S+)\s+—\s+\S.*\(\d{4}-\d{2}-\d{2}\)", line.strip())
+        if m:
+            out.add(m.group(1))
+    return out
 
 
 def main():
@@ -75,21 +110,20 @@ def main():
 
     (REPO / "conformance/matrix.json").write_text(json.dumps(matrix, indent=2))
 
+    # Flake-quarantine cap (PROC-FLAKE-CAP): red at >5 quarantined tests.
+    # Decorator-anchored (round-1 finding: string mentions counted toward the cap).
+    flaky_re = re.compile(r"^\s*@pytest\.mark\.flaky_quarantine\b", re.M)
+    count = sum(len(flaky_re.findall(py.read_text(encoding="utf-8")))
+                for py in (REPO / "tests").rglob("*.py"))
+    if count > 5:
+        failures.append(f"flake quarantine cap exceeded: {count} > 5")
+
     if failures:
         print("conformance-check FAILED:")
         for f in failures:
             print(f"  - {f}")
         return 1
     print(f"conformance-check ok — {len(registry)} reqs, matrix.json written")
-    # Flake-quarantine cap (PROC-FLAKE-CAP): red at >5 quarantined tests.
-    flaky = subprocess.run(
-        ["grep", "-rc", "@pytest.mark.flaky_quarantine", str(REPO / "tests")],
-        capture_output=True, text=True,
-    )
-    count = sum(int(line.rsplit(":", 1)[1]) for line in flaky.stdout.splitlines() if ":" in line)
-    if count > 5:
-        print(f"flake quarantine cap exceeded: {count} > 5")
-        return 1
     return 0
 
 

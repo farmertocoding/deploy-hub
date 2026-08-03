@@ -2,6 +2,8 @@
 # staging) lands in Phase 2.5; this stub keeps the schedule slot warm and runs
 # the full suite + conformance until then.
 name: nightly
+permissions:
+  contents: read
 on:
   schedule:
     - cron: "17 18 * * *"   # 02:17 Asia/Taipei

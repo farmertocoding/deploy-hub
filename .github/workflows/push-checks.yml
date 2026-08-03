@@ -1,6 +1,8 @@
 # CI workflow 1 — on-push gates (<2 min target). T2 container-tier job lands Phase 2.5.
 name: push-checks
 on: [push, pull_request]
+permissions:
+  contents: read
 
 jobs:
   lint-and-unit:
