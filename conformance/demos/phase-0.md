@@ -49,6 +49,14 @@ Screenshots (in `phase-0/`): `01-login` · `02-enroll-qr` (otpauth + QR) ·
 `05-form-warning` (409 + confirm) · `06-streaming` · `07-dead` (*reconnecting*,
 worker still publishing) · `08-recovered` (all 9 lines exactly once).
 
+## Post-recording re-verification
+
+The driver was re-run against later round HEADs and passed **4/4 consecutive runs**
+at `573d17b` (post round-4 accept-then-close). An earlier intermittent failure during
+these reruns was traced to stale Celery worker processes running pre-rewrite code in
+the recording environment — an environment artifact, not a product defect — but it
+still yielded one real client fix (syncTopic catch scope, commit `573d17b`).
+
 ## Notes
 
 - The 24 s pause is django-otp's replay protection working as designed: the code
