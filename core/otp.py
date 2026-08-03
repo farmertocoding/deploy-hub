@@ -82,7 +82,10 @@ class ConfirmView(APIView):
         # Recovery codes: shown once, usable once each (§6.10 resilience rules);
         # only sha256 hashes are stored (round-1 finding: plaintext at rest).
         RecoveryCode.objects.filter(user=request.user).delete()
-        codes = [get_random_string(10, "abcdefghjkmnpqrstuvwxyz23456789")
+        # 16 chars over a 31-symbol alphabet ≈ 79 bits: enough that a leaked
+        # sha256 table can't be brute-forced offline (round-2 finding — 10 chars
+        # was ~50 bits, GPU-feasible).
+        codes = [get_random_string(16, "abcdefghjkmnpqrstuvwxyz23456789")
                  for _ in range(RECOVERY_CODE_COUNT)]
         RecoveryCode.objects.bulk_create(
             [RecoveryCode(user=request.user, code_hash=hash_recovery_code(c))

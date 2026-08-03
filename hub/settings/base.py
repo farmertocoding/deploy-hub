@@ -22,7 +22,9 @@ INSTALLED_APPS = [
     "channels",
     "django_otp",
     "django_otp.plugins.otp_totp",
-    "django_otp.plugins.otp_static",  # recovery codes
+    # otp_static removed 2026-08-03 (round 2): recovery codes live in
+    # core.RecoveryCode (sha256-hashed); keeping the plugin would let match_token
+    # accept legacy plaintext StaticToken rows as second factors.
     # hub apps (§D4 layout)
     "core",
     "vault",

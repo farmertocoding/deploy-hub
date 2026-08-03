@@ -22,6 +22,15 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 "ws_connect_rejected", source="ws", severity="security")
             await self.close(code=4401)
             return
+        # §6.10 mandatory-2FA covers BOTH planes (round-2 finding: the HTTP
+        # middleware gate alone left the realtime surface open to password-only
+        # sessions of not-yet-enrolled users).
+        if not await database_sync_to_async(_enrolled)(user):
+            await database_sync_to_async(audit)(
+                "ws_connect_rejected", source="ws", severity="security",
+                actor=user, reason="enrollment_required")
+            await self.close(code=4403)
+            return
         self.topics = set()
         await self.accept()
 
@@ -60,3 +69,9 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 {"topic": message["topic"], "seq": message["seq"], "event": message["event"]}
             )
         )
+
+
+def _enrolled(user):
+    from django_otp import devices_for_user
+
+    return any(devices_for_user(user, confirmed=True))

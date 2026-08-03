@@ -17,15 +17,35 @@ pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.asyncio]
 APP = AuthMiddlewareStack(URLRouter(realtime.routing.websocket_urlpatterns))
 
 
-async def _connected_communicator():
+async def _make_user(enrolled=True, username="ws-tester"):
     from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
 
-    user, _ = await sync_to_async(User.objects.get_or_create)(username="ws-tester")
+    user, _ = await sync_to_async(User.objects.get_or_create)(username=username)
+    if enrolled:
+        await sync_to_async(TOTPDevice.objects.get_or_create)(
+            user=user, name="phone", defaults={"confirmed": True})
+    return user
+
+
+async def _connected_communicator():
     comm = WebsocketCommunicator(APP, "/ws/events/")
-    comm.scope["user"] = user
+    comm.scope["user"] = await _make_user()
     connected, _ = await comm.connect()
     assert connected
     return comm
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+async def test_unenrolled_session_rejected_on_ws_plane():
+    """Round-2 finding: the HTTP-only gate left /ws/events/ open to password-only
+    sessions of not-yet-enrolled users — both planes must enforce §6.10."""
+    comm = WebsocketCommunicator(APP, "/ws/events/")
+    comm.scope["user"] = await _make_user(enrolled=False, username="ws-unenrolled")
+    connected, close_code = await comm.connect()
+    assert not connected
+    assert close_code == 4403
+    await comm.disconnect()
 
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")

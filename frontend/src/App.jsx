@@ -34,10 +34,24 @@ export default function App() {
   // Hydrate the session on load: restores login state across reloads AND plants
   // the CSRF cookie the (CSRF-protected) login POST needs.
   const [user, setUser] = useState(undefined); // undefined = loading
-  useEffect(() => {
-    api("auth/me/").then(({ status, data }) =>
-      setUser(status === 200 && data.authenticated ? data : null));
-  }, []);
+  const [unreachable, setUnreachable] = useState(false);
+  const hydrate = () => {
+    setUnreachable(false);
+    setUser(undefined);
+    api("auth/me/").then(({ status, data }) => {
+      // A dead server is NOT "logged out" (round-2 finding): show the truth.
+      if (status === 0 || status >= 500) return setUnreachable(true);
+      setUser(status === 200 && data.authenticated ? data : null);
+    });
+  };
+  useEffect(hydrate, []);
+  if (unreachable)
+    return (
+      <div style={{ margin: "15vh auto", width: "fit-content", textAlign: "center" }}>
+        <p>Cannot reach server — check your connection.</p>
+        <button style={{ padding: 8 }} onClick={hydrate}>Retry</button>
+      </div>
+    );
   if (user === undefined) return <p style={{ margin: "15vh auto", width: "fit-content" }}>Loading…</p>;
   if (!user) return <Login onLogin={setUser} />;
   if (!user.otp_enrolled) return <Enroll onDone={() => setUser({ ...user, otp_enrolled: true })} />;
@@ -109,8 +123,11 @@ function Enroll({ onDone }) {
         <p>Store these offline (password manager / paper). Each works exactly once.</p>
         <pre style={{ ...box, lineHeight: 1.8 }}>{recovery.join("\n")}</pre>
         <button style={{ padding: 8, marginRight: 8 }}
-          onClick={() => navigator.clipboard.writeText(recovery.join("\n")).then(() => setCopied(true))}>
-          {copied ? "Copied ✔" : "Copy to clipboard"}
+          onClick={() => navigator.clipboard.writeText(recovery.join("\n"))
+            .then(() => setCopied("ok"), () => setCopied("failed"))}>
+          {copied === "ok" ? "Copied ✔"
+            : copied === "failed" ? "Copy failed — select the codes manually"
+            : "Copy to clipboard"}
         </button>
         <button style={{ padding: 8 }} onClick={onDone}>I saved them — continue</button>
       </div>
@@ -159,6 +176,7 @@ function DemoPanel({ user }) {
   const { status, subscribe } = useEvents();
   const [lines, setLines] = useState([]);
   const [warnings, setWarnings] = useState(null);
+  const [busy, setBusy] = useState(false); // covers the 409-confirm relaunch too
   const {
     register,
     handleSubmit,
@@ -179,11 +197,14 @@ function DemoPanel({ user }) {
   };
 
   async function launch(values, confirm = false) {
+    if (busy) return;
+    setBusy(true);
     setWarnings(null);
     clearErrors();
     const { status: st, data } = await api("demo-jobs/", {
       ...values, confirm_warnings: confirm,
     });
+    setBusy(false);
     if (st === 400) {
       // Server verdict wins (§4.5): map {field: [{code, message, hint}]} into RHF.
       for (const [field, errs] of Object.entries(data.errors ?? {})) {
@@ -218,19 +239,26 @@ function DemoPanel({ user }) {
   // same multiplexed socket — two topics, one panel, real publish() path.
   function watchSimulation() {
     setLines(["— watching simulation topics (run: manage.py replay_simulation) —"]);
-    const simHandler = (render) => (event) => {
+    const synced = new Set(); // first snapshot per topic = initial load, not a resync
+    const simHandler = (topic, render) => (event) => {
       if (event.__snapshot) {
-        // Sim topics carry no history; keep the resync visible rather than silent.
-        if (event.data.length) return setLines(event.data.map((e) => render(e.event)));
-        return setLines((p) => [...p, "— resynced —"]);
+        const isResync = synced.has(topic);
+        synced.add(topic);
+        // Append a delimited per-topic block — never replace the shared pane
+        // (round-2 finding: one topic's snapshot wiped the other's lines).
+        const block = event.data.map((e) => render(e.event));
+        if (isResync) return setLines((p) => [...p, `— ${topic} resynced —`, ...block]);
+        if (block.length) return setLines((p) => [...p, ...block]);
+        return;
       }
       if (event.__snapshot_failed)
         return setLines((p) => [...p, snapshotFailedLine(event.status)]);
       setLines((p) => [...p, render(event)]);
     };
-    subscribe("demo.sim.log", simHandler((e) => e.line ?? JSON.stringify(e)), snapshotFn);
+    subscribe("demo.sim.log",
+      simHandler("demo.sim.log", (e) => e.line ?? JSON.stringify(e)), snapshotFn);
     subscribe("alerts",
-      simHandler((e) => `⚠ ${e.kind} ${e.site ?? ""} ${e.state ?? ""}`), snapshotFn);
+      simHandler("alerts", (e) => `⚠ ${e.kind} ${e.site ?? ""} ${e.state ?? ""}`), snapshotFn);
   }
 
   return (
@@ -252,8 +280,8 @@ function DemoPanel({ user }) {
           <input {...register("delay", { valueAsNumber: true })} type="number" step="0.05"
             style={{ ...box, width: 80 }} aria-invalid={!!errors.delay} />
         </label>
-        <button style={{ padding: 8 }} disabled={isSubmitting}>
-          {isSubmitting ? "Launching…" : "Launch"}
+        <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
+          {isSubmitting || busy ? "Launching…" : "Launch"}
         </button>
         <button type="button" onClick={watchSimulation} style={{ padding: 8 }}>
           Watch simulation
@@ -267,8 +295,9 @@ function DemoPanel({ user }) {
       {warnings && (
         <div style={{ color: "#f0b72f", marginTop: 8 }}>
           {warnings.body.map((w) => <div key={w.code}>⚠ {w.message} {w.hint}</div>)}
-          <button onClick={() => launch(warnings.values, true)} style={{ marginTop: 8 }}>
-            I understand, continue
+          <button onClick={() => launch(warnings.values, true)} style={{ marginTop: 8 }}
+            disabled={busy}>
+            {busy ? "Launching…" : "I understand, continue"}
           </button>
         </div>
       )}
