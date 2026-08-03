@@ -6,6 +6,10 @@ paths:
   /api/auth/login/:
     post:
       operationId: auth_login_create
+      description: |-
+        CSRF-protected even though unauthenticated (round-1 finding: login-CSRF —
+        a cross-site page must not be able to log the victim into an attacker account).
+        The SPA fetches /api/auth/me/ on load, which plants the CSRF cookie.
       tags:
       - auth
       requestBody:
@@ -43,10 +47,15 @@ paths:
   /api/auth/me/:
     get:
       operationId: auth_me_retrieve
+      description: |-
+        Session hydration for the SPA. AllowAny: the anonymous response is the
+        SPA's pre-login bootstrap and plants the CSRF cookie (get_token) so the
+        login POST itself can be CSRF-checked.
       tags:
       - auth
       security:
       - cookieAuth: []
+      - {}
       responses:
         '200':
           description: No response body

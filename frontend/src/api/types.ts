@@ -13,6 +13,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * @description CSRF-protected even though unauthenticated (round-1 finding: login-CSRF —
+         *     a cross-site page must not be able to log the victim into an attacker account).
+         *     The SPA fetches /api/auth/me/ on load, which plants the CSRF cookie.
+         */
         post: operations["auth_login_create"];
         delete?: never;
         options?: never;
@@ -43,6 +48,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * @description Session hydration for the SPA. AllowAny: the anonymous response is the
+         *     SPA's pre-login bootstrap and plants the CSRF cookie (get_token) so the
+         *     login POST itself can be CSRF-checked.
+         */
         get: operations["auth_me_retrieve"];
         put?: never;
         post?: never;
