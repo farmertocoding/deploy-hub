@@ -98,6 +98,8 @@ with sync_playwright() as p:
     page.wait_for_selector("text=Signed in as")
 
     # -- 3. Re-login WITH TOTP (proves the second factor is now enforced).
+    # Session hydration keeps a reload signed in, so simulate a new browser:
+    page.context.clear_cookies()
     page.reload()
     page.get_by_placeholder("username").fill(USERNAME)
     page.get_by_placeholder("password").fill(PASSWORD)

@@ -1,7 +1,8 @@
 # Phase 0 exit demo — recorded (P0-WS-DEMO)
 
-**Date:** 2026-08-03 · **Commit under test:** `80af3d2` (+ the two live fixes below,
-committed immediately after) · **Recorded by:** Cowork session — automated Playwright
+**Date:** 2026-08-03 · **Commit under test:** `fc708fa` (round-1 fixes included; the
+walkthrough now also exercises the CSRF-protected login via the /me bootstrap and the
+server-side 2FA gate) · **Recorded by:** Cowork session — automated Playwright
 walkthrough, driver checked in at `scripts_dev/ws_reconnect_demo.py`, re-runnable.
 
 ## Environment
@@ -28,19 +29,19 @@ this environment); the compose file only changes *where* these same services run
 ## Transcript (driver output, verbatim)
 
 ```
-[19:41:33] open http://127.0.0.1:5173 — fresh user 'demo-operator', no TOTP device
-[19:41:35] logged in with password; UI forces TOTP enrollment (§6.10 mandatory-2FA)
-[19:41:35] TOTP enrolled via UI; 8 recovery codes shown once
-[19:41:36] re-login without TOTP rejected (second factor enforced)
-[19:41:36] waiting 24s for the next TOTP window (replay protection)
-[19:42:01] re-logged in with password + TOTP; demo panel open; socket live
-[19:42:01] form error blocks client-side via generated zod mirror (§4.5)
-[19:42:01] server warning (slow_demo) rendered with 409 + confirm flow
-[19:42:02] streaming: 2 lines rendered, killing socket now
-[19:42:03] socket killed: status=reconnecting; worker keeps publishing meanwhile
-[19:42:04] socket reconnected (1.5s backoff): snapshot refetched, stream resumed
-[19:42:10] recovered panel shows all 9 lines exactly once — no gap, no duplicates
-[19:42:10] PASS: full Phase 0 exit walkthrough
+[20:06:57] open http://127.0.0.1:5173 — fresh user 'demo-operator', no TOTP device
+[20:06:58] logged in with password; UI forces TOTP enrollment (§6.10 mandatory-2FA)
+[20:06:59] TOTP enrolled via UI; 8 recovery codes shown once
+[20:07:00] re-login without TOTP rejected (second factor enforced)
+[20:07:00] waiting 30s for the next TOTP window (replay protection)
+[20:07:31] re-logged in with password + TOTP; demo panel open; socket live
+[20:07:32] form error blocks client-side via generated zod mirror (§4.5)
+[20:07:32] server warning (slow_demo) rendered with 409 + confirm flow
+[20:07:33] streaming: 2 lines rendered, killing socket now
+[20:07:33] socket killed: status=reconnecting; worker keeps publishing meanwhile
+[20:07:35] socket reconnected (1.5s backoff): snapshot refetched, stream resumed
+[20:07:40] recovered panel shows all 9 lines exactly once — no gap, no duplicates
+[20:07:40] PASS: full Phase 0 exit walkthrough
 ```
 
 Screenshots (in `phase-0/`): `01-login` · `02-enroll-qr` (otpauth + QR) ·
