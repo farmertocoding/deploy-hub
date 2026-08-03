@@ -1,0 +1,178 @@
+openapi: 3.0.3
+info:
+  title: Deploy Hub API
+  version: 0.0.1
+paths:
+  /api/auth/login/:
+    post:
+      operationId: auth_login_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/logout/:
+    post:
+      operationId: auth_logout_create
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/auth/totp/confirm/:
+    post:
+      operationId: auth_totp_confirm_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Confirm'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Confirm'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Confirm'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/totp/enroll/:
+    post:
+      operationId: auth_totp_enroll_create
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/demo-jobs/:
+    post:
+      operationId: demo_jobs_create
+      tags:
+      - demo-jobs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DemoJob'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DemoJob'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DemoJob'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/topics/{topic}/snapshot/:
+    get:
+      operationId: topics_snapshot_retrieve
+      description: 'Snapshot-then-stream (§D7): every snapshot returns {seq, data}
+        from the same counter.'
+      parameters:
+      - in: path
+        name: topic
+        schema:
+          type: string
+        required: true
+      tags:
+      - topics
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+components:
+  schemas:
+    Confirm:
+      type: object
+      properties:
+        otp_code:
+          type: string
+          pattern: ^\d{6}$
+      required:
+      - otp_code
+    DemoJob:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,30}$
+        delay:
+          type: number
+          format: double
+          maximum: 5.0
+          minimum: 0.05
+          default: 0.5
+        confirm_warnings:
+          type: boolean
+          default: false
+      required:
+      - name
+    Login:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        otp_code:
+          type: string
+      required:
+      - password
+      - username
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

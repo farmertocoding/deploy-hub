@@ -1,4 +1,10 @@
-.PHONY: dev test lint conformance review-round
+.PHONY: dev test lint conformance review-round generate-client
+
+# §4.5 pipeline: serializers → OpenAPI → generated TS types. Regenerate after any
+# serializer change; CI will later assert the generated files are not stale.
+generate-client:
+	python manage.py spectacular --file frontend/src/api/openapi.yaml --settings=hub.settings.dev
+	cd frontend && npx openapi-typescript src/api/openapi.yaml -o src/api/types.ts
 
 dev:
 	docker compose up --build

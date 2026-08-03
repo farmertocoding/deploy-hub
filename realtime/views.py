@@ -6,6 +6,7 @@ every later form copies.
 """
 import uuid
 
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -50,6 +51,7 @@ def drf_errors_to_contract(errors):
 
 
 class DemoJobView(APIView):
+    @extend_schema(request=DemoJobSerializer, responses={201: dict})
     def post(self, request):
         ser = DemoJobSerializer(data=request.data)
         if not ser.is_valid():

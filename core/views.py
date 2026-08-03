@@ -5,6 +5,7 @@ Mockup-first: one endpoint takes password + TOTP code together. Split ceremony
 """
 from django.contrib.auth import authenticate, login, logout
 from django_otp import devices_for_user, match_token
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -23,6 +24,7 @@ class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
 
+    @extend_schema(request=LoginSerializer, responses={200: dict})
     def post(self, request):
         ser = LoginSerializer(data=request.data)
         ser.is_valid(raise_exception=True)

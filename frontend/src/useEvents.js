@@ -1,13 +1,34 @@
 // The one multiplexed socket (§3.5/§D7): subscribe/unsubscribe by topic,
-// snapshot-then-stream on reconnect, per-topic seq gap detection.
+// snapshot-then-stream on connect AND reconnect, per-topic seq gap detection.
+//
+// Contract: subscribe(topic, handler, snapshotFn?)
+//  - snapshotFn (optional) fetches `${topic}` snapshot -> {seq, data}; called before
+//    the stream is trusted, and again after every reconnect. Events with
+//    seq <= snapshot.seq are discarded (§D7: exactly one code path for load+resume).
 import { useEffect, useRef, useState } from "react";
 
 export function useEvents() {
   const wsRef = useRef(null);
-  const topicsRef = useRef(new Set());
-  const handlersRef = useRef(new Map()); // topic -> fn(event, seq)
-  const seqRef = useRef(new Map());
+  const subsRef = useRef(new Map()); // topic -> {handler, snapshotFn}
+  const seqRef = useRef(new Map());  // topic -> last seen seq
   const [status, setStatus] = useState("connecting");
+
+  async function syncTopic(topic) {
+    const sub = subsRef.current.get(topic);
+    if (!sub) return;
+    if (sub.snapshotFn) {
+      try {
+        const snap = await sub.snapshotFn(topic); // {seq, data}
+        seqRef.current.set(topic, snap.seq ?? 0);
+        sub.handler({ __snapshot: true, data: snap.data }, snap.seq ?? 0);
+      } catch {
+        sub.handler({ __snapshot_failed: true }, seqRef.current.get(topic) ?? 0);
+      }
+    }
+    if (wsRef.current?.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ action: "subscribe", topics: [topic] }));
+    }
+  }
 
   useEffect(() => {
     let closed = false;
@@ -17,25 +38,27 @@ export function useEvents() {
       wsRef.current = ws;
       ws.onopen = () => {
         setStatus("live");
-        if (topicsRef.current.size) {
-          ws.send(JSON.stringify({ action: "subscribe", topics: [...topicsRef.current] }));
-        }
+        // Snapshot-then-stream for every subscribed topic — same path as initial load.
+        for (const topic of subsRef.current.keys()) syncTopic(topic);
       };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (!msg.topic) return;
+        const sub = subsRef.current.get(msg.topic);
+        if (!sub) return;
         const last = seqRef.current.get(msg.topic) ?? 0;
-        if (msg.seq <= last) return; // duplicate
+        if (msg.seq <= last) return; // duplicate or pre-snapshot
         if (msg.seq > last + 1 && last !== 0) {
-          // Gap: caller should refetch snapshot; v0 surfaces it via handler flag.
-          handlersRef.current.get(msg.topic)?.({ __gap: true }, msg.seq);
+          // Gap detected: refetch snapshot rather than pretend continuity (§D7).
+          syncTopic(msg.topic);
+          return;
         }
         seqRef.current.set(msg.topic, msg.seq);
-        handlersRef.current.get(msg.topic)?.(msg.event, msg.seq);
+        sub.handler(msg.event, msg.seq);
       };
       ws.onclose = () => {
         setStatus("reconnecting");
-        if (!closed) setTimeout(connect, 1500); // then snapshot-then-stream
+        if (!closed) setTimeout(connect, 1500);
       };
     }
     connect();
@@ -45,13 +68,19 @@ export function useEvents() {
     };
   }, []);
 
-  function subscribe(topic, handler) {
-    topicsRef.current.add(topic);
-    handlersRef.current.set(topic, handler);
+  function subscribe(topic, handler, snapshotFn) {
+    subsRef.current.set(topic, { handler, snapshotFn });
+    seqRef.current.delete(topic);
+    syncTopic(topic);
+  }
+
+  function unsubscribe(topic) {
+    subsRef.current.delete(topic);
+    seqRef.current.delete(topic);
     if (wsRef.current?.readyState === 1) {
-      wsRef.current.send(JSON.stringify({ action: "subscribe", topics: [topic] }));
+      wsRef.current.send(JSON.stringify({ action: "unsubscribe", topics: [topic] }));
     }
   }
 
-  return { status, subscribe };
+  return { status, subscribe, unsubscribe };
 }
