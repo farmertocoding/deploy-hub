@@ -145,7 +145,10 @@ function DemoPanel({ user }) {
         setError(field, { type: e.code, message: [e.message, e.hint].filter(Boolean).join(" ") });
       }
     } else if (st === 409) setWarnings({ values, body: data.warnings });
-    else if (st === 201) {
+    else if (st !== 201) {
+      // Non-contract statuses (403 CSRF/session-expiry, 500…) must never be silent.
+      setError("root", { type: String(st), message: data.detail ?? `Unexpected ${st} response.` });
+    } else {
       setLines([]);
       subscribe(
         data.topic,

@@ -20,3 +20,8 @@ if not os.environ.get("POSTGRES_PASSWORD"):
 if not os.environ.get("REDIS_PASSWORD"):
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
     CELERY_TASK_ALWAYS_EAGER = True  # demo job runs inline without a worker
+
+# The vite dev server (5173) proxies /api with changeOrigin, so Django sees
+# Host=localhost:8000 while the browser Origin is the vite origin — without this
+# every POST fails Django's CSRF origin check. Dev only; prod is same-origin.
+CSRF_TRUSTED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
