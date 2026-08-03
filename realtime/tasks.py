@@ -21,7 +21,7 @@ FAKE_LOG = [
 def demo_stream_logs(job_id, delay=0.5):
     topic = f"demo.{job_id}.log"
     for i, line in enumerate(FAKE_LOG):
-        publish(topic, {"line": line, "n": i})
+        publish(topic, {"line": line, "n": i}, history=True)
         time.sleep(delay)
-    publish(topic, {"done": True, "n": len(FAKE_LOG)})
+    publish(topic, {"done": True, "n": len(FAKE_LOG)}, history=True)
     return {"lines": len(FAKE_LOG)}

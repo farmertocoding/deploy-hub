@@ -150,7 +150,11 @@ function DemoPanel({ user }) {
       subscribe(
         data.topic,
         (event) => {
-          if (event.__snapshot) return; // demo topic has no history to replay
+          if (event.__snapshot) {
+            // §D7 repaint: snapshot data is the capped history — a socket killed
+            // mid-stream recovers every line published while it was dead.
+            return setLines(event.data.map((e) => e.line ?? "✔ done"));
+          }
           if (event.__snapshot_failed) return setLines((p) => [...p, "⚠ snapshot refetch failed"]);
           setLines((p) => [...p, event.line ?? "✔ done"]);
         },

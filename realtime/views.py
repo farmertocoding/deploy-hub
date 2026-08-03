@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 
 from core.audit import audit
 
-from .publish import current_seq
+from .publish import current_seq, topic_history
 from .tasks import demo_stream_logs
 
 
@@ -72,4 +72,6 @@ class TopicSnapshotView(APIView):
     """Snapshot-then-stream (§D7): every snapshot returns {seq, data} from the same counter."""
 
     def get(self, request, topic):
-        return Response({"seq": current_seq(topic), "data": []})
+        # data = capped history for log-style topics (empty for topics without
+        # history); reconnecting panels repaint from it, then stream from seq.
+        return Response({"seq": current_seq(topic), "data": topic_history(topic)})
