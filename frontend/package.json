@@ -9,6 +9,7 @@
     "lint": "echo 'eslint config lands with the first real screen'"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.7.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-hook-form": "^7.52.0",
@@ -17,6 +18,8 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
     "openapi-typescript": "^7.13.0",
+    "openapi-zod-client": "^1.18.3",
+    "tsx": "^4.23.5",
     "vite": "^5.4.0"
   }
 }

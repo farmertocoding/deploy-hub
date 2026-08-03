@@ -2,6 +2,9 @@
 // → demo log panel on the multiplexed socket. shadcn/Tailwind (§A8) arrive with the
 // first real screen; this stays plain so the demo proves plumbing, not styling.
 import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { schemas } from "./api/zod.ts";
 import { useEvents } from "./useEvents.js";
 
 function getCookie(name) {
@@ -103,19 +106,45 @@ function Enroll({ onDone }) {
   );
 }
 
+// §4.5 client half: the generated zod mirror (frontend/src/api/zod.ts) validates
+// before the wire; the DRF serializer stays the source of truth. Friendly copy for
+// zod's generic messages lives here — the rules themselves are never hand-written.
+const demoJobErrorMap = (issue, ctx) => {
+  if (issue.path[0] === "name") {
+    return { message: "Lowercase letters, digits and dashes; start with a letter." };
+  }
+  if (issue.path[0] === "delay") {
+    return { message: "Delay must be between 0.05 and 5.0 seconds." };
+  }
+  return { message: ctx.defaultError };
+};
+
 function DemoPanel({ user }) {
   const { status, subscribe } = useEvents();
   const [lines, setLines] = useState([]);
-  const [name, setName] = useState("demo");
-  const [problem, setProblem] = useState(null);
+  const [warnings, setWarnings] = useState(null);
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(schemas.DemoJob, { errorMap: demoJobErrorMap }),
+    defaultValues: { name: "demo", delay: 0.5, confirm_warnings: false },
+  });
 
-  async function launch(confirm = false) {
-    setProblem(null);
+  async function launch(values, confirm = false) {
+    setWarnings(null);
     const { status: st, data } = await api("demo-jobs/", {
-      name, delay: 0.5, confirm_warnings: confirm,
+      ...values, confirm_warnings: confirm,
     });
-    if (st === 400) setProblem({ kind: "errors", body: data.errors });
-    else if (st === 409) setProblem({ kind: "warnings", body: data.warnings });
+    if (st === 400) {
+      // Server verdict wins (§4.5): map {field: [{code, message, hint}]} into RHF.
+      for (const [field, errs] of Object.entries(data.errors ?? {})) {
+        const e = errs[0];
+        setError(field, { type: e.code, message: [e.message, e.hint].filter(Boolean).join(" ") });
+      }
+    } else if (st === 409) setWarnings({ values, body: data.warnings });
     else if (st === 201) {
       setLines([]);
       subscribe(
@@ -138,17 +167,24 @@ function DemoPanel({ user }) {
         <small style={{ color: status === "live" ? "#7ee787" : "#f0b72f" }}>({status})</small>
       </h2>
       <p>Signed in as {user.username}.</p>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} style={box} />
-        <button onClick={() => launch(false)} style={{ padding: 8 }}>Launch</button>
-      </div>
-      {problem?.kind === "errors" && (
-        <pre style={{ color: "#ff7b72" }}>{JSON.stringify(problem.body, null, 2)}</pre>
-      )}
-      {problem?.kind === "warnings" && (
+      <form onSubmit={handleSubmit((v) => launch(v, false))}
+        style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input {...register("name")} style={box} aria-invalid={!!errors.name} />
+        <input {...register("delay", { valueAsNumber: true })} type="number" step="0.05"
+          style={{ ...box, width: 80 }} aria-invalid={!!errors.delay} title="delay (s)" />
+        <button style={{ padding: 8 }}>Launch</button>
+      </form>
+      {Object.entries(errors).map(([field, e]) => (
+        <div key={field} style={{ color: "#ff7b72", marginTop: 8 }}>
+          {field}: {e.message}
+        </div>
+      ))}
+      {warnings && (
         <div style={{ color: "#f0b72f", marginTop: 8 }}>
-          {problem.body.map((w) => <div key={w.code}>⚠ {w.message} {w.hint}</div>)}
-          <button onClick={() => launch(true)} style={{ marginTop: 8 }}>I understand, continue</button>
+          {warnings.body.map((w) => <div key={w.code}>⚠ {w.message} {w.hint}</div>)}
+          <button onClick={() => launch(warnings.values, true)} style={{ marginTop: 8 }}>
+            I understand, continue
+          </button>
         </div>
       )}
       <pre style={{ background: "#161a21", padding: 12, minHeight: 220, marginTop: 16 }}>
