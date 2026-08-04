@@ -17,6 +17,7 @@ APPS = ["core", "vault", "catalog", "scanner", "provision", "deploys",
 
 
 @pytest.mark.req("P0-IMPORT-RULE")
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
 def test_cloud_sdk_imports_only_under_providers():
     violations = []
     for app in APPS:

@@ -21,8 +21,39 @@ import yaml
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 
+ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$")
+VERIFY_KINDS = {"test", "demo", "checklist", "static-gate"}
+ALLOWED_KEYS = {"id", "phase", "verify", "source", "text", "kind", "status", "retired_reason"}
+
+
 def load_registry():
+    """Load + schema-validate (conformance/schema.json is the JSON-Schema statement
+    of these rules; validated here dependency-free so CI needs no extra package)."""
     data = yaml.safe_load((REPO / "conformance/requirements.yaml").read_text())
+    problems = []
+    seen = set()
+    for r in data.get("requirements", []):
+        rid = r.get("id", "<missing id>")
+        if not isinstance(rid, str) or not ID_RE.match(rid):
+            problems.append(f"bad id: {rid!r}")
+        if rid in seen:
+            problems.append(f"duplicate id: {rid}")
+        seen.add(rid)
+        missing = {"id", "phase", "verify", "source", "text"} - set(r)
+        if missing:
+            problems.append(f"{rid}: missing keys {sorted(missing)}")
+        if not isinstance(r.get("phase"), int) or not 0 <= r.get("phase", -1) <= 7:
+            problems.append(f"{rid}: phase must be int 0-7")
+        if r.get("verify") not in VERIFY_KINDS:
+            problems.append(f"{rid}: verify must be one of {sorted(VERIFY_KINDS)}")
+        extra = set(r) - ALLOWED_KEYS
+        if extra:
+            problems.append(f"{rid}: unknown keys {sorted(extra)}")
+    if problems:
+        print("registry schema validation FAILED:")
+        for pr in problems:
+            print(f"  - {pr}")
+        sys.exit(1)
     return {r["id"]: r for r in data["requirements"]}
 
 

@@ -37,6 +37,7 @@ async def _connected_communicator():
 
 
 @pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
 async def test_unenrolled_session_rejected_on_ws_plane():
     """Round-2 finding: the HTTP-only gate left /ws/events/ open to password-only
     sessions of not-yet-enrolled users — both planes must enforce §6.10."""

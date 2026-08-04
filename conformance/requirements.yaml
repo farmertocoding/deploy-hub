@@ -69,3 +69,352 @@ requirements:
     text: >
       Simulation seed v0 loads; replayer publishes scripted events through the
       real publish() path; every scripted topic passes authorize_topic().
+  # ── §Q1 expansion pass (2026-08-04) — seeded from the frozen doc stack in
+  # docs/plan/. Entries with phase > 0 are FUTURE work: check.py enforces them
+  # only when their phase becomes current. verify: checklist/static-gate entries
+  # are tracked but not yet mechanically enforced (Q2 v0 enforces test + demo).
+  # Sensitive path: human-merge only; never edited in the round judged by it.
+
+  # — §1.5 principles (master plan)
+  - id: REL-P1-RECONCILER
+    phase: 2
+    verify: test
+    source: deploy-system-plan.md §1.5 P1
+    text: A reconciler converges desired vs observed state (containers, Caddy routes, DNS) on a Beat schedule; drift is repaired and logged.
+  - id: REL-P2-HUB-DOWN-SITES-UP
+    phase: 2
+    verify: demo
+    source: deploy-system-plan.md §1.5 P2
+    text: Sites keep serving with the Hub stopped for 24h (chaos drill); every site-serving dependency lives on the target.
+  - id: REL-P3-RESUMABLE-DEPLOYS
+    phase: 2
+    verify: test
+    source: deploy-system-plan.md §1.5 P3 / §D2
+    text: Deployment is a persisted state machine; a crashed deploy resumes from the last completed step; per-site/host locks serialize operations.
+  - id: REL-P4-ARTIFACT-SNAPSHOTS
+    phase: 2
+    verify: test
+    source: deploy-system-plan.md §1.5 P4
+    text: Every generated artifact is snapshotted per deployment; rollback re-applies a known artifact set.
+  - id: SEC-P5-BREAK-GLASS
+    phase: 2
+    verify: checklist
+    source: deploy-system-plan.md §1.5 P5
+    text: Per-site break-glass runbooks (0400 root-owned, no secrets) are generated and stored on the target.
+
+  # — §4.5 validation standard (beyond the Phase-0 first form)
+  - id: VAL-45-SHELL-ARGLISTS
+    phase: 2
+    verify: checklist
+    source: deploy-system-plan.md §4.5
+    text: Everything touching a shell is built as argument lists, never interpolated strings; file contents via SFTP, never heredocs.
+  - id: VAL-45-REJECTED-INPUT-AUDITED
+    phase: 1
+    verify: test
+    source: deploy-system-plan.md §4.5
+    text: Rejected API inputs are logged to the audit trail with source IP and field.
+  - id: SEC-B10-SSRF-GUARD
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-07-30.md §B10
+    text: Domain/URL validators reject or warn on private ranges, 100.64/10, localhost, and 169.254.169.254.
+
+  # — Scanner (Phase 1)
+  - id: SCAN-S1-MODULAR-DISPATCH
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-scanner-node-ts.md §S1
+    text: Detection dispatches to scanner modules (django, node-ts, plus dockerfile/static fallbacks); one project may match several modules, merged into ONE manifest.
+  - id: SEC-SCAN-NOEXEC
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §M1
+    text: The scanner's Hub-side code path invokes zero subprocess/npm/pip/pnpm entry points; every check is classified static or executing, and executing checks run only in a sandbox off the Hub.
+  - id: SCAN-S3-DETECTION-RULES
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-scanner-node-ts.md §S3
+    text: node-ts detection recognizes pnpm workspaces, engines.node, tsconfig strict, fastify/ws/zod/ccxt deps, worker_threads usage, Python offline component, and local-state data paths — each rule fired by the sample-node-site fixture.
+  - id: SCAN-S4-READINESS-PATTERN
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N2
+    text: The node-ts module detects (pattern-level) whether a readiness gate exists in the /healthz handler.
+  - id: PIPE-S4-READINESS-GATE
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N2
+    text: Pipeline step 5 gates cutover on the readiness field of the pinned /healthz contract with per-site warmup_timeout_s.
+  - id: SCAN-V4-FALLBACK-PRECEDENCE
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §V4
+    text: dockerfile/static are lowest-precedence fallback modules; a matching framework module always wins; an existing Dockerfile is validated input, never a bypass.
+  - id: SCAN-DJANGO-UV
+    phase: 1
+    verify: test
+    source: claude/project-inventory.md cross-cutting finding 1 (J7)
+    text: The django module reads uv-managed projects (pyproject.toml + uv.lock) as well as requirements.txt, tolerating Python 3.12-3.14 and Django 5.2-6.
+  - id: SCAN-DJANGO-ASGI
+    phase: 1
+    verify: test
+    source: claude/project-inventory.md cross-cutting finding 2 (J7)
+    text: The django module detects ASGI-only serving (daphne/uvicorn, Channels) and preserves the ASGI server command instead of assuming gunicorn.
+  - id: SCAN-M4-EXPOSURE-AUTH
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §M4
+    text: Both modules warn when no authentication is detected on a public-exposure site; Blocker when the wizard tags financial/personal data.
+  - id: Q7-NODE-FIXTURE
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §Q7
+    text: sample-node-site fires every S3 detection rule and S4 check at least once, with a mutation set asserting each check's negative case.
+
+  # — Pipeline & deploy (Phase 2)
+  - id: SEC-B1-BUILD-OFFHUB
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §B1
+    text: docker build never runs on the Hub; build contexts never contain env files or vault material; generated Dockerfiles use npm ci / hash-pinned pip installs.
+  - id: SEC-B2-NO-DNS-TOKENS-ON-TARGETS
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §B2
+    text: No DNS API token ever lives on a target; proxied sites use Cloudflare Origin Certificates, unproxied use Hub-central DNS-01.
+  - id: PIPE-D2-STATE-MACHINE
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §D2
+    text: Deployment/DeploymentStep statuses match the pinned enums; resume = first non-succeeded step; rollback is a new Deployment row; env snapshots go through the vault code path.
+  - id: PIPE-D6-IDEMPOTENT-STEPS
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §D6
+    text: Every pipeline step and playbook runs twice in tests; the second run records zero mutating Transport calls.
+  - id: PIPE-N1-DEPLOY-STRATEGY
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N1
+    text: Sites carry deploy_strategy blue_green|recreate; recreate is mandatory for local-state sites and stops the old writer before the new one opens the DB.
+  - id: PIPE-N5-VOLUMES-MODELED
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N1/§N5
+    text: Volumes are per-Site named volumes in the manifest with an idempotent ensure_volume primitive; rollback/reaper/decommission never touch them without T1 confirmation.
+  - id: PIPE-M2-GIT-POLLING
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §M2
+    text: Phase-2 auto-deploys use git polling (Beat job); no Django URL route is reachable from a non-tailnet source.
+  - id: PIPE-N8-DEPLOY-POLICY
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N8
+    text: Per-site deploy_policy auto|confirm|windowed queues automatic deploys outside the window with a deploy-waiting notice.
+  - id: REL-C1-HEARTBEAT-SWEEP
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §C1
+    text: Running deployments heartbeat every ~30s; a sweep resumes-or-aborts any running Deployment with a stale heartbeat.
+  - id: REL-C2-RECONCILER-BRAKES
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §C2
+    text: Reconciler honors maintenance_until, per-resource backoff after 3 failed convergences, flap detection, convergence budget with jitter, re-probe before mutation, and a step-up-gated kill switch.
+  - id: REL-A5-POSTGRES-LOCKS
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §A5
+    text: Operation locks live in Postgres, not Redis; a Redis restart cannot release a held deploy lock.
+  - id: REL-C3-ONE-COLLECTOR-SESSION
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §C3
+    text: One SSH collector session per target per minute returns metrics, container states, log chunk, and clock sample as one JSON contract with per-target jitter.
+  - id: SEC-68-HOSTKEY-PINNING
+    phase: 2
+    verify: test
+    source: deploy-system-plan.md §6.8
+    text: SSH host keys are pinned at provision and verified strictly on every connection; a mismatch refuses the connection and alerts.
+  - id: ARCH-D4-IMPORT-RULE
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §D4
+    text: Cloud/DNS SDK imports exist only under providers/ (superset of P0-IMPORT-RULE; scanned roots include tests, scripts_dev, conformance).
+  - id: ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §V6
+    text: deploys/ reads only the stored manifest and never imports scanner modules; the wizard materializes module outputs into the manifest.
+
+  # — Vault & crypto (Phases 1-4)
+  - id: SEC-69-ENVELOPE-ENCRYPTION
+    phase: 1
+    verify: test
+    source: deploy-system-plan.md §6.9
+    text: Every vault secret is encrypted with its own fresh AES-256-GCM DEK wrapped by the KEK, with AAD binding record id and type; ciphertexts cannot be swapped between rows.
+  - id: SEC-69-KEK-NEVER-IN-BACKUPS
+    phase: 2
+    verify: test
+    source: deploy-system-plan.md §6.9
+    text: The KEK is never present in the database, DB dumps, or backups; backups are client-side encrypted with a dedicated key.
+  - id: SEC-69-NO-SECRETS-IN-EXHAUST
+    phase: 1
+    verify: static-gate
+    source: deploy-system-plan.md §6.9
+    text: Secrets never appear in logs, Celery task args, or frontend responses after write; a CI log-scrubber greps test output for plaintext markers.
+  - id: SEC-B4-REDIS-CROWN-JEWEL
+    phase: 0
+    verify: checklist
+    source: plan-addendum-2026-07-30.md §B4
+    text: Redis runs on the compose-internal network only with requirepass; Celery serializers are pinned to JSON.
+  - id: SEC-B5-CF-TOKEN-SCOPING
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §B5
+    text: Cloudflare access uses two scoped tokens (DNS ops; attack playbook), never the Global API Key; an audit check verifies scopes.
+  - id: SEC-A1-SESSION-AUTH
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §A1
+    text: Hub auth is session-cookie (HttpOnly/Secure/SameSite=Lax) + CSRF header, not JWT; WebSocket rides the same session.
+  - id: SEC-610-MANDATORY-2FA
+    phase: 0
+    verify: test
+    source: deploy-system-plan.md §6.10
+    text: No panel session can use the API (HTTP or WS) without an enrolled, confirmed second factor; enrollment is forced at first login.
+  - id: SEC-A2-WEBAUTHN-PHASE4
+    phase: 4
+    verify: test
+    source: plan-addendum-2026-07-30.md §A2/§E9
+    text: WebAuthn (django-otp-webauthn) becomes the primary second factor with TOTP fallback; step-up hardware touch gates T1 actions via require_recent_touch.
+
+  # — Monitoring & alerting (Phases 2-3)
+  - id: ALERT-P1-ROWS
+    phase: 3
+    verify: test
+    source: alert-protocol.md §2
+    text: Every alert class emitted by the Hub maps to exactly one severity row of the alert-protocol rules table; unclassified alert types cannot ship.
+  - id: ALERT-ANTINOISE-HYSTERESIS
+    phase: 3
+    verify: test
+    source: alert-protocol.md §4
+    text: Alerts open after 3 consecutive failures and close after 2 successes; flapping collapses; root-cause suppression replaces N alerts with one; a storm breaker caps push rate.
+  - id: ALERT-N3-STALENESS-NEVER-RESTARTS
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §N3
+    text: Feed data-staleness produces at most a P2 finding and never triggers a reconciler restart; upstream-down feeds are never restarted.
+  - id: MON-C4-LOG-BACKPRESSURE
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §C4
+    text: Caddy logs are rotated by catalog entry; log pulls have a byte cap with a sampled degrade mode.
+  - id: MON-DEADMAN-EXTERNAL
+    phase: 3
+    verify: checklist
+    source: alert-protocol.md §5
+    text: An external dead-man's switch receives a heartbeat after each completed probe cycle; a canary probe precedes any mass-outage declaration.
+
+  # — Hardening (Phase 2 adopt; scripts interim)
+  - id: HARD-R1-TWO-POSTURES
+    phase: 2
+    verify: test
+    source: server-hardening.md R1
+    text: Hub hosts expose zero public inbound ports (tailscale0 only); target hosts open 80/443 to Cloudflare ranges only; the intake profile is tunnel-published with no public inbound.
+  - id: HARD-R2-SSHD-VALIDATE-FIRST
+    phase: 2
+    verify: test
+    source: server-hardening.md R2
+    text: sshd hardening uses drop-in configs, validates with sshd -t before reload, and refuses to disable password auth before authorized_keys exists.
+  - id: HARD-R3-IGNOREIP
+    phase: 2
+    verify: test
+    source: server-hardening.md R3 / review3 §V1
+    text: fail2ban ignoreip whitelists only the Hub's mesh IP, never the whole tailnet /10.
+  - id: HARD-Q8-SCRIPTS-TESTED
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §Q8
+    text: The five shell scripts live under scripts/, are shellcheck/shfmt/bash -n gated, and harden-ubuntu.sh runs twice idempotently in the test container with DRY_RUN mutating nothing.
+  - id: HARD-V2-MESH-BEFORE-FIREWALL
+    phase: 2
+    verify: test
+    source: server-hardening.md Quick start / review3 §V2
+    text: harden-ubuntu.sh refuses the tailscale0-only firewall posture unless the mesh is up and the current session rides it.
+
+  # — Provisioner & targets (Phase 2)
+  - id: PROV-E6-FRESH-HOST-GUARD
+    phase: 2
+    verify: test
+    source: plan-addendum-2026-07-30.md §E6
+    text: The provisioner detects occupied ports 80/443 or non-fresh state and refuses with an explanation instead of proceeding.
+  - id: PROV-J7-COMPOSE-AWARE-ADOPT
+    phase: 3
+    verify: checklist
+    source: claude/project-inventory.md cross-cutting finding 3 (J7)
+    text: The adopt-existing-site flow understands compose stacks with sidecar processes (worker, beat, scheduler, one-shot migrate) and site-owned edge containers, not just single containers.
+
+  # — Realtime (extends P0-REALTIME into later phases)
+  - id: RT-D7-SNAPSHOT-CONTRACT
+    phase: 0
+    verify: test
+    source: plan-addendum-2026-07-30.md §D7
+    text: Snapshot endpoints return {seq, data} from the same counter publish() increments; history entries carry their seq; reconnect repaint has no gap.
+  - id: RT-35-DEGRADED-POLLING
+    phase: 3
+    verify: test
+    source: deploy-system-plan.md §3.5
+    text: When WebSocket is unavailable, panels degrade to visible 10s REST polling, never silently stale.
+
+  # — UX (Phase 3-4)
+  - id: UX-F2-FINDING-MODEL
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §F2
+    text: All engines emit the unified Finding model with fingerprints; accept-risk requires a reason and re-surfaces on fingerprint change.
+  - id: UX-F5-ACTION-TIERS
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §F5
+    text: T1 actions require hardware touch + type-the-name; T2 a diff-summarizing confirm; T3 (rollback/restart) a single click with undo — never behind a hardware touch.
+  - id: UX-F8-SIMULATION-STATES
+    phase: 2
+    verify: checklist
+    source: plan-addendum-2026-07-30.md §F8 / review3 §N2
+    text: Every screen renders empty/loading/live/error/degraded states in simulation mode, including warming and data-stale badges.
+
+  # — Partner surface (Phase 5.5)
+  - id: PART-K1-ZERO-INBOUND-HUB
+    phase: 5
+    verify: test
+    source: plan-addendum-2026-07-30.md §K1
+    text: The Hub has zero inbound internet paths; the credential-free intake is polled by the Hub over the mesh.
+  - id: PART-K2-REPLAY-AT-HUB
+    phase: 5
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §M5
+    text: The Hub owns the authoritative replay defense; a replayed signed request is rejected at the Hub even when the intake forwards it.
+  - id: PART-K6-NO-INTERNAL-ACTIONS
+    phase: 5
+    verify: test
+    source: plan-addendum-2026-07-30.md §K6
+    text: The partner router maps to no internal T1/T2 action; a standing test fails if a refactor widens it.
+
+  # — Process (registered per Q6)
+  - id: PROC-REGRESSION-TEST
+    phase: 0
+    verify: checklist
+    source: build-process.md §5
+    text: No bug fix merges without its named regression test.
+  - id: PROC-SENSITIVE-HUMAN-MERGE
+    phase: 0
+    verify: checklist
+    source: build-process.md §5 / conformance/paths.yaml
+    text: Diffs touching sensitive-path globs are always human-merged; the glob list includes scripts/**, intake/**, and the requirements registry.
+  - id: PROC-GENERATED-NOT-STALE
+    phase: 0
+    verify: static-gate
+    source: deploy-system-plan.md §4.5
+    text: Generated client artifacts (types + zod) are regenerated in CI and must match the committed files (make check-generated).

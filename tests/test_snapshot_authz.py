@@ -33,6 +33,7 @@ def test_snapshot_refuses_unauthorized_topic(client):
 
 
 @pytest.mark.req("P0-REALTIME")
+@pytest.mark.req("RT-D7-SNAPSHOT-CONTRACT")
 def test_snapshot_history_entries_carry_seq(client):
     """History entries are {seq, event} written atomically with the counter
     (round-1 finding: a snapshot could observe seq N with event N missing)."""

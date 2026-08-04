@@ -49,6 +49,7 @@ def test_me_hydrates_session_and_bootstraps_anonymous(client):
 
 
 @pytest.mark.req("P0-LOGIN")
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
 def test_login_post_is_csrf_protected():
     """Round-1 finding: login-CSRF — a cross-site page must not be able to log the
     victim into an attacker-chosen account. The login POST itself requires the
@@ -69,6 +70,7 @@ def test_login_post_is_csrf_protected():
 
 
 @pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
 def test_unenrolled_session_is_gated_to_enrollment(client):
     """Round-1 security finding: a password-only session of a not-yet-enrolled user
     had full API access. The middleware gate restricts it to /api/auth/*."""

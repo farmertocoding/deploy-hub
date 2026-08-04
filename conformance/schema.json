@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "conformance/requirements.yaml registry entry (review3 Q1)",
+  "type": "object",
+  "required": ["schema_version", "requirements"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "phase", "verify", "source", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$"},
+          "phase": {"type": "integer", "minimum": 0, "maximum": 7},
+          "verify": {"enum": ["test", "demo", "checklist", "static-gate"]},
+          "source": {"type": "string", "minLength": 5},
+          "text": {"type": "string", "minLength": 10},
+          "kind": {"enum": ["invariant", "behavior", "interface", "process"]},
+          "status": {"enum": ["planned", "implemented", "verified", "retired"]},
+          "retired_reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}
