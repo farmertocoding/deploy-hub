@@ -1,0 +1,15 @@
+[project]
+name = "sr-backtest"
+version = "0.1.0"
+description = "Offline S/R backtesting over the same Parquet partitions the live engine writes. Manual-only in v1 (not a serving process, never deployed as a site)."
+requires-python = ">=3.12"
+dependencies = [
+    "vectorbt>=0.27",
+    "polars>=1.20",
+    "duckdb>=1.1",
+    "numba>=0.61",
+]
+
+[tool.sr-backtest]
+parquet-dir = "data"
+duckdb-file = "data/levels.duckdb"

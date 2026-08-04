@@ -1,0 +1,18 @@
+version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "django"
+version = "5.2.4"
+
+[[package]]
+name = "daphne"
+version = "4.1.2"
+
+[[package]]
+name = "channels"
+version = "4.2.0"
+
+[[package]]
+name = "celery"
+version = "5.4.0"

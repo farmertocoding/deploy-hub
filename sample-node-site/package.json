@@ -1,0 +1,13 @@
+{
+  "name": "sample-node-site",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": "22"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  }
+}

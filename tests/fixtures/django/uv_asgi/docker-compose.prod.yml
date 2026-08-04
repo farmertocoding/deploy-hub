@@ -1,0 +1,24 @@
+services:
+  web:
+    build: .
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+  worker:
+    build: .
+    command: celery -A config worker -l info
+    depends_on:
+      - redis
+  beat:
+    build: .
+    command: celery -A config beat -l info
+    depends_on:
+      - redis
+  migrate:
+    build: .
+    command: python manage.py migrate --noinput
+    restart: "no"
+  redis:
+    image: redis:7

@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+packages/*/dist/
+*.tsbuildinfo
+
+# secrets / local config
+.env
+.env.local
+.env.*.local
+
+# python offline component
+__pycache__/
+.venv/
+*.egg-info/
+
+# data (large local state — named volume in prod, never committed)
+data/*.parquet
+# tiny sample partition kept for tests
+!data/bars-2026-01.parquet
+data/partitions/
+data/*.duckdb.wal
+*.sqlite3-shm
+
+# tooling
+.DS_Store
+coverage/

@@ -1,0 +1,125 @@
+"""Django scanner module: fleet-norm (uv+ASGI+sidecars), legacy blockers, pip/WSGI."""
+import pathlib
+
+import pytest
+
+from scanner import core
+from scanner.modules import django as dj
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "django"
+UV_ASGI = FIXTURES / "uv_asgi"
+LEGACY_BAD = FIXTURES / "legacy_bad"
+PIP_WSGI = FIXTURES / "pip_wsgi"
+
+
+def _by_id(results):
+    return {c.id: c for c in results}
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_uv_asgi_detected_and_manifest_source_recorded_as_uv():
+    """J7: pyproject.toml + uv.lock is the fleet norm — recognized, recorded,
+    and never mistaken for a missing dependency manifest."""
+    assert dj.module.detect(UV_ASGI) is True
+    checks = _by_id(dj.module.checks(UV_ASGI))
+    dep = checks["django.dependency-manifest"]
+    assert dep.tier == "ok"
+    assert "uv" in dep.detail
+    blockers = [c.id for c in checks.values() if c.tier == "blocker"]
+    assert blockers == [], f"fleet-norm fixture must not fire blockers: {blockers}"
+    # uv.lock counts as pinning — no unpinned-requirements warning either.
+    assert checks["django.deps-pinned"].tier == "ok"
+    assert checks["django.runtime-versions"].tier == "ok"
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_uv_asgi_service_command_is_asgi_and_sidecars_become_jobs():
+    """J7: ASGI-only serving is universal — the manifest command must stay
+    daphne/uvicorn (never a gunicorn default), and compose sidecars (celery
+    worker/beat, one-shot migrate) must land as components.jobs entries."""
+    report = core.scan(UV_ASGI)
+    assert "django" in report["modules"]
+    svc = report["manifest_draft"]["components"]["service"]
+    assert svc["kind"] == "django"
+    assert svc["port"] == 8000
+    assert svc["command"][0] in ("daphne", "uvicorn")
+    assert "gunicorn" not in " ".join(svc["command"])
+    jobs = {j["name"]: j for j in report["manifest_draft"]["components"]["jobs"]}
+    assert {"worker", "beat", "migrate"} <= set(jobs)
+    assert jobs["worker"]["kind"] == "long_running"
+    assert jobs["beat"]["kind"] == "long_running"
+    assert jobs["migrate"]["kind"] == "one_shot"
+    assert "redis" not in jobs  # infra images are not project jobs
+    mode = next(c for c in report["checks"] if c["id"] == "django.server-mode")
+    assert mode["tier"] == "ok" and "ASGI" in mode["detail"]
+    sidecars = next(c for c in report["checks"] if c["id"] == "django.sidecars")
+    assert sidecars["tier"] == "ok"
+
+
+def test_legacy_bad_fires_debug_secret_and_runserver_blockers():
+    checks = {c.id: c.tier for c in dj.module.checks(LEGACY_BAD)}
+    assert checks["django.debug-hardcoded"] == "blocker"
+    assert checks["django.secret-key-literal"] == "blocker"
+    assert checks["django.runserver"] == "blocker"
+
+
+def test_legacy_bad_fires_the_warnings():
+    checks = {c.id: c.tier for c in dj.module.checks(LEGACY_BAD)}
+    for cid in ("django.settings-shape", "django.allowed-hosts", "django.db-engine",
+                "django.static-root", "django.security-settings", "django.deps-pinned"):
+        assert checks[cid] == "warning", f"{cid} should be a warning, got {checks[cid]}"
+    # requirements.txt exists, so the manifest-source blocker must NOT fire.
+    assert checks["django.dependency-manifest"] == "ok"
+
+
+def test_pip_wsgi_passes_and_gets_a_gunicorn_command():
+    checks = dj.module.checks(PIP_WSGI)
+    blockers = [c.id for c in checks if c.tier == "blocker"]
+    warnings = [c.id for c in checks if c.tier == "warning"]
+    assert blockers == []
+    assert warnings == []
+    frag = dj.module.manifest_fragment(PIP_WSGI)
+    assert frag["components"]["service"]["command"][0] == "gunicorn"
+    assert "config.wsgi:application" in frag["components"]["service"]["command"]
+    assert frag["dependency_source"] == "requirements"
+    assert frag["components"]["jobs"] == []
+
+
+def test_detect_is_false_on_an_empty_tree(tmp_path):
+    assert dj.module.detect(tmp_path) is False
+    assert "django" not in [m.name for m in core.detect_modules(tmp_path)]
+
+
+def test_sandbox_checks_are_emitted_as_specs_not_run():
+    specs = {s.id: s for s in dj.module.sandbox_checks(UV_ASGI)}
+    assert set(specs) == {"django.check-deploy", "django.migrations-check",
+                          "django.collectstatic"}
+    for spec in specs.values():
+        assert isinstance(spec, core.SandboxSpec)
+        assert spec.command[:2] == ["python", "manage.py"]
+        assert spec.as_result().tier == "pending_sandbox"
+
+
+def test_wizard_questions_cover_domain_exposure_db_and_env_secrets():
+    qs = {q.id: q for q in dj.module.wizard_questions(UV_ASGI)}
+    assert qs["django.domain"].kind == "text"
+    assert set(qs["django.exposure"].choices) == {"public", "mesh_only"}
+    assert qs["django.db"].kind == "choice"
+    assert qs["django.env.DJANGO_SECRET_KEY"].kind == "secret"
+    assert qs["django.env.POSTGRES_PASSWORD"].kind == "secret"
+    assert qs["django.env.DJANGO_ALLOWED_HOSTS"].kind == "text"
+    assert "django.env.DJANGO_SETTINGS_MODULE" not in qs
+
+
+def test_healthz_route_maps_to_liveness_path():
+    assert dj.module.manifest_fragment(UV_ASGI)["healthz"]["liveness_path"] == "/healthz"
+    assert dj.module.manifest_fragment(LEGACY_BAD)["healthz"]["liveness_path"] is None
+
+
+def test_csrf_trusted_origins_advice_fires_on_spa_without_the_setting(tmp_path):
+    (tmp_path / "manage.py").write_text("# manage\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2.4\ndjango-cors-headers==4.4.0\n")
+    (tmp_path / "settings.py").write_text(
+        "import os\nSECRET_KEY = os.environ['KEY']\nSTATIC_ROOT = '/srv/static'\n")
+    checks = _by_id(dj.module.checks(tmp_path))
+    assert checks["django.csrf-trusted-origins"].tier == "advice"
