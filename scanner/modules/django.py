@@ -37,7 +37,8 @@ _SECRETISH = ("SECRET", "PASSWORD", "TOKEN", "API_KEY", "PRIVATE", "SIGNING",
               "CREDENTIAL", "SALT", "DSN", "PASS")
 _ENV_RE = re.compile(
     r"(?:os\.environ\.get|os\.getenv|os\.environ|\benv)\s*[\(\[]\s*['\"]([A-Z][A-Z0-9_]+)['\"]")
-_ENV_DRIVEN_RE = re.compile(r"os\.environ|os\.getenv|\benv\(")
+_ENV_DRIVEN_RE = re.compile(
+    r"os\.environ|os\.getenv|\benv\(|\bconfig\(|from decouple import|import environ")
 
 
 def _iter_files(root, pattern):
@@ -95,12 +96,28 @@ class DjangoScannerModule:
 
     # ── detection ───────────────────────────────────────────────────────────
     def detect(self, root):
+        return self.project_root(root) is not None
+
+    def project_root(self, root):
+        """The directory actually holding the Django project. Real repos nest it
+        (backend/, app/backend/ — J7: all four inventoried projects do); search
+        manage.py / a Django dependency up to depth 3, skipping vendored trees."""
         root = Path(root)
-        if (root / "manage.py").is_file():
-            return True
+        skip = {"node_modules", ".venv", "venv", ".git", "dist", "build",
+                "reference_impl", "reference-code"}
+        candidates = []
+        for p in sorted(root.rglob("manage.py")):
+            rel = p.relative_to(root)
+            if len(rel.parts) <= 4 and not (set(rel.parts[:-1]) & skip):
+                candidates.append(p.parent)
+        if candidates:
+            # Shallowest wins; ties broken alphabetically by the sort above.
+            return min(candidates, key=lambda d: len(d.relative_to(root).parts))
         deps = self._deps_text(root)
-        return bool(re.search(r"(?im)^\s*[\"']?django\b", deps)
-                    or re.search(r"(?i)[\"']django[\[>=<~!,\"']", deps))
+        if re.search(r"(?im)^\s*[\"']?django\b", deps) or re.search(
+                r"(?i)[\"']django[\[>=<~!,\"']", deps):
+            return root
+        return None
 
     # ── shared file discovery ───────────────────────────────────────────────
     def _settings_files(self, root):
@@ -125,12 +142,32 @@ class DjangoScannerModule:
         return "\n".join(parts)
 
     def _compose_files(self, root):
+        """Compose files live at the REPO root while manage.py nests in backend/
+        (J7: all four inventoried projects) — search the project dir, then walk
+        up to the originally scanned root."""
         root = Path(root)
+        dirs = [root]
+        stop = getattr(self, "_scan_root", None)
+        cur = root
+        while stop is not None and cur != cur.parent:
+            if cur == Path(stop):
+                break
+            cur = cur.parent
+            dirs.append(cur)
+            if cur == Path(stop):
+                break
         out = []
-        for pat in ("docker-compose*.yml", "docker-compose*.yaml",
-                    "compose.yml", "compose.yaml"):
-            out.extend(sorted(root.glob(pat)))
-        return out
+        for d in dirs:
+            for pat in ("docker-compose*.yml", "docker-compose*.yaml",
+                        "compose.yml", "compose.yaml"):
+                out.extend(sorted(d.glob(pat)))
+        # de-dup preserving order
+        seen, uniq = set(), []
+        for f in out:
+            if f not in seen:
+                seen.add(f)
+                uniq.append(f)
+        return uniq
 
     def _dockerfiles(self, root):
         return list(_iter_files(root, "Dockerfile*"))
@@ -261,7 +298,8 @@ class DjangoScannerModule:
 
     # ── static checks ───────────────────────────────────────────────────────
     def checks(self, root):
-        root = Path(root)
+        self._scan_root = Path(root)
+        root = self.project_root(root) or Path(root)
         results = []
         settings = self._settings_files(root)
         prod = self._prod_settings(root)
@@ -551,6 +589,8 @@ class DjangoScannerModule:
 
     # ── executing checks: EMITTED as sandbox specs, never run here (§M1) ────
     def sandbox_checks(self, root):
+        self._scan_root = Path(root)
+        root = self.project_root(root) or Path(root)
         return [
             SandboxSpec(
                 id="django.check-deploy",
@@ -575,6 +615,8 @@ class DjangoScannerModule:
         return sorted(names)
 
     def wizard_questions(self, root):
+        self._scan_root = Path(root)
+        root = self.project_root(root) or Path(root)
         questions = [
             WizardQuestion(id="django.domain", prompt="Public domain for this site",
                            kind="text"),
@@ -603,6 +645,8 @@ class DjangoScannerModule:
         return None
 
     def manifest_fragment(self, root, answers=None):
+        self._scan_root = Path(root)
+        root = self.project_root(root) or Path(root)
         _mode, argv, _why = self._server_shape(root)
         fragment = {
             "components": {

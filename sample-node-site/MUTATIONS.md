@@ -15,7 +15,7 @@ this table is the contract between fixture and tests.
 | 3 | Remove the ready gating from `/healthz` (return `ready: true` unconditionally, i.e. drop the `backfillDone` term) | `packages/server/src/index.ts` | `node-ts.readiness-pattern` | §S4 Warm-up / readiness, `SCAN-S4-READINESS-PATTERN` |
 | 4 | Remove the ping/pong heartbeat (`setInterval` block + `on("pong")` handler) | `packages/server/src/index.ts` | `node-ts.ws-heartbeat` | §S4 WebSocket specifics |
 | 5 | Delete the file | `pnpm-lock.yaml` | `core.lockfile` | §S1 common core / §S4 frozen-lockfile |
-| 6 | Add a `.env` file containing `ALPACA_SECRET=AKFAKEFAKEFAKEFAKE1234` | `.env` (new file) | `core.secrets` | §S1 common core, §S4 Config & secrets (entropy scan §4.5) |
+| 6 | Add a `.env` file containing `ALPACA_SECRET=AKFAKEFAKEFAKEFAKE1234` | `.env` (new file) | `core.secret-scan` | §S1 common core, §S4 Config & secrets (entropy scan §4.5) |
 | 7 | Remove the reconnect/backoff loop (drop the `catch` + `backoffMs` retry from `streamLoop`, let the error propagate) | `packages/server/src/ingest.ts` | `node-ts.ingest-reconnect` | §S4 Ingestion daemon |
 | 8 | Change the start script to `"start": "ts-node src/index.ts"` | `packages/server/package.json` | `node-ts.compiled-js` | §S4 Build & runtime (prod runs compiled JS) |
 | 9 | Remove the `"engines"` block | `packages/server/package.json` | `node-ts.engines-pin` | §S4 Build & runtime (engines pinned to Node 22) |

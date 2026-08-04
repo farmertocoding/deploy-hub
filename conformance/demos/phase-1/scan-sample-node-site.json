@@ -1,0 +1,389 @@
+{
+  "schema_version": 1,
+  "modules": [
+    "node-ts"
+  ],
+  "checks": [
+    {
+      "id": "core.secret-scan",
+      "tier": "ok",
+      "title": "No committed secrets found",
+      "detail": "",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "core.lockfile",
+      "tier": "ok",
+      "title": "Node dependency manifests are locked",
+      "detail": "pnpm lockfile present. The Python pyproject.toml is the §N7 offline component (manual-v1): its lock is deferred to the Phase-3 jobs_image build, not a deploy gate.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "core.gitignore",
+      "tier": "ok",
+      "title": ".gitignore covers the basics",
+      "detail": "",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "core.tests-exist",
+      "tier": "advice",
+      "title": "No test files found",
+      "detail": "No test_*.py / *_test.py / *.test.* / *.spec.* files or tests/ directory were found.",
+      "fix_hint": "Even a small smoke-test suite lets the pipeline verify a build before it ships.",
+      "execution": "static"
+    },
+    {
+      "id": "core.healthz",
+      "tier": "ok",
+      "title": "Health endpoint detected",
+      "detail": "",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "core.digest-pins",
+      "tier": "ok",
+      "title": "All base images digest-pinned",
+      "detail": "",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "core.exposure-auth",
+      "tier": "warning",
+      "title": "No authentication detected",
+      "detail": "no authentication detected — Blocker if this site will be public with financial/personal data (wizard will ask)",
+      "fix_hint": "If the site is meant to be public and handles financial or personal data, add authentication before deploying, or set exposure to mesh_only in the wizard.",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.monorepo",
+      "tier": "ok",
+      "title": "pnpm monorepo detected",
+      "detail": "pnpm-workspace.yaml — workspace packages: server, web.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.service-package",
+      "tier": "ok",
+      "title": "Deployable service package: server",
+      "detail": "Heuristic pick (server/ws dependency + entry point dist/index.js); the wizard confirms this choice.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.recognized-deps",
+      "tier": "ok",
+      "title": "Recognized dependencies recorded",
+      "detail": "Recognized: ccxt, fastify, ws, zod — ccxt present: ingestion-daemon checks armed.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.worker-threads",
+      "tier": "ok",
+      "title": "worker_threads usage detected",
+      "detail": "worker_threads/SharedArrayBuffer run fine in Docker, no special flags (COOP/COEP is a browser concern, §S4 workers); the wizard's thread-count answer feeds container CPU guidance.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.offline-component",
+      "tier": "ok",
+      "title": "Python offline component present",
+      "detail": "pyproject.toml with duckdb, polars, vectorbt — co-detected, never blocking (§S3): an offline analysis component, not a serving process and not its own Site (§V5).",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.strict-build",
+      "tier": "ok",
+      "title": "TypeScript strict mode is on",
+      "detail": "tsconfig.json of the service package sets \"strict\": true; `tsc --noEmit` runs in the sandbox.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.compiled-js",
+      "tier": "ok",
+      "title": "Production runs compiled JS",
+      "detail": "start script: `node dist/index.js`.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.engines-pin",
+      "tier": "ok",
+      "title": "engines.node pinned to Node 22 LTS",
+      "detail": "Service package engines.node: \"22\" — the generated image uses that exact line.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.bun-dev-only",
+      "tier": "ok",
+      "title": "Bun is confined to dev tooling",
+      "detail": "No bun in start/main or runtime dependencies (devDependencies and test scripts are fine).",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.fastify-serving",
+      "tier": "ok",
+      "title": "Fastify serving is container-shaped",
+      "detail": "trustProxy set, bodyLimit set, listens on 0.0.0.0:$PORT.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.graceful-shutdown",
+      "tier": "ok",
+      "title": "SIGTERM drain handler present",
+      "detail": "SIGTERM handler found, closing the ws server and draining in-flight work.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.ws-heartbeat",
+      "tier": "ok",
+      "title": "Server-side ws heartbeat present",
+      "detail": "ping/pong heartbeat found — half-open sockets get reaped. Clients should auto-reconnect with snapshot-then-stream (the §3.5 pattern) since blue-green cutover severs every live socket.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.readiness-pattern",
+      "tier": "ok",
+      "title": "Readiness gate pattern detected in /healthz",
+      "detail": "ready gated on `backfillDone && feed.connected`; contract fields present: ready, live, checks (§N2 pinned shape {live, ready, checks: {...}}).",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.ingest-reconnect",
+      "tier": "ok",
+      "title": "Ingestion reconnects with backoff",
+      "detail": "A reconnect-with-backoff pattern is present in the ingestion path.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.ingest-staleness",
+      "tier": "ok",
+      "title": "Last-tick age surfaced in /healthz",
+      "detail": "Feed staleness is its own metric with its own Finding class (§N2/§N3): P2 at most, market-calendar-aware, and NEVER a reconciler restart trigger — feed silence is the normal state most of the week.",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.ingest-backfill",
+      "tier": "ok",
+      "title": "Backfill resumes from checkpoint with bounded concurrency",
+      "detail": "Resume-from-checkpoint plus bounded request concurrency found — restarts do not re-pull full history (§N4 rate-limit guidance).",
+      "fix_hint": "",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.exclusive-upstream",
+      "tier": "warning",
+      "title": "Exclusive upstream feeds require the recreate strategy",
+      "detail": "Detected: alpaca. These permit one concurrent websocket per account — during a blue-green overlap two ingestion daemons fight over the socket (green never becomes ready, or kicks blue's live feed mid-serving), and a double backfill can exhaust quotas. deploy_strategy is set to recreate in the manifest (§N4).",
+      "fix_hint": "Keep the recreate strategy (the manifest already pins it), or add a documented pre-stop ingestion-handoff hook (a `prestop`/handoff script that pauses ingestion) if blue-green is truly needed.",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.local-state",
+      "tier": "warning",
+      "title": "Local on-disk state — single-instance site",
+      "detail": "Data files: data/app.sqlite3, data/app.sqlite3-wal, data/bars-2026-01.parquet, data/levels.duckdb. State on host disk means single-instance only (§9.5.6) — marked, not blocked; correct for v1. deploy_strategy is set to recreate and the data directory becomes a per-Site named volume (§N1/N5). SQLite present: WAL does not make concurrent cross-container writers safe — the old writer must stop before the new one writes. DuckDB files are derived data, rebuildable from Parquet — excluded from backup (§N6).",
+      "fix_hint": "Keep the data directory on the named volume the manifest declares (never in image layers); backups ride the per-site data-backup registry (sqlite_file + incremental directory_sync, §N6).",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.secrets-env",
+      "tier": "advice",
+      "title": "Broker credentials are env-driven — prefer read-only/paper keys",
+      "detail": "Broker key env names found in .env.example: ALPACA_KEY_ID, ALPACA_SECRET, FINMIND_TOKEN. Env-driven is correct; committed key-like values ride core.secret-scan (entropy scan §4.5). Keyless Binance endpoints need no secret.",
+      "fix_hint": "Broker keys are a money-moving credential class (§M4): use read-only or paper-trading keys wherever the broker supports scoping, store live keys in the vault, and never commit .env.",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.jobs-image",
+      "tier": "advice",
+      "title": "Backtesting is manual-only in v1",
+      "detail": "The Python offline component (duckdb, polars, vectorbt) cannot run inside the Node-only production image. v1 ships backtesting as manual-only (§N7); the manifest records a jobs_image stub from pyproject.toml so the Phase-3 run-image-X-with-volumes job type can pick it up.",
+      "fix_hint": "Run backtests manually against the same Parquet data for now; when the Phase-3 job type lands, the jobs_image container shares the site's Parquet volume read-only.",
+      "execution": "static"
+    },
+    {
+      "id": "node-ts.install",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] node-ts.install",
+      "detail": "Runs off-Hub (review3 §M1): pnpm install --frozen-lockfile --ignore-scripts",
+      "fix_hint": "CI-honesty install check; lifecycle scripts are the §6.8 supply-chain surface, so --ignore-scripts is explicit (§M1).",
+      "execution": "executing"
+    },
+    {
+      "id": "node-ts.tsc",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] node-ts.tsc",
+      "detail": "Runs off-Hub (review3 §M1): pnpm exec tsc --noEmit",
+      "fix_hint": "Strict-mode type check; requires installed node_modules and plugin execution, so sandbox-only.",
+      "execution": "executing"
+    },
+    {
+      "id": "node-ts.build",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] node-ts.build",
+      "detail": "Runs off-Hub (review3 §M1): pnpm run build",
+      "fix_hint": "Production build must succeed; builds execute project code, so sandbox-only (§M1).",
+      "execution": "executing"
+    }
+  ],
+  "sandbox_jobs": [
+    {
+      "id": "node-ts.install",
+      "command": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile",
+        "--ignore-scripts"
+      ],
+      "cwd": ".",
+      "why": "CI-honesty install check; lifecycle scripts are the §6.8 supply-chain surface, so --ignore-scripts is explicit (§M1)."
+    },
+    {
+      "id": "node-ts.tsc",
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--noEmit"
+      ],
+      "cwd": ".",
+      "why": "Strict-mode type check; requires installed node_modules and plugin execution, so sandbox-only."
+    },
+    {
+      "id": "node-ts.build",
+      "command": [
+        "pnpm",
+        "run",
+        "build"
+      ],
+      "cwd": ".",
+      "why": "Production build must succeed; builds execute project code, so sandbox-only (§M1)."
+    }
+  ],
+  "wizard_questions": [
+    {
+      "id": "node-ts.service-package",
+      "prompt": "Which workspace package is the deployable service?",
+      "kind": "choice",
+      "default": "server",
+      "choices": [
+        "server",
+        "web"
+      ]
+    },
+    {
+      "id": "node-ts.dev-packages",
+      "prompt": "Which workspace packages are dev-only (never deployed)?",
+      "kind": "text",
+      "default": "web",
+      "choices": []
+    },
+    {
+      "id": "node-ts.data-dir",
+      "prompt": "Where does the data directory live? (becomes a per-Site named volume surviving container replacement)",
+      "kind": "text",
+      "default": "data",
+      "choices": []
+    },
+    {
+      "id": "node-ts.worker-threads",
+      "prompt": "Expected worker-thread count (feeds container CPU guidance)",
+      "kind": "number",
+      "default": 2,
+      "choices": []
+    },
+    {
+      "id": "node-ts.exposure",
+      "prompt": "Who should reach this site? This service appears to handle financial/broker data — mesh_only is recommended; public requires authentication (§M4).",
+      "kind": "choice",
+      "default": "mesh_only",
+      "choices": [
+        "public",
+        "mesh_only"
+      ]
+    },
+    {
+      "id": "node-ts.exclusive-upstream",
+      "prompt": "Do any upstream feeds permit only one concurrent connection per account (e.g. Alpaca standard plan)? Flagged sites require the recreate strategy or a pre-stop handoff (§N4). Detected: alpaca.",
+      "kind": "bool",
+      "default": true,
+      "choices": []
+    }
+  ],
+  "manifest_draft": {
+    "schema_version": 1,
+    "components": {
+      "service": {
+        "kind": "node-ts",
+        "package": "server",
+        "command": [
+          "node",
+          "dist/index.js"
+        ],
+        "port": 8080
+      },
+      "static_route": null,
+      "jobs": []
+    },
+    "jobs_image": {
+      "from": "pyproject.toml",
+      "status": "manual-v1"
+    },
+    "volumes": [
+      {
+        "name": "site-data-data",
+        "path": "data",
+        "backup_policy": {
+          "backup_units": [
+            {
+              "kind": "sqlite_file",
+              "path": "data/app.sqlite3"
+            },
+            {
+              "kind": "directory_sync",
+              "path": "data",
+              "incremental": true
+            }
+          ],
+          "derived_excluded": [
+            "data/levels.duckdb"
+          ]
+        }
+      }
+    ],
+    "deploy_strategy": "recreate",
+    "exposure": "public",
+    "healthz": {
+      "liveness_path": "/healthz",
+      "readiness_path": "/healthz",
+      "warmup_timeout_s": 600,
+      "data_staleness_threshold": 900
+    }
+  },
+  "summary": {
+    "blocker": 0,
+    "warning": 3,
+    "advice": 3,
+    "ok": 21,
+    "pending_sandbox": 3
+  }
+}

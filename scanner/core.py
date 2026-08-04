@@ -116,8 +116,11 @@ def scan(root):
         "deploy_strategy": "blue_green",       # §N1 default; modules may set recreate
         "exposure": "public",                  # §M4; wizard may set mesh_only
         "healthz": {                           # §N2 pinned contract fields
+            # warmup seeds None so a module's per-class default (node-ts: 600s,
+            # §N2) survives the first-set-wins merge; the pipeline applies 120s
+            # only when no module set one.
             "liveness_path": None, "readiness_path": None,
-            "warmup_timeout_s": 120, "data_staleness_threshold": None,
+            "warmup_timeout_s": None, "data_staleness_threshold": None,
         },
     }
     for m in mods:

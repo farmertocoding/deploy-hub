@@ -1,0 +1,46 @@
+modules: django
+summary: ✖ blocker:1  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ ok:13
+
+── BLOCKER (1)
+  ✖ django.secret-key-literal: Secret material is a literal in source
+      config/settings/base.py: DEV_FALLBACK_ENCRYPTION_KEY (high-entropy literal)
+      fix: A secret in source sits in git history forever and in every clone. Load it from the environment — SECRET_KEY = os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
+
+── PENDING_SANDBOX (3)
+  ▸ django.check-deploy: [sandbox] django.check-deploy
+      Runs off-Hub (review3 §M1): python manage.py check --deploy
+  ▸ django.migrations-check: [sandbox] django.migrations-check
+      Runs off-Hub (review3 §M1): python manage.py makemigrations --check --dry-run
+  ▸ django.collectstatic: [sandbox] django.collectstatic
+      Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
+
+── OK (13)
+  ✓ django.settings-shape: Settings are a split package
+      Found a settings/ package (base + per-environment modules).
+  ✓ django.debug-hardcoded: DEBUG is not hardcoded True
+      No prod-reachable settings file pins DEBUG = True.
+  ✓ django.allowed-hosts: ALLOWED_HOSTS is configured
+      Set (literal hosts or env-driven) in prod settings.
+  ✓ django.db-engine: Database engine
+      Engine: postgresql.
+  ✓ django.static-root: STATIC_ROOT is set
+      collectstatic has a destination.
+  ✓ django.security-settings: HTTPS security settings present
+      All of: SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE, SECURE_HSTS_SECONDS, SECURE_PROXY_SSL_HEADER
+  ✓ django.csrf-trusted-origins: CSRF_TRUSTED_ORIGINS is set
+      Cross-origin POSTs from the SPA/domain will pass.
+  ✓ django.dependency-manifest: Dependency manifest: uv
+      source: uv (pyproject.toml + uv.lock) — fleet norm.
+  ✓ django.deps-pinned: Dependencies are locked
+      uv.lock pins the full resolved dependency set.
+  ✓ django.runtime-versions: Runtime versions recorded
+      Python: 3.14 (requires-python); Django: 6.0 (dependency spec).
+  ✓ django.server-mode: ASGI serving detected
+      ASGI (daphne): compose web service runs daphne. Service argv: daphne -b 0.0.0.0 -p 8000 config.asgi:application.
+  ✓ django.sidecars: Sidecar processes recorded (3)
+      migrate (one_shot): python manage.py migrate --noinput; worker (long_running): celery -A config worker -l INFO --concurrency ${WORKER_CONCURRENCY:-4}; beat (long_running): celery -A config beat -l INFO --schedule /var/lib/celery/beat-schedule — each becomes a manifest components.jobs entry.
+  ✓ django.runserver: No runserver in container files
+      Dockerfile/compose entries use a real app server.
+
+manifest draft: service=django strategy=blue_green exposure=public jobs=3 volumes=0
+wizard: 26 question(s) pending

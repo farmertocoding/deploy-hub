@@ -1,0 +1,45 @@
+modules: django
+summary: ✖ blocker:0  ⚠ warning:0  • advice:1  ▸ pending_sandbox:3  ✓ ok:13
+
+── ADVICE (1)
+  • django.csrf-trusted-origins: CSRF_TRUSTED_ORIGINS absent with a SPA/CORS frontend present
+      CORS/SPA indicators found but no CSRF_TRUSTED_ORIGINS in prod settings.
+
+── PENDING_SANDBOX (3)
+  ▸ django.check-deploy: [sandbox] django.check-deploy
+      Runs off-Hub (review3 §M1): python manage.py check --deploy
+  ▸ django.migrations-check: [sandbox] django.migrations-check
+      Runs off-Hub (review3 §M1): python manage.py makemigrations --check --dry-run
+  ▸ django.collectstatic: [sandbox] django.collectstatic
+      Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
+
+── OK (13)
+  ✓ django.settings-shape: Settings are a split package
+      Found a settings/ package (base + per-environment modules).
+  ✓ django.debug-hardcoded: DEBUG is not hardcoded True
+      No prod-reachable settings file pins DEBUG = True.
+  ✓ django.secret-key-literal: No secret literals in settings
+      SECRET_KEY and friends come from the environment.
+  ✓ django.allowed-hosts: ALLOWED_HOSTS is configured
+      Set (literal hosts or env-driven) in prod settings.
+  ✓ django.db-engine: Database engine
+      Engine: postgresql.
+  ✓ django.static-root: STATIC_ROOT is set
+      collectstatic has a destination.
+  ✓ django.security-settings: HTTPS security settings present
+      All of: SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE, SECURE_HSTS_SECONDS, SECURE_PROXY_SSL_HEADER
+  ✓ django.dependency-manifest: Dependency manifest: uv
+      source: uv (pyproject.toml + uv.lock) — fleet norm.
+  ✓ django.deps-pinned: Dependencies are locked
+      uv.lock pins the full resolved dependency set.
+  ✓ django.runtime-versions: Runtime versions recorded
+      Python: 3.12 (requires-python); Django: 5.2 (dependency spec).
+  ✓ django.server-mode: ASGI serving detected
+      ASGI (uvicorn): compose web service runs uvicorn. Service argv: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*.
+  ✓ django.sidecars: Sidecar processes recorded (5)
+      migrate (one_shot): python manage.py migrate --noinput; worker (long_running): celery -A config worker --loglevel=info --concurrency=2; beat (long_running): celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule; worker (long_running): celery -A config worker --loglevel=info --concurrency=2; beat (long_running): celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule — each becomes a manifest components.jobs entry.
+  ✓ django.runserver: No runserver in container files
+      Dockerfile/compose entries use a real app server.
+
+manifest draft: service=django strategy=blue_green exposure=public jobs=3 volumes=0
+wizard: 39 question(s) pending

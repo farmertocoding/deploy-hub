@@ -25,3 +25,15 @@ def test_cloud_sdk_imports_only_under_providers():
             if FORBIDDEN.search(py.read_text(encoding="utf-8")):
                 violations.append(str(py.relative_to(REPO)))
     assert violations == [], f"Cloud SDK imports outside providers/: {violations}"
+
+
+@pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
+def test_deploys_never_imports_scanner():
+    """§V6: deploys/ reads only the stored manifest — the wizard materializes
+    module outputs; a deploys→scanner import edge may never appear."""
+    violations = []
+    for py in (REPO / "deploys").rglob("*.py"):
+        if re.search(r"^\s*(import|from)\s+scanner\b",
+                     py.read_text(encoding="utf-8"), re.M):
+            violations.append(str(py.relative_to(REPO)))
+    assert violations == [], violations

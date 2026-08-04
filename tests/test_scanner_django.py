@@ -123,3 +123,41 @@ def test_csrf_trusted_origins_advice_fires_on_spa_without_the_setting(tmp_path):
         "import os\nSECRET_KEY = os.environ['KEY']\nSTATIC_ROOT = '/srv/static'\n")
     checks = _by_id(dj.module.checks(tmp_path))
     assert checks["django.csrf-trusted-origins"].tier == "advice"
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_nested_project_root_with_repo_root_compose(tmp_path):
+    """Live-demo finding (2026-08-04 real-repo scans): manage.py nests in backend/
+    while compose lives at the repo root — all four J7 projects. Detection must
+    find the nested root AND sidecar discovery must still see the root compose."""
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "backend" / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "backend" / "settings.py").write_text(
+        "import os\nDEBUG = os.environ.get('DEBUG') == '1'\n")
+    (tmp_path / "docker-compose.prod.yml").write_text(
+        "services:\n"
+        "  web:\n    image: app\n    command: daphne -b 0.0.0.0 config.asgi:application\n"
+        "  worker:\n    image: app\n    command: celery -A config worker\n"
+        "  migrate:\n    image: app\n    command: python manage.py migrate\n"
+        "    restart: \"no\"\n")
+    from scanner.modules.django import module
+
+    assert module.detect(tmp_path)
+    assert module.project_root(tmp_path).name == "backend"
+    frag = module.manifest_fragment(tmp_path)
+    jobs = {j["name"] for j in frag["components"]["jobs"]}
+    assert "worker" in jobs and "migrate" in jobs
+
+
+def test_decouple_config_counts_as_env_driven(tmp_path):
+    """Live-demo finding: SATURDAYS uses python-decouple — a single settings.py
+    reading config() is env-driven, not 'hardcoded'."""
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "settings.py").write_text(
+        "from decouple import config\nSECRET_KEY = config('SECRET_KEY')\n"
+        "DEBUG = config('DEBUG', default=False, cast=bool)\n")
+    from scanner.modules.django import module
+
+    results = {c.id: c for c in module.checks(tmp_path)}
+    shape = results["django.settings-shape"]
+    assert shape.tier != "warning", shape.detail
