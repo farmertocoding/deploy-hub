@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "vault",
     "catalog",
     "scanner",
+    "wizard",   # §D4 amendment 2026-08-09 — see wizard/__init__.py
     "provision",
     "deploys",
     "reconcile",

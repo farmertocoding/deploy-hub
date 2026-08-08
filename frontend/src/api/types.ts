@@ -127,6 +127,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/readiness/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description The three-tier readiness report (§5.3), tiered server-side.
+         *
+         *     Tiering happens here rather than in the client so the CLI, the UI and the pipeline
+         *     all agree on what counts as a blocker.
+         */
+        get: operations["v1_projects_readiness_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/manifest/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description POST materializes version N+1; GET returns the latest frozen manifest. */
+        get: operations["v1_sites_manifest_retrieve"];
+        put?: never;
+        /** @description POST materializes version N+1; GET returns the latest frozen manifest. */
+        post: operations["v1_sites_manifest_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/wizard/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET the question set and current answers; PATCH a partial answer set. */
+        get: operations["v1_sites_wizard_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description GET the question set and current answers; PATCH a partial answer set. */
+        patch: operations["v1_sites_wizard_partial_update"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -148,6 +206,65 @@ export interface components {
             username: string;
             password: string;
             otp_code?: string;
+        };
+        Manifest: {
+            version: number;
+            schema_version: number;
+            body: unknown;
+            scan_report_hash: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        Materialize: {
+            /** @default false */
+            confirm_warnings: boolean;
+        };
+        PatchedAnswers: {
+            /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
+            answers?: {
+                [key: string]: unknown;
+            };
+        };
+        Question: {
+            id: string;
+            prompt: string;
+            kind: string;
+            default?: unknown;
+            choices?: string[];
+            secret: boolean;
+        };
+        Readiness: {
+            /** Format: date-time */
+            scanned_at: string | null;
+            modules: string[];
+            summary: {
+                [key: string]: unknown;
+            };
+            blockers: {
+                [key: string]: unknown;
+            }[];
+            warnings: {
+                [key: string]: unknown;
+            }[];
+            advice: {
+                [key: string]: unknown;
+            }[];
+            pending_sandbox: {
+                [key: string]: unknown;
+            }[];
+        };
+        WizardState: {
+            questions: components["schemas"]["Question"][];
+            answered: {
+                [key: string]: unknown;
+            };
+            blocking: {
+                [key: string]: unknown;
+            }[];
+            warnings: {
+                [key: string]: unknown;
+            }[];
+            can_materialize: boolean;
         };
     };
     responses: never;
@@ -310,6 +427,123 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_projects_readiness_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    v1_sites_manifest_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manifest"];
+                };
+            };
+        };
+    };
+    v1_sites_manifest_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Materialize"];
+                "application/x-www-form-urlencoded": components["schemas"]["Materialize"];
+                "multipart/form-data": components["schemas"]["Materialize"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manifest"];
+                };
+            };
+        };
+    };
+    v1_sites_wizard_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WizardState"];
+                };
+            };
+        };
+    };
+    v1_sites_wizard_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedAnswers"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedAnswers"];
+                "multipart/form-data": components["schemas"]["PatchedAnswers"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WizardState"];
+                };
             };
         };
     };

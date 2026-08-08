@@ -141,6 +141,137 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/projects/{project_id}/readiness/:
+    get:
+      operationId: v1_projects_readiness_retrieve
+      description: |-
+        The three-tier readiness report (§5.3), tiered server-side.
+
+        Tiering happens here rather than in the client so the CLI, the UI and the pipeline
+        all agree on what counts as a blocker.
+      parameters:
+      - in: path
+        name: project_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+          description: ''
+  /api/v1/sites/{site_id}/manifest/:
+    get:
+      operationId: v1_sites_manifest_retrieve
+      description: POST materializes version N+1; GET returns the latest frozen manifest.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Manifest'
+          description: ''
+    post:
+      operationId: v1_sites_manifest_create
+      description: POST materializes version N+1; GET returns the latest frozen manifest.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Materialize'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Materialize'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Materialize'
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Manifest'
+          description: ''
+  /api/v1/sites/{site_id}/wizard/:
+    get:
+      operationId: v1_sites_wizard_retrieve
+      description: GET the question set and current answers; PATCH a partial answer
+        set.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WizardState'
+          description: ''
+    patch:
+      operationId: v1_sites_wizard_partial_update
+      description: GET the question set and current answers; PATCH a partial answer
+        set.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAnswers'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAnswers'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAnswers'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WizardState'
+          description: ''
 components:
   schemas:
     Confirm:
@@ -180,6 +311,131 @@ components:
       required:
       - password
       - username
+    Manifest:
+      type: object
+      properties:
+        version:
+          type: integer
+        schema_version:
+          type: integer
+        body: {}
+        scan_report_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - body
+      - created_at
+      - scan_report_hash
+      - schema_version
+      - version
+    Materialize:
+      type: object
+      properties:
+        confirm_warnings:
+          type: boolean
+          default: false
+    PatchedAnswers:
+      type: object
+      properties:
+        answers:
+          type: object
+          additionalProperties: {}
+          description: question id -> answer. Partial sets are fine; the wizard saves
+            as you go.
+    Question:
+      type: object
+      properties:
+        id:
+          type: string
+        prompt:
+          type: string
+        kind:
+          type: string
+        default:
+          nullable: true
+        choices:
+          type: array
+          items:
+            type: string
+        secret:
+          type: boolean
+      required:
+      - id
+      - kind
+      - prompt
+      - secret
+    Readiness:
+      type: object
+      properties:
+        scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+        modules:
+          type: array
+          items:
+            type: string
+        summary:
+          type: object
+          additionalProperties: {}
+        blockers:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        warnings:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        advice:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        pending_sandbox:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - advice
+      - blockers
+      - modules
+      - pending_sandbox
+      - scanned_at
+      - summary
+      - warnings
+    WizardState:
+      type: object
+      properties:
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+        answered:
+          type: object
+          additionalProperties: {}
+        blocking:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        warnings:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        can_materialize:
+          type: boolean
+      required:
+      - answered
+      - blocking
+      - can_materialize
+      - questions
+      - warnings
   securitySchemes:
     cookieAuth:
       type: apiKey

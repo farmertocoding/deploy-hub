@@ -242,6 +242,21 @@ requirements:
     verify: test
     source: plan-addendum-2026-07-30.md §D4
     text: Cloud/DNS SDK imports exist only under providers/ (superset of P0-IMPORT-RULE; scanned roots include tests, scripts_dev, conformance).
+  - id: WIZ-V5-ONE-MANIFEST
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §V5
+    text: One Site materializes exactly ONE manifest (service + optional static route + optional jobs); manifest rows are append-only and versioned, and carry env NAMES only, never values.
+  - id: WIZ-ANSWER-VALIDATION
+    phase: 1
+    verify: test
+    source: deploy-system-plan.md §4.5 / §5.2
+    text: Every wizard answer is validated against the question that produced it (kind, choices, emptiness); unknown question ids are rejected rather than ignored, and a partial save is all-or-nothing.
+  - id: WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE
+    phase: 1
+    verify: test
+    source: plan-addendum-2026-07-30.md §F4
+    text: Materialization refuses with 409 and a machine-readable cause naming the offending blockers, missing answers or values needing re-entry; it never returns a partial manifest and never 500s on ordinary state.
   - id: ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT
     phase: 1
     verify: test

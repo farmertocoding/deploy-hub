@@ -27,13 +27,62 @@ def test_cloud_sdk_imports_only_under_providers():
     assert violations == [], f"Cloud SDK imports outside providers/: {violations}"
 
 
+def _direct_imports(package):
+    """First-party packages imported anywhere under `package`."""
+    edges = set()
+    pattern = re.compile(r"^\s*(?:from|import)\s+([a-zA-Z_][\w]*)", re.M)
+    for py in (REPO / package).rglob("*.py"):
+        for name in pattern.findall(py.read_text(encoding="utf-8")):
+            if (REPO / name).is_dir() and name != package:
+                edges.add(name)
+    return edges
+
+
+def _reaches(start, target):
+    """Walk the first-party import graph from `start`, looking for `target`.
+
+    Returns the path as a list, or None. Depth-first over a graph this small is
+    plenty; the point is to follow edges at all, not to do it cleverly.
+    """
+    stack, seen = [(start, [start])], {start}
+    while stack:
+        node, path = stack.pop()
+        for edge in sorted(_direct_imports(node)):
+            if edge == target:
+                return path + [edge]
+            if edge not in seen:
+                seen.add(edge)
+                stack.append((edge, path + [edge]))
+    return None
+
+
 @pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
 def test_deploys_never_imports_scanner():
     """§V6: deploys/ reads only the stored manifest — the wizard materializes
-    module outputs; a deploys→scanner import edge may never appear."""
-    violations = []
-    for py in (REPO / "deploys").rglob("*.py"):
-        if re.search(r"^\s*(import|from)\s+scanner\b",
-                     py.read_text(encoding="utf-8"), re.M):
-            violations.append(str(py.relative_to(REPO)))
-    assert violations == [], violations
+    module outputs; a deploys→scanner import edge may never appear.
+
+    TRANSITIVE, deliberately (2026-08-09 design debate). The original version grepped
+    deploys/ for a direct `import scanner` line. That would have stayed green if the
+    wizard had been placed in core/, because everything imports core — `deploys →
+    core → scanner` satisfies a direct-import grep while completely destroying the
+    invariant. A gate that can be satisfied by moving the violation one file away is
+    not a gate.
+    """
+    path = _reaches("deploys", "scanner")
+    assert path is None, "deploys reaches scanner via: " + " -> ".join(path or [])
+
+
+@pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
+def test_transitive_detector_actually_detects():
+    """The test above passes trivially if the graph walk is broken. This asserts the
+    detector finds a path that genuinely exists (wizard is allowed to import scanner —
+    it is the component that materializes module outputs)."""
+    assert _reaches("wizard", "scanner") is not None
+
+
+@pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
+def test_core_stays_free_of_scanner():
+    """core is the shared kernel: a scanner dependency here becomes a scanner
+    dependency in every app, which is the exact mechanism the test above guards."""
+    path = _reaches("core", "scanner")
+    assert path is None, "core reaches scanner via: " + " -> ".join(path or [])
