@@ -181,7 +181,8 @@ def materialize(site, *, actor=None, confirm_warnings=False):
 
     body = copy.deepcopy(report.get("manifest_draft") or {})
     answers = list(WizardAnswer.objects.filter(site=locked).select_related("secret_ref"))
-    env_values = _apply_answers(body, locked, answers, question_map(project))
+    env_values = _apply_answers(body, locked, answers, question_map(project),
+                                actor=actor)
 
     # Round-1 F1 (security, high): env VALUES never enter the manifest body — not
     # even the plain-classified ones, because classification is a heuristic and one
@@ -218,7 +219,7 @@ def materialize(site, *, actor=None, confirm_warnings=False):
     return manifest
 
 
-def _apply_answers(body, site, answers, known):
+def _apply_answers(body, site, answers, known, *, actor=None):
     """Overlay answers onto the scan's manifest draft. Pure — no disk, no network.
 
     Returns {ENV_NAME: value} for the vault bundle. NO env value — plain or secret —
@@ -235,8 +236,12 @@ def _apply_answers(body, site, answers, known):
             name = _env_name(qid)
             if name and answer.secret_ref is not None:
                 env_names.append(name)
+                # Round-2 R2-1: actor was omitted here, so the vault's
+                # "every use is recorded" audit rows showed decryptions during
+                # materialization with no one attributed to them.
                 env_values[name] = vault_service.get(
-                    answer.secret_ref, reason=f"materialize {site.pk}"
+                    answer.secret_ref, actor=actor,
+                    reason=f"materialize {site.pk}"
                 ).decode("utf-8")
             continue
 

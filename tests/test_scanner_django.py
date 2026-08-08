@@ -181,6 +181,7 @@ def _tiers(root):
     return {c.id: c for c in dj.module.checks(root)}
 
 
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_d008_dev_fallback_with_prod_hard_fail_is_a_warning(tmp_path):
     """The E-invoice shape: a high-entropy dev key committed in base.py, and prod
     reassigning the same NAME from os.environ[...] subscript — a boot failure without
@@ -208,6 +209,7 @@ def test_d008_dev_fallback_with_prod_hard_fail_is_a_warning(tmp_path):
     assert "git history" in fallback.fix_hint
 
 
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_d008_literal_without_prod_guard_stays_a_blocker(tmp_path):
     """The downgrade requires the evidence. No hard-fail reassignment, no mercy."""
     root = _proj(
@@ -220,6 +222,7 @@ def test_d008_literal_without_prod_guard_stays_a_blocker(tmp_path):
     assert "django.secret-dev-fallback" not in checks
 
 
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_d008_env_get_with_default_is_not_hard_fail(tmp_path):
     """`os.environ.get('X', literal)` boots happily WITH the literal — the exact
     opposite of the evidence D-008 requires. Must stay a blocker."""
@@ -234,6 +237,7 @@ def test_d008_env_get_with_default_is_not_hard_fail(tmp_path):
     assert _tiers(root)["django.secret-key-literal"].tier == "blocker"
 
 
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_d008_mixed_project_reports_both(tmp_path):
     """One guarded name and one unguarded name: the project honestly carries the
     blocker AND the warning — the downgrade is per-offender, not per-project."""

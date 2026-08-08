@@ -257,6 +257,11 @@ requirements:
     verify: test
     source: plan-addendum-2026-07-30.md §F4
     text: Materialization refuses with 409 and a machine-readable cause naming the offending blockers, missing answers or values needing re-entry; it never returns a partial manifest and never 500s on ordinary state.
+  - id: SCAN-D008-DEV-FALLBACK-TIER
+    phase: 1
+    verify: test
+    source: DECISIONS.md D-008
+    text: A committed secret literal whose name is reassigned in prod-reachable settings from a hard-fail environment read tiers as warning-with-context (django.secret-dev-fallback); unguarded literals and .get(default) fallbacks remain blockers, and a mixed project reports both.
   - id: ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT
     phase: 1
     verify: test
