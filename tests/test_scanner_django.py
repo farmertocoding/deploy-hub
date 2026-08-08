@@ -161,3 +161,96 @@ def test_decouple_config_counts_as_env_driven(tmp_path):
     results = {c.id: c for c in module.checks(tmp_path)}
     shape = results["django.settings-shape"]
     assert shape.tier != "warning", shape.detail
+
+
+# ── D-008: dev-fallback secrets that prod provably rejects (Joseph, 2026-08-09) ──
+
+def _proj(tmp_path, base_body, prod_body):
+    root = tmp_path / "proj"
+    settings = root / "config" / "settings"
+    settings.mkdir(parents=True)
+    (root / "manage.py").write_text("#!/usr/bin/env python\n")
+    (root / "requirements.txt").write_text("Django==5.2\n")
+    (settings / "__init__.py").write_text("")
+    (settings / "base.py").write_text(base_body)
+    (settings / "prod.py").write_text(prod_body)
+    return root
+
+
+def _tiers(root):
+    return {c.id: c for c in dj.module.checks(root)}
+
+
+def test_d008_dev_fallback_with_prod_hard_fail_is_a_warning(tmp_path):
+    """The E-invoice shape: a high-entropy dev key committed in base.py, and prod
+    reassigning the same NAME from os.environ[...] subscript — a boot failure without
+    the real value. Blocker means "will not deploy correctly"; this deploys correctly,
+    so it tiers as warning-with-context (D-008, chosen over Blocker and
+    proof-dependent tiers)."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "FIELD_ENCRYPTION_KEYS = "
+            "['aXb9Qz3kLm8Rt2Yw6Fh1Jd4Ns7Pv0Cg5Ke9Ub3Xq2Wz8Ma6=']\n"
+        ),
+        prod_body=(
+            "import os\nfrom .base import *  # noqa\n"
+            "FIELD_ENCRYPTION_KEYS = os.environ['FIELD_ENCRYPTION_KEYS'].split(',')\n"
+        ),
+    )
+    checks = _tiers(root)
+    assert "django.secret-key-literal" not in checks or \
+        checks["django.secret-key-literal"].tier != "blocker"
+    fallback = checks["django.secret-dev-fallback"]
+    assert fallback.tier == "warning"
+    assert "FIELD_ENCRYPTION_KEYS" in fallback.detail
+    assert "rotate" in fallback.fix_hint
+    assert "git history" in fallback.fix_hint
+
+
+def test_d008_literal_without_prod_guard_stays_a_blocker(tmp_path):
+    """The downgrade requires the evidence. No hard-fail reassignment, no mercy."""
+    root = _proj(
+        tmp_path,
+        base_body="SECRET_KEY = 'committed-and-actually-used-in-prod'\n",
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "django.secret-dev-fallback" not in checks
+
+
+def test_d008_env_get_with_default_is_not_hard_fail(tmp_path):
+    """`os.environ.get('X', literal)` boots happily WITH the literal — the exact
+    opposite of the evidence D-008 requires. Must stay a blocker."""
+    root = _proj(
+        tmp_path,
+        base_body="SECRET_KEY = 'dev-only-fallback-key-value'\n",
+        prod_body=(
+            "import os\nfrom .base import *  # noqa\n"
+            "SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-only-fallback-key-value')\n"
+        ),
+    )
+    assert _tiers(root)["django.secret-key-literal"].tier == "blocker"
+
+
+def test_d008_mixed_project_reports_both(tmp_path):
+    """One guarded name and one unguarded name: the project honestly carries the
+    blocker AND the warning — the downgrade is per-offender, not per-project."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "FIELD_ENCRYPTION_KEYS = "
+            "['aXb9Qz3kLm8Rt2Yw6Fh1Jd4Ns7Pv0Cg5Ke9Ub3Xq2Wz8Ma6=']\n"
+            "API_SIGNING_TOKEN = 'this-one-nobody-guards'\n"
+        ),
+        prod_body=(
+            "import os\nfrom .base import *  # noqa\n"
+            "FIELD_ENCRYPTION_KEYS = os.environ['FIELD_ENCRYPTION_KEYS'].split(',')\n"
+        ),
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "API_SIGNING_TOKEN" in checks["django.secret-key-literal"].detail
+    assert checks["django.secret-dev-fallback"].tier == "warning"
+    assert "FIELD_ENCRYPTION_KEYS" in checks["django.secret-dev-fallback"].detail

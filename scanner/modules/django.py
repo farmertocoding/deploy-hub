@@ -34,7 +34,7 @@ _SECURITY_SETTINGS = ("SECURE_SSL_REDIRECT", "SESSION_COOKIE_SECURE",
                       "CSRF_COOKIE_SECURE", "SECURE_HSTS_SECONDS",
                       "SECURE_PROXY_SSL_HEADER")
 _SECRETISH = ("SECRET", "PASSWORD", "TOKEN", "API_KEY", "PRIVATE", "SIGNING",
-              "CREDENTIAL", "SALT", "DSN", "PASS")
+              "CREDENTIAL", "SALT", "DSN", "PASS", "ENCRYPTION")
 _ENV_RE = re.compile(
     r"(?:os\.environ\.get|os\.getenv|os\.environ|\benv)\s*[\(\[]\s*['\"]([A-Z][A-Z0-9_]+)['\"]")
 _ENV_DRIVEN_RE = re.compile(
@@ -61,6 +61,33 @@ def _shannon(s):
         return 0.0
     n = len(s)
     return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
+
+
+def _string_literal(node):
+    """The string content of an assignment, unwrapping one list/tuple level.
+
+    Found writing the D-008 tests against E-invoice's REAL shape: its dev key is
+    `FIELD_ENCRYPTION_KEYS = ["<fernet>"]` — a list — and the check only matched bare
+    string constants, so the very finding that prompted D-008 would have been missed
+    by its own regression test. Elements are joined so entropy is judged on the
+    whole committed material.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        parts = [el.value for el in node.elts
+                 if isinstance(el, ast.Constant) and isinstance(el.value, str)]
+        if parts:
+            return "".join(parts)
+    return None
+
+
+def _prod_hard_fails_for(name, prod_union):
+    """True when a prod-reachable settings text reassigns `name` from a hard-fail
+    environment read: subscript form (`environ["X"]`), where a missing variable is a
+    KeyError at boot. `.get()` with a default is deliberately not matched."""
+    pattern = rf"^\s*{re.escape(name)}\s*=.*\benviron\[" 
+    return bool(re.search(pattern, prod_union, re.M))
 
 
 def _top_assigns(text):
@@ -313,7 +340,7 @@ class DjangoScannerModule:
 
         results.append(self._check_settings_shape(settings, all_texts))
         results.append(self._check_debug(root, prod_texts))
-        results.append(self._check_secret_key(root, all_texts))
+        results.extend(self._check_secret_key(root, all_texts, prod_union))
         results.append(self._check_allowed_hosts(root, prod_texts))
         results.append(self._check_db_engine(prod_union))
         results.append(self._check_static_root(all_union))
@@ -371,30 +398,62 @@ class DjangoScannerModule:
                            title="DEBUG is not hardcoded True",
                            detail="No prod-reachable settings file pins DEBUG = True.")
 
-    def _check_secret_key(self, root, all_texts):
-        offenders = []
+    def _check_secret_key(self, root, all_texts, prod_union):
+        """Committed secret literals, tiered per D-008 (Joseph, 2026-08-09).
+
+        Blocker means "this will not deploy correctly." A dev-fallback literal whose
+        NAME is reassigned in a prod-reachable settings file from a HARD-FAIL source
+        (`NAME = ... os.environ["..."] ...` — subscript form, so a missing env var is
+        a boot failure) cannot ship: prod provably refuses to use it. That pattern is
+        the fleet norm (inventory finding 5), so it tiers as warning-with-context —
+        the literal still lives in git history and the copy says to rotate it.
+        A `.get(...)` with a default is NOT hard-fail and earns no downgrade.
+        Returns a list: the blocker and the warning are separate results so one
+        project can honestly carry both.
+        """
+        unmitigated, dev_fallbacks = [], []
         for path, text in all_texts.items():
             for name, val in _top_assigns(text).items():
-                if not (isinstance(val, ast.Constant) and isinstance(val.value, str)):
+                literal = _string_literal(val)
+                if literal is None:
                     continue
-                literal = val.value
                 secretish = any(s in name for s in _SECRETISH)
-                if name == "SECRET_KEY" or (secretish and literal):
-                    offenders.append(f"{path.relative_to(root)}: {name}")
-                elif len(literal) >= 24 and _shannon(literal) > 4.0:
-                    offenders.append(f"{path.relative_to(root)}: {name} (high-entropy literal)")
-        if offenders:
-            return CheckResult(
+                high_entropy = len(literal) >= 24 and _shannon(literal) > 4.0
+                if not (name == "SECRET_KEY" or (secretish and literal) or high_entropy):
+                    continue
+                label = f"{path.relative_to(root)}: {name}"
+                if high_entropy and not secretish and name != "SECRET_KEY":
+                    label += " (high-entropy literal)"
+                if _prod_hard_fails_for(name, prod_union):
+                    dev_fallbacks.append(label)
+                else:
+                    unmitigated.append(label)
+
+        results = []
+        if unmitigated:
+            results.append(CheckResult(
                 id="django.secret-key-literal", tier="blocker",
                 title="Secret material is a literal in source",
-                detail="; ".join(sorted(offenders)),
+                detail="; ".join(sorted(unmitigated)),
                 fix_hint=("A secret in source sits in git history forever and in every "
                           "clone. Load it from the environment — SECRET_KEY = "
                           "os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and "
-                          "store the new one through the Hub vault."))
-        return CheckResult(id="django.secret-key-literal", tier="ok",
-                           title="No secret literals in settings",
-                           detail="SECRET_KEY and friends come from the environment.")
+                          "store the new one through the Hub vault.")))
+        if dev_fallbacks:
+            results.append(CheckResult(
+                id="django.secret-dev-fallback", tier="warning",
+                title="Dev-fallback secret committed (prod provably rejects it)",
+                detail="; ".join(sorted(dev_fallbacks)),
+                fix_hint=("Production reassigns this from os.environ[...] and hard-fails "
+                          "without it, so the committed value cannot ship — but it lives "
+                          "in git history and every clone. If this repo was ever shared, "
+                          "rotate the value at its source. (Tier per D-008.)")))
+        if not results:
+            results.append(CheckResult(
+                id="django.secret-key-literal", tier="ok",
+                title="No secret literals in settings",
+                detail="SECRET_KEY and friends come from the environment."))
+        return results
 
     def _check_allowed_hosts(self, root, prod_texts):
         seen, blank = False, []
