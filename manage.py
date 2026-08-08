@@ -4,6 +4,11 @@
 import os
 import sys
 
+if sys.version_info < (3, 11):
+    raise SystemExit(
+        f"deploy-hub requires Python >= 3.11 (you have {sys.version.split()[0]})."
+    )
+
 
 def main():
     """Run administrative tasks."""

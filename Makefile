@@ -23,7 +23,7 @@ test-frontend:
 
 lint:
 	ruff check .
-	bandit -q -c pyproject.toml -r core vault catalog scanner provision deploys reconcile providers monitor scaling realtime hub
+	bandit -q -c pyproject.toml -r core vault catalog scanner provision deploys reconcile providers monitor scaling realtime hub wizard
 	pip-audit -r requirements.txt || true   # advisory until Phase 1; blocking after
 
 conformance:
