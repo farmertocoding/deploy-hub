@@ -167,3 +167,75 @@ def validate_git_url(value: str, *, resolve=True):
         resolve_and_check_host(host)
 
     return value
+
+
+# ── Domains ──────────────────────────────────────────────────────────────────────
+
+# RFC 1123 label: alnum, hyphens inside only, 1–63 chars.
+_LABEL_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
+
+
+def validate_domain(value: str) -> str:
+    """Validate and normalize a site domain (lowercased ASCII/IDNA form).
+
+    This value ends up in Caddy route config and DNS records (§8), where a malformed
+    domain is an injection vector, not a typo. Unicode names are accepted and stored
+    in their IDNA A-label form so every later consumer handles exactly one alphabet.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("a domain is required", code="required")
+    value = value.strip().rstrip(".").lower()
+
+    if _CONTROL_CHARS.search(value) or any(ch.isspace() for ch in value):
+        raise ValidationError("domain contains whitespace or control characters",
+                              code="invalid")
+    for marker, msg in (("://", "a domain, not a URL — drop the scheme"),
+                        ("/", "a domain must not contain a path"),
+                        (":", "a domain must not contain a port"),
+                        ("@", "a domain must not contain userinfo"),
+                        ("*", "wildcard domains are not supported here")):
+        if marker in value:
+            raise ValidationError(f"enter {msg}", code="invalid")
+
+    # A bare IP is not a domain: the pipeline provisions DNS + TLS per domain (§8),
+    # and Let's Encrypt will not issue for an IP. Saying so now beats a cryptic
+    # go-live failure three phases later.
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        raise ValidationError(
+            "an IP address cannot be used as a site domain — DNS and TLS need a name",
+            code="ip_literal",
+        )
+
+    # Unicode → IDNA A-labels. Python's built-in codec implements IDNA 2003, which
+    # covers normalization; full IDNA 2008 (the `idna` package) is deliberately
+    # deferred until a real user hits a difference (mockup-first).
+    if not value.isascii():
+        try:
+            value = value.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise ValidationError("domain is not valid internationalized text",
+                                  code="invalid_idna") from exc
+
+    if len(value) > 253:
+        raise ValidationError("domain exceeds 253 characters", code="too_long")
+
+    labels = value.split(".")
+    if len(labels) < 2:
+        raise ValidationError(
+            "enter a full domain including its TLD (e.g. app.example.com)",
+            code="no_tld",
+        )
+    for label in labels:
+        if not _LABEL_RE.match(label):
+            raise ValidationError(
+                f"{label!r} is not a valid domain label (letters, digits and inner "
+                f"hyphens only, max 63 chars)",
+                code="bad_label",
+            )
+    if labels[-1].isdigit():
+        raise ValidationError("the TLD cannot be all digits", code="bad_label")
+    return value

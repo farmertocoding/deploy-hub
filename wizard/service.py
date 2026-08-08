@@ -36,6 +36,13 @@ def set_answers(site, incoming: dict, *, actor=None):
     per-field error map, which the DRF layer renders in the §4.5 error shape and the
     exception handler audits (VAL-45-REJECTED-INPUT-AUDITED).
     """
+    # Round-1 F6: serialize writers per site. Two operators saving at once must not
+    # race update_or_create's get/insert window into an IntegrityError 500; the
+    # loser waits and overwrites, which for a wizard form is the expected outcome.
+    site = type(site).objects.select_for_update().get(pk=site.pk)
+    # Round-1 F5: scrubbing moved out of GET/preflight into the write paths — a
+    # write is where destroying stale plaintext belongs.
+    scrub_downgraded_answers(site)
     cleaned = validate_answers(site.project, incoming)
     written = []
 
@@ -73,6 +80,22 @@ def set_answers(site, incoming: dict, *, actor=None):
     return sorted(written)
 
 
+def downgraded_answers(site):
+    """READ-ONLY detection of plaintext answers whose question is now a secret.
+
+    Round-1 F5: preflight runs on GET, and a GET that deletes rows both violates HTTP
+    semantics and makes two consecutive refreshes report different problem codes.
+    Detection is free of side effects; scrubbing happens in the write paths.
+    """
+    known = question_map(site.project)
+    hits = []
+    for answer in WizardAnswer.objects.filter(site=site, is_secret=False):
+        question = known.get(answer.question_id)
+        if question is not None and question.kind == "secret":
+            hits.append(answer.question_id)
+    return sorted(hits)
+
+
 def scrub_downgraded_answers(site):
     """Delete plaintext answers whose question is NOW classified as a secret.
 
@@ -88,13 +111,10 @@ def scrub_downgraded_answers(site):
     plaintext has already been at rest, so it must be rotated at the source, not
     laundered into the vault where it would look freshly-protected.
     """
-    known = question_map(site.project)
-    scrubbed = []
-    for answer in WizardAnswer.objects.filter(site=site, is_secret=False):
-        question = known.get(answer.question_id)
-        if question is not None and question.kind == "secret":
-            answer.delete()
-            scrubbed.append(answer.question_id)
+    scrubbed = downgraded_answers(site)
+    if scrubbed:
+        WizardAnswer.objects.filter(site=site, is_secret=False,
+                                    question_id__in=scrubbed).delete()
     if scrubbed:
         audit("wizard_plaintext_answer_scrubbed", site, source="system",
               severity="security", question_ids=sorted(scrubbed))
@@ -111,10 +131,15 @@ def answered_state(site):
     state = {}
     for answer in WizardAnswer.objects.filter(site=site).select_related("secret_ref"):
         if answer.is_secret:
+            # Round-1 F3: the fingerprint (unsalted sha256[:16] of the plaintext) was
+            # returned here — a confirmation oracle for anyone with a stolen session
+            # holding a guessed password. §7.4's fingerprint precedent is about key
+            # material, which is high-entropy; env secrets are not. changed_at gives
+            # the UI the same "set on Tuesday" signal with nothing to test against.
             state[answer.question_id] = {   # nosec B105 — metadata, not a value
                 "answered": True,
                 "is_secret": True,
-                "fingerprint": answer.secret_ref.fingerprint if answer.secret_ref else "",
+                "changed_at": answer.answered_at.isoformat(),
             }
         else:
             state[answer.question_id] = answer.value

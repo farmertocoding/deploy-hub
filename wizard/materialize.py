@@ -25,6 +25,8 @@ from django.db import transaction
 
 from core.audit import audit
 from deploys.models import MANIFEST_SCHEMA_VERSION, Manifest
+from vault import service as vault_service
+from vault.models import Secret
 
 from .models import WizardAnswer
 from .questions import missing_required, question_map
@@ -38,14 +40,23 @@ class MaterializeRefused(Exception):
     blockers, this missing answer' can act.
     """
 
-    def __init__(self, code, message, items=None):
+    def __init__(self, code, message, items=None, problems=None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.items = items or []
+        # Round-1 F4: preflight gathers EVERY problem precisely so the operator can
+        # see the whole list; raising only problems[0] threw that away and produced
+        # the fix-one-see-the-next loop the docstring claims to avoid. The 409 body
+        # now carries all of them; `code`/`items` remain the first problem so
+        # existing single-cause consumers keep working.
+        self.problems = problems if problems is not None else [
+            {"code": self.code, "detail": self.message, "items": self.items}
+        ]
 
     def as_dict(self):
-        return {"code": self.code, "detail": self.message, "items": self.items}
+        return {"code": self.code, "detail": self.message, "items": self.items,
+                "problems": self.problems}
 
 
 def report_hash(report):
@@ -82,12 +93,11 @@ def preflight(site):
             "items": [{"id": c["id"], "title": c["title"]} for c in blockers],
         })
 
-    # Before deciding what is answered, drop any plaintext answer whose question has
-    # since been reclassified as a secret. Those values must be re-entered, and the
-    # cleartext must not survive the discovery (see service.scrub_downgraded_answers).
-    from .service import scrub_downgraded_answers
+    # Round-1 F5: detection only — preflight runs on GET and must not delete rows.
+    # The scrub itself happens in the write paths (set_answers, materialize).
+    from .service import downgraded_answers
 
-    rescanned = scrub_downgraded_answers(site)
+    rescanned = downgraded_answers(site)
     if rescanned:
         known_now = question_map(project)
         problems.append({
@@ -124,10 +134,31 @@ def warnings_for(site):
 @transaction.atomic
 def materialize(site, *, actor=None, confirm_warnings=False):
     """Freeze the manifest. Raises MaterializeRefused; never returns a partial row."""
-    problems = preflight(site)
+    # Round-1 F5: materialize is a write, so the scrub happens here for real — and
+    # the scrub and the refusal are ONE event: destroying stale plaintext without
+    # telling the operator what to re-enter would leave a site that won't start and
+    # no visible reason (the exact failure the original test pinned). The refusal is
+    # composed from what THIS call scrubbed, plus everything preflight still sees.
+    from .service import scrub_downgraded_answers
+
+    scrubbed = scrub_downgraded_answers(site)
+    problems = []
+    if scrubbed:
+        known = question_map(site.project)
+        problems.append({
+            "code": "answers_need_reentry",
+            "detail": "these values are now handled as secrets and must be entered "
+                      "again; the previously stored plaintext has been deleted and "
+                      "should be rotated at the source",
+            "items": [{"id": qid,
+                       "prompt": known[qid].prompt if qid in known else qid}
+                      for qid in scrubbed],
+        })
+    problems.extend(preflight(site))
     if problems:
         first = problems[0]
-        raise MaterializeRefused(first["code"], first["detail"], first["items"])
+        raise MaterializeRefused(first["code"], first["detail"], first["items"],
+                                 problems=problems)
 
     warnings = warnings_for(site)
     if warnings and not confirm_warnings:
@@ -139,16 +170,37 @@ def materialize(site, *, actor=None, confirm_warnings=False):
 
     project = site.project
     report = project.scan_report
-    body = copy.deepcopy(report.get("manifest_draft") or {})
-    answers = list(WizardAnswer.objects.filter(site=site).select_related("secret_ref"))
-    _apply_answers(body, site, answers, question_map(project))
 
-    # select_for_update on the site row: two operators pressing Materialize at the
-    # same moment must not both compute version N+1 and race the unique constraint
-    # into a 500. The loser waits and gets N+2.
+    # select_for_update FIRST: the version number feeds the env bundle's AAD, so the
+    # lock must be held before either is computed — two operators pressing
+    # Materialize at once must not both compute version N+1 (round-1 ordering fix;
+    # previously the lock was taken after answers were applied).
     locked = type(site).objects.select_for_update().get(pk=site.pk)
     latest = Manifest.objects.filter(site=locked).order_by("-version").first()
     version = (latest.version + 1) if latest else 1
+
+    body = copy.deepcopy(report.get("manifest_draft") or {})
+    answers = list(WizardAnswer.objects.filter(site=locked).select_related("secret_ref"))
+    env_values = _apply_answers(body, locked, answers, question_map(project))
+
+    # Round-1 F1 (security, high): env VALUES never enter the manifest body — not
+    # even the plain-classified ones, because classification is a heuristic and one
+    # miss would freeze a live credential into an append-only JSON row returned by
+    # GET. Instead every manifest version owns ONE vault env bundle (plain + secret
+    # merged), AAD-bound to site:version, composed under the same transaction so a
+    # failed materialization leaves no orphan. Reproducibility comes free: deploying
+    # v3 uses v3's env exactly as frozen, even if answers changed since (§D2's
+    # env-snapshot rule applied one step earlier).
+    body["env_bundle_ref"] = None
+    if env_values:
+        bundle = vault_service.put(
+            kind=Secret.Kind.ENV_BUNDLE,
+            owner_type="manifest",
+            owner_id=f"{locked.pk}:v{version}",
+            plaintext=json.dumps(env_values, sort_keys=True).encode("utf-8"),
+            actor=actor,
+        )
+        body["env_bundle_ref"] = bundle.pk
 
     manifest = Manifest.objects.create(
         site=locked,
@@ -169,20 +221,23 @@ def materialize(site, *, actor=None, confirm_warnings=False):
 def _apply_answers(body, site, answers, known):
     """Overlay answers onto the scan's manifest draft. Pure — no disk, no network.
 
-    Secret VALUES never appear in the manifest. The manifest carries env NAMES; the
-    values stay as vault rows the pipeline dereferences at deploy time (§6.9, §F9's
-    'env names only' rule for the diff screen).
+    Returns {ENV_NAME: value} for the vault bundle. NO env value — plain or secret —
+    is written into `body` (round-1 F1): the body carries names + the bundle ref, and
+    the values live only as vault ciphertext. Secret answers are decrypted here,
+    inside the materialize transaction, through the audited vault.get path.
     """
-    env_names, env_refs = [], {}
+    env_names, env_values = [], {}
 
     for answer in answers:
         qid = answer.question_id
 
         if answer.is_secret:
             name = _env_name(qid)
-            if name:
+            if name and answer.secret_ref is not None:
                 env_names.append(name)
-                env_refs[name] = answer.secret_ref_id
+                env_values[name] = vault_service.get(
+                    answer.secret_ref, reason=f"materialize {site.pk}"
+                ).decode("utf-8")
             continue
 
         if qid == "site.domain":
@@ -193,7 +248,7 @@ def _apply_answers(body, site, answers, known):
         elif _env_name(qid):
             name = _env_name(qid)
             env_names.append(name)
-            body.setdefault("env_plain", {})[name] = answer.value
+            env_values[name] = answer.value
         else:
             # Module-specific answers are recorded verbatim under a namespace rather
             # than dropped: a module that asked a question expects to see the answer,
@@ -201,11 +256,10 @@ def _apply_answers(body, site, answers, known):
             body.setdefault("module_answers", {})[qid] = answer.value
 
     body["env_names"] = sorted(set(env_names))
-    body["env_secret_refs"] = env_refs
     body["site"] = {"id": site.pk, "name": site.name, "domain": site.domain}
     if site.domain:
         site.save(update_fields=["domain"])
-    return body
+    return env_values
 
 
 def _env_name(question_id):

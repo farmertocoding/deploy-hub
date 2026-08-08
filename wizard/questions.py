@@ -17,7 +17,7 @@ from scanner.core import WizardQuestion
 # Canonical questions the wizard always asks (master plan §5.2). Modules ask their own
 # framework-specific ones on top.
 BASE_QUESTIONS = [
-    WizardQuestion(id="site.domain", kind="text",
+    WizardQuestion(id="site.domain", kind="domain",
                    prompt="Public domain for this site (e.g. app.example.com)"),
     WizardQuestion(id="site.exposure", kind="choice", default="public",
                    choices=["public", "mesh_only"],
@@ -86,6 +86,16 @@ def coerce_answer(question, value):
             raise ValidationError("a secret value must be a non-empty string",
                                   code="invalid")
         return value
+
+    if kind == "domain":
+        # Round-1 finding F2: this value reaches Caddy config and DNS records, was
+        # coerced as free text into a 253-char column, and could carry control
+        # characters. Full validation + normalization in core.validators.
+        from core.validators import validate_domain
+
+        if not isinstance(value, str):
+            raise ValidationError("expected a domain name", code="invalid")
+        return validate_domain(value)
 
     if kind == "text":
         if not isinstance(value, str):
