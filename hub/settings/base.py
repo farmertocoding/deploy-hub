@@ -117,12 +117,19 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",  # browsable API off (§B10)
     ],
+    # Rejected input is an attack signal, not just a 400 (§4.5).
+    "EXCEPTION_HANDLER": "core.exception_handlers.audited_exception_handler",
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Deploy Hub API",
     "VERSION": "0.0.1",
     "SERVE_INCLUDE_SCHEMA": False,
 }
+
+# How many proxies sit in front of the Hub (Caddy = 1; Cloudflare + Caddy = 2).
+# X-Forwarded-For is caller-controlled, so we count hops from the right rather than
+# trusting the leftmost entry — otherwise any client can forge its own source IP.
+HUB_TRUSTED_PROXY_HOPS = int(os.environ.get("HUB_TRUSTED_PROXY_HOPS", "0"))
 
 # --- Vault (§6.9 envelope encryption) ---
 # Rung ① of the KEK placement ladder: a 32-byte keyfile outside the DB and excluded
