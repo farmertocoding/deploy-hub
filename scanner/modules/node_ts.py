@@ -509,7 +509,9 @@ class NodeTsScannerModule:
                            "Django's SECURE_PROXY_SSL_HEADER)")
         if not re.search(r"\bbodyLimit\s*:", text):
             missing.append("bodyLimit (request body size cap)")
-        if "0.0.0.0" not in text or not re.search(r"process\.env\.PORT\b", text):
+        # nosec B104 — this *looks for* a 0.0.0.0 bind in the scanned project;
+        # it does not bind anything itself.
+        if "0.0.0.0" not in text or not re.search(r"process\.env\.PORT\b", text):  # nosec B104
             missing.append("a 0.0.0.0 + $PORT listen (containers need both)")
         if missing:
             return CheckResult(

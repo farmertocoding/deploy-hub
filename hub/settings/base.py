@@ -124,6 +124,16 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
+# --- Vault (§6.9 envelope encryption) ---
+# Rung ① of the KEK placement ladder: a 32-byte keyfile outside the DB and excluded
+# from backups. Rungs ② (YubiKey unlock) and ③ (cloud KMS) are Phase 4 and change only
+# VAULT_KEK_BACKEND — ciphertexts and schema are identical (D-006).
+VAULT_KEK_BACKEND = os.environ.get("HUB_VAULT_KEK_BACKEND", "local")
+VAULT_KEYFILE = os.environ.get("HUB_VAULT_KEYFILE", "/etc/deploy-hub/vault.key")
+VAULT_KEYFILE_REQUIRE_MODE = True
+# The in-memory test KEK is opt-in and off by default; prod.py hard-fails on it.
+VAULT_ALLOW_FAKE_KEK = False
+
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")

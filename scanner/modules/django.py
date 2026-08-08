@@ -237,11 +237,14 @@ class DjangoScannerModule:
         asgi_mod = self._dotted(root, "asgi.py", "config.asgi")
         if asgi:
             if has_uvicorn and not has_daphne:
+                # nosec B104 — a containerised server must bind all interfaces;
+                # the network boundary is the container/Caddy, not the bind address.
                 argv = ["uvicorn", f"{asgi_mod}:application",
-                        "--host", "0.0.0.0", "--port", "8000"]
+                        "--host", "0.0.0.0", "--port", "8000"]  # nosec B104
                 return "asgi", argv, "uvicorn in dependencies"
             why = "daphne in dependencies" if has_daphne else "Channels detected"
-            argv = ["daphne", "-b", "0.0.0.0", "-p", "8000", f"{asgi_mod}:application"]
+            # nosec B104 — same rationale as the uvicorn branch above.
+            argv = ["daphne", "-b", "0.0.0.0", "-p", "8000", f"{asgi_mod}:application"]  # nosec B104
             return "asgi", argv, why
         wsgi_mod = self._dotted(root, "wsgi.py", "config.wsgi")
         argv = ["gunicorn", f"{wsgi_mod}:application", "--bind", "0.0.0.0:8000"]

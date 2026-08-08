@@ -25,3 +25,9 @@ if not os.environ.get("REDIS_PASSWORD"):
 # Host=localhost:8000 while the browser Origin is the vite origin — without this
 # every POST fails Django's CSRF origin check. Dev only; prod is same-origin.
 CSRF_TRUSTED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+# Vault: dev uses the fake KEK (refuses to load when DEBUG is False, see vault/kek.py)
+# so a laptop needs no keyfile. Tests that exercise the real backend point
+# VAULT_KEYFILE at a tmp_path and flip the backend explicitly.
+VAULT_KEK_BACKEND = "fake"
+VAULT_ALLOW_FAKE_KEK = True

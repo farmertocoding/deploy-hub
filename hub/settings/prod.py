@@ -19,3 +19,9 @@ SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# The vault must be backed by a real KEK in prod. A fake KEK here would mean every
+# stored secret is encrypted under a key that is literally in the source tree.
+if os.environ.get("HUB_VAULT_KEK_BACKEND", "local") == "fake":
+    raise ImproperlyConfigured("HUB_VAULT_KEK_BACKEND=fake is not permitted in prod.")
+VAULT_ALLOW_FAKE_KEK = False
