@@ -141,6 +141,30 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/projects/:
+    get:
+      operationId: v1_projects_list
+      description: |-
+        What the readiness screen renders its left column from (F7-lite).
+
+        tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+        projects grow. manifest_current answers the one freshness question the data model
+        can answer honestly: does the latest manifest correspond to the CURRENT scan?
+        (A true warnings-diff-since-last-manifest would need the prior report stored,
+        which it isn't — noted in the F7 design decision rather than faked.)
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSummary'
+          description: ''
   /api/v1/projects/{project_id}/readiness/:
     get:
       operationId: v1_projects_readiness_retrieve
@@ -344,6 +368,34 @@ components:
           additionalProperties: {}
           description: question id -> answer. Partial sets are fine; the wizard saves
             as you go.
+    ProjectSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        slug:
+          type: string
+        scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+        tiers:
+          type: object
+          additionalProperties:
+            type: integer
+        sites:
+          type: array
+          items:
+            $ref: '#/components/schemas/SiteSummary'
+      required:
+      - id
+      - name
+      - scanned_at
+      - sites
+      - slug
+      - tiers
     Question:
       type: object
       properties:
@@ -408,6 +460,27 @@ components:
       - scanned_at
       - summary
       - warnings
+    SiteSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        domain:
+          type: string
+        latest_manifest_version:
+          type: integer
+          nullable: true
+        manifest_current:
+          type: boolean
+          nullable: true
+      required:
+      - domain
+      - id
+      - latest_manifest_version
+      - manifest_current
+      - name
     WizardState:
       type: object
       properties:

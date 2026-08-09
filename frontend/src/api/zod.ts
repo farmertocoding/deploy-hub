@@ -17,6 +17,25 @@ const DemoJob = z
     confirm_warnings: z.boolean().optional().default(false),
   })
   .passthrough();
+const SiteSummary = z
+  .object({
+    id: z.number().int(),
+    name: z.string(),
+    domain: z.string(),
+    latest_manifest_version: z.number().int().nullable(),
+    manifest_current: z.boolean().nullable(),
+  })
+  .passthrough();
+const ProjectSummary = z
+  .object({
+    id: z.number().int(),
+    name: z.string(),
+    slug: z.string(),
+    scanned_at: z.string().datetime({ offset: true }).nullable(),
+    tiers: z.record(z.number().int()),
+    sites: z.array(SiteSummary),
+  })
+  .passthrough();
 const Readiness = z
   .object({
     scanned_at: z.string().datetime({ offset: true }).nullable(),
@@ -69,6 +88,8 @@ export const schemas = {
   Login,
   Confirm,
   DemoJob,
+  SiteSummary,
+  ProjectSummary,
   Readiness,
   Manifest,
   Materialize,

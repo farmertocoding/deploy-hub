@@ -127,6 +127,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description What the readiness screen renders its left column from (F7-lite).
+         *
+         *     tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+         *     projects grow. manifest_current answers the one freshness question the data model
+         *     can answer honestly: does the latest manifest correspond to the CURRENT scan?
+         *     (A true warnings-diff-since-last-manifest would need the prior report stored,
+         *     which it isn't — noted in the F7 design decision rather than faked.)
+         */
+        get: operations["v1_projects_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/readiness/": {
         parameters: {
             query?: never;
@@ -225,6 +250,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        ProjectSummary: {
+            id: number;
+            name: string;
+            slug: string;
+            /** Format: date-time */
+            scanned_at: string | null;
+            tiers: {
+                [key: string]: number;
+            };
+            sites: components["schemas"]["SiteSummary"][];
+        };
         Question: {
             id: string;
             prompt: string;
@@ -252,6 +288,13 @@ export interface components {
             pending_sandbox: {
                 [key: string]: unknown;
             }[];
+        };
+        SiteSummary: {
+            id: number;
+            name: string;
+            domain: string;
+            latest_manifest_version: number | null;
+            manifest_current: boolean | null;
         };
         WizardState: {
             questions: components["schemas"]["Question"][];
@@ -427,6 +470,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_projects_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"][];
+                };
             };
         };
     };

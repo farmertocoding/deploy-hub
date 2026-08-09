@@ -129,6 +129,62 @@ class ReadinessSerializer(serializers.Serializer):
     pending_sandbox = serializers.ListField(child=serializers.DictField())
 
 
+class SiteSummarySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    domain = serializers.CharField(allow_blank=True)
+    latest_manifest_version = serializers.IntegerField(allow_null=True)
+    manifest_current = serializers.BooleanField(allow_null=True)
+
+
+class ProjectSummarySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    scanned_at = serializers.DateTimeField(allow_null=True)
+    tiers = serializers.DictField(child=serializers.IntegerField())
+    sites = SiteSummarySerializer(many=True)
+
+
+class ProjectListView(APIView):
+    """What the readiness screen renders its left column from (F7-lite).
+
+    tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+    projects grow. manifest_current answers the one freshness question the data model
+    can answer honestly: does the latest manifest correspond to the CURRENT scan?
+    (A true warnings-diff-since-last-manifest would need the prior report stored,
+    which it isn't — noted in the F7 design decision rather than faked.)
+    """
+
+    @extend_schema(responses={200: ProjectSummarySerializer(many=True)})
+    def get(self, request):
+        from .materialize import report_hash
+
+        rows = []
+        for project in Project.objects.order_by("name").prefetch_related("sites"):
+            report = project.scan_report or {}
+            checks = report.get("checks", [])
+            current_hash = report_hash(report) if report else None
+            sites = []
+            for site in project.sites.all():
+                latest = site.manifests.order_by("-version").first()
+                sites.append({
+                    "id": site.pk, "name": site.name, "domain": site.domain,
+                    "latest_manifest_version": latest.version if latest else None,
+                    "manifest_current": (
+                        None if latest is None or current_hash is None
+                        else latest.scan_report_hash == current_hash),
+                })
+            rows.append({
+                "id": project.pk, "name": project.name, "slug": project.slug,
+                "scanned_at": project.scanned_at,
+                "tiers": {t: sum(1 for c in checks if c.get("tier") == t)
+                          for t in ("blocker", "warning", "advice", "pending_sandbox")},
+                "sites": sites,
+            })
+        return Response(ProjectSummarySerializer(rows, many=True).data)
+
+
 class ReadinessView(APIView):
     """The three-tier readiness report (§5.3), tiered server-side.
 

@@ -486,3 +486,44 @@ def test_materialize_refuses_and_names_the_values_to_reenter(db):
     assert exc.value.code == "answers_need_reentry"
     assert exc.value.items[0]["id"] == "django.env.API_KEY"
     assert "rotate" in exc.value.message
+
+
+# ── F7-lite: the project list the readiness screen renders from ──────────────────
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_project_list_reports_tier_counts_and_manifest_currency(auth_client):
+    """The list endpoint carries tier COUNTS (cheap) and the one freshness fact the
+    data model can answer honestly: is the latest manifest built from the CURRENT
+    scan? (manifest_current: None = never materialized, True = current, False = the
+    scan moved on.)"""
+    report = make_report(checks=[{"id": "w1", "tier": "warning", "title": "w",
+                                  "detail": "", "fix_hint": ""}])
+    project = Project.objects.create(name="listme", slug="listme",
+                                     git_url="https://github.com/o/r.git",
+                                     scan_report=report)
+    site = Site.objects.create(project=project, name="prod")
+
+    payload = auth_client.get("/api/v1/projects/").json()
+    row = next(p for p in payload if p["slug"] == "listme")
+    assert row["tiers"] == {"blocker": 0, "warning": 1, "advice": 0,
+                            "pending_sandbox": 0}
+    assert row["sites"][0]["latest_manifest_version"] is None
+    assert row["sites"][0]["manifest_current"] is None
+
+    service.set_answers(site, {"site.domain": "l.example.com"})
+    materialize(site, confirm_warnings=True)
+    row = next(p for p in auth_client.get("/api/v1/projects/").json()
+               if p["slug"] == "listme")
+    assert row["sites"][0]["latest_manifest_version"] == 1
+    assert row["sites"][0]["manifest_current"] is True
+
+    # The scan moves on -> the manifest is honestly stale.
+    changed = make_report(checks=[{"id": "w1", "tier": "warning", "title": "w",
+                                   "detail": "", "fix_hint": ""}])
+    changed["checks"].append({"id": "new.advice", "tier": "advice",
+                              "title": "new", "detail": "", "fix_hint": ""})
+    project.scan_report = changed
+    project.save()
+    row = next(p for p in auth_client.get("/api/v1/projects/").json()
+               if p["slug"] == "listme")
+    assert row["sites"][0]["manifest_current"] is False

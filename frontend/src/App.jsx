@@ -6,27 +6,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { schemas } from "./api/zod.ts";
 import { useEvents } from "./useEvents.js";
-
-function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return m ? m[2] : "";
-}
-
-async function api(path, body) {
-  // A down/unreachable server must surface, never reject unhandled (round-1 UX
-  // finding): status 0 routes into every existing error branch via data.detail.
-  try {
-    const res = await fetch(`/api/${path}`, {
-      method: body !== undefined ? "POST" : "GET",
-      headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
-      credentials: "include",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    return { status: res.status, data: await res.json().catch(() => ({})) };
-  } catch {
-    return { status: 0, data: { detail: "Cannot reach server — check your connection and retry." } };
-  }
-}
+import { api, simState } from "./api.js";
+import ReadinessScreen from "./Readiness.jsx";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -35,6 +16,9 @@ export default function App() {
   // the CSRF cookie the (CSRF-protected) login POST needs.
   const [user, setUser] = useState(undefined); // undefined = loading
   const [unreachable, setUnreachable] = useState(false);
+  // §F8 simulation: ?sim=<state> reviews the readiness screen with no backend at
+  // all, so auth (which needs a server) is skipped and the fixtures take over.
+  if (simState()) return <ReadinessScreen />;
   const hydrate = () => {
     setUnreachable(false);
     setUser(undefined);
@@ -55,7 +39,23 @@ export default function App() {
   if (user === undefined) return <p style={{ margin: "15vh auto", width: "fit-content" }}>Loading…</p>;
   if (!user) return <Login onLogin={setUser} />;
   if (!user.otp_enrolled) return <Enroll onDone={() => setUser({ ...user, otp_enrolled: true })} />;
-  return <DemoPanel user={user} />;
+  return <Shell user={user} />;
+}
+
+function Shell({ user }) {
+  const [tab, setTab] = useState("readiness");
+  return (
+    <div>
+      <nav style={{ display: "flex", gap: 8, padding: 8, borderBottom: "1px solid #333" }}>
+        {["readiness", "demo"].map((t) => (
+          <button key={t} style={{ ...box, opacity: tab === t ? 1 : 0.6 }}
+            onClick={() => setTab(t)}>{t === "readiness" ? "Readiness" : "Demo log"}</button>
+        ))}
+        <span style={{ marginLeft: "auto", color: "#8b949e", alignSelf: "center" }}>{user.username}</span>
+      </nav>
+      {tab === "readiness" ? <ReadinessScreen /> : <DemoPanel user={user} />}
+    </div>
+  );
 }
 
 function Login({ onLogin }) {
