@@ -35,3 +35,12 @@ does not apply. Recommendation: accept convergence; do not reset the design.
   environment had no docker daemon; identical code paths were exercised natively).
 - CI action SHA-pinning rides the D-001 GitHub move (waived, dated).
 - Orphaned otp_static tables in dev DBs (plugin removed from INSTALLED_APPS; inert).
+
+## Convergence ruling
+
+**ACCEPTED — Joseph, 2026-08-09.** Phase 0 is converged at `90568c9` per the
+recommendation above: the round-6 cap interrupt is resolved by owner's call, the
+design is not reset, and the disclosed residuals stand as non-blocking (each already
+carried by its own mechanism — the compose spot-check as an open task, SHA-pinning as
+a dated waiver riding D-001, the otp_static tables as inert). Phase 0 is closed;
+nothing further is owed to it except those residuals on their own schedules.
