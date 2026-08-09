@@ -158,9 +158,17 @@ checkout, `deploy-system-plan.md` synced verbatim into `docs/plan/`.
 
 **Joseph:** walk the five sim states (that walk IS the §F8 human review); tarballs
 for TAKKO + trading repo + E-invoice (demo scans; the private node-ts milestone; the
-D-008 re-record); shape checks for `ecommerce` (deploy candidate? TBC) and
-`fb-group-poster` (shape only — not a candidate); J-1 spike (shapes Phase 2's T2);
-the still-open Phase 0 convergence call; merge this branch.
+D-008 re-record); shape checks for `ecommerce` and `fb-group-poster` (**both ruled
+not deploy candidates — Joseph, 2026-08-09** — so §V12's clause (a) only: framework,
+serving process, which scanner module each lands on; ~15 min per repo once the
+folders are connected, and the ONLY thing §J7 still owes); J-1 spike (shapes Phase
+2's T2); merge this branch. The Phase 0 convergence call was accepted 2026-08-09
+(see phase-0-round-log.md).
+
+**Phase 2 deploy-target pool, now final:** TAKKO, SATURDAYS_site, hr-saas-starter.
+TAKKO first — the only one already proven live end-to-end (the 0.5 spike), so Phase
+2's milestone is "make the spike reproducible through the real pipeline," not "make
+a new thing work."
 
 **Known debts carried forward:** IDNA-2008 (`idna` package) deferred until a real
 user hits a 2003/2008 difference; F6's concurrency pinned structurally (SQLite
