@@ -72,6 +72,15 @@ DECLARATION_FILE = "deployhub.yaml"
 # Ordinary non-ASCII text is untouched and must stay that way: this fleet is Taiwanese
 # and reasons will be written in Chinese. Refusing code points that lie about structure
 # is not refusing a script.
+#
+# WHERE THE LINE IS DRAWN, and it is drawn deliberately short of "everything invisible":
+# some code points render as blank yet are LETTERS or format characters belonging to a
+# script — Hangul fillers U+115F, U+3164 and U+FFA0 (category Lo), soft hyphen U+00AD.
+# They are NOT refused here. "Renders as nothing" is not "is a control character", and a
+# rule built on the first phrasing ends up refusing scripts, which is round-6b's mistake
+# in a new costume. What is refused is the set that rewrites LINES (the report is built
+# line by line) or reorders them (bidi), because those forge the scanner's own output;
+# a blank-looking letter in a reason is only a badly written reason.
 _CONTROL_CHARS_RE = re.compile(
     "["
     "\\x00-\\x1f"        # C0
@@ -80,6 +89,8 @@ _CONTROL_CHARS_RE = re.compile(
     "\\u2028\\u2029"      # LINE / PARAGRAPH SEPARATOR
     "\\u200b-\\u200f"     # zero-width space/joiners + LRM/RLM
     "\\u202a-\\u202e"     # bidi embeddings and overrides
+    "\\u2066-\\u2069"     # bidi ISOLATES - the Trojan-Source family (CVE-2021-42574)
+    "\\u061c"            # ARABIC LETTER MARK
     "\\u2060-\\u2064"     # word joiner + invisible operators
     "\\ufeff"            # BOM / zero-width no-break space
     "]"

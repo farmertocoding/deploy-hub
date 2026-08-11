@@ -591,6 +591,16 @@ def test_a_unicode_line_separator_in_a_real_directory_name_is_refused(tmp_path):
     ("\u2060", "U+2060 WORD JOINER"),
     ("\u200f", "U+200F RIGHT-TO-LEFT MARK"),
     ("\u0091", "U+0091 PRIVATE USE ONE (C1)"),
+    # The Trojan-Source family (CVE-2021-42574): bidi ISOLATES are the modern
+    # reordering mechanism — the one that made source code read as one program and
+    # compile as another — and the round-2 class covered only the older embeddings and
+    # overrides. Same argument, same field: a reason is read by a human to decide
+    # whether hiding findings is justified.
+    ("\u2066", "U+2066 LEFT-TO-RIGHT ISOLATE"),
+    ("\u2067", "U+2067 RIGHT-TO-LEFT ISOLATE"),
+    ("\u2068", "U+2068 FIRST STRONG ISOLATE"),
+    ("\u2069", "U+2069 POP DIRECTIONAL ISOLATE"),
+    ("\u061c", "U+061C ARABIC LETTER MARK"),
 ])
 def test_deceptive_code_points_are_refused_in_both_fields(tmp_path, char, name):
     """Two families, one rule. The line-breaking ones forge structure; the bidi and
