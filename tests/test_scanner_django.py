@@ -500,7 +500,7 @@ def test_legacy_bad_scan_surfaces_the_core_findings():
     assert "settings.py:5" in checks["core.secret-scan"]["detail"]
 
 
-def test_pip_wsgi_scan_stays_blocker_and_warning_free():
+def test_pip_wsgi_scan_is_clean_apart_from_the_auth_warning():
     """The classic pip/WSGI fixture passes at report level too. `core.healthz` is
     `advice` and stays that way: a classic project with no health route earns
     exactly the §E9 advice — a genuine finding, not a fixture gap."""

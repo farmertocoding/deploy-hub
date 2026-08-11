@@ -40,7 +40,38 @@ _SKIP_DIRS = {
 _MAX_TEXT_BYTES = 512 * 1024
 
 # ── secret-scan patterns ────────────────────────────────────────────────────────
+#
+# TWO INDEPENDENT AXES, and the review that followed the first cut of this file is the
+# reason both exist. Detection used to be entirely NAME-driven — a keyword in the
+# identifier — with `AKIA…` the single exception. So a committed `id_rsa`, a
+# `ghp_…` GitHub token or a `sk_live_…` Stripe key scanned clean unless the variable
+# they were assigned to happened to be called something helpful, which a credential
+# pasted into a config file rarely is.
+#
+#   axis 1 (VALUE): formats that are self-evidently credentials, whatever they are
+#                   called or whether they are quoted at all.
+#   axis 2 (NAME):  a secret-ish identifier assigned a high-entropy literal.
 _AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+
+# Axis 1. Each is a published, prefixed credential format — a match is a credential,
+# not a heuristic, so these fire regardless of quoting, naming or entropy.
+_CREDENTIAL_FORMATS = (
+    ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("private key block", re.compile(
+        r"-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----")),
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36}\b")),
+    ("GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}")),
+    ("GitLab personal access token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("Slack webhook URL", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+")),
+    ("Stripe live key", re.compile(r"\b[sr]k_live_[A-Za-z0-9]{20,}")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
+    ("PyPI token", re.compile(r"\bpypi-[A-Za-z0-9_-]{16,}")),
+    ("SendGrid key", re.compile(r"\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}")),
+    ("Twilio account sid", re.compile(r"\bAC[0-9a-f]{32}\b")),
+    ("OpenAI key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}")),
+)
 
 # The keyword may sit ANYWHERE in the identifier, and that is the whole point of the
 # widening (D-010 follow-up item 3). The previous pattern required the keyword to be
@@ -67,23 +98,74 @@ _ASSIGNMENT_RE = re.compile(
     rf"(?P<quote>['\"])(?P<value>[^\s'\"]{{16,}})(?P=quote)",
     re.IGNORECASE,
 )
-# Values that are addresses rather than credentials. A URL or a path is long and
-# high-entropy enough to clear both filters, and `token_url`, `secret_path` and
-# `credentials_file` are ordinary names.
-_ADDRESS_RE = re.compile(r"^(?:\w+://|\.{0,2}/|~/|[A-Za-z]:\\)")
+
+# The same thing UNQUOTED, which is how it appears everywhere the item-4 fix just made
+# reachable: `run: AWS_SECRET_ACCESS_KEY=…` in a workflow, `API_KEY: …` in YAML,
+# `export TOKEN=…` in a shell script, `password: …` in a k8s manifest. The first cut
+# required both quotes, so the motivating case of item 4 — a key in
+# `.github/workflows/deploy.yml` — was still missed unless it happened to be
+# AKIA-shaped. Unquoted values carry no delimiter, so this arm is deliberately stricter:
+# a narrower alphabet (no shell metacharacters, no `$`, so an interpolation cannot
+# match) and a higher entropy floor.
+_UNQUOTED_ASSIGNMENT_RE = re.compile(
+    rf"(?P<name>[A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)\s*[=:]\s*"
+    rf"(?P<value>[A-Za-z0-9+/_=.~-]{{20,}})(?=[\s,;)\"']|$)",
+    re.IGNORECASE,
+)
+_UNQUOTED_ENTROPY_FLOOR_BITS = 3.5
+
+# Values that are addresses rather than credentials: `token_url`, `secret_path` and
+# `credentials_file` are ordinary names holding ordinary values.
+#
+# Reviewed and narrowed — the first cut skipped anything matching `^\w+://`, which was a
+# one-character bypass (`API_KEY = "x://<40-char key>"` scanned clean) AND dropped the
+# one URL shape that IS a credential: `postgres://user:REALPASSWORD@host`. So the
+# scheme must be a real one, and a URL carrying userinfo with a password is never
+# skipped — it is the finding.
+_URL_RE = re.compile(
+    r"^(?:https?|ftps?|s3|git|ssh|file|postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?"
+    r"|redis(?:s)?|amqps?|kafka|jdbc):/{2,3}(?P<userinfo>[^/@\s]*@)?", re.IGNORECASE)
+_PATH_RE = re.compile(r"^(?:\.{0,2}/|~/|[A-Za-z]:\\)")
+
+
+def _is_address_not_credential(value):
+    """True for a URL or path that carries no credential of its own."""
+    if _PATH_RE.match(value):
+        return True
+    match = _URL_RE.match(value)
+    if not match:
+        return False
+    userinfo = match.group("userinfo") or ""
+    # `user:password@` is a credential wearing a URL. `user@` alone is not.
+    return ":" not in userinfo.rstrip("@")
+
 
 # Directory names whose contents are test material. A password in a test helper is a
 # fixture, and blocking a deployment on it teaches people to route around the check —
 # but it is not nothing either, so it is reported at a lower tier rather than dropped.
-_TEST_DIR_NAMES = {"tests", "test", "spec", "specs", "__tests__", "testdata",
-                   "fixtures", "e2e", "cypress"}
+#
+# Reviewed and narrowed. The first cut also listed `spec`, `specs`, `e2e`, `fixtures`
+# and `cypress`, which routinely name PRODUCTION directories — an OpenAPI `spec/`, a
+# Django `fixtures/`, a service called `e2e`. A real key at `api/spec/config.py` was
+# downgraded from blocker to warning by nothing more than a directory name, which is a
+# security hole dressed as noise reduction. What is left is unambiguous, and a file
+# whose own NAME is test-shaped counts wherever it lives.
+_TEST_DIR_NAMES = {"tests", "test", "__tests__", "testdata", "__snapshots__"}
+_TEST_FILE_NAME_RE = re.compile(
+    r"(^test_|_test\.|\.(test|spec)\.|^conftest\.|^factories\.|\.snap$)")
 
 
 def _is_test_path(rel):
     parts = [p.lower() for p in rel.parts]
     return (bool(_TEST_FILE_RE.search(rel.name))
-            or any(part in _TEST_DIR_NAMES for part in parts[:-1])
-            or rel.name.lower().startswith(("conftest", "factories")))
+            or bool(_TEST_FILE_NAME_RE.search(rel.name.lower()))
+            or any(part in _TEST_DIR_NAMES for part in parts[:-1]))
+
+
+# Machine-written files whose contents are not reviewed source: a minified bundle is
+# full of high-entropy identifiers and none of them is a committed credential.
+_GENERATED_FILE_RE = re.compile(r"\.min\.(?:js|css|mjs)$|\.map$|\.lock$|\.woff2?$")
+
 _PLACEHOLDER_MARKERS = ("changeme", "change-me", "change_me", "xxx", "example",
                         "dummy", "insecure", "placeholder", "sample", "your_", "your-",
                         # Same class as `sample`/`dummy`/`example`, added after scanning
@@ -151,7 +233,11 @@ def _iter_files(root):
         except OSError:
             continue
         for path in entries:
-            if path.is_symlink():
+            # Symlinked DIRECTORIES are not followed — a link out of the tree is not the
+            # project's source and a link back into it is a loop. Symlinked FILES are
+            # still read: master yielded them, and a committed symlinked `.env` or
+            # config file is exactly the thing this suite is looking for.
+            if path.is_symlink() and path.is_dir():
                 continue
             if path.is_dir():
                 if path.name in _SKIP_DIRS:
@@ -252,17 +338,30 @@ def _check_secret_scan(root, texts):
         if _is_env_file(path.name):
             bucket.append(f"{rel}: committed .env file")
             continue
+        generated = bool(_GENERATED_FILE_RE.search(path.name.lower()))
         for lineno, line in enumerate(text.splitlines(), 1):
-            if _AWS_KEY_RE.search(line):
-                bucket.append(f"{rel}:{lineno}: AWS access key id (AKIA…)")
+            # Axis 1 — a published credential format. Runs even in generated files: a
+            # bundler can inline a key, and `AKIA…` in a minified bundle is still a key.
+            fmt = next((label for label, pattern in _CREDENTIAL_FORMATS
+                        if pattern.search(line)), None)
+            if fmt:
+                bucket.append(f"{rel}:{lineno}: {fmt}")
+                continue
+            # Axis 2 — a secret-ish name assigned a high-entropy literal. This one is a
+            # heuristic, so it does not run over machine-written files.
+            if generated:
                 continue
             match = _ASSIGNMENT_RE.search(line)
+            floor = _ENTROPY_FLOOR_BITS
+            if not match:
+                match = _UNQUOTED_ASSIGNMENT_RE.search(line)
+                floor = _UNQUOTED_ENTROPY_FLOOR_BITS
             if match:
                 name, value = match.group("name"), match.group("value")
-                if (not _ADDRESS_RE.match(value)
+                if (not _is_address_not_credential(value)
                         and not _is_identifier_echo(name, value)
                         and not _looks_placeholder(value)
-                        and _shannon_entropy(value) >= _ENTROPY_FLOOR_BITS):
+                        and _shannon_entropy(value) >= floor):
                     bucket.append(f"{rel}:{lineno}: hardcoded {name.lower()} value")
     if findings:
         detail = "\n".join(findings)
@@ -307,19 +406,25 @@ def _has_pinned_requirements(directory):
 # the scan ROOT, but every repo in the fleet nests — `backend/pyproject.toml`,
 # `frontend/package.json`, `packages/*/package.json` — so on a real adopt-path scan it
 # was vacuously `ok` and the frontend lockfile was covered by nothing at all. Three
-# levels reaches `packages/<name>/package.json` and stops well short of walking a
-# monorepo's whole tree.
-_MANIFEST_MAX_DEPTH = 3
+# levels reaches `apps/web/frontend/package.json` and `services/api/internal/`, and
+# stops short of a vendored tree. Raised from 3 on review: `services/api/internal/
+# worker/package.json` is an ordinary shape and was out of scope.
+_MANIFEST_MAX_DEPTH = 4
 _NODE_LOCKS = ("package-lock.json", "package-lock.yaml", "pnpm-lock.yaml", "yarn.lock",
                "bun.lockb", "bun.lock")
 _PY_LOCKS = ("uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock")
 
 
-def _find_manifests(root, names, max_depth=_MANIFEST_MAX_DEPTH):
-    """[Path] for every `names` file at or under root, to `max_depth` directories."""
+def _find_manifests(root, names, files=None, max_depth=_MANIFEST_MAX_DEPTH):
+    """[Path] for every `names` file at or under root, to `max_depth` directories.
+
+    `files` lets the caller pass the walk it already did: `common_checks` walks the tree
+    once for `texts`, and re-walking it per check was three full traversals of a
+    monorepo to answer one question about lockfiles.
+    """
     root = Path(root)
     found = []
-    for path in _iter_files(root):
+    for path in (_iter_files(root) if files is None else files):
         if path.name not in names:
             continue
         if len(path.relative_to(root).parts) - 1 > max_depth:
@@ -345,14 +450,14 @@ def _locked_at_or_above(manifest, root, lock_names):
         directory = directory.parent
 
 
-def _check_lockfile(root):
+def _check_lockfile(root, files=None):
     root = Path(root)
     missing = []
-    for manifest in _find_manifests(root, {"package.json"}):
+    for manifest in _find_manifests(root, {"package.json"}, files):
         if not _locked_at_or_above(manifest, root, _NODE_LOCKS):
             missing.append(f"{manifest.relative_to(root)} without a lockfile "
                            f"({' / '.join(_NODE_LOCKS[:4])}) beside it or above it")
-    for manifest in _find_manifests(root, {"pyproject.toml"}):
+    for manifest in _find_manifests(root, {"pyproject.toml"}, files):
         locked = (_locked_at_or_above(manifest, root, _PY_LOCKS)
                   or _has_pinned_requirements(manifest.parent)
                   or _has_pinned_requirements(root))
@@ -372,7 +477,7 @@ def _check_lockfile(root):
                             title="Dependency manifests are locked")
 
 
-def _check_gitignore(root, texts):
+def _check_gitignore(root, texts, files=None):
     root = Path(root)
     gitignore = root / ".gitignore"
     if not gitignore.is_file():
@@ -398,7 +503,7 @@ def _check_gitignore(root, texts):
     # `frontend/package.json` is still a node project, and its node_modules still must
     # not enter the repo. One root .gitignore covers subdirectories, so only the
     # DETECTION needed widening, not the coverage lookup.
-    node_matters = (bool(_find_manifests(root, {"package.json"}))
+    node_matters = (bool(_find_manifests(root, {"package.json"}, files))
                     or (root / "node_modules").is_dir())
     if node_matters and not covered("node_modules"):
         gaps.append("node project but .gitignore does not cover node_modules")
@@ -511,10 +616,11 @@ def common_checks(root):
     scan report by `scanner.core.scan` (D-010) and called directly by tests."""
     root = Path(root)
     texts = _text_files(root)
+    paths = [path for path, _ in texts]
     return [
         _check_secret_scan(root, texts),
-        _check_lockfile(root),
-        _check_gitignore(root, texts),
+        _check_lockfile(root, paths),
+        _check_gitignore(root, texts, paths),
         _check_tests_exist(root),
         _check_healthz(texts),
         _check_digest_pins(root, texts),

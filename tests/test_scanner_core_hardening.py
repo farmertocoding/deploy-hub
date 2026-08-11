@@ -196,6 +196,159 @@ def test_a_fixture_scanned_at_its_own_root_is_not_test_material(tmp_path):
     assert _core(legacy)["core.secret-scan"].tier == "blocker"
 
 
+# ── what the security review of the first cut found ────────────────────────
+#
+# Four findings, two of them holes this change itself opened. Recorded here because a
+# security check that gets narrowed by its own noise-reduction is the failure mode that
+# matters most: nobody notices a blocker that stopped blocking.
+
+@pytest.mark.parametrize("value,blocks", [
+    ("x://" + FAKE_HIGH_ENTROPY, True),                 # a scheme nobody uses
+    ("zzz://" + FAKE_HIGH_ENTROPY, True),
+    ("postgres://app:RealPassw0rdHere@db:5432/app", True),   # userinfo IS the credential
+    ("mongodb+srv://svc:s3cretValue99@cluster0.example.net", True),
+    ("https://example.com/oauth/token", False),         # an address, and only that
+    ("https://user@example.com/callback", False),       # userinfo with no password
+    ("/etc/ssl/private/service.pem", False),
+    ("./config/credentials.json", False),
+])
+def test_review_f1_a_url_prefix_is_not_a_free_pass(tmp_path, value, blocks):
+    """`API_KEY = "x://<40-char key>"` scanned clean — a one-character bypass.
+
+    The first cut skipped any value matching `^\\w+://`, which did two wrong things at
+    once: it let an arbitrary invented scheme launder a key past the blocker, and it
+    dropped the one URL shape that *is* a credential — a connection string with an
+    embedded password, which is how database credentials most often get committed.
+    """
+    root = _project(tmp_path, {"conf.py": f'DB_PASSWORD = "{value}"\n'},
+                    name=str(abs(hash(value))))
+    tier = _core(root)["core.secret-scan"].tier
+    assert (tier == "blocker") is blocks, f"{value!r} -> {tier}"
+
+
+@pytest.mark.parametrize("rel,blocks", [
+    ("api/spec/config.py", True),           # an OpenAPI spec directory, not a test dir
+    ("app/fixtures/prod_config.py", True),  # Django fixtures are production data
+    ("services/e2e/settings.py", True),     # a service that happens to be called e2e
+    ("frontend/cypress/support/env.js", True),
+    ("src/latest/config.py", True),         # 'latest' contains 'test'
+    ("tests/test_login.py", False),
+    ("app/__tests__/helpers.js", False),
+    ("src/login.test.ts", False),           # test-shaped FILE, wherever it lives
+    ("conftest.py", False),
+])
+def test_review_f2_a_directory_name_may_not_downgrade_a_real_credential(
+        tmp_path, rel, blocks):
+    """A real key at `api/spec/config.py` was reported as "test material only".
+
+    The test-material downgrade was written for login helpers in an auth test suite and
+    reached far wider than that: `spec`, `specs`, `e2e`, `fixtures` and `cypress` all
+    name production directories in ordinary repos, so a credential in one of them
+    stopped gating the deploy. What is left is unambiguous, and a file whose own name is
+    test-shaped counts wherever it lives.
+    """
+    root = _project(tmp_path, {rel: f'API_TOKEN_VALUE = "{FAKE_HIGH_ENTROPY}"\n'},
+                    name=str(abs(hash(rel))))
+    tier = _core(root)["core.secret-scan"].tier
+    assert (tier == "blocker") is blocks, f"{rel} -> {tier}"
+
+
+PEM = ("-----BEGIN RSA PRIVATE KEY-----\n"
+       "MIIEowIBAAKCAQEA3Tz2mr7SZiAMfQyuvBjM9Oi8oL0kK1kZ4XxYqK8pDDdVYQmZ\n"
+       "-----END RSA PRIVATE KEY-----\n")
+
+
+@pytest.mark.parametrize("content,label", [
+    (PEM, "private key block"),
+    ("deploy_key = ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8", "GitHub token"),
+    ("SLACK=xoxb-123456789012-abcdefghijklmnop", "Slack token"),
+    ("stripe = sk_live_51H8xQ2eZvKYlo2CkKlmnopqrstu", "Stripe live key"),
+    ("google = AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY", "Google API key"),
+    ("registry = npm_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789", "npm token"),
+    ("gitlab = glpat-ABCdefGHIjklMNOpqrst", "GitLab personal access token"),
+])
+def test_review_f3_a_credential_is_detected_by_its_own_format(tmp_path, content, label):
+    """Detection was entirely NAME-driven, with `AKIA…` the single exception.
+
+    So a committed `id_rsa`, a `ghp_…` token or a `sk_live_…` key scanned clean unless
+    the variable holding it happened to be called something helpful — which a credential
+    pasted into a config file rarely is. These are published, prefixed formats: a match
+    is a credential, not a heuristic, so it fires whatever the name and whatever the
+    quoting.
+    """
+    root = _project(tmp_path, {"config/app.conf": content + "\n"}, name=str(abs(hash(label))))
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", f"{label} scanned clean"
+    assert label in result.detail
+
+
+@pytest.mark.parametrize("line", [
+    "      - run: AWS_SECRET_ACCESS_KEY=%s ./deploy.sh" % FAKE_HIGH_ENTROPY,
+    "  API_KEY: %s" % FAKE_HIGH_ENTROPY,
+    "export GITHUB_TOKEN_VALUE=%s" % FAKE_HIGH_ENTROPY,
+    "  password: %s" % FAKE_HIGH_ENTROPY,
+])
+def test_review_f4_an_unquoted_assignment_is_still_an_assignment(tmp_path, line):
+    """The motivating case of item 4 was still missed: workflow values are unquoted.
+
+    The first cut required an opening AND closing quote, so making `.github/workflows/`
+    reachable achieved nothing for the shape that actually appears there — `run: KEY=…`
+    — unless the value happened to be AKIA-shaped.
+    """
+    root = _project(tmp_path, {".github/workflows/deploy.yml": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", f"{line!r} scanned clean"
+
+
+@pytest.mark.parametrize("line", [
+    "  API_KEY: ${{ secrets.API_KEY }}",
+    "  password: ${DB_PASSWORD}",
+    "  api_key: !ENV APP_KEY",
+    "      - run: export TOKEN_VALUE=$GITHUB_TOKEN",
+    "  secret_name: my-app-secrets",
+])
+def test_review_f4_the_unquoted_arm_does_not_fire_on_references(tmp_path, line):
+    """An unquoted value has no delimiter, so this arm has to be the stricter one:
+    interpolations, references and kebab-case names must all stay quiet."""
+    root = _project(tmp_path, {".github/workflows/deploy.yml": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "ok", f"{line!r} was reported:\n{result.detail}"
+
+
+def test_review_f6_a_symlinked_file_is_still_read(tmp_path):
+    """Not following symlinked DIRECTORIES is right; skipping symlinked FILES was not.
+
+    A committed symlinked `.env` or config file is precisely what this suite is looking
+    for, and master read them.
+    """
+    root = _project(tmp_path, {"src/app.py": "print('x')\n"})
+    real = tmp_path / "real-config.py"
+    real.write_text(f'API_TOKEN_VALUE = "{FAKE_HIGH_ENTROPY}"\n', encoding="utf-8")
+    (root / "config.py").symlink_to(real)
+    assert _core(root)["core.secret-scan"].tier == "blocker"
+
+
+def test_review_f7_generated_bundles_do_not_produce_heuristic_findings(tmp_path):
+    """A minified bundle is full of high-entropy identifiers and none is a credential.
+
+    The name-and-entropy heuristic is switched off for machine-written files — but the
+    published-format patterns keep running there, because a bundler can inline a key and
+    `AKIA…` in a bundle is still `AKIA…`.
+    """
+    noisy = _project(tmp_path, {
+        "static/app.min.js": f'var e={{apiKey:"{FAKE_HIGH_ENTROPY}"}};\n',
+        "static/app.js.map": f'{{"sourcesContent":["api_key = \\"{FAKE_HIGH_ENTROPY}\\""]}}\n',
+    }, name="noisy")
+    assert _core(noisy)["core.secret-scan"].tier == "ok"
+
+    inlined = _project(tmp_path, {"static/app.min.js": f'var k="AKIA{"B" * 16}";\n'},
+                       name="inlined")
+    assert _core(inlined)["core.secret-scan"].tier == "blocker", (
+        "a published credential format was skipped because the file was minified")
+
+
 # ── item 4: dot-directories were skipped entirely ──────────────────────────
 
 @pytest.mark.parametrize("rel", [
@@ -272,13 +425,22 @@ def test_issue_d010_6_a_workspace_lockfile_above_the_manifest_counts(tmp_path):
 
 
 def test_issue_d010_6_discovery_is_depth_bounded(tmp_path):
-    """Unbounded discovery walks a whole monorepo and reports vendored fixtures. Three
-    levels reaches `packages/<name>/package.json` and stops."""
+    """Unbounded discovery walks a whole monorepo and reports vendored trees.
+
+    Four levels reaches `apps/web/frontend/package.json` and
+    `services/api/internal/package.json` — both ordinary shapes, and the reason the
+    review raised this from three — and stops before a vendored dependency tree.
+    """
+    reachable = "services/api/internal/worker/package.json"
+    root = _project(tmp_path, {reachable: '{"name": "worker"}\n'}, name="reachable")
+    assert _core(root)["core.lockfile"].tier == "warning", (
+        f"{reachable} is an ordinary monorepo shape and must be in scope")
+
     deep = "a/b/c/d/e/package.json"
-    root = _project(tmp_path, {deep: '{"name": "buried"}\n'})
-    assert _core(root)["core.lockfile"].tier == "ok", (
+    buried = _project(tmp_path, {deep: '{"name": "buried"}\n'}, name="buried")
+    assert _core(buried)["core.lockfile"].tier == "ok", (
         f"{deep} is {deep.count('/')} directories down and should be out of scope")
-    assert fallbacks._MANIFEST_MAX_DEPTH == 3
+    assert fallbacks._MANIFEST_MAX_DEPTH == 4
 
 
 def test_issue_d010_6_gitignore_sees_a_nested_node_project(tmp_path):
