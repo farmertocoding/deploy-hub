@@ -19,7 +19,24 @@
           "text": {"type": "string", "minLength": 10},
           "kind": {"enum": ["invariant", "behavior", "interface", "process"]},
           "status": {"enum": ["planned", "implemented", "verified", "retired"]},
-          "retired_reason": {"type": "string"}
+          "retired_reason": {"type": "string"},
+          "demo": {
+            "description": "R4-9 §3.2 rule 3 — repo-relative artifact path(s) for verify: demo. Each must exist and be non-empty; a directory must hold at least one non-empty file. Absent = fallback to conformance/demos/phase-N.md with a warning.",
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+            ]
+          },
+          "gate": {
+            "description": "R4-9 §3.2 rule 4 — Makefile target or workflow step name that enforces a verify: checklist / static-gate requirement. Required once the requirement's phase is due; missing or unresolvable = uncovered (red unless waived).",
+            "type": "string",
+            "minLength": 1
+          },
+          "text_hash": {
+            "description": "R4-9 §3.2 rule 6 (review3 §Q3) — sha256 of this requirement's source section body in docs/plan/. Recomputed on every run; a mismatch is red and prints the linked test ids as the re-review list. Re-pin with `python conformance/check.py --print-text-hashes`.",
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
         }
       }
     }

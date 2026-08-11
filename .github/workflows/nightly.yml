@@ -1,6 +1,10 @@
 # CI workflow 2 — nightly. T3 live e2e (Multipass/QEMU VM, test DNS zone, LE
 # staging) lands in Phase 2.5; this stub keeps the schedule slot warm and runs
 # the full suite + conformance until then.
+#
+# As in push-checks.yml: gate scope and arguments live in the Makefile, never here
+# (SPEC-gate-integrity.md §2). This file had its own copy of the conformance phase and
+# went on running --phase 0 long after the Makefile moved to --phase 1.
 name: nightly
 permissions:
   contents: read
@@ -19,5 +23,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: pytest -q
-      - run: python conformance/check.py --phase 0
+      - name: full test suite
+        run: make test
+      - name: conformance gate
+        run: make conformance

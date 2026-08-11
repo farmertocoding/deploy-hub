@@ -1,4 +1,10 @@
 # CI workflow 1 — on-push gates (<2 min target). T2 container-tier job lands Phase 2.5.
+#
+# No gate's scope or arguments appear in this file (SPEC-gate-integrity.md §2). A gate
+# declared both here and in the Makefile drifts in whichever copy nobody runs, and that
+# copy was always this one — see the R4-8/R4-12 table in the spec. Every gate step below
+# is a `make <target>` call; only setup the Makefile does not own is spelled out here.
+# Target definitions, tool flags and scan roots: see the Makefile.
 name: push-checks
 on: [push, pull_request]
 permissions:
@@ -14,19 +20,16 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: ruff
-        run: ruff check .
-      - name: bandit
-        run: bandit -q -c pyproject.toml -r core vault catalog scanner provision deploys reconcile providers monitor scaling realtime hub
-      - name: pip-audit (advisory in Phase 0)
-        run: pip-audit -r requirements.txt || true
-      - name: log-scrubber grep
-        run: |
-          ! grep -rn "SECRET_KEY\s*=" --include="*.py" core vault deploys realtime | grep -v "settings" || (echo "possible secret in code" && exit 1)
+      # Static analysis + dependency audit. The audit is advisory until Phase 1 and the
+      # Makefile keeps it that way; do not re-declare it here to change that.
+      - name: lint gate
+        run: make lint
+      - name: log scrub
+        run: make log-scrub
       - name: T1 unit tests
-        run: pytest -q
-      - name: conformance-check
-        run: python conformance/check.py --phase 0
+        run: make test
+      - name: conformance gate
+        run: make conformance
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
