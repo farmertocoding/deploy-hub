@@ -463,6 +463,62 @@ def test_n7_the_env_finding_does_not_claim_the_file_is_committed(tmp_path):
     assert "git status" in result.fix_hint and "rotate" in result.fix_hint
 
 
+# ── N7 follow-up: a URL-format COMMENT is not a connection string ───────────────
+#
+# Found by the post-N7 fleet re-record (2026-08-11). Fix 3 stopped suppressing
+# `.env.*.example` files as "committed .env", which correctly turned the line scan back
+# on over them — and the first thing it found in `~/E-invoice` was a comment explaining
+# the URL format, reported at `[proof]` tier. The password it "matched" is the literal
+# `<this>`.
+#
+# A `[proof]` false positive is the worst kind this check can produce: the label says
+# "not a guess", so the reader who checks it once learns the labels mean nothing. That
+# is round-6b's Twilio reasoning — flagging a non-secret costs the check's credibility
+# twice over — and it applies harder to the tier that claims certainty.
+
+_N7_URL_FORMAT_COMMENT = (
+    "# redis://:<this>@redis:6379/0. Use a URL-safe value (no '@' or '/').")
+
+
+def test_n7_a_url_format_comment_is_not_a_connection_string_credential(tmp_path):
+    """The E-invoice line verbatim, in the file it lives in."""
+    root = _n7_tree(tmp_path, {"app/.env.prod.example": (
+        "REDIS_PASSWORD=changeme\n" + _N7_URL_FORMAT_COMMENT + "\n")})
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+
+
+@pytest.mark.parametrize("line,blocks", [
+    # A real one, in the same file: the template is still scanned, and a key pasted
+    # into it is still a key.
+    ("REDIS_URL=redis://:realS3cretPass@redis:6379/0", True),
+    # A password with percent-ENCODED angle brackets is a valid URI and a working
+    # credential — `%3C` contains no bare `<`, so the rule does not reach it.
+    ("DATABASE_URL=postgres://app:S3cret%3CPass%3E@db:5432/app", True),
+    # Documentation, in the three shapes the fleet writes it in.
+    (_N7_URL_FORMAT_COMMENT, False),
+    ("# DATABASE_URL=postgres://user:<password>@host:5432/db", False),
+    ("AMQP_URL=amqp://svc:<your-password-here>@rabbit:5672/", False),
+])
+def test_n7_guard_the_angle_bracket_rule_is_an_rfc_3986_validity_test(
+        tmp_path, line, blocks):
+    """Not a heuristic — a validity argument, which is what makes it safe to widen.
+
+    RFC 3986 §2 lists `<` and `>` among the characters that MUST be percent-encoded
+    anywhere in a URI; a userinfo password containing one bare cannot parse, so it
+    cannot be a working credential. That also answers the one-character-bypass class
+    the F1 review raised against `_is_address_not_credential`: an attacker who inserts
+    `<` into a real connection string to launder it past this check has broken the
+    connection string, and the credential no longer works where it was going.
+    """
+    root = _n7_tree(tmp_path, {"app/.env.prod.example": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _n7_secret_scan(root)
+    assert (result.tier == "blocker") is blocks, f"{line!r} -> {result.tier}"
+    if blocks:
+        assert "[proof] connection string" in result.detail
+
+
 # ── common core: exposure-auth heuristic (SCAN-M4-EXPOSURE-AUTH) ────────────────
 #
 # R4-11 WI-3: these two tests carried `@pytest.mark.req("SCAN-M4-EXPOSURE-AUTH")`,

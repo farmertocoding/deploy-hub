@@ -247,7 +247,7 @@ requirements:
     text_hash: sha256:f7c131228f88e4bc4db89f976a83efafa76bab1eebe8d68f8415b3465bf449e0
     text: >
       The phase-1 milestone demo is recorded: `python -m hub scan` run against the
-      real fleet (E-invoice, hr-saas-starter, SATURDAYS_site) and the in-repo
+      real fleet (E-invoice, hr-saas-starter, SATURDAYS_site, TAKKO) and the in-repo
       sample-node-site fixture, with each run's report checked in.
 
   # — Pipeline & deploy (Phase 2)

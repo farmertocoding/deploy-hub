@@ -588,7 +588,23 @@ def _credential_format_in(line):
     match = _CONNECTION_STRING_RE.search(line)
     if match:
         password = match.group("password")
-        if len(password) >= 6 and not _looks_placeholder(password):
+        # N7 follow-up (fleet re-record, 2026-08-11): E-invoice's
+        # `app/.env.prod.example` documents the format as
+        # `# redis://:<this>@redis:6379/0`, and Fix 3 — correctly — turned the line
+        # scan back on over template files, so this was reported at `[proof]` tier with
+        # `<this>` as the password. A `[proof]` false positive is the worst kind the
+        # check can produce: the label's whole job is to say "not a guess".
+        #
+        # This is a VALIDITY argument, not a heuristic. RFC 3986 §2 requires `<` and
+        # `>` to be percent-encoded anywhere in a URI, so userinfo carrying one bare
+        # cannot parse and cannot be a working credential — the value is documentation
+        # by construction. It is also why the rule is not the one-character bypass the
+        # F1 review found in `_is_address_not_credential`: inserting `<` into a real
+        # connection string to launder it past this check breaks the connection string.
+        # A percent-encoded real password (`S3cret%3CPass%3E`) carries no bare bracket
+        # and still fires.
+        documented = "<" in password or ">" in password
+        if len(password) >= 6 and not documented and not _looks_placeholder(password):
             return "connection string with an embedded password"
     match = _DOCKER_AUTH_RE.search(line)
     if match:
