@@ -174,3 +174,51 @@ a new thing work."
 user hits a 2003/2008 difference; F6's concurrency pinned structurally (SQLite
 ignores FOR UPDATE — real test needs Postgres at T2); frontend has no render tests
 (contract tests only) until the tooling decision lands with shadcn.
+
+## 9. Round 5 — the gate-integrity PR (branch `gate-integrity-r4`, 2026-08-11)
+
+Round 4 found that the gates themselves were hollow and wrote the finding as a
+buildable spec (`spec-gate-integrity-r4-8-r4-9.md`, project docs) rather than a
+commit, per §4's anti-gaming rule and §1's delegation rule. This branch is that spec
+built, by sessions that did not find the findings.
+
+**Three commits.** `e2f62c4` — R4-8/R4-12 (CI calls `make`; bandit and log-scrubber
+roots derived from the tree, not typed) and R4-9 (`check.py` grades run outcomes from
+a SHA-pinned `conformance/run-report.json` instead of counting markers; `demo:`,
+`gate:`, `text_hash`, retired-id detection, real status in `matrix.json`).
+`15b87dd` — reworded a scanner `fix_hint` the widened scrubber hit, rather than
+loosening the pattern. `80d7198` — the ten findings an independent review returned.
+
+**What the first honest `--phase 1` run cost:** exactly the five reqs §3.4 predicted.
+Two got real gates; four now carry dated waivers. The one worth re-reading is
+`SEC-69-NO-SECRETS-IN-EXHAUST`: it was initially pointed at `make log-scrub`, and the
+reviewer's finding F1 was that a source grep for an assignment literal enforces
+materially less than "secrets never appear in logs, task args or responses". Waived
+instead. That is the whole lesson of this branch in one requirement — the failure mode
+is not a red gate, it is a green one nobody earned.
+
+**Reviewer findings, all closed and re-verified by reproduction (not by report):**
+a workflow could neuter a gate with `&&`/`|| true`/`continue-on-error` and the parity
+test stayed green (F2); `gate:` resolved on a bare name, so a no-op target or an
+echo-only step read as `verified` (F3); a whitespace-only demo artifact passed the
+content check (F4); unpinned `text_hash` was silent (F5); markers on tests inside a
+class reported `not-collected` (F6); `PYTEST_ADDOPTS` could forge `full_run` (F7);
+the required-gate set was hand-typed a third time (F8); the phase-1 demo tree is
+checked by nothing, which is why R4-10 never surfaced (F9, recorded as a waiver);
+`log-scrub` had no escape hatch short of degrading product copy (F10).
+
+**Open, deliberately.** `text_hash` pins only the first cited section of a
+multi-section `source:`. The run report is bound to `git rev-parse HEAD`, not to the
+working tree, so `make conformance` alone on a dirty checkout can pass on a tree the
+report does not describe (unreachable in CI and in `review-round`, which order
+`test` before `conformance`). Four re-review nits: `check.py` and the parity test have
+two implementations of "CI invokes this gate" (N1); a wired-in no-op target still
+resolves, now documented in three places (N2); the `if:` ban on gate steps will need
+an escape hatch when D-001's PR-only `sensitive-path-guard` becomes a real gate (N3);
+one tautological assertion and two reflow-brittle doc assertions (N4).
+
+**State at hand-off:** 263 passed, ruff clean, `make lint`/`log-scrub` green,
+`check.py --phase 1` exit 0 with six honest warnings. `requirements.yaml` carries zero
+semantic edits across the branch — one removed `gate:` line, plus added `demo:`,
+`gate:`, `text_hash:` keys and comments. Sensitive paths (CI workflows, gate scripts,
+the registry) are human-merge-only: awaiting Joseph.
