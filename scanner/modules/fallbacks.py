@@ -21,7 +21,7 @@ import math
 import re
 from pathlib import Path
 
-from scanner import core
+from scanner import core, declarations
 
 # Directories that are dependency/build/data output, never reviewed source.
 #
@@ -639,11 +639,27 @@ def _is_identifier_echo(name, value):
     return name.lower().strip("_") == value.lower().replace("-", "_").strip("_")
 
 
-def _check_secret_scan(root, texts):
+def _check_secret_scan(root, texts, declared=None):
+    """Follow-up 2 (spec-declared-test-material.md): `declared` is what the scanned repo
+    said about itself in `deployhub.yaml`, and it reaches exactly ONE thing — the
+    heuristic axis's bucket. The N6 rule, restated: scope the axis, never the walk. The
+    `[proof]` axis and the `.env` handler below run at full tier inside a declared tree,
+    because a repo cannot declare its way out of a published credential format.
+    """
+    declared = declared or declarations.NONE
     findings, test_findings = [], []
+    # A third bucket, never merged into the second: one claim the scanner made about a
+    # path, one the repo made about itself, and a reader who cannot tell them apart
+    # cannot audit either.
+    declared_findings = []
+    declared_counts = {d.path: 0 for d in declared.accepted}
     for path, text in texts:
         rel = path.relative_to(root)
         bucket = test_findings if _is_test_path(rel) else findings
+        # Auto-detected test material wins when both apply: it is already non-blocking,
+        # and routing such a finding through the declaration would let a declaration
+        # claim credit for a downgrade it did not make.
+        covering = None if bucket is test_findings else declared.covering(rel)
         if _is_env_file(path.name):
             # N7 (TAKKO scan, 2026-08-11): this line used to read "committed .env file",
             # which the scanner has no way to know — it reads a TREE and cannot see git.
@@ -687,13 +703,23 @@ def _check_secret_scan(root, texts):
                         and not _is_identifier_echo(name, value)
                         and not _looks_placeholder(value)
                         and _shannon_entropy(value) >= floor):
+                    if covering is not None:
+                        declared_counts[covering.path] += 1
+                        declared_findings.append(
+                            f"{rel}:{lineno}: [heuristic, {covering.label()}] "
+                            f"hardcoded {name.lower()} value")
+                        continue
                     bucket.append(
                         f"{rel}:{lineno}: [heuristic] hardcoded {name.lower()} value")
+
+    header = _declaration_header(declared, declared_counts)
     if findings:
-        detail = "\n".join(findings)
-        if test_findings:
-            detail += ("\n\nAlso in test material (not blocking):\n"
-                       + "\n".join(test_findings))
+        detail = _join_sections(
+            header,
+            "\n".join(findings),
+            _test_material_section(test_findings),
+            _declared_section(declared_findings),
+        )
         return core.CheckResult(
             id="core.secret-scan", tier="blocker",
             title="Committed secrets detected",
@@ -709,22 +735,80 @@ def _check_secret_scan(root, texts):
                      "high-entropy literal: real most of the time, and worth a look "
                      "before you decide.",
         )
-    if test_findings:
+    if test_findings or declared_findings or declared.problems:
         # Reported, not blocked. A fixture password is not a deployable credential, and
         # a blocker that fires on every test suite is a blocker people learn to route
         # around — but a real key does get committed to a test file sometimes, so the
-        # finding still has to appear in the report with its file and line.
+        # finding still has to appear in the report with its file and line. A declared
+        # tree is the same bargain with the claim made by the repo instead of by the
+        # scanner, and a declaration PROBLEM lands here too: nothing was downgraded, and
+        # a claim the scanner refused is exactly what a reader has to see.
+        # The auto-detected bucket is only LABELLED when something else shares the
+        # report with it — on its own it is what the whole result is about, and the
+        # title says so. Two labelled sections beside each other is the point of the
+        # third bucket; a label over the only section is noise.
+        auto = (_test_material_section(test_findings) if declared_findings
+                else "\n".join(test_findings))
+        detail = _join_sections(header, auto, _declared_section(declared_findings))
         return core.CheckResult(
             id="core.secret-scan", tier="warning",
-            title="Secret-shaped values in test material only",
-            detail="\n".join(test_findings),
-            fix_hint="These are in test files, so they do not block a deploy. Confirm "
-                     "each one is a fixture rather than a real credential that was "
-                     "pasted into a test — if any is real, rotate it: it is in git "
-                     "history either way.",
+            title=_warning_title(test_findings, declared_findings, declared),
+            detail=detail,
+            fix_hint="These are in test material, so they do not block a deploy. "
+                     "Confirm each one is a fixture rather than a real credential that "
+                     "was pasted into a test — if any is real, rotate it: it is in git "
+                     "history either way. Lines marked `declared:` were downgraded by "
+                     f"this repo's own {declarations.DECLARATION_FILE}; the wizard asks "
+                     "you to accept that claim, and refusing it is how you say the "
+                     "declaration is wrong.",
         )
     return core.CheckResult(id="core.secret-scan", tier="ok",
-                            title="No committed secrets found")
+                            title="No committed secrets found", detail=header)
+
+
+def _warning_title(test_findings, declared_findings, declared):
+    if declared.problems and not (test_findings or declared_findings):
+        return f"{declarations.DECLARATION_FILE} declarations need attention"
+    if declared_findings or declared.problems:
+        return "Secret-shaped values in declared or test material only"
+    return "Secret-shaped values in test material only"
+
+
+def _join_sections(*sections):
+    return "\n\n".join(s for s in sections if s)
+
+
+def _test_material_section(test_findings):
+    if not test_findings:
+        return ""
+    return "Also in test material (not blocking):\n" + "\n".join(test_findings)
+
+
+def _declared_section(declared_findings):
+    if not declared_findings:
+        return ""
+    return ("Declared test material (downgrade claimed by "
+            f"{declarations.DECLARATION_FILE}, not blocking):\n"
+            + "\n".join(declared_findings))
+
+
+def _declaration_header(declared, counts):
+    """The claim, always visible when the repo made one.
+
+    Spec: the header is printed even when a declaration downgraded NOTHING (`0
+    findings`). A declaration that quiets nothing today is still a live assertion about
+    the tree, and one that has gone stale should be readable before the day it starts
+    hiding something — that is the whole reason the ruling put the claim in the report
+    rather than in a Hub-side waiver nobody sees.
+    """
+    lines = []
+    for declaration in declared.accepted:
+        lines.append(
+            f"Downgrades claimed by {declarations.DECLARATION_FILE}: "
+            f'{declaration.path} ("{declaration.reason}", '
+            f"{counts.get(declaration.path, 0)} findings)")
+    lines.extend(declared.problems)
+    return "\n".join(lines)
 
 
 def _has_pinned_requirements(directory):
@@ -955,7 +1039,10 @@ def common_checks(root):
     texts = _text_files(root)
     paths = [path for path, _ in texts]
     return [
-        _check_secret_scan(root, texts),
+        # Follow-up 2: `deployhub.yaml` is read once per suite and reaches ONE check.
+        # No other check takes it as an argument, which is the scope rule written as
+        # a call signature rather than as a promise.
+        _check_secret_scan(root, texts, declarations.load(root)),
         _check_lockfile(root, paths),
         _check_gitignore(root, texts, paths),
         _check_tests_exist(root),

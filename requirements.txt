@@ -11,3 +11,9 @@ redis>=5,<7
 django-otp>=1.5,<2
 qrcode>=7,<9
 psycopg[binary]>=3.2,<4
+# The scanner is Django-free and runs from this file alone (`python -m hub scan`),
+# and three of its readers are YAML: compose files (django module), pnpm workspaces
+# (node-ts), and `deployhub.yaml` (declared test material). It was dev-only until
+# 2026-08-11 — an install from requirements.txt could import the scanner and then
+# fail on the first tree that carried any of the three.
+PyYAML>=6

@@ -24,6 +24,7 @@ never call it themselves (D-010). A module may supersede a core result only by
 emitting the same id; absence is impossible, so a Django report can no longer be
 silently missing `core.secret-scan`.
 """
+import re
 from dataclasses import dataclass, field
 
 SCHEMA_VERSION = 1
@@ -165,6 +166,18 @@ def scan(root):
     if mods:
         from .modules.fallbacks import common_checks
         core_suite = common_checks(root)          # runs over the SCAN root, once
+        # Follow-up 2 (spec-declared-test-material.md §The report shows the claim): the
+        # DOWNGRADE is the repo's claim, made in its own `deployhub.yaml` and printed in
+        # the check detail; the ACCEPTANCE is the operator's, asked here and logged in
+        # the manifest, per §F5 action-tier friction. A repo that declares nothing adds
+        # no question and no manifest key, so every report predating this feature is
+        # unchanged byte for byte.
+        from . import declarations
+        declared = declarations.load(root)        # parsed once; two readers below
+        questions.extend(_declaration_questions(declared))
+        if declared.accepted:
+            manifest["declared_test_material"] = [
+                {"path": d.path, "reason": d.reason} for d in declared.accepted]
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
     for m in mods:
@@ -204,6 +217,33 @@ def scan(root):
         "manifest_draft": manifest,
         "summary": tiers,
     }
+
+
+def _declaration_questions(declared):
+    """One confirm per accepted declaration, in declaration order.
+
+    The id carries an INDEX and a slug, never the raw path, for one specific reason:
+    `wizard.materialize._env_name` turns any question id containing `.env.` into an
+    environment variable name, and a declared path is text the scanned repo controls —
+    `docker/.env.d` would otherwise turn a confirm into an env var. The slug is
+    non-alphanumerics collapsed to `-`, so it can hold no dot at all; the index keeps
+    two paths that slug alike apart, and the manifest's `declared_test_material` list is
+    in the same order, so an answer is always resolvable to its path.
+    """
+    questions = []
+    for index, declaration in enumerate(declared.accepted, 1):
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", declaration.path).strip("-").lower()
+        questions.append(WizardQuestion(
+            id=f"scanner.test_material.{index}.{slug}",
+            kind="bool",
+            default=None,          # no default: an unanswered claim is not an accepted one
+            prompt=(f"This repo declares `{declaration.path}` as test material — "
+                    f'"{declaration.reason}". Accept that claim? Heuristic secret '
+                    f"findings under that path are reported without blocking the "
+                    f"deploy; published credential formats and .env files there still "
+                    f"block."),
+        ))
+    return questions
 
 
 def _deep_merge(base, fragment):
