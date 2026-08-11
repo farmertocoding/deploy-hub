@@ -253,6 +253,82 @@ def test_review_f2_a_directory_name_may_not_downgrade_a_real_credential(
     assert (tier == "blocker") is blocks, f"{rel} -> {tier}"
 
 
+def test_review2_the_openai_pattern_does_not_match_a_css_class(tmp_path):
+    """`sk-[A-Za-z0-9_-]{32,}` matched every kebab-case class name of that length.
+
+    SpinKit's `.sk-chase-dot-…` ships in `public/vendor/` on a great many sites, and
+    axis 1 runs inside generated files by design — so a constructed Next.js tree
+    scanned as a blocker with two findings, both from one stylesheet and neither a
+    credential. The body may not contain `-` now; project keys keep the wider alphabet
+    but must carry the `sk-proj-` prefix and 64+ characters.
+    """
+    css = _project(tmp_path, {"public/vendor/spinkit.min.css": (
+        ".sk-chase-dot-before-animation-delay-frames-x{animation-delay:-1.1s}\n"
+        ".sk-circle-fade-dot-before-animation-delay-frames{opacity:0}\n")}, name="css")
+    assert _core(css)["core.secret-scan"].tier == "ok", _core(css)["core.secret-scan"].detail
+
+    for key in ("sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6",
+                # a real project key is ~150 chars of base64url
+                "sk-proj-" + "aB3-dE6_gH9jK2mN5pQ8rS1tU4vW7xY0zA3bC6dE9fG2hJ5kL8mN1pQ4rS7t"
+                + "uV0wX3yZ6aB9cD2eF5gH8iJ1kL4mN7oP0qR3sT6uV9wX2yZ5"):
+        tree = _project(tmp_path, {"conf.py": f'k = "{key}"\n'}, name=key[:12])
+        assert _core(tree)["core.secret-scan"].tier == "blocker", key
+
+
+def test_review2_a_connection_string_is_caught_whatever_it_is_called(tmp_path):
+    """`DATABASE_URL = "postgres://user:pass@host"` is the commonest committed database
+    credential there is, and the name carries no keyword — so the name-driven axis never
+    saw it, while `DB_SECRET = <same value>` blocked. It is a value format now."""
+    root = _project(tmp_path, {"settings.py": (
+        'DATABASE_URL = "postgres://app:Pr0dPassw0rd99@db.internal:5432/app"\n')})
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker"
+    assert "connection string" in result.detail and "[proof]" in result.detail
+
+    # A placeholder password, a short one, and a credential-free URL stay quiet.
+    for value in ("postgres://app:changeme@localhost:5432/app",
+                  "postgres://app:pw@localhost:5432/app",
+                  "postgres://app@localhost:5432/app",
+                  "https://example.com/health"):
+        quiet = _project(tmp_path, {"s.py": f'DATABASE_URL = "{value}"\n'},
+                         name=str(abs(hash(value))))
+        assert _core(quiet)["core.secret-scan"].tier == "ok", value
+
+
+def test_review2_a_docker_registry_auth_blob_is_decoded(tmp_path):
+    """`"auth": "<base64>"` in a docker config is `user:password`, and `auth` is not a
+    secret keyword. Decoding is what separates it from any other base64 blob."""
+    import base64 as b64
+    real = b64.b64encode(b"deployer:Pr0dRegistryPassw0rd").decode()
+    root = _project(tmp_path, {".docker/config.json": (
+        '{"auths": {"registry.example.com": {"auth": "%s"}}}\n' % real)})
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker" and "docker registry auth" in result.detail
+
+    # A base64 blob under `auth` that is not user:password is not this finding.
+    other = b64.b64encode(b"just-some-opaque-token-value").decode()
+    quiet = _project(tmp_path, {"c.json": '{"auth": "%s"}\n' % other}, name="quiet")
+    assert _core(quiet)["core.secret-scan"].tier == "ok"
+
+
+def test_review2_findings_say_which_are_proof_and_which_are_guesses(tmp_path):
+    """The report mixes a matched credential format with a name-and-entropy guess, and
+    a reader who cannot tell them apart will discount both equally.
+
+    The security review's own framing: axis 1 is proof, axis 2 is a heuristic, and
+    presenting them identically overstates the second.
+    """
+    root = _project(tmp_path, {
+        "a.py": "deploy_key = ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8" + "\n",
+        "b.py": f'API_TOKEN_VALUE = "{FAKE_HIGH_ENTROPY}"\n'})
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker"
+    assert "[proof] GitHub token" in result.detail
+    assert "[heuristic] hardcoded api_token_value value" in result.detail
+    assert "[proof]" in result.fix_hint and "[heuristic]" in result.fix_hint, (
+        "the labels appear in the findings but nothing tells the reader what they mean")
+
+
 PEM = ("-----BEGIN RSA PRIVATE KEY-----\n"
        "MIIEowIBAAKCAQEA3Tz2mr7SZiAMfQyuvBjM9Oi8oL0kK1kZ4XxYqK8pDDdVYQmZ\n"
        "-----END RSA PRIVATE KEY-----\n")

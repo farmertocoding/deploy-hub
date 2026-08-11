@@ -16,6 +16,7 @@ manifest reading only. Nothing from the scanned tree is ever executed on the
 Hub, and the `dockerfile` module emits NO build spec: the image build is
 pipeline step 1, governed by §B1, not a scan-time sandbox job.
 """
+import base64
 import math
 import re
 from pathlib import Path
@@ -69,9 +70,24 @@ _CREDENTIAL_FORMATS = (
     ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
     ("PyPI token", re.compile(r"\bpypi-[A-Za-z0-9_-]{16,}")),
     ("SendGrid key", re.compile(r"\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}")),
-    ("Twilio account sid", re.compile(r"\bAC[0-9a-f]{32}\b")),
-    ("OpenAI key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}")),
+    # Reviewed: the body may not contain `-`. `sk-[A-Za-z0-9_-]{32,}` matched every
+    # kebab-case CSS class of that length, and SpinKit's `.sk-chase-dot-…` ships in
+    # `public/vendor/` on a great many sites — two blockers on a constructed Next.js
+    # tree, both from one stylesheet, no credentials. Project keys keep the wider
+    # alphabet but must carry the `sk-proj-` prefix and be 64+ characters, which no
+    # class name is.
+    ("OpenAI key", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
+    ("OpenAI project key", re.compile(r"\bsk-proj-[A-Za-z0-9_-]{64,}")),
+    # Twilio's `AC[0-9a-f]{32}` was dropped on review: it is the Account SID, a public
+    # identifier, not the Auth Token — and it collides with any content-addressed hex.
+    # Flagging a non-secret costs the check's credibility twice over.
 )
+
+# Axis 1, two entries that need a look at the match rather than just its shape.
+_CONNECTION_STRING_RE = re.compile(
+    r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis(?:s)?|amqps?|ftp|"
+    r"ssh|https?)://(?P<user>[^/\s:@'\"]*):(?P<password>[^/\s@'\"]+)@", re.IGNORECASE)
+_DOCKER_AUTH_RE = re.compile(r'"auth"\s*:\s*"(?P<b64>[A-Za-z0-9+/]{16,}={0,2})"')
 
 # The keyword may sit ANYWHERE in the identifier, and that is the whole point of the
 # widening (D-010 follow-up item 3). The previous pattern required the keyword to be
@@ -318,6 +334,37 @@ def _is_env_file(name):
 
 # ── common core checks (id prefix `core.`) ──────────────────────────────────────
 
+def _credential_format_in(line):
+    """The label of the published credential format on this line, or None.
+
+    Axis 1. The two shapes that need more than a pattern are handled here: a connection
+    string is only a finding if its userinfo carries a real-looking password, and a
+    docker `"auth"` blob only if it base64-decodes to `user:password`.
+    """
+    for label, pattern in _CREDENTIAL_FORMATS:
+        if pattern.search(line):
+            return label
+    # Reviewed as a miss: `DATABASE_URL = "postgres://user:pass@host"` is the single
+    # commonest committed database credential, and the name carries no keyword, so the
+    # name-driven axis never saw it. As a value format it fires regardless of the name.
+    match = _CONNECTION_STRING_RE.search(line)
+    if match:
+        password = match.group("password")
+        if len(password) >= 6 and not _looks_placeholder(password):
+            return "connection string with an embedded password"
+    match = _DOCKER_AUTH_RE.search(line)
+    if match:
+        try:
+            decoded = base64.b64decode(match.group("b64"), validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            decoded = ""
+        # A docker registry auth is base64 of `username:password`. Decoding is what
+        # separates it from any other base64 blob under a key called `auth`.
+        if ":" in decoded and len(decoded.split(":", 1)[1]) >= 6:
+            return "docker registry auth (base64 user:password)"
+    return None
+
+
 def _is_identifier_echo(name, value):
     """`CLOUD_CREDENTIAL = "cloud_credential"` — the value IS the name.
 
@@ -342,10 +389,9 @@ def _check_secret_scan(root, texts):
         for lineno, line in enumerate(text.splitlines(), 1):
             # Axis 1 — a published credential format. Runs even in generated files: a
             # bundler can inline a key, and `AKIA…` in a minified bundle is still a key.
-            fmt = next((label for label, pattern in _CREDENTIAL_FORMATS
-                        if pattern.search(line)), None)
+            fmt = _credential_format_in(line)
             if fmt:
-                bucket.append(f"{rel}:{lineno}: {fmt}")
+                bucket.append(f"{rel}:{lineno}: [proof] {fmt}")
                 continue
             # Axis 2 — a secret-ish name assigned a high-entropy literal. This one is a
             # heuristic, so it does not run over machine-written files.
@@ -362,7 +408,8 @@ def _check_secret_scan(root, texts):
                         and not _is_identifier_echo(name, value)
                         and not _looks_placeholder(value)
                         and _shannon_entropy(value) >= floor):
-                    bucket.append(f"{rel}:{lineno}: hardcoded {name.lower()} value")
+                    bucket.append(
+                        f"{rel}:{lineno}: [heuristic] hardcoded {name.lower()} value")
     if findings:
         detail = "\n".join(findings)
         if test_findings:
@@ -374,7 +421,12 @@ def _check_secret_scan(root, texts):
             detail=detail,
             fix_hint="Move secrets to the vault / environment injection, rotate any "
                      "value that was committed, and add .env to .gitignore. "
-                     "Committed secrets stay in git history until rotated.",
+                     "Committed secrets stay in git history until rotated.\n\n"
+                     "[proof] lines matched a published credential format — a GitHub "
+                     "token, a PEM block, an AWS key id — and are not guesses. "
+                     "[heuristic] lines are a secret-shaped name assigned a "
+                     "high-entropy literal: real most of the time, and worth a look "
+                     "before you decide.",
         )
     if test_findings:
         # Reported, not blocked. A fixture password is not a deployable credential, and
