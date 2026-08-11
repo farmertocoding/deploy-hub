@@ -4,6 +4,7 @@ matrix (one edit per mutation; exactly the named check flips tier)."""
 import json
 import pathlib
 import shutil
+from typing import NamedTuple
 
 import pytest
 
@@ -393,20 +394,76 @@ def test_mutation_flips_exactly_the_target_check(tmp_path, pristine_report,
 # the other branch of the message (or the check's absence) and are proven by the
 # minimal-tree test below. Q7-NODE-FIXTURE says "a mutation set asserting EACH check's
 # negative case" — before R4-11 WI-8, seven checks had no entry here at all.
-_BRANCH_TEST = "test_issue_r4_11_detection_recordings_have_their_negative_branch"
+class _Owner(NamedTuple):
+    """Who proves one check's negative case, in a form a test can *resolve*.
+
+    R4-11 F-3: these values used to be prose — `"MUTATIONS #10"` — that nothing ever
+    cross-checked against the real `MUTATIONS` list. Deleting the `unsurface_feed_age`
+    row left `node-ts.ingest-staleness` pointing at a matrix entry that no longer
+    existed, and both enforcement tests below stayed green: the map recorded an
+    intention, not a fact. `ref` now names the thing that does the proving, and the
+    enforcement test resolves every one of them.
+
+    The MUTATIONS.md table numbering lives on the `mutate_*` functions above, one per
+    row, so the fixture contract is still one grep away from the row name.
+    """
+
+    kind: str   # "matrix" | "branch" | "test"
+    ref: str    # MUTATIONS row name | branch-test name | test function name
+
+
+def _matrix(row_name):
+    """Negative case is the named row of the `MUTATIONS` matrix (a tier flip)."""
+    return _Owner("matrix", row_name)
+
+
+def _named_test(func_name):
+    """Negative case is a standalone test in this module (predates the matrix)."""
+    return _Owner("test", func_name)
+
+
+_BRANCH_TEST = _Owner(
+    "branch", "test_issue_r4_11_detection_recordings_have_their_negative_branch")
+
+# The checks whose negative case is the other branch of a message (or the check being
+# absent) rather than a tier flip, so they cannot live in the single-edit MUTATIONS
+# matrix. `test_issue_r4_11_detection_recordings_have_their_negative_branch` iterates
+# THIS constant and demands an assertion block per id — a check cannot be listed as
+# branch-owned while its branch goes unasserted, which is the other half of F-3:
+# before it, deleting an assertion from that test lost a negative case silently.
+_CORE_MATRIX_TARGETS = frozenset({"core.lockfile", "core.secret-scan"})
+"""The common-core checks the Q7 fixture contract carries a mutation for (MUTATIONS.md
+#5 and #6). They are not `node-ts.*` checks so they have no `NEGATIVE_CASE_OWNER` entry
+— pinned separately, because otherwise "removing any MUTATIONS row goes red" would hold
+for nine rows and quietly not for these two."""
+
+_BRANCH_TEST_CHECKS = frozenset({
+    "node-ts.monorepo",
+    "node-ts.service-package",
+    "node-ts.recognized-deps",
+    "node-ts.worker-threads",
+    "node-ts.offline-component",
+    "node-ts.jobs-image",
+    "node-ts.exclusive-upstream",
+    "node-ts.local-state",
+    "node-ts.secrets-env",
+})
 
 NEGATIVE_CASE_OWNER = {
-    "node-ts.strict-build": "MUTATIONS #1",
-    "node-ts.graceful-shutdown": "MUTATIONS #2",
-    "node-ts.readiness-pattern": "MUTATIONS #3",
-    "node-ts.ws-heartbeat": "MUTATIONS #4",
-    "node-ts.ingest-reconnect": "MUTATIONS #7",
-    "node-ts.compiled-js": "MUTATIONS #8",
-    "node-ts.engines-pin": "MUTATIONS #9",
-    "node-ts.ingest-staleness": "MUTATIONS #10",
-    "node-ts.ingest-backfill": "MUTATIONS #11",
-    "node-ts.bun-dev-only": "MUTATIONS #12 (test_bun_in_the_runtime_path_is_flagged)",
-    "node-ts.fastify-serving": "MUTATIONS #13 (test_missing_trust_proxy_flags_fastify_serving)",
+    "node-ts.strict-build": _matrix("strict_false"),
+    "node-ts.graceful-shutdown": _matrix("remove_sigterm"),
+    "node-ts.readiness-pattern": _matrix("remove_ready_gate"),
+    "node-ts.ws-heartbeat": _matrix("remove_heartbeat"),
+    "node-ts.ingest-reconnect": _matrix("remove_reconnect_backoff"),
+    "node-ts.compiled-js": _matrix("ts_node_start"),
+    "node-ts.engines-pin": _matrix("remove_engines"),
+    "node-ts.ingest-staleness": _matrix("unsurface_feed_age"),
+    "node-ts.ingest-backfill": _matrix("unbounded_backfill"),
+    "node-ts.bun-dev-only": _named_test("test_bun_in_the_runtime_path_is_flagged"),
+    "node-ts.fastify-serving": _named_test(
+        "test_missing_trust_proxy_flags_fastify_serving"),
+    # Listed one by one rather than spread from _BRANCH_TEST_CHECKS: the equality
+    # assertion below is only worth running if the two are written independently.
     "node-ts.monorepo": _BRANCH_TEST,
     "node-ts.service-package": _BRANCH_TEST,
     "node-ts.recognized-deps": _BRANCH_TEST,
@@ -421,18 +478,59 @@ NEGATIVE_CASE_OWNER = {
 
 @pytest.mark.req("Q7-NODE-FIXTURE")
 def test_issue_r4_11_every_node_ts_check_has_a_negative_case():
-    """The "each check" scope of the requirement, made mechanical.
+    """The "each check" scope of the requirement, made mechanical — in both directions.
 
-    Without this, adding a 21st check to the module leaves the requirement reading
-    `verified` on a mutation set that never touches it — the same class of gap the
-    R4-11 audit found. A new check must land with its negative case or go red here.
+    Adding a 21st check leaves the requirement reading `verified` on a mutation set
+    that never touches it (the gap the R4-11 audit found); *removing* a negative case
+    does the same thing more quietly, because nothing was deleted from the inventory —
+    which is R4-11 F-3. So the owner map is checked against the real `MUTATIONS` list
+    and the real test functions, not read as documentation.
     """
-    missing = sorted(set(EXPECTED_TIERS) - set(NEGATIVE_CASE_OWNER))
-    assert missing == [], f"checks with no negative case: {missing}"
+    assert set(NEGATIVE_CASE_OWNER) == set(EXPECTED_TIERS), (
+        f"owner map and check inventory disagree: "
+        f"no negative case for {sorted(set(EXPECTED_TIERS) - set(NEGATIVE_CASE_OWNER))}, "
+        f"stale entries for {sorted(set(NEGATIVE_CASE_OWNER) - set(EXPECTED_TIERS))}")
+
+    matrix_rows = {name: target for name, _mutate, target, _tier in MUTATIONS}
+    assert len(matrix_rows) == len(MUTATIONS), "duplicate row names in MUTATIONS"
+
     # Every matrix row must name a check the fixture actually produces.
-    unknown = sorted({target for _n, _m, target, _e in MUTATIONS
-                      if not target.startswith("core.")} - set(EXPECTED_TIERS))
+    matrix_targets = {t for t in matrix_rows.values() if not t.startswith("core.")}
+    unknown = sorted(matrix_targets - set(EXPECTED_TIERS))
     assert unknown == [], f"MUTATIONS rows target unknown checks: {unknown}"
+    assert {t for t in matrix_rows.values() if t.startswith("core.")} \
+        == set(_CORE_MATRIX_TARGETS), "the fixture's common-core mutation rows changed"
+
+    # A claim of a matrix row resolves to a row that exists AND targets this check.
+    for check_id, owner in sorted(NEGATIVE_CASE_OWNER.items()):
+        if owner.kind != "matrix":
+            continue
+        assert matrix_rows.get(owner.ref) == check_id, (
+            f"{check_id} claims MUTATIONS row {owner.ref!r}, which "
+            + (f"targets {matrix_rows[owner.ref]}" if owner.ref in matrix_rows
+               else "does not exist — the row was removed and the claim was not"))
+
+    # ...and the other direction, so a row cannot cover a check nobody credited to it.
+    claimed_by_matrix = {check_id for check_id, owner in NEGATIVE_CASE_OWNER.items()
+                         if owner.kind == "matrix"}
+    assert claimed_by_matrix == matrix_targets, (
+        f"matrix rows exist for {sorted(matrix_targets - claimed_by_matrix)} but no "
+        f"check credits them; {sorted(claimed_by_matrix - matrix_targets)} credit a "
+        f"matrix row that is gone")
+
+    # Test-owned claims must name a test that exists here — a rename or deletion is a
+    # lost negative case exactly like a deleted matrix row.
+    for check_id, owner in sorted(NEGATIVE_CASE_OWNER.items()):
+        if owner.kind == "matrix":
+            continue
+        func = globals().get(owner.ref)
+        assert owner.ref.startswith("test_") and callable(func), (
+            f"{check_id}'s negative case names {owner.ref!r}, which is not a test "
+            f"function in this module")
+
+    # The branch-owned entries and the constant the branch test iterates are one list.
+    assert {check_id for check_id, owner in NEGATIVE_CASE_OWNER.items()
+            if owner.kind == "branch"} == set(_BRANCH_TEST_CHECKS)
 
 
 @pytest.mark.req("Q7-NODE-FIXTURE")
@@ -447,6 +545,12 @@ def test_issue_r4_11_detection_recordings_have_their_negative_branch(tmp_path):
     a single-package project, detected only by its serverish `main`, with no
     recognized dependency, no worker threads, no pyproject.toml, and no server
     framework dependency to make it a deployable service.
+
+    R4-11 F-3: the assertions are registered per check id and then driven from
+    `_BRANCH_TEST_CHECKS`, so deleting a check's block fails the coverage assertion
+    rather than quietly shrinking what "proven by the branch test" covers. Before
+    this, dropping the `worker-threads` line left the owner map still claiming this
+    test proves it — with nothing here that did.
     """
     (tmp_path / "package.json").write_text(json.dumps({
         "name": "solo", "main": "dist/index.js",
@@ -459,26 +563,64 @@ def test_issue_r4_11_detection_recordings_have_their_negative_branch(tmp_path):
     assert node_ts.module.detect(tmp_path) is True  # serverish main alone detects
     checks = {c.id: c for c in node_ts.module.checks(tmp_path)}
 
-    assert checks["node-ts.monorepo"].title == "Single-package Node project"
-    assert "No pnpm-workspace.yaml" in checks["node-ts.monorepo"].detail
+    negatives = {}
 
-    assert checks["node-ts.service-package"].tier == "warning"
-    assert "No workspace package has a server framework dependency" in \
-        checks["node-ts.service-package"].detail
+    def negative(check_id):
+        def register(fn):
+            negatives[check_id] = fn
+            return fn
+        return register
 
-    assert "(none)" in checks["node-ts.recognized-deps"].detail
-    assert "ingestion-daemon checks armed" not in checks["node-ts.recognized-deps"].detail
+    @negative("node-ts.monorepo")
+    def _monorepo():
+        assert checks["node-ts.monorepo"].title == "Single-package Node project"
+        assert "No pnpm-workspace.yaml" in checks["node-ts.monorepo"].detail
 
-    assert checks["node-ts.worker-threads"].title.endswith("not detected")
+    @negative("node-ts.service-package")
+    def _service_package():
+        assert checks["node-ts.service-package"].tier == "warning"
+        assert "No workspace package has a server framework dependency" in \
+            checks["node-ts.service-package"].detail
 
-    assert "node-ts.offline-component" not in checks
-    assert "node-ts.jobs-image" not in checks   # no offline component ⇒ no jobs image
+    @negative("node-ts.recognized-deps")
+    def _recognized_deps():
+        assert "(none)" in checks["node-ts.recognized-deps"].detail
+        assert "ingestion-daemon checks armed" not in \
+            checks["node-ts.recognized-deps"].detail
+
+    @negative("node-ts.worker-threads")
+    def _worker_threads():
+        assert checks["node-ts.worker-threads"].title.endswith("not detected")
+
+    @negative("node-ts.offline-component")
+    def _offline_component():
+        assert "node-ts.offline-component" not in checks
+
+    @negative("node-ts.jobs-image")
+    def _jobs_image():
+        assert "node-ts.jobs-image" not in checks  # no offline component ⇒ no image
 
     # The three checks that fire at a non-ok tier on the pristine fixture have their
     # quiet branch here — the same "negative case" obligation, mirrored.
-    assert checks["node-ts.exclusive-upstream"].tier == "ok"
-    assert checks["node-ts.local-state"].tier == "ok"
-    assert checks["node-ts.secrets-env"].tier == "ok"
+    @negative("node-ts.exclusive-upstream")
+    def _exclusive_upstream():
+        assert checks["node-ts.exclusive-upstream"].tier == "ok"
+
+    @negative("node-ts.local-state")
+    def _local_state():
+        assert checks["node-ts.local-state"].tier == "ok"
+
+    @negative("node-ts.secrets-env")
+    def _secrets_env():
+        assert checks["node-ts.secrets-env"].tier == "ok"
+
+    assert set(negatives) == set(_BRANCH_TEST_CHECKS), (
+        f"branch-owned checks with no assertion here: "
+        f"{sorted(set(_BRANCH_TEST_CHECKS) - set(negatives))}; "
+        f"asserted here but not branch-owned: "
+        f"{sorted(set(negatives) - set(_BRANCH_TEST_CHECKS))}")
+    for check_id in sorted(_BRANCH_TEST_CHECKS):
+        negatives[check_id]()
 
 
 @pytest.mark.req("Q7-NODE-FIXTURE")

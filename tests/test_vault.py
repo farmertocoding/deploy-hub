@@ -8,6 +8,7 @@ perform the swap and watch it fail.
 import os
 import pathlib
 import stat
+import types
 
 import pytest
 from django.test import override_settings
@@ -40,18 +41,92 @@ def test_roundtrip():
 
 @pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
 def test_fresh_dek_per_write():
-    """Identical plaintext, two writes: ciphertext, nonce and wrapped DEK all differ.
+    """Identical plaintext, two writes: the two rows are encrypted under *different
+    DEKs* — compared as keys, after unwrapping, not as wrapped bytes.
 
-    If a DEK were reused, equal ciphertexts would leak equality of secrets across rows.
+    R4-11 F-2 correction (2026-08-11). This test used to assert
+    `a.wrapped_dek != b.wrapped_dek` and justify it as "if a DEK were reused, equal
+    ciphertexts would leak equality of secrets across rows". Both halves were wrong,
+    and the docstring was the more dangerous half because it told the next reader the
+    clause was covered:
+
+    * `kek.wrap()` prepends a fresh `os.urandom` nonce, so two *identical* DEKs wrap to
+      different bytes every time — that assertion could not fail.
+    * `service.put()` draws a fresh GCM nonce, so equal plaintexts under a shared DEK
+      still produce different ciphertexts. Nonce freshness, not DEK freshness, is what
+      stops ciphertext equality from leaking plaintext equality.
+
+    Measured: pinning `dek = b"\\x42" * DEK_BYTES` in `vault/service.py` left all 23
+    vault tests green, this one included. What fresh-DEK-per-write actually buys is
+    blast radius (one recovered DEK decrypts exactly one row) and DEKs that never need
+    rotation because no key is used often enough to approach GCM's nonce budget —
+    `deploy-system-plan.md` §6.9. That is a claim about the keys, so the keys are what
+    this test compares. Where the key *comes from* is pinned separately by
+    `test_issue_r4_11_f2_dek_is_drawn_from_the_csprng` — "different every write" is
+    necessary, not sufficient.
     """
+    from vault.kek import get_backend
+
     a, b = _put(), _put()
-    assert bytes(a.ciphertext) != bytes(b.ciphertext)
+    backend = get_backend()
+    dek_a = backend.unwrap(bytes(a.wrapped_dek))
+    dek_b = backend.unwrap(bytes(b.wrapped_dek))
+    assert dek_a != dek_b, "both rows are encrypted under the same DEK"
+    assert len(dek_a) == len(dek_b) == service.DEK_BYTES
+
+    # Nonce freshness is the property that keeps equal plaintexts from producing equal
+    # ciphertexts, and unlike the wrapped-DEK comparison it can genuinely fail (a fixed
+    # or counter-reset nonce breaks it), so it stays asserted — on its own terms.
     assert bytes(a.nonce) != bytes(b.nonce)
-    assert bytes(a.wrapped_dek) != bytes(b.wrapped_dek)
+    assert bytes(a.ciphertext) != bytes(b.ciphertext)
+
     # ... and both still decrypt to the same thing.
     assert service.get(a) == service.get(b) == SECRET_MARKER
     # Fingerprints match — that's how the UI compares without decrypting.
     assert a.fingerprint == b.fingerprint
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_issue_r4_11_f2_dek_is_drawn_from_the_csprng(monkeypatch):
+    """R4-11 F-2: the DEK must come from `os.urandom`, and be the key the row is
+    encrypted under.
+
+    Comparing two unwrapped DEKs proves they differ; it cannot prove they are
+    *unpredictable*. `dek = random.randbytes(DEK_BYTES)` is fresh per write, differs
+    every time, and is a Mersenne Twister draw an attacker who sees a few outputs can
+    continue — it kept all 23 vault tests green before this test existed. So the draw
+    itself is recorded: `put()` must take exactly two values from the CSPRNG, the DEK
+    then the GCM nonce, and the DEK it stored must be the one it drew.
+
+    Note the patch target. `import os` binds the one shared module object, so
+    `setattr(service.os, "urandom", ...)` would swap the CSPRNG out from under
+    `vault.kek` and Django too for the duration of the test. Replacing *this module's
+    reference* to `os` keeps the blast radius at `vault.service`, which is the only
+    thing under test here — and `vault/service.py` uses `os` for nothing else.
+    """
+    from vault.kek import get_backend
+
+    real_urandom = os.urandom
+    draws = []
+
+    def recording_urandom(n):
+        value = real_urandom(n)
+        draws.append((n, value))
+        return value
+
+    monkeypatch.setattr(service, "os", types.SimpleNamespace(urandom=recording_urandom))
+    secret = _put()
+
+    assert [n for n, _value in draws] == [service.DEK_BYTES, service.NONCE_BYTES], (
+        f"put() must draw the DEK ({service.DEK_BYTES} bytes) then the GCM nonce "
+        f"({service.NONCE_BYTES} bytes) from os.urandom and nothing else; "
+        f"observed draws of {[n for n, _value in draws]} bytes"
+    )
+    drawn_dek, drawn_nonce = draws[0][1], draws[1][1]
+    # The drawn bytes are the material actually used — not a decoy draw beside a DEK
+    # that came from somewhere else.
+    assert get_backend().unwrap(bytes(secret.wrapped_dek)) == drawn_dek
+    assert bytes(secret.nonce) == drawn_nonce
 
 
 @pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
