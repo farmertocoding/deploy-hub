@@ -504,3 +504,151 @@ def test_an_oversized_declaration_file_is_refused_unparsed(tmp_path):
     assert "Downgrades claimed" not in result.detail
     assert "too large" in result.detail
     assert "[heuristic] hardcoded staff_password value" in result.detail
+
+
+# ── adversarial round 2: the line break is whatever the RENDERER thinks it is ───
+#
+# Round 1 refused C0 and DEL and called the forgery closed. It was not: `str.splitlines`
+# — which is what builds this report's lines, and what any Python reader of it will use
+# — also breaks on U+2028, U+2029 and U+0085, and a browser rendering the JSON breaks on
+# the first two as well (they are JS LineTerminators). The PATH vector was the worse of
+# the two, because a directory really can be named with U+2028 on every filesystem the
+# scanner runs on: the declaration passed the existence check and was ACCEPTED, and the
+# forged line appeared in the header and in every label.
+#
+# The class this validator refuses is therefore defined by what RENDERERS treat as
+# structure, not by what YAML admits. Escapes are spelled out below rather than pasted
+# as literals, for the same reason the refusal quotes nothing: a test file is read too.
+
+LSEP = "\u2028"        # LINE SEPARATOR — a line break to splitlines() and to JS
+PSEP = "\u2029"        # PARAGRAPH SEPARATOR — the same
+NEL = "\u0085"         # NEXT LINE — the one C1 character PyYAML lets through
+RLO = "\u202e"         # RIGHT-TO-LEFT OVERRIDE — reverses rendered order
+ZWSP = "\u200b"        # ZERO WIDTH SPACE — renders as nothing at all
+CHINESE_REASON = "\u7d05\u968a\u6f14\u7df4\u7528\u5047\u5bc6\u78bc"   # 紅隊演練用假密碼
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_unicode_line_separator_in_a_reason_cannot_forge_report_lines(tmp_path):
+    """The verifier's round-2 case. `[\\x00-\\x1f\\x7f]` does not contain U+2028, and
+    every line of this report is produced by `splitlines`, which does."""
+    forged = (f"drill scripts{LSEP}{LSEP}Also in test material (not blocking):{LSEP}"
+              f"src/app.py:1: [heuristic] hardcoded api_key value")
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/drill\n"
+        f'      reason: "{forged}"\n')
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    lines = result.detail.splitlines()
+    for line in lines:
+        assert line.strip() != "Also in test material (not blocking):", lines
+        assert not line.startswith("src/app.py:1"), lines
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_unicode_line_separator_in_a_real_directory_name_is_refused(tmp_path):
+    """The path vector, with the directory actually on disk — the case round 1 left
+    fully open. A filesystem accepts every byte but `/` and NUL, so the declaration
+    pointed at a real tree, passed the existence check and was accepted."""
+    # No colon anywhere in the name, deliberately: the first cut refused this case by
+    # accident, through the Windows drive-letter test (`":" in parts[0]`), which the
+    # forged section header happened to contain. A forgery that avoids the colon showed
+    # the vector was wide open.
+    forged_dir = f"drill{LSEP}Also in test material (not blocking)"
+    files = dict(_drill_files())
+    files[f"{forged_dir}/qa.mjs"] = f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n'
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        f'    - path: "{forged_dir}"\n'
+        f"      reason: {DRILL_REASON}\n")
+    root = _tree(tmp_path, files)
+    assert (root / forged_dir).is_dir(), "the fixture must put the real directory there"
+
+    result = _secret_scan(root)
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    for line in result.detail.splitlines():
+        assert line.strip() != "Also in test material (not blocking)", result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("char,name", [
+    (LSEP, "U+2028 LINE SEPARATOR"),
+    (PSEP, "U+2029 PARAGRAPH SEPARATOR"),
+    # NEL is passed as its YAML escape, not as a literal: PyYAML FOLDS a literal
+    # U+0085 inside a quoted scalar to a space (it is a line break to the scanner), so
+    # the escape is the only way one reaches a value — and it does reach it.
+    ("\\u0085", "U+0085 NEXT LINE (YAML escape)"),
+    (RLO, "U+202E RIGHT-TO-LEFT OVERRIDE"),
+    (ZWSP, "U+200B ZERO WIDTH SPACE"),
+    ("\ufeff", "U+FEFF ZERO WIDTH NO-BREAK SPACE"),
+    ("\u2060", "U+2060 WORD JOINER"),
+    ("\u200f", "U+200F RIGHT-TO-LEFT MARK"),
+    ("\u0091", "U+0091 PRIVATE USE ONE (C1)"),
+])
+def test_deceptive_code_points_are_refused_in_both_fields(tmp_path, char, name):
+    """Two families, one rule. The line-breaking ones forge structure; the bidi and
+    zero-width ones forge appearance — a reason reading `drill scripts` on screen while
+    the bytes say something else is a justification nobody can review."""
+    for field in ("reason", "path"):
+        files = dict(_drill_files())
+        if field == "reason":
+            body = ("scanner:\n  test_material:\n"
+                    "    - path: frontend/scripts/drill\n"
+                    f'      reason: "drill{char}scripts"\n')
+        else:
+            body = ("scanner:\n  test_material:\n"
+                    f'    - path: "frontend/scripts/dr{char}ill"\n'
+                    f"      reason: {DRILL_REASON}\n")
+        files["deployhub.yaml"] = body
+        result = _secret_scan(_tree(tmp_path, files,
+                                    name=f"u{abs(hash(char + field))}"))
+        assert result.tier == "blocker", f"{name} in {field}: {result.detail}"
+        assert "Downgrades claimed" not in result.detail, f"{name} in {field}"
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_an_ordinary_non_ascii_reason_is_accepted_end_to_end(tmp_path):
+    """The over-correction guard, and the one that matters most for this fleet: every
+    repo it scans is Taiwanese, and the reasons will be written in Chinese. A validator
+    that refused 紅隊演練用假密碼 would make the feature unusable by the people it was
+    built for — refusing code points that lie about STRUCTURE is not refusing a script.
+    """
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill", CHINESE_REASON)
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "warning", result.detail
+    assert (f"Downgrades claimed by deployhub.yaml: frontend/scripts/drill "
+            f'("{CHINESE_REASON}", 2 findings)') in result.detail
+    assert f'declared: frontend/scripts/drill — "{CHINESE_REASON}"' in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_the_json_cli_emits_the_reason_raw_so_the_validator_is_the_guarantee(
+        tmp_path, capsys):
+    """`python -m hub scan --json` dumps with `ensure_ascii=False`, so a reason reaches
+    a downstream JS/HTML renderer as the characters themselves rather than as `\\uXXXX`
+    escapes. That is deliberate and stays — changing it would move the recorded demo
+    artifacts — and it is precisely why the refusal above has to cover what a RENDERER
+    treats as structure: nothing between this validator and the browser will escape a
+    U+2028 on the way. This test is the standing assertion of that division of labour;
+    if the CLI ever starts escaping, the comment above is wrong and should be re-read.
+    """
+    import hub.__main__ as cli
+
+    files = dict(_drill_files())
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill", CHINESE_REASON)
+    root = _tree(tmp_path, files)
+
+    cli.main(["scan", str(root), "--json"])
+    out = capsys.readouterr().out
+    assert CHINESE_REASON in out, "the CLI stopped emitting raw non-ASCII"
+    assert "\\u2028" not in out and LSEP not in out

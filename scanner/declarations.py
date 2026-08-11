@@ -50,7 +50,40 @@ DECLARATION_FILE = "deployhub.yaml"
 # The rule is refuse, never repair. Text that will be read as the justification for
 # hiding findings is exactly what was written or it is rejected — a collapsed forgery is
 # still a claim nobody wrote, and it would be printed as if somebody had.
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# ROUND 2 WIDENED THIS CLASS, because round 1 defined it by what looks like a control
+# character in ASCII and the forgery reopened one code point up. The class is defined by
+# what a RENDERER treats as structure, not by what YAML admits:
+#
+#   * `str.splitlines` — which builds every line of this report — breaks on U+2028,
+#     U+2029 and U+0085 as well as on C0. `[\x00-\x1f\x7f]` contained none of them;
+#   * a browser rendering the `--json` output breaks on U+2028/U+2029 too: they are JS
+#     LineTerminators, and the CLI dumps with `ensure_ascii=False`, so nothing between
+#     this validator and the browser will escape them;
+#   * PyYAML's reader refuses most of C1 as non-printable, which hid the gap — U+0085
+#     is the one it admits, so C1 is refused HERE rather than left to a dependency's
+#     idea of printable.
+#
+# The second family is not about lines but about appearance: bidi overrides (U+202A-E,
+# U+200E/F) reverse rendered order and zero-width code points (U+200B-D, U+2060-4,
+# U+FEFF) render as nothing, so a reason can read `drill scripts` on screen while the
+# bytes say something else. A justification nobody can read accurately is not reviewable,
+# which is the whole purpose of the field.
+#
+# Ordinary non-ASCII text is untouched and must stay that way: this fleet is Taiwanese
+# and reasons will be written in Chinese. Refusing code points that lie about structure
+# is not refusing a script.
+_CONTROL_CHARS_RE = re.compile(
+    "["
+    "\\x00-\\x1f"        # C0
+    "\\x7f"              # DEL
+    "\\x80-\\x9f"        # C1, incl. U+0085 NEL - the one PyYAML lets through
+    "\\u2028\\u2029"      # LINE / PARAGRAPH SEPARATOR
+    "\\u200b-\\u200f"     # zero-width space/joiners + LRM/RLM
+    "\\u202a-\\u202e"     # bidi embeddings and overrides
+    "\\u2060-\\u2064"     # word joiner + invisible operators
+    "\\ufeff"            # BOM / zero-width no-break space
+    "]"
+)
 # A cap, because length is the other way to edit the report: the findings count sits at
 # the END of the header line, and a wall of prose in front of it buries the number the
 # reader came for.
@@ -256,10 +289,21 @@ def _read_entry(root, index, entry):
             # and they cannot be authored.
             return None, (
                 f"{where} has a control character in its `{field_name}` "
-                f"(\\x{ord(hit.group()):02x} at offset {hit.start()} of "
+                f"(U+{ord(hit.group()):04X} at offset {hit.start()} of "
                 f"{len(value)} characters; the value is not quoted here on purpose) — "
-                f"the report prints this text as evidence, and a newline or a tab in it "
-                f"writes lines a reviewer would read as the scanner's own findings; "
+                f"the report prints this text as evidence, and a line break, a tab or a "
+                f"bidi override in it writes or reorders lines a reviewer would read as "
+                f"the scanner's own findings; rejected rather than repaired")
+        # The belt, and it is not redundant: `splitlines` recognizes more separators
+        # than any character class somebody remembered to write down (\x0b, \x0c,
+        # \x1c-\x1e among them), and it is the function that actually builds this
+        # report's lines. If the class above ever drifts behind CPython, this still
+        # catches the only thing that matters — a value that occupies two lines.
+        if value and value.splitlines() != [value]:
+            return None, (
+                f"{where} has a `{field_name}` that spans more than one line as Python "
+                f"reads it (the value is not quoted here on purpose) — the report is "
+                f"built line by line, so a multi-line value writes lines of its own; "
                 f"rejected rather than repaired")
     if len(reason) > MAX_REASON_CHARS:
         return None, (f"{where} ({_quote(raw_path)}) has a `reason` of {len(reason)} "
