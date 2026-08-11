@@ -1,5 +1,6 @@
 """Django scanner module: fleet-norm (uv+ASGI+sidecars), legacy blockers, pip/WSGI."""
 import pathlib
+import shutil
 
 import pytest
 
@@ -423,28 +424,58 @@ def test_committed_env_secret_blocks_a_django_scan(tmp_path):
     assert report["summary"]["blocker"] >= 1
 
 
-def test_a_django_scan_surfaces_the_exposure_auth_check():
+def test_a_django_scan_surfaces_the_exposure_auth_check(tmp_path):
     """SCAN-M4-EXPOSURE-AUTH's warning clause, on the django side. Named in the
     amended waiver as the proof that retires clause (b). Deliberately unmarked
-    while the blocker-escalation clause of that requirement stays unbuilt."""
+    while the blocker-escalation clause of that requirement stays unbuilt.
+
+    The silencing half used to be asserted against UV_ASGI, which carries no
+    authentication whatsoever — it passed on the substring `session` inside
+    `SESSION_COOKIE_SECURE = True` (D-010 follow-up item 7). It now takes a tree that
+    actually authenticates someone.
+    """
     res = _report_by_id(LEGACY_BAD)["core.exposure-auth"]
     assert res["tier"] == "warning"
     assert "no authentication detected" in res["detail"]
-    # …and it silences when the tree does carry an auth indicator.
-    assert _report_by_id(UV_ASGI)["core.exposure-auth"]["tier"] == "ok"
+
+    authed = tmp_path / "authed"
+    shutil.copytree(UV_ASGI, authed)
+    (authed / "config" / "views.py").write_text(
+        "from django.contrib.auth.decorators import login_required\n\n\n"
+        "@login_required\ndef dashboard(request):\n    return request.user\n",
+        encoding="utf-8")
+    checks = {c["id"]: c for c in core.scan(authed)["checks"]}
+    assert checks["core.exposure-auth"]["tier"] == "ok", (
+        "a login_required view did not register as an authentication indicator")
 
 
-def test_uv_asgi_scan_carries_the_core_suite_all_ok():
-    """The fleet-norm fixture: every core check passes. The `.gitignore` and
-    `tests/smoke.py` in this fixture are stub-artifact fixes — all four inventoried
-    fleet repos ship both, so their absence was fixture noise, not a finding."""
+def test_uv_asgi_scan_carries_the_core_suite_with_one_honest_warning():
+    """The fleet-norm fixture: every core check passes except the one that should not.
+
+    The `.gitignore` and `tests/smoke.py` here are stub-artifact fixes — all four
+    inventoried fleet repos ship both, so their absence was fixture noise, not a
+    finding. `core.exposure-auth` is different: this project installs only
+    `staticfiles` and `channels`, has no `django.contrib.auth`, no
+    `AuthenticationMiddleware` and no login view, so "no authentication detected" is
+    simply true. It read `ok` until D-010 follow-up item 7 because the auth-indicator
+    regex matched the substring `session` in `SESSION_COOKIE_SECURE = True` — which
+    means every project that passed `django.security-settings` passed this check for
+    free, whatever its actual auth.
+
+    The fixture is deliberately NOT given an auth stub to make this green: inventing
+    evidence so a check passes is the failure mode this whole check exists to catch.
+    """
     checks = _report_by_id(UV_ASGI)
     core_tiers = {i: c["tier"] for i, c in checks.items() if i.startswith("core.")}
     assert core_tiers == {
         "core.secret-scan": "ok", "core.lockfile": "ok", "core.gitignore": "ok",
         "core.tests-exist": "ok", "core.healthz": "ok", "core.digest-pins": "ok",
-        "core.exposure-auth": "ok",
+        "core.exposure-auth": "warning",
     }
+    assert "SESSION_COOKIE_SECURE" in (
+        (UV_ASGI / "config" / "settings" / "prod.py").read_text(encoding="utf-8")), (
+        "the fixture no longer carries the setting whose substring produced the old "
+        "false `ok` — this test's whole point is that it no longer suffices")
 
 
 def test_legacy_bad_scan_surfaces_the_core_findings():
@@ -454,20 +485,31 @@ def test_legacy_bad_scan_surfaces_the_core_findings():
     checks = _report_by_id(LEGACY_BAD)
     core_tiers = {i: c["tier"] for i, c in checks.items() if i.startswith("core.")}
     assert core_tiers == {
-        "core.secret-scan": "ok", "core.lockfile": "ok", "core.gitignore": "warning",
-        "core.tests-exist": "advice", "core.healthz": "advice",
-        "core.digest-pins": "warning", "core.exposure-auth": "warning",
+        "core.secret-scan": "blocker", "core.lockfile": "ok",
+        "core.gitignore": "warning", "core.tests-exist": "advice",
+        "core.healthz": "advice", "core.digest-pins": "warning",
+        "core.exposure-auth": "warning",
     }
     assert "python:3.11-slim" in checks["core.digest-pins"]["detail"]
+    # `core.secret-scan` read `ok` here until D-010 follow-up item 5, on a fixture whose
+    # settings.py carries a real committed Django SECRET_KEY: the value contains the
+    # marker `insecure`, and a marker used to excuse a value outright. `django-insecure-`
+    # is the prefix Django's own startproject writes, so the marker was hiding the single
+    # most common real finding there is. In this fixture `django.secret-key-literal`
+    # caught it anyway; in any file that is not a settings module, nothing did.
+    assert "settings.py:5" in checks["core.secret-scan"]["detail"]
 
 
-def test_pip_wsgi_scan_stays_blocker_and_warning_free():
+def test_pip_wsgi_scan_is_clean_apart_from_the_auth_warning():
     """The classic pip/WSGI fixture passes at report level too. `core.healthz` is
     `advice` and stays that way: a classic project with no health route earns
     exactly the §E9 advice — a genuine finding, not a fixture gap."""
     report = core.scan(PIP_WSGI)
     loud = [c["id"] for c in report["checks"] if c["tier"] in ("blocker", "warning")]
-    assert loud == []
+    # core.exposure-auth is the one warning, and it is earned: like uv_asgi, this
+    # fixture has no authentication at all and used to pass on the substring `session`
+    # inside SESSION_COOKIE_SECURE (D-010 follow-up item 7).
+    assert loud == ["core.exposure-auth"]
     checks = {c["id"]: c for c in report["checks"]}
     assert {i for i in checks if i.startswith("core.")} == {
         "core.secret-scan", "core.lockfile", "core.gitignore", "core.tests-exist",

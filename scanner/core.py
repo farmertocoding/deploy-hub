@@ -84,8 +84,34 @@ class WizardQuestion:
 _FRAMEWORK_MODULES = []
 _FALLBACK_MODULES = []
 
+# Core ids a module is allowed to supersede, declared by the module as
+# `supersedes = frozenset({...})`. A module that omits it supersedes nothing.
+#
+# D-010 follow-up item 1: same-id supersession is the designed mechanism and it is
+# also the way to silently weaken a blocker — a module can replace `core.secret-scan`
+# with an `ok` result, the invariant test checks presence and uniqueness rather than
+# tier, and the replaced entry leaves no trace in the report. The only watcher was code
+# review, and `scanner/modules/` was not on the sensitive-path human-merge list. Making
+# the set explicit does not stop a determined author; it makes the attempt a one-line
+# declaration in the diff, next to a test that freezes the union, instead of a change of
+# tier buried in a check body.
+_DEFAULT_SUPERSEDES = frozenset()
+
+
+def module_supersedes(module):
+    return frozenset(getattr(module, "supersedes", _DEFAULT_SUPERSEDES))
+
 
 def register(module, fallback=False):
+    # Item 8: the per-module invariant row is keyed by name, so two modules sharing one
+    # would have collapsed into a single row and the second would have been checked by
+    # nothing.
+    existing = {m.name for m in _FRAMEWORK_MODULES} | {m.name for m in _FALLBACK_MODULES}
+    if module.name in existing:
+        raise ValueError(
+            f"a scanner module named {module.name!r} is already registered — module "
+            f"names key the report, the registry invariant and the demo records, and "
+            f"a duplicate silently hides one of the two")
     (_FALLBACK_MODULES if fallback else _FRAMEWORK_MODULES).append(module)
     return module
 
@@ -142,8 +168,17 @@ def scan(root):
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
     for m in mods:
+        allowed = module_supersedes(m)
         for c in m.checks(root):
             if c.id in core_pos:
+                if c.id not in allowed:
+                    raise ValueError(
+                        f"module {m.name!r} supersedes core check {c.id!r} without "
+                        f"declaring it: add it to the module's `supersedes` frozenset "
+                        f"(declared: {sorted(allowed) or 'nothing'}). Superseding a "
+                        f"core result replaces it outright, tier included, so it is a "
+                        f"deliberate, reviewable act — not something a check body "
+                        f"does in passing")
                 core_suite[core_pos[c.id]] = c    # supersession: same id, position kept
             elif c.id.startswith("core."):
                 raise ValueError(

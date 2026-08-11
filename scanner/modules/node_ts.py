@@ -261,6 +261,14 @@ class NodeTsScannerModule:
 
     name = "node-ts"
 
+    # Core results this module replaces outright (D-010 follow-up item 1). It
+    # re-derives `core.lockfile` because the pnpm-workspace shape and the §N7 offline
+    # Python component both change what "locked" means here, and because the sandbox's
+    # `pnpm install --frozen-lockfile` is what the warning is really about. Everything
+    # else in the core suite reaches the report untouched; superseding it would need a
+    # line here first.
+    supersedes = frozenset({"core.lockfile"})
+
     # ── detection (§S3, SCAN-S3-DETECTION-RULES) ────────────────────────────
     def detect(self, root):
         root = Path(root)
