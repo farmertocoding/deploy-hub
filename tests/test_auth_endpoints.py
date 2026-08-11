@@ -126,3 +126,55 @@ def test_security_events_are_audited(client):
     client.login(username="joseph", password="a-long-dev-password")
     client.post("/api/auth/logout/")
     assert AuditEvent.objects.filter(action="logout").exists()
+
+
+# ── SEC-A1-SESSION-AUTH: the clauses the login-CSRF test never touched ──────────
+#
+# R4-11 WI-4: the sole SEC-A1 marker was on test_login_post_is_csrf_protected, which
+# proves the "CSRF header" clause only. Setting SESSION_COOKIE_HTTPONLY = False and
+# SESSION_COOKIE_SAMESITE = "None" in hub/settings/base.py left it green, and left the
+# whole auth + ws suite green. The requirement also claims HttpOnly/Secure/SameSite=Lax,
+# "not JWT", and "WebSocket rides the same session".
+
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
+def test_issue_r4_11_session_cookie_carries_the_hardening_attributes():
+    """HttpOnly stops document.cookie theft; SameSite=Lax is what makes the CSRF
+    token a second factor rather than the only one. Neither was pinned."""
+    from django.conf import settings
+
+    assert settings.SESSION_COOKIE_HTTPONLY is True
+    assert settings.SESSION_COOKIE_SAMESITE == "Lax"
+    assert settings.CSRF_COOKIE_SAMESITE == "Lax"
+
+
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
+def test_issue_r4_11_prod_settings_mark_the_session_cookie_secure(monkeypatch):
+    """`Secure` is a prod-only attribute (dev runs on http), so it has to be read
+    off hub.settings.prod — nothing asserted it there."""
+    import importlib
+
+    monkeypatch.setenv("HUB_SECRET_KEY", "test-only-key-for-settings-import")
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    prod = importlib.import_module("hub.settings.prod")
+    importlib.reload(prod)
+
+    assert prod.SESSION_COOKIE_SECURE is True
+    assert prod.CSRF_COOKIE_SECURE is True
+    assert prod.SESSION_COOKIE_HTTPONLY is True     # inherited from base, not lost
+    assert prod.SESSION_COOKIE_SAMESITE == "Lax"
+
+
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
+def test_issue_r4_11_hub_auth_is_session_based_and_not_jwt():
+    """"not JWT" is half the requirement's sentence and had no assertion at all.
+    A JWT authentication class added to DRF would move auth off the session — and
+    off the CSRF + HttpOnly protections the rest of this requirement relies on."""
+    from django.conf import settings
+
+    auth_classes = settings.REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]
+    assert auth_classes == ["rest_framework.authentication.SessionAuthentication"]
+
+    installed = " ".join(settings.INSTALLED_APPS + settings.MIDDLEWARE
+                         + list(auth_classes)).lower()
+    for token in ("jwt", "simplejwt", "knox", "oauth2_provider", "tokenauthentication"):
+        assert token not in installed, f"{token} installed — auth is no longer session-only"

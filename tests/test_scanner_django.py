@@ -56,6 +56,130 @@ def test_uv_asgi_service_command_is_asgi_and_sidecars_become_jobs():
     assert sidecars["tier"] == "ok"
 
 
+# ── R4-11 WI-7: the version window's edges, not just its interior ──────────────
+#
+# SCAN-DJANGO-UV claims tolerance of "Python 3.12–3.14 and Django 5.2–6". The only
+# assertion was `django.runtime-versions == ok` on the uv_asgi fixture, which declares
+# 3.12 / 5.2 — one interior point. Widening the window to accept every version left
+# that test green, so nothing pinned where the window ends.
+
+def _uv_project(tmp_path, requires_python, django_spec):
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "manage.py").write_text("#!/usr/bin/env python\n")
+    (root / "uv.lock").write_text("version = 1\n")
+    (root / "pyproject.toml").write_text(
+        "[project]\nname = \"x\"\n"
+        f"requires-python = \">={requires_python}\"\n"
+        f"dependencies = [\"django>={django_spec}\"]\n")
+    return root
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+@pytest.mark.parametrize("python_v,django_v", [
+    ("3.12", "5.2"),   # both lower edges
+    ("3.14", "5.2"),   # upper Python edge
+    ("3.12", "6.0"),   # Django 6, the top of the stated range
+    ("3.14", "6.9"),   # both upper edges
+])
+def test_issue_r4_11_versions_inside_the_window_tier_ok(tmp_path, python_v, django_v):
+    root = _uv_project(tmp_path, python_v, django_v)
+    check = _by_id(dj.module.checks(root))["django.runtime-versions"]
+    assert check.tier == "ok", f"{python_v}/{django_v}: {check.detail}"
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+@pytest.mark.parametrize("python_v,django_v", [
+    ("3.11", "5.2"),   # below the Python floor
+    ("3.15", "5.2"),   # above the Python ceiling
+    ("3.12", "5.1"),   # below the Django floor
+    ("3.12", "7.0"),   # above the Django ceiling — "5.2–6" ends before 7
+])
+def test_issue_r4_11_versions_outside_the_window_tier_advice(tmp_path, python_v,
+                                                             django_v):
+    root = _uv_project(tmp_path, python_v, django_v)
+    check = _by_id(dj.module.checks(root))["django.runtime-versions"]
+    assert check.tier == "advice", f"{python_v}/{django_v}: {check.detail}"
+    assert "3.12" in check.fix_hint and "5.2" in check.fix_hint
+
+
+# ── R4-11 WI-1: ASGI inferred from DEPENDENCIES, not copied from a compose argv ──
+
+def _asgi_by_deps_project(tmp_path, deps, compose_command=None):
+    """A Django project that is ASGI by its dependency manifest alone.
+
+    Deliberately ships NO explicit daphne/uvicorn `command:` in compose — the real
+    fleet shape when the server lives in the image default or a Dockerfile CMD.
+    `_server_shape` returns a compose argv before it ever reaches the
+    dependency-based branch, so a fixture with an explicit command proves only
+    passthrough (R4-11 WI-2: disabling the whole synthesis branch left the two
+    SCAN-DJANGO-ASGI-marked tests, and the phase-1 acceptance module, green).
+    """
+    root = tmp_path / "proj"
+    (root / "config").mkdir(parents=True)
+    (root / "manage.py").write_text("#!/usr/bin/env python\n")
+    (root / "config" / "__init__.py").write_text("")
+    (root / "config" / "asgi.py").write_text(
+        "import os\nfrom django.core.asgi import get_asgi_application\n"
+        "application = get_asgi_application()\n")
+    (root / "config" / "wsgi.py").write_text(
+        "from django.core.wsgi import get_wsgi_application\n"
+        "application = get_wsgi_application()\n")
+    (root / "config" / "settings.py").write_text(
+        "import os\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n")
+    (root / "requirements.txt").write_text(deps)
+    web = "  web:\n    image: app\n"
+    if compose_command:
+        web += f"    command: {compose_command}\n"
+    (root / "docker-compose.yml").write_text("services:\n" + web)
+    return root
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_issue_r4_11_channels_deps_alone_synthesize_a_daphne_command(tmp_path):
+    """Channels/daphne in the dependency manifest, no server argv anywhere: the
+    manifest command must still be ASGI, never a gunicorn default."""
+    root = _asgi_by_deps_project(
+        tmp_path, "Django==5.2.4\nchannels==4.1.0\ndaphne==4.1.2\n")
+    frag = dj.module.manifest_fragment(root)
+    command = frag["components"]["service"]["command"]
+    assert command[0] == "daphne", command
+    assert "gunicorn" not in " ".join(command)
+    assert "config.asgi:application" in command
+    mode = _by_id(dj.module.checks(root))["django.server-mode"]
+    assert mode.detail.startswith("ASGI"), mode.detail
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_issue_r4_11_uvicorn_without_daphne_synthesizes_a_uvicorn_command(tmp_path):
+    """The uvicorn-only sub-branch: uvicorn in deps, no daphne, no compose argv."""
+    root = _asgi_by_deps_project(tmp_path, "Django==5.2.4\nuvicorn==0.30.6\n")
+    command = dj.module.manifest_fragment(root)["components"]["service"]["command"]
+    assert command[0] == "uvicorn", command
+    assert "gunicorn" not in " ".join(command)
+    assert "config.asgi:application" in command
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_issue_r4_11_channels_without_a_named_server_still_serves_asgi(tmp_path):
+    """Channels alone (no daphne/uvicorn pin) is still an ASGI project — the
+    `channels` half of the disjunction, which no test exercised either."""
+    root = _asgi_by_deps_project(tmp_path, "Django==5.2.4\nchannels==4.1.0\n")
+    command = dj.module.manifest_fragment(root)["components"]["service"]["command"]
+    assert command[0] == "daphne", command
+    assert "gunicorn" not in " ".join(command)
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_issue_r4_11_a_wsgi_only_project_is_not_pushed_onto_asgi(tmp_path):
+    """Negative case, so the tests above cannot be satisfied by hardcoding ASGI:
+    no Channels, no daphne, no uvicorn ⇒ the classic gunicorn shape."""
+    root = _asgi_by_deps_project(tmp_path, "Django==5.2.4\ngunicorn==22.0.0\n")
+    command = dj.module.manifest_fragment(root)["components"]["service"]["command"]
+    assert command[0] == "gunicorn", command
+    assert "config.wsgi:application" in command
+
+
 def test_legacy_bad_fires_debug_secret_and_runserver_blockers():
     checks = {c.id: c.tier for c in dj.module.checks(LEGACY_BAD)}
     assert checks["django.debug-hardcoded"] == "blocker"
@@ -90,6 +214,7 @@ def test_detect_is_false_on_an_empty_tree(tmp_path):
     assert "django" not in [m.name for m in core.detect_modules(tmp_path)]
 
 
+@pytest.mark.req("SEC-SCAN-NOEXEC")
 def test_sandbox_checks_are_emitted_as_specs_not_run():
     specs = {s.id: s for s in dj.module.sandbox_checks(UV_ASGI)}
     assert set(specs) == {"django.check-deploy", "django.migrations-check",

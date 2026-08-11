@@ -134,3 +134,54 @@ async def test_post_reject_frames_are_dropped():
     await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.race.log"]}))
     assert await comm.receive_nothing(timeout=0.3)
     await comm.disconnect()
+
+
+# ── SEC-A1-SESSION-AUTH: "WebSocket rides the same session" ────────────────────
+#
+# R4-11 WI-4: nothing proved this clause. Every test above hands the consumer a
+# ready-made `scope["user"]`, which is exactly the step a session cookie is supposed
+# to perform — so a Hub that authenticated sockets from a bearer token instead would
+# keep them all green. This drives the PRODUCTION asgi application (hub.asgi), with
+# no scope injection, using only the cookie a normal HTTP login planted.
+
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
+async def test_issue_r4_11_ws_authenticates_from_the_http_login_session_cookie():
+    from django.conf import settings
+    from django.test import Client
+
+    from hub.asgi import application
+
+    await _make_user(username="ws-session-rider")
+
+    def _login():
+        from django.contrib.auth.models import User
+
+        user = User.objects.get(username="ws-session-rider")
+        user.set_password("a-long-dev-password")
+        user.save()
+        http = Client()
+        assert http.login(username="ws-session-rider", password="a-long-dev-password")
+        return http.cookies[settings.SESSION_COOKIE_NAME].value
+
+    sessionid = await sync_to_async(_login)()
+    headers = [
+        (b"origin", b"http://testserver"),
+        (b"cookie", f"{settings.SESSION_COOKIE_NAME}={sessionid}".encode()),
+    ]
+
+    comm = WebsocketCommunicator(application, "/ws/events/", headers=headers)
+    connected, _ = await comm.connect()
+    assert connected
+    # No 4401: the socket resolved a real user from the session cookie alone.
+    await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.a1.log"]}))
+    assert json.loads(await comm.receive_from()) == {"subscribed": "demo.a1.log"}
+    await comm.disconnect()
+
+    # …and the same socket with no session cookie is refused.
+    anon = WebsocketCommunicator(application, "/ws/events/",
+                                 headers=[(b"origin", b"http://testserver")])
+    connected, _ = await anon.connect()
+    assert connected
+    close = await anon.receive_output()
+    assert close["type"] == "websocket.close" and close["code"] == 4401
+    await anon.disconnect()

@@ -181,6 +181,31 @@ def test_secrets_env_advises_paper_keys_and_rides_core_secret_scan(pristine_repo
     assert "read-only" in res["fix_hint"] and "paper" in res["fix_hint"]
 
 
+def test_issue_r4_11_node_ts_module_surfaces_the_exposure_auth_check(tmp_path):
+    """R4-11 WI-3: SCAN-M4-EXPOSURE-AUTH says *both modules* warn when no
+    authentication is detected. Nothing asserted that a module's own report
+    carries `core.exposure-auth` at all — the two marked tests called
+    `fallbacks.common_checks` directly. This pins the node-ts half.
+
+    Deliberately unmarked: the requirement is waived (WAIVERS.md, 2026-08-11) —
+    the django module never emits this check and the blocker escalation does not
+    exist, so no single test can honestly carry the marker yet. This test is
+    named in the waiver as the proof that retires the node-ts half.
+    """
+    res = by_id({"checks": [c.as_dict() for c in node_ts.module.checks(FIXTURE)]},
+                "core.exposure-auth")
+    assert res["tier"] == "warning"
+    assert "no authentication detected" in res["detail"]
+
+    # …and it silences when the tree does carry an auth indicator.
+    site = copy_fixture(tmp_path)
+    (site / "packages" / "server" / "src" / "auth.ts").write_text(
+        "export function login(req: Request) { return null; }\n", encoding="utf-8")
+    silenced = by_id({"checks": [c.as_dict() for c in node_ts.module.checks(site)]},
+                     "core.exposure-auth")
+    assert silenced["tier"] == "ok"
+
+
 def test_exclusive_upstream_warns_and_explains_recreate(pristine_report):
     res = by_id(pristine_report, "node-ts.exclusive-upstream")
     assert res["tier"] == "warning"
@@ -300,6 +325,31 @@ def mutate_remove_engines(site):  # MUTATIONS.md #9
     edit_json(site / SERVER_PKG, lambda d: d.pop("engines"))
 
 
+def mutate_unsurface_feed_age(site):  # MUTATIONS.md #10
+    """Stop /healthz reporting the feed-age metric: rename it out of the payload.
+
+    One identifier rename, applied at its definition and its single call site so
+    the fixture still compiles (MUTATIONS.md "one edit" rule). Note the check
+    greps the concatenated text of *every* service file that mentions healthz, so
+    editing only the payload in index.ts leaves ingest.ts's `lastTickAgeS`
+    matching — the reason a one-file edit cannot express this negative.
+    """
+    for path in (site / SERVER_INDEX, site / SERVER_INGEST):
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("feed_age", "tick_gap")
+                            .replace("lastTickAgeS", "tickGapS"), encoding="utf-8")
+
+
+def mutate_unbounded_backfill(site):  # MUTATIONS.md #11
+    """Drop the bounded-concurrency wording/const from the backfill path."""
+    path = site / SERVER_INGEST
+    text = path.read_text(encoding="utf-8")
+    assert "CONCURRENCY" in text and "concurrency" in text
+    path.write_text(text.replace("CONCURRENCY", "PARALLELISM").replace("concurrency",
+                                                                      "parallelism"),
+                    encoding="utf-8")
+
+
 MUTATIONS = [
     ("strict_false", mutate_strict_false, "node-ts.strict-build", "warning"),
     ("ts_node_start", mutate_ts_node_start, "node-ts.compiled-js", "warning"),
@@ -311,6 +361,11 @@ MUTATIONS = [
     ("remove_reconnect_backoff", mutate_remove_reconnect_backoff,
      "node-ts.ingest-reconnect", "warning"),
     ("remove_engines", mutate_remove_engines, "node-ts.engines-pin", "warning"),
+    # R4-11 WI-8: the two behavioural checks that had no negative case at all.
+    ("unsurface_feed_age", mutate_unsurface_feed_age, "node-ts.ingest-staleness",
+     "warning"),
+    ("unbounded_backfill", mutate_unbounded_backfill, "node-ts.ingest-backfill",
+     "advice"),
 ]
 
 
@@ -333,6 +388,100 @@ def test_mutation_flips_exactly_the_target_check(tmp_path, pristine_report,
 
 # ── further negatives beyond the documented matrix ──────────────────────────────
 
+# Where each `node-ts.*` check's negative case is proven. The matrix rows above cover
+# the checks whose negative is a tier flip; the rest are recordings whose negative is
+# the other branch of the message (or the check's absence) and are proven by the
+# minimal-tree test below. Q7-NODE-FIXTURE says "a mutation set asserting EACH check's
+# negative case" — before R4-11 WI-8, seven checks had no entry here at all.
+_BRANCH_TEST = "test_issue_r4_11_detection_recordings_have_their_negative_branch"
+
+NEGATIVE_CASE_OWNER = {
+    "node-ts.strict-build": "MUTATIONS #1",
+    "node-ts.graceful-shutdown": "MUTATIONS #2",
+    "node-ts.readiness-pattern": "MUTATIONS #3",
+    "node-ts.ws-heartbeat": "MUTATIONS #4",
+    "node-ts.ingest-reconnect": "MUTATIONS #7",
+    "node-ts.compiled-js": "MUTATIONS #8",
+    "node-ts.engines-pin": "MUTATIONS #9",
+    "node-ts.ingest-staleness": "MUTATIONS #10",
+    "node-ts.ingest-backfill": "MUTATIONS #11",
+    "node-ts.bun-dev-only": "MUTATIONS #12 (test_bun_in_the_runtime_path_is_flagged)",
+    "node-ts.fastify-serving": "MUTATIONS #13 (test_missing_trust_proxy_flags_fastify_serving)",
+    "node-ts.monorepo": _BRANCH_TEST,
+    "node-ts.service-package": _BRANCH_TEST,
+    "node-ts.recognized-deps": _BRANCH_TEST,
+    "node-ts.worker-threads": _BRANCH_TEST,
+    "node-ts.offline-component": _BRANCH_TEST,
+    "node-ts.jobs-image": _BRANCH_TEST,
+    "node-ts.exclusive-upstream": _BRANCH_TEST,
+    "node-ts.local-state": _BRANCH_TEST,
+    "node-ts.secrets-env": _BRANCH_TEST,
+}
+
+
+@pytest.mark.req("Q7-NODE-FIXTURE")
+def test_issue_r4_11_every_node_ts_check_has_a_negative_case():
+    """The "each check" scope of the requirement, made mechanical.
+
+    Without this, adding a 21st check to the module leaves the requirement reading
+    `verified` on a mutation set that never touches it — the same class of gap the
+    R4-11 audit found. A new check must land with its negative case or go red here.
+    """
+    missing = sorted(set(EXPECTED_TIERS) - set(NEGATIVE_CASE_OWNER))
+    assert missing == [], f"checks with no negative case: {missing}"
+    # Every matrix row must name a check the fixture actually produces.
+    unknown = sorted({target for _n, _m, target, _e in MUTATIONS
+                      if not target.startswith("core.")} - set(EXPECTED_TIERS))
+    assert unknown == [], f"MUTATIONS rows target unknown checks: {unknown}"
+
+
+@pytest.mark.req("Q7-NODE-FIXTURE")
+def test_issue_r4_11_detection_recordings_have_their_negative_branch(tmp_path):
+    """R4-11 WI-8: five §S3 recording checks had no negative case anywhere.
+
+    `node-ts.monorepo`, `recognized-deps` and `worker-threads` are always `ok` —
+    their negative is the *other branch* of the message, not a tier flip, so they
+    cannot live in the single-edit MUTATIONS matrix (which asserts a tier change).
+    `offline-component`'s negative is the check being absent, and
+    `service-package`'s is a real `warning`. One minimal tree exercises all five:
+    a single-package project, detected only by its serverish `main`, with no
+    recognized dependency, no worker threads, no pyproject.toml, and no server
+    framework dependency to make it a deployable service.
+    """
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "solo", "main": "dist/index.js",
+        "scripts": {"build": "tsc -p ."},
+    }))
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "index.ts").write_text("export const noop = () => undefined;\n")
+
+    assert node_ts.module.detect(tmp_path) is True  # serverish main alone detects
+    checks = {c.id: c for c in node_ts.module.checks(tmp_path)}
+
+    assert checks["node-ts.monorepo"].title == "Single-package Node project"
+    assert "No pnpm-workspace.yaml" in checks["node-ts.monorepo"].detail
+
+    assert checks["node-ts.service-package"].tier == "warning"
+    assert "No workspace package has a server framework dependency" in \
+        checks["node-ts.service-package"].detail
+
+    assert "(none)" in checks["node-ts.recognized-deps"].detail
+    assert "ingestion-daemon checks armed" not in checks["node-ts.recognized-deps"].detail
+
+    assert checks["node-ts.worker-threads"].title.endswith("not detected")
+
+    assert "node-ts.offline-component" not in checks
+    assert "node-ts.jobs-image" not in checks   # no offline component ⇒ no jobs image
+
+    # The three checks that fire at a non-ok tier on the pristine fixture have their
+    # quiet branch here — the same "negative case" obligation, mirrored.
+    assert checks["node-ts.exclusive-upstream"].tier == "ok"
+    assert checks["node-ts.local-state"].tier == "ok"
+    assert checks["node-ts.secrets-env"].tier == "ok"
+
+
+@pytest.mark.req("Q7-NODE-FIXTURE")
 def test_bun_in_the_runtime_path_is_flagged(tmp_path, pristine_report):
     assert by_id(pristine_report, "node-ts.bun-dev-only")["tier"] == "ok"
     site = copy_fixture(tmp_path)  # bun as devDependency/test script is fine
@@ -343,6 +492,7 @@ def test_bun_in_the_runtime_path_is_flagged(tmp_path, pristine_report):
     assert "bun" in checks["node-ts.bun-dev-only"].detail
 
 
+@pytest.mark.req("Q7-NODE-FIXTURE")
 def test_missing_trust_proxy_flags_fastify_serving(tmp_path):
     site = copy_fixture(tmp_path)
     replace_once(site / SERVER_INDEX, "trustProxy: true,", "")

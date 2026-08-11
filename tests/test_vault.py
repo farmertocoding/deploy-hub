@@ -55,6 +55,32 @@ def test_fresh_dek_per_write():
 
 
 @pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_issue_r4_11_dek_is_a_full_256_bit_key():
+    """R4-11 WI-6: the requirement says AES-**256**-GCM and nothing pinned the key
+    size — setting `vault.service.DEK_BYTES = 16` (AES-128) kept all 22 vault tests
+    green, because AES-128-GCM round-trips, authenticates and rejects swaps exactly
+    like AES-256-GCM does.
+
+    Measured on the real key material, not just the named constant: the DEK is
+    unwrapped back out of the stored row with the configured KEK backend, so a
+    downgrade anywhere between `os.urandom(...)` and the cipher is caught.
+    """
+    from vault.kek import get_backend
+
+    assert service.DEK_BYTES == 32, "the DEK constant must stay AES-256"
+
+    secret = _put()
+    dek = get_backend().unwrap(bytes(secret.wrapped_dek))
+    assert len(dek) == 32, f"DEK is {len(dek) * 8}-bit, requirement says AES-256"
+    # It really is the key this row's ciphertext was encrypted under.
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    aad = f"{secret.kind}|{secret.owner_type}|{secret.owner_id}".encode()
+    assert AESGCM(dek).decrypt(bytes(secret.nonce), bytes(secret.ciphertext),
+                               aad) == SECRET_MARKER
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
 def test_plaintext_never_stored():
     secret = _put()
     row = Secret.objects.get(pk=secret.pk)

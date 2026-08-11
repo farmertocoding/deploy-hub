@@ -135,8 +135,22 @@ def test_placeholder_values_are_not_flagged(tmp_path):
 
 
 # ── common core: exposure-auth heuristic (SCAN-M4-EXPOSURE-AUTH) ────────────────
+#
+# R4-11 WI-3: these two tests carried `@pytest.mark.req("SCAN-M4-EXPOSURE-AUTH")`,
+# which reported the requirement `verified`. They prove the warning/ok toggle of the
+# common-core heuristic and nothing else. The requirement makes two further claims
+# that are not merely untested but absent from the tree:
+#   1. "Blocker when the wizard tags financial/personal data" — `_check_exposure_auth`
+#      returns only ok/warning, and no wizard question tags data sensitivity, so
+#      there is no answer for an escalation to read.
+#   2. "*Both modules* warn" — the django module's `checks()` never calls
+#      `common_checks`, so `core.exposure-auth` never appears in a Django scan
+#      report at all.
+# The markers are therefore removed and the requirement is waived (WAIVERS.md,
+# 2026-08-11) rather than left reading `verified` on a third of its text. The tests
+# stay and still run; they regain the marker when the waiver retires. See D-009.
 
-@pytest.mark.req("SCAN-M4-EXPOSURE-AUTH")
+
 def test_no_auth_indicators_fires_exposure_auth_warning():
     results = fallbacks.common_checks(FIXTURES / "noauth_project")
     res = by_id(results, "core.exposure-auth")
@@ -145,7 +159,6 @@ def test_no_auth_indicators_fires_exposure_auth_warning():
     assert "wizard will ask" in res.detail
 
 
-@pytest.mark.req("SCAN-M4-EXPOSURE-AUTH")
 def test_auth_indicators_silence_exposure_auth(tmp_path):
     (tmp_path / "app.py").write_text("def login(request):\n    return None\n")
     res = by_id(fallbacks.common_checks(tmp_path), "core.exposure-auth")
@@ -208,6 +221,7 @@ def test_real_registry_scan_of_dockerfile_project_uses_the_fallback():
     assert report["manifest_draft"]["components"]["service"]["kind"] == "dockerfile"
 
 
+@pytest.mark.req("SCAN-V4-FALLBACK-PRECEDENCE")
 @pytest.mark.skipif(
     DJANGO_MODULE_SRC.read_text(encoding="utf-8").strip() == "",
     reason="scanner.modules.django not implemented yet — precedence untestable "

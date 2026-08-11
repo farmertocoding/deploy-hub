@@ -19,6 +19,10 @@ this table is the contract between fixture and tests.
 | 7 | Remove the reconnect/backoff loop (drop the `catch` + `backoffMs` retry from `streamLoop`, let the error propagate) | `packages/server/src/ingest.ts` | `node-ts.ingest-reconnect` | §S4 Ingestion daemon |
 | 8 | Change the start script to `"start": "ts-node src/index.ts"` | `packages/server/package.json` | `node-ts.compiled-js` | §S4 Build & runtime (prod runs compiled JS) |
 | 9 | Remove the `"engines"` block | `packages/server/package.json` | `node-ts.engines-pin` | §S4 Build & runtime (engines pinned to Node 22) |
+| 10 | Rename the feed-age metric out of the `/healthz` payload (`feed_age`→`tick_gap`, `lastTickAgeS`→`tickGapS`, at its definition and its call site) | `packages/server/src/ingest.ts` + `index.ts` | `node-ts.ingest-staleness` | §S4 Ingestion daemon (§N2/§N3 staleness metric) |
+| 11 | Rename the bounded-concurrency const and its comment (`CONCURRENCY`→`PARALLELISM`) so no bounded-concurrency pattern remains | `packages/server/src/ingest.ts` | `node-ts.ingest-backfill` | §S4 Ingestion daemon (§N4 rate-limit guidance) |
+| 12 | Change the start script to `"start": "bun src/index.ts"` | `packages/server/package.json` | `node-ts.bun-dev-only` | §S4 Build & runtime (bun is dev-only) |
+| 13 | Remove `trustProxy: true` from the Fastify constructor | `packages/server/src/index.ts` | `node-ts.fastify-serving` | §S4 Fastify serving |
 
 Rules for the tests consuming this table:
 
@@ -27,7 +31,24 @@ Rules for the tests consuming this table:
 - Mutation 6 is the only place the fake secret string exists — it is written by the test at
   runtime and must never be committed to the fixture tree.
 - Mutation 5 (deleting a file) and mutation 6 (adding one) are still "one edit" for the purposes
-  of this contract.
+  of this contract. So is **renaming one identifier at its definition and its call sites**
+  (mutations 10 and 11): renaming a producer without its consumers would leave the fixture
+  failing `tsc`, and a fixture that does not compile is not a fixture. Mutation 10 spans two
+  files for exactly that reason — and because `node-ts.ingest-staleness` greps the concatenated
+  text of *every* service file mentioning `healthz`, so editing only the `/healthz` payload
+  leaves `ingest.ts` still matching.
+- Mutations 12 and 13 are asserted by their own named tests rather than the parametrized matrix
+  (they predate it); they carry the `Q7-NODE-FIXTURE` marker like every other row.
+
+**Checks whose negative case is a branch, not a tier flip.** `node-ts.monorepo`,
+`node-ts.recognized-deps` and `node-ts.worker-threads` are §S3 *recording* results: they are
+always `ok` and report what was found, so no mutation can flip their tier. `node-ts.offline-component`
+is emitted only when a Python offline component exists, so its negative is the check's absence, and
+`node-ts.service-package` warns on a tree with no deployable package — which the pristine fixture
+cannot be. Their negatives are therefore asserted on a minimal single-package tree by
+`tests/test_scanner_node_ts.py::test_issue_r4_11_detection_recordings_have_their_negative_branch`,
+not by a row above. Every `node-ts.*` check now has a negative case in one form or the other
+(R4-11 WI-8).
 
 Positive-fire inventory (what the pristine tree exercises), for the detection/dispatch tests:
 
