@@ -553,7 +553,10 @@ def main():
         # registry check and went on reading to a human as a waiver in force.
         if fingerprint in registry:
             continue
-        normalized = re.sub(r"[—–]", "-", fingerprint).upper()
+        # Every dash-like character a copy-paste can substitute for `-`: em, en, figure,
+        # non-breaking hyphen, minus sign, horizontal bar. Plus trailing sentence
+        # punctuation, which round-6 F4 found still silent.
+        normalized = re.sub(r"[—–‒‑−―]", "-", fingerprint).rstrip(".,:;").upper()
         if not ID_RE.match(normalized):
             continue  # a path, an artifact tree: not the registry's business
         if normalized in registry:

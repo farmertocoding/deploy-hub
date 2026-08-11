@@ -76,17 +76,37 @@ def _gate_req(rid="PROC-EXAMPLE-GATE", **kw):
     return req
 
 
-def _reaches_gates(node):
+def _gates_names(path):
+    """Every local name that refers to conformance/gates.py in this module.
+
+    `import gates`, `import gates as g`, `from gates import parse_waivers` — all three
+    are delegation, and a check that only knows the literal `gates` calls the second one
+    a re-implementation (round-6 F3 residual).
+    """
+    tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"))
+    modules, members = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(a.asname or a.name for a in node.names if a.name == "gates")
+        elif isinstance(node, ast.ImportFrom) and node.module == "gates":
+            members.update(a.asname or a.name for a in node.names)
+    return modules, members
+
+
+def _reaches_gates(node, modules, members):
     """True if this definition ever touches the `gates` module.
 
     Round-6 F3: this used to be `"gates." in source`, which a docstring or an
     attribution comment satisfied — so "unlike conformance/gates.py, mine is lenient"
-    counted as delegation. Only a real `gates.<attr>` access counts now.
+    counted as delegation. Only a real reference counts now.
     """
-    return any(
-        isinstance(child, ast.Attribute)
-        and isinstance(child.value, ast.Name) and child.value.id == "gates"
-        for child in ast.walk(node))
+    for child in ast.walk(node):
+        if (isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name)
+                and child.value.id in modules):
+            return True
+        if isinstance(child, ast.Name) and child.id in members:
+            return True
+    return False
 
 
 def _definitions(path):
@@ -97,13 +117,24 @@ def _definitions(path):
     """
     tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"))
     out = {}
+
+    def bind(target, node):
+        # Round-6 F3 residual: plain `x = ...` was the only binding form recognised, so
+        # an annotated assignment or a tuple unpack hid a copy in plain sight.
+        if isinstance(target, ast.Name):
+            out.setdefault(target.id, node)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                bind(element, node)
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             out.setdefault(node.name, node)
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name):
-                    out.setdefault(target.id, node)
+                bind(target, node)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            bind(node.target, node)
     return out
 
 
@@ -122,8 +153,9 @@ GATES_OWNED = frozenset({
 
 def _reimplemented(path):
     """Owned names this module defines without ever calling through to `gates`."""
+    modules, members = _gates_names(path)
     return sorted(name for name, node in _definitions(path).items()
-                  if name in GATES_OWNED and not _reaches_gates(node))
+                  if name in GATES_OWNED and not _reaches_gates(node, modules, members))
 
 
 def _consumers():
@@ -133,9 +165,14 @@ def _consumers():
     hold the next copy. Anything under conformance/ or tests/ that imports `gates` is a
     consumer and is held to the same rule.
     """
-    candidates = sorted(REPO.glob("conformance/*.py")) + sorted(REPO.rglob("tests/*.py"))
-    return [p for p in candidates
-            if p.name != "gates.py" and _imports_gates(p)]
+    # Round-6 F3 residual: `rglob("tests/*.py")` missed `tests/acceptance/`, and a flat
+    # `conformance/*.py` would miss a future subdirectory. And a module holding a second
+    # implementation is exactly the one that would *not* import gates, so the scan is no
+    # longer limited to importers — every module under these two trees is held to the
+    # rule, which is the honest scope for "nobody re-derives this".
+    candidates = sorted((REPO / "conformance").rglob("*.py")) + sorted(
+        (REPO / "tests").rglob("*.py"))
+    return [p for p in candidates if p.name != "gates.py"]
 
 
 def _imports_gates(path):
@@ -519,6 +556,143 @@ def test_issue_f4_a_near_miss_requirement_id_is_still_held_to_the_registry(
                  + "WAIVED: conformance/demos/phase-1+unread — a tree (2026-08-11)\n"),
         makefile=GATED_MAKEFILE, workflows={"push-checks.yml": HONEST_WORKFLOW})
     assert run_check(ok).returncode == 0
+
+
+@pytest.mark.parametrize("scope", ["workflow", "job", "step"])
+@pytest.mark.parametrize("var", ["MAKEFLAGS", "GNUMAKEFLAGS"])
+def test_issue_r7_make_flags_from_the_environment_neuter_a_gate(tmp_path, scope, var):
+    """`env: MAKEFLAGS: -n` is the F1 false green through a channel argv never shows.
+
+    Round-6 re-verification, finding N1: GNU make reads its flags from the environment
+    as well as the command line, proven against the real tool — `MAKEFLAGS=-n make lint`
+    on a failing recipe prints the recipe and exits 0; `MAKEFLAGS=i` runs it and swallows
+    the failure. The F1 allow-list looks only at the command, so a workflow whose gate
+    steps are all bare `make <target>` calls ran no gate at all and was green to both
+    consumers.
+    """
+    env_block = f"env:\n  {var}: -n\n"
+    workflow = (
+        "name: push-checks\non: [push, pull_request]\n"
+        + (env_block if scope == "workflow" else "")
+        + "jobs:\n  gates:\n    runs-on: ubuntu-latest\n"
+        + (("    " + env_block.replace("\n  ", "\n      ").rstrip() + "\n")
+           if scope == "job" else "")
+        + "    steps:\n      - name: lint gate\n"
+        + (("        " + env_block.replace("\n  ", "\n          ").rstrip() + "\n")
+           if scope == "step" else "")
+        + "        run: make lint\n"
+        "      - name: unit tests\n        run: make test\n"
+        "      - name: conformance gate\n        run: make conformance\n"
+    )
+    root = write_repo(tmp_path, reqs=[_gate_req()], makefile=GATED_MAKEFILE,
+                      workflows={"push-checks.yml": workflow})
+    wf = root / ".github/workflows/push-checks.yml"
+    violations = gates.gate_step_violations(wf, gates.review_round_prerequisites(root))
+    assert any(var in v for v in violations), (
+        f"`{var}` at {scope} scope was not treated as neutering the gate: {violations}")
+
+    result = run_check(root)
+    assert result.returncode == 1, (
+        f"check.py resolved `gate: lint` with {var} set at {scope} scope:\n{result.stdout}")
+    assert var in result.stdout, result.stdout
+
+
+def test_issue_r7_an_unrelated_env_var_on_a_gate_step_is_fine(tmp_path):
+    """Only make's own flag variables are banned — the rule is not "no env on gates"."""
+    workflow = HONEST_WORKFLOW.replace(
+        "      - name: lint gate\n",
+        "      - name: lint gate\n        env:\n          CI: 'true'\n")
+    root = write_repo(tmp_path, reqs=[_gate_req()], makefile=GATED_MAKEFILE,
+                      workflows={"push-checks.yml": workflow})
+    assert gates.gate_step_violations(
+        root / ".github/workflows/push-checks.yml",
+        gates.review_round_prerequisites(root)) == []
+    assert run_check(root).returncode == 0
+
+
+def test_issue_f3_residual_delegation_survives_an_import_alias(tmp_path):
+    """`import gates as g` is delegation, and a copy can hide in shapes `ast.Assign`
+    does not cover or in a module that imports nothing at all."""
+    aliased = tmp_path / "aliased.py"
+    aliased.write_text(
+        "import gates as g\n"
+        "from gates import parse_waivers as _pw\n\n\n"
+        "def gate_step_violations(workflow):\n"
+        "    return g.gate_step_violations(workflow, {'lint'})\n\n\n"
+        "def parse_waivers(root):\n"
+        "    return _pw(root)\n", encoding="utf-8")
+    assert _reimplemented(aliased) == [], (
+        f"a delegating wrapper using an import alias was called a copy: "
+        f"{_reimplemented(aliased)}")
+
+    hidden = tmp_path / "hidden.py"
+    hidden.write_text(
+        "MAKE_CALL_RE: object = None\n"
+        "SHELL_JOINERS, _other = ('&&',), None\n", encoding="utf-8")
+    assert _reimplemented(hidden) == ["MAKE_CALL_RE", "SHELL_JOINERS"], (
+        f"an annotated assignment or a tuple unpack hid a copy: {_reimplemented(hidden)}")
+
+
+def test_issue_f5_residual_two_steps_of_one_name_in_one_job_are_distinguishable(tmp_path):
+    """Within a single job the same fix has to hold as across jobs."""
+    workflow = """\
+name: push-checks
+on: [push, pull_request]
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: build
+        continue-on-error: true
+        run: make lint
+      - name: build
+        run: make lint
+      - name: unit tests
+        run: make test
+      - name: conformance gate
+        run: make conformance
+"""
+    root = write_repo(tmp_path, reqs=[_gate_req()], makefile=GATED_MAKEFILE,
+                      workflows={"push-checks.yml": workflow})
+    invoked, _ = gates.ci_gate_invocations(root)
+    assert "lint" in invoked, (
+        f"the honest second `build` step was suppressed by its broken namesake in the "
+        f"same job: {invoked}")
+
+
+def test_issue_f6_residual_every_makefile_assignment_form_declares():
+    """`override`, `?=` and `+=` were as silent as `export` was."""
+    assert gates.pr_only_gates(text="override PR_ONLY_GATES := sp\n") == {"sp"}
+    assert gates.pr_only_gates(text="PR_ONLY_GATES ?= sp\n") == {"sp"}
+    assert gates.pr_only_gates(text="PR_ONLY_GATES := a\nPR_ONLY_GATES += b\n") == {"a", "b"}
+    assert gates.pr_only_gates(text="export override PR_ONLY_GATES ::= sp\n") == {"sp"}
+
+
+def test_issue_f7_residual_a_skipped_workflow_says_why(tmp_path):
+    """"No workflow step invokes make lint" is not an answer when one plainly does."""
+    manual = HONEST_WORKFLOW.replace("on: [push, pull_request]", "on: workflow_dispatch")
+    root = write_repo(tmp_path, reqs=[_gate_req()], makefile=GATED_MAKEFILE,
+                      workflows={"manual.yml": manual})
+    result = run_check(root)
+    assert result.returncode == 1
+    assert "manual.yml" in result.stdout and "workflow_dispatch" in result.stdout, (
+        f"the failure does not name the workflow that was skipped or its triggers:\n"
+        f"{result.stdout}")
+
+
+@pytest.mark.parametrize("fingerprint", [
+    "PROC‑EXAMPLE‑GATE",   # non-breaking hyphen
+    "PROC−EXAMPLE-GATE",        # minus sign
+    "PROC-EXAMPLE-GATE.",            # trailing sentence punctuation
+])
+def test_issue_f4_residual_other_lookalike_characters_are_caught(tmp_path, fingerprint):
+    """Em and en dash were the two the first fix knew about; a copy-paste has more."""
+    root = write_repo(tmp_path, reqs=[_gate_req(gate=None)],
+                      waivers=f"WAIVED: {fingerprint} — a typo (2026-08-11)\n",
+                      makefile=GATED_MAKEFILE,
+                      workflows={"push-checks.yml": HONEST_WORKFLOW})
+    result = run_check(root)
+    assert result.returncode == 1 and "not spelled the way" in result.stdout, result.stdout
 
 
 # ── N3: the `if:` ban needs a declared, narrow escape hatch ─────────────────

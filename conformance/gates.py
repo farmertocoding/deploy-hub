@@ -115,17 +115,20 @@ def pr_only_gates(root=None, text=None):
     it is narrow: see `gate_step_violations` for what a declared PR-only gate is still
     not allowed to do.
     """
-    # `[ \t]*`, not `\s*`: `\s` matches newlines, so an EMPTY declaration
-    # (`PR_ONLY_GATES :=`) swallowed the blank line after it and read the next comment
-    # line as its value — which is the state this repo ships in. Caught by
-    # `pr_only_declaration_problems` on the first honest run, which is the point of
-    # having that check at all.
-    # Round-6 F6: `export PR_ONLY_GATES := sp` used to slip past the `^` anchor and read
-    # as an empty declaration with no diagnostic — silently un-declaring an exemption
-    # someone believed they had written.
-    m = re.search(r"^(?:export[ \t]+)?PR_ONLY_GATES[ \t]*:?=[ \t]*([^\n]*)",
-                  _text(root, text), re.M)
-    return set(m.group(1).split()) if m else set()
+    # Two ways this reader used to declare nothing while looking like it declared
+    # something, both found by running it:
+    #   * `[ \t]*`, not `\s*` — `\s` matches newlines, so an EMPTY declaration
+    #     (`PR_ONLY_GATES :=`) ran on into the blank line after it and read the next
+    #     comment line as its value. That is the state this repo ships in.
+    #   * `export` / `override` prefixes and the `?=` / `+=` / `::=` assignment forms
+    #     (round-6 F6) slipped past the `^` anchor, silently un-declaring an exemption
+    #     its author had written. Every form contributes, so `+=` accumulates.
+    declared = set()
+    for m in re.finditer(
+            r"^(?:(?:export|override)[ \t]+)*PR_ONLY_GATES[ \t]*[:?+]{0,2}=[ \t]*([^\n]*)",
+            _text(root, text), re.M):
+        declared.update(m.group(1).split())
+    return declared
 
 
 def recipe(root, target):
@@ -153,16 +156,29 @@ def _document(path):
 
 
 def steps(path):
-    """Yield (job_name, job, step_name, step) for every step carrying a `run:`."""
+    """Yield (job_name, job, step_name, step) for every step carrying a `run:`.
+
+    The name a step is yielded under is unique within its job: round-6 F5 found that
+    steps are addressed by name downstream, so two steps a job gives the same name were
+    indistinguishable and a broken one suppressed its honest namesake. A duplicated name
+    gains its position; a unique one is left alone, so failure messages keep reading the
+    way the workflow does.
+    """
     doc = _document(path)
     for job_name, job in (doc.get("jobs") or {}).items():
         if not isinstance(job, dict):
             continue
+        raw = []
         for index, step in enumerate(job.get("steps") or [], 1):
             if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                 continue
-            name = step.get("name") or step.get("uses") or f"step #{index}"
-            yield job_name, job, name, step
+            raw.append((index, step.get("name") or step.get("uses") or f"step #{index}",
+                        step))
+        counts = {}
+        for _index, name, _step in raw:
+            counts[name] = counts.get(name, 0) + 1
+        for index, name, step in raw:
+            yield job_name, job, (name if counts[name] == 1 else f"{name} #{index}"), step
 
 
 def triggers(path):
@@ -276,6 +292,32 @@ def _swallow_problem(scope, mapping):
     return None
 
 
+# GNU make reads its flags from the environment as well as from argv, so everything
+# ALLOWED_MAKE_FLAGS exists to stop is reachable without touching the command line:
+# `MAKEFLAGS: -n` prints the recipe and exits 0, `MAKEFLAGS: i` runs it and ignores the
+# failure. Round-6 N1 reproduced exactly that against the real tool, at workflow, job
+# and step scope, with the parity test and check.py both green.
+#
+# Banned outright rather than filtered through the allow-list. There is no CI need to
+# set make's flags out of band, and "which values of MAKEFLAGS are harmless" is a
+# question this gate should not have to keep answering — the same reasoning that made
+# the flag rule an allow-list in the first place.
+MAKE_ENV_VARS = ("MAKEFLAGS", "GNUMAKEFLAGS")
+
+
+def _make_env_problem(scope, mapping):
+    env = mapping.get("env")
+    if not isinstance(env, dict):
+        return None
+    for name in MAKE_ENV_VARS:
+        if name in env:
+            return (f"{scope} sets `env: {name}: {env[name]}` — GNU make reads its flags "
+                    f"from the environment, so this can turn the gate into a dry run "
+                    f"(`-n`), make it ignore its own errors (`-i`), or run nothing at "
+                    f"all (`-q`), without the command line ever showing it")
+    return None
+
+
 def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
     """`[(job_name, step_name, (gate targets...), message)]` — the structured form.
 
@@ -285,6 +327,7 @@ def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
     """
     workflow = pathlib.Path(workflow)
     wf_triggers = triggers(workflow)
+    document = _document(workflow)
     problems = []
     for job_name, job, step_name, step in steps(workflow):
         commands = run_commands(step["run"])
@@ -314,10 +357,13 @@ def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
                     f"`make <target>` call: no {' '.join(SHELL_JOINERS)}, no "
                     f"trailing arguments")
 
-        for scope, mapping in ((f"step '{step_name}'", step), (f"job '{job_name}'", job)):
+        for scope, mapping in ((f"step '{step_name}'", step),
+                               (f"job '{job_name}'", job),
+                               (f"workflow {workflow.name!r}", document)):
             for problem, token in (
                 (_swallow_problem(scope, mapping), "continue-on-error"),
                 (_conditional_problem(scope, mapping, gated, pr_only, wf_triggers), "if"),
+                (_make_env_problem(scope, mapping), "env"),
             ):
                 if problem:
                     found.append(
@@ -363,8 +409,18 @@ def ci_gate_invocations(root, required_targets=None, pr_only=None):
         # honest `make lint` in a `workflow_dispatch`-only file resolved the gate.
         wf_triggers = triggers(workflow)
         if not wf_triggers & {"push", "pull_request"}:
-            for target in required:
-                rejected.setdefault(target, [])
+            # Round-6 F7 residual: this used to record an empty list, so the failure said
+            # "no workflow step invokes make lint" and never said which workflow was
+            # skipped or why. Name it: the author whose only gate lives in a dispatch-only
+            # file gets the answer instead of a hunt.
+            for _job, _j, step_name, step in steps(workflow):
+                for line in run_commands(step["run"]):
+                    for target in set(MAKE_CALL_RE.findall(line)) & required:
+                        rejected.setdefault(target, []).append(
+                            f"{workflow.name}: step '{step_name}' invokes `make {target}`, "
+                            f"but the workflow triggers on "
+                            f"{sorted(wf_triggers) or '(nothing)'} — neither `push` nor "
+                            f"`pull_request`, so nothing automatic ever runs it")
             continue
         # Round-6 F5: keyed by step *name* alone, a dishonest step named `build` in one
         # job suppressed an honest step of the same name in another — and unnamed steps
