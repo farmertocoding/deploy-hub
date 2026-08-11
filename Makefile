@@ -16,6 +16,12 @@
 # they catch the honest mistake in the diff; this catches the rest.
 #
 # `$(error)` fires while the makefile is being read, which happens even under `-n`.
+#
+# NOT covered, deliberately, and it costs nothing today: the `-o`/`--old-file`/`-W`
+# family never survives into `$(MAKEFLAGS)`, so it cannot be caught here. It also cannot
+# skip a `.PHONY` target, and every gate is phony — while from argv it is caught by the
+# bare-`make <target>` rule in conformance/gates.py. If a gate ever stops being phony,
+# that changes: re-read this comment then.
 _MF_HEAD := $(firstword $(MAKEFLAGS))
 _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
 #
@@ -25,8 +31,8 @@ _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
 # the gate prints nothing and exits 0.
 _MF_BAD := $(strip \
 	$(foreach c,n i q t o,$(findstring $(c),$(_MF_SHORT))) \
-	$(filter --dry-run --just-print --recon --ignore-errors --question --touch \
-		--old-file --assume-old,$(MAKEFLAGS)) \
+	$(filter --dry-run --just-print --recon --ignore-errors --question --touch,\
+		$(MAKEFLAGS)) \
 	$(filter --eval% .SHELLFLAGS=%,$(MAKEFLAGS)) \
 	$(filter-out file default,$(origin SHELL))$(filter-out file default,$(origin .SHELLFLAGS)) \
 	$(MAKEFILES))

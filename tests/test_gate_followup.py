@@ -691,11 +691,24 @@ def test_issue_r8_the_guard_cannot_be_quietly_deleted():
         "recipe-suppressing flag from MAKEFLAGS, GNUMAKEFLAGS, MAKEFILES or argv")
     assert text.index("_MF_BAD") < text.index("review-round:"), (
         "the guard must be evaluated before any target is defined")
-    for var in gates.MAKE_ENV_VARS:
-        assert var in text, (
-            f"conformance/gates.py bans `env: {var}` in workflows but the Makefile "
-            f"guard does not mention it — the two halves of this defence have drifted, "
-            f"which is the N1 defect all over again")
+
+
+@pytest.mark.parametrize("var", gates.MAKE_ENV_VARS)
+def test_issue_r8_both_halves_of_the_defence_cover_the_same_variables(var):
+    """gates.py bans these in `env:`; the Makefile must actually refuse them.
+
+    Asserted by running make, not by grepping the Makefile for the variable's name —
+    a name in a comment satisfies a substring check while enforcing nothing, and two
+    checks of one rule drifting apart is the N1 defect this branch exists to close.
+    """
+    hostile = {"MAKEFILES": "/tmp/injected-by-a-test.mk"} if var == "MAKEFILES" \
+        else {var: "-n"}
+    result = _make_with_env(hostile)
+    assert result.returncode != 0 and "refusing to run" in result.stderr, (
+        f"conformance/gates.py bans `env: {var}` in a workflow, but the Makefile runs "
+        f"happily with it set — the two halves of this defence have drifted, and only "
+        f"the half that cannot see $GITHUB_ENV is still enforcing:\n"
+        f"{result.stdout}{result.stderr}")
 
 
 def test_issue_f3_residual_delegation_survives_an_import_alias(tmp_path):
