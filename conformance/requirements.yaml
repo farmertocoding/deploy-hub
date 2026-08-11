@@ -225,6 +225,22 @@ requirements:
     source: plan-addendum-2026-08-02-review3.md §M4
     text_hash: sha256:56109e3e7f4bef73a7fd524b3fe21ac53b1eb001dfabed17664f41889fb46ae5
     text: Both modules warn when no authentication is detected on a public-exposure site; Blocker when the wizard tags financial/personal data.
+  # Follow-up 2 of the D-011r noise work, ruled by Joseph 2026-08-11: a repo declares
+  # its own drill/QA trees and the scan says so out loud. The spec is the buildable
+  # shape of that ruling; these two ids split it the way the spec does — what a
+  # declaration DOES, and what it may not do.
+  - id: SCAN-DECLARED-TEST-MATERIAL
+    phase: 1
+    verify: test
+    source: spec-declared-test-material.md §What a declaration does — and does not — change
+    text_hash: sha256:5430d49de73ef1903240287448dc652edad14abad5a6282ec8b715dbfdeb9803
+    text: A repo declares drill/QA trees in deployhub.yaml (scanner.test_material, each entry a path plus a mandatory reason); only core.secret-scan's heuristic findings under a declared path move to a third, non-blocking bucket labelled with the path and the verbatim reason, never merged with auto-detected test material, and the report always shows the claim in a header line naming the declaration and its finding count — even when that count is zero.
+  - id: SCAN-DECLARED-GUARDS
+    phase: 1
+    verify: test
+    source: spec-declared-test-material.md §The file
+    text_hash: sha256:a31ff57851385b2f617bf9ef9d680784019118ea910e218097bc7f0a732d0ea1
+    text: A declaration that swallows the repo is refused — declaring the scan root, or a path holding the manifest files the scanner keys on, is rejected as a warning with no downgrade; a declared path missing from the tree warns as stale; a malformed deployhub.yaml warns and applies nothing rather than crashing the scan; and under an accepted declaration the [proof] axis and the .env handler still run at full tier.
   - id: Q7-NODE-FIXTURE
     phase: 1
     verify: test
