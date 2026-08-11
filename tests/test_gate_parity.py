@@ -20,11 +20,12 @@ import re
 import shutil
 import subprocess
 
+import gates
 import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_DIR = REPO / ".github/workflows"
-WORKFLOWS = sorted(WORKFLOW_DIR.glob("*.yml")) + sorted(WORKFLOW_DIR.glob("*.yaml"))
+WORKFLOWS = gates.workflow_paths(REPO)
 
 # Tool invocations the Makefile owns (SPEC-gate-integrity.md §2.2). A workflow may name
 # a make target; it may never name one of these.
@@ -35,33 +36,18 @@ OWNED_TOOLS = ("ruff ", "bandit ", "pip-audit ", "pytest ", "conformance/check.p
 # a `with:` argument, none of which are `run:` strings.
 ACCEPTANCE_RE = re.compile(r"(ruff|bandit|pip-audit|pytest|check\.py)")
 
-MAKE_CALL_RE = re.compile(r"\bmake\s+(?:-[A-Za-z-]+\s+)*([A-Za-z0-9_.-]+)")
-
-# A gate step is one command: `make <target>`, optionally with make's own flags. Anything
-# that joins a second command to it can change the verdict (round-5 F2).
-BARE_MAKE_RE = re.compile(r"^make(?:\s+-[A-Za-z-]+)*\s+([A-Za-z0-9_.-]+)$")
-SHELL_JOINERS = ("&&", "||", ";", "|")
-
-
-def _review_round_prerequisites(makefile_text=None):
-    """The gate set, read from `review-round`'s prerequisite list.
-
-    Round-5 F8: this used to be a hand-typed `REQUIRED_TARGETS` — the same defect class
-    R4-12 records (a gate list declared twice drifts in the copy nobody runs), declared a
-    third time. `review-round` is what a round actually executes, so it is the one place
-    the gate list is stated and every other consumer derives from it.
-    """
-    if makefile_text is None:
-        makefile_text = (REPO / "Makefile").read_text(encoding="utf-8")
-    match = re.search(r"^review-round:((?:[^\n]*\\\n)*[^\n]*)", makefile_text, re.M)
-    if not match:
-        return set()
-    return set(match.group(1).replace("\\", " ").split())
-
+# N1: the Makefile/workflow parsing this file used to carry — MAKE_CALL_RE, the bare-make
+# matcher, the shell-joiner list, the `review-round` reader, `gate_step_violations` — now
+# lives in conformance/gates.py, which conformance/check.py imports too. Round 5 left the
+# two files holding separate implementations of "does CI invoke this gate", at different
+# strictnesses, and they had already disagreed: a step with `continue-on-error: true` was
+# neutered here and a working gate there. One rule, two declarations, is R4-8's own defect.
+SHELL_JOINERS = gates.SHELL_JOINERS
 
 # Every gate the Makefile owns must be reachable from CI (SPEC-gate-integrity.md §2.2),
 # and the Makefile — not this file — says which those are.
-REQUIRED_TARGETS = _review_round_prerequisites()
+REQUIRED_TARGETS = gates.review_round_prerequisites(REPO)
+PR_ONLY = gates.pr_only_gates(REPO)
 
 
 def _command(line):
@@ -80,93 +66,23 @@ def _command(line):
     return text
 
 
-def _strip_comment(command):
-    """Drop a trailing shell comment (` # ...`), which is inert to the shell."""
-    return re.sub(r"(^|\s)#.*$", "", command).strip()
-
-
-def _bare_make_target(command):
-    """The target of `command` if it is exactly one `make <target>` call, else None.
-
-    Round-5 F2: `make lint && pytest -q --no-header || true` starts with `make ` and used
-    to be waved through. It is two commands, the second of which decides the exit status.
-    """
-    match = BARE_MAKE_RE.match(_strip_comment(command))
-    return match.group(1) if match else None
-
-
 def _is_allowed(line):
     """A workflow line may carry a gate tool name only as a comment or a bare make call."""
     text = line.strip()
     if text.startswith("#"):
         return True
-    return _bare_make_target(_command(line)) is not None
+    return gates.bare_make_target(_command(line)) is not None
 
 
-def _run_commands(run):
-    """The meaningful command lines of a `run:` block (comments and blanks dropped)."""
-    return [line.strip() for line in run.splitlines()
-            if line.strip() and not line.strip().startswith("#")]
-
-
-def _guard_problem(scope, mapping):
-    """`continue-on-error:`/`if:` on a step or job, as an offending-token string."""
-    if "if" in mapping:
-        return f"{scope} carries an `if:` expression ({mapping['if']!r})"
-    cont = mapping.get("continue-on-error")
-    if cont is not None and cont is not False and str(cont).strip().lower() != "false":
-        return f"{scope} carries `continue-on-error: {cont}`"
-    return None
-
-
-def gate_step_violations(workflow):
+def gate_step_violations(workflow, pr_only=None):
     """Ways a workflow step could invoke a required gate without obeying it (round-5 F2).
 
-    A step that calls one of `review-round`'s gate targets must be exactly one
-    `make <target>` command, and neither it nor its job may be conditional or allowed to
-    fail. Steps that call no gate target are none of this check's business — `cd frontend
-    && npm ci` is a perfectly good setup step.
+    Thin wrapper over `gates.gate_step_violations` so this file's tests keep reading the
+    way they did; the rule itself is stated once, in conformance/gates.py, and check.py
+    reads the same one (N1).
     """
-    document = yaml.safe_load(pathlib.Path(workflow).read_text(encoding="utf-8")) or {}
-    problems = []
-    for job_name, job in (document.get("jobs") or {}).items():
-        for index, step in enumerate(job.get("steps") or [], 1):
-            run = step.get("run")
-            if not run:
-                continue
-            commands = _run_commands(run)
-            targets = {t for line in commands for t in MAKE_CALL_RE.findall(line)}
-            gated = sorted(targets & REQUIRED_TARGETS)
-            if not gated:
-                continue
-            name = step.get("name") or f"step #{index}"
-            where = f"{pathlib.Path(workflow).name}: job '{job_name}': step '{name}'"
-            gates = ", ".join(gated)
-
-            if len(commands) != 1:
-                problems.append(
-                    f"{where}: invokes gate(s) {gates} inside a {len(commands)}-command "
-                    f"run block (offending token: {commands[0]!r}) — a gate step must be "
-                    f"exactly one `make <target>` call so its exit status is the step's")
-            else:
-                command = _strip_comment(commands[0])
-                if _bare_make_target(command) is None:
-                    joiner = next((j for j in SHELL_JOINERS if j in command), None)
-                    token = joiner or command[len("make"):].strip().split(" ", 1)[-1]
-                    problems.append(
-                        f"{where}: invokes gate(s) {gates} as {command!r} (offending "
-                        f"token: {token!r}) — a gate step must be exactly one "
-                        f"`make <target>` call: no {' '.join(SHELL_JOINERS)}, no "
-                        f"trailing arguments")
-
-            for scope, mapping in ((f"step '{name}'", step), (f"job '{job_name}'", job)):
-                guard = _guard_problem(scope, mapping)
-                if guard:
-                    problems.append(
-                        f"{where}: invokes gate(s) {gates} but {guard} (offending token: "
-                        f"{'if' if 'if' in mapping else 'continue-on-error'}) — CI that "
-                        f"reaches a gate and then ignores its verdict has no gate")
-    return problems
+    return gates.gate_step_violations(
+        workflow, REQUIRED_TARGETS, PR_ONLY if pr_only is None else pr_only)
 
 
 def _annotate(text):
@@ -192,30 +108,8 @@ def _annotate(text):
 
 def _steps(workflow):
     """Yield (job_name, step_name, run_string) for every step with a `run:`."""
-    document = yaml.safe_load(workflow.read_text(encoding="utf-8")) or {}
-    for job_name, job in (document.get("jobs") or {}).items():
-        for index, step in enumerate(job.get("steps") or [], 1):
-            run = step.get("run")
-            if not run:
-                continue
-            name = step.get("name") or step.get("uses") or f"step #{index}"
-            yield job_name, name, run
-
-
-def _phony_targets():
-    """The `.PHONY:` target list from the Makefile (continuations included)."""
-    text = (REPO / "Makefile").read_text(encoding="utf-8")
-    targets = set()
-    for match in re.finditer(r"^\.PHONY:((?:[^\n]*\\\n)*[^\n]*)", text, re.M):
-        targets.update(match.group(1).replace("\\", " ").split())
-    return targets
-
-
-def _recipe(target):
-    """The recipe lines of one Makefile target, as a single string."""
-    text = (REPO / "Makefile").read_text(encoding="utf-8")
-    match = re.search(rf"^{re.escape(target)}:[^\n]*\n((?:\t[^\n]*\n)+)", text, re.M)
-    return match.group(1) if match else ""
+    for job_name, _job, step_name, step in gates.steps(workflow):
+        yield job_name, step_name, step["run"]
 
 
 def _package_roots():
@@ -274,7 +168,7 @@ def test_issue_r4_8_ci_does_not_redeclare_gate_invocations():
 
 def test_issue_r4_8_every_makefile_gate_target_is_reachable_from_ci():
     """The other half: a gate the Makefile owns but CI never calls is a dropped gate."""
-    phony = _phony_targets()
+    phony = gates.phony_targets(REPO)
     missing_targets = sorted(REQUIRED_TARGETS - phony)
     assert not missing_targets, (
         f"Makefile: .PHONY does not declare required gate target(s) {missing_targets} — "
@@ -285,7 +179,7 @@ def test_issue_r4_8_every_makefile_gate_target_is_reachable_from_ci():
     for workflow in WORKFLOWS:
         for job, step, run in _steps(workflow):
             for line in run.splitlines():
-                for target in MAKE_CALL_RE.findall(line):
+                for target in gates.MAKE_CALL_RE.findall(line):
                     invoked.setdefault(target, f"{workflow.name}: job '{job}': step '{step}'")
     missing_from_ci = sorted(REQUIRED_TARGETS - set(invoked))
     assert not missing_from_ci, (
@@ -323,7 +217,7 @@ def test_issue_r4_12_scan_scope_is_derived_from_the_package_roots():
     )
 
     for target in ("lint", "log-scrub"):
-        recipe = _recipe(target)
+        recipe = gates.recipe(REPO, target)
         assert recipe, f"Makefile: target '{target}' has no recipe"
         assert "$(PY_ROOTS)" in recipe, (
             f"Makefile: target '{target}' does not use $(PY_ROOTS); a hand-typed root "
@@ -345,13 +239,16 @@ def _req(req_id):
 
 
 def _waived_fingerprints():
-    """`WAIVED: <fingerprint> — reason (YYYY-MM-DD)` lines, as check.py parses them."""
-    text = (REPO / "WAIVERS.md").read_text(encoding="utf-8")
-    return {
-        match.group(1): match.group(0)
-        for match in re.finditer(
-            r"^WAIVED:\s*(\S+)\s+—\s+\S.*\(\d{4}-\d{2}-\d{2}\)$", text, re.M)
-    }
+    """`WAIVED: <fingerprint> — reason (YYYY-MM-DD)` lines, as check.py parses them.
+
+    D-010 follow-up item 2: "as check.py parses them" used to be a claim rather than a
+    fact — this file's regex was end-anchored and check.py's was not, so the two
+    disagreed about SCAN-M4-EXPOSURE-AUTH, whose real tail was prose. One parser now,
+    and a line that fails it is a reported problem instead of a silent absence.
+    """
+    waivers, problems = gates.parse_waivers(REPO)
+    assert not problems, "WAIVERS.md has unparseable lines:\n  " + "\n  ".join(problems)
+    return waivers
 
 
 def test_issue_f1_secrets_in_exhaust_is_waived_not_gated_by_log_scrub():
@@ -390,7 +287,7 @@ def test_issue_f1_secrets_in_exhaust_is_waived_not_gated_by_log_scrub():
     )
 
     # The source scan itself is useful and stays; it is simply not this req's gate.
-    assert "log-scrub" in _phony_targets(), (
+    assert "log-scrub" in gates.phony_targets(REPO), (
         "make log-scrub was deleted along with the claim — it is a real source-scan gate "
         "and review-round runs it; only the requirement mapping was wrong"
     )
@@ -581,7 +478,7 @@ def test_issue_f8_the_required_gate_set_is_read_from_review_round():
         "review-round: lint new-gate test\n"
         "\t@echo mechanical gates green\n"
     )
-    assert _review_round_prerequisites(synthetic) == {"lint", "new-gate", "test"}, (
+    assert gates.review_round_prerequisites(text=synthetic) == {"lint", "new-gate", "test"}, (
         "a gate added to review-round must show up in the required set without anyone "
         "editing this test")
 
@@ -591,11 +488,11 @@ def test_issue_f8_the_required_gate_set_is_read_from_review_round():
         "\ttest-frontend check-generated conformance\n"
         "\t@echo ok\n"
     )
-    assert _review_round_prerequisites(wrapped) == {
+    assert gates.review_round_prerequisites(text=wrapped) == {
         "lint", "log-scrub", "test", "test-frontend", "check-generated", "conformance",
     }, "a wrapped prerequisite list was truncated"
 
-    live = _review_round_prerequisites()
+    live = gates.review_round_prerequisites(REPO)
     assert live == REQUIRED_TARGETS, (
         f"REQUIRED_TARGETS ({sorted(REQUIRED_TARGETS)}) is not the set review-round "
         f"declares ({sorted(live)}) — it is a fourth hand-typed copy")

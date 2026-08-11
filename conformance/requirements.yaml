@@ -46,7 +46,7 @@ requirements:
     phase: 0
     verify: test
     source: plan-addendum-2026-07-30.md §I Phase 0 / §E9
-    text_hash: sha256:5529aa22dae0bac7bc53903c2c454ef6e27940cf752ae7e3ebabde6f05a6e539
+    text_hash: sha256:3da72f9bd931c4c9d24ef0f97dd8a457cedc2aa06c9c79aa95c719911fd07e5a
     text: TOTP second factor enforced for enrolled users at login.
   - id: P0-VALIDATION
     phase: 0
@@ -69,7 +69,7 @@ requirements:
     phase: 0
     verify: test
     source: plan-addendum-2026-07-30.md §A1/§D7
-    text_hash: sha256:03a0e992bcb8b765ce21a3b576864ee6c652d1b435a184f3bc81094fddbd61e2
+    text_hash: sha256:aa2402428dd17c88f1a17bac3556b5aaed4d0c331c4176322225a964ea81a57b
     text: Every topic subscribe passes authorize_topic(); anonymous sockets rejected.
   - id: P0-AUDIT
     phase: 0
@@ -87,7 +87,7 @@ requirements:
     phase: 0
     verify: test
     source: plan-addendum-2026-07-30.md §A7/§D5
-    text_hash: sha256:929a807a8d20610d6e705c7d549e6afabc3858fb2631705b65bd18ab2ada463c
+    text_hash: sha256:bea5e22edf4d6b1fb91820956920dbf741fc875a23a1989a0052f1eac08d31f1
     text: Transport + provider interfaces exist with in-memory fakes; fakes idempotent.
   - id: P0-WS-DEMO
     phase: 0
@@ -267,7 +267,7 @@ requirements:
     phase: 2
     verify: test
     source: plan-addendum-2026-08-02-review3.md §N1/§N5
-    text_hash: sha256:945b9c35b3193082fdfde0c4ce728440a1ee2a41337a9aa9be3563ab91d20108
+    text_hash: sha256:2555c46fefe62940e1784f13549319c090c6c73ba169817c8dc96551cc64d62b
     text: Volumes are per-Site named volumes in the manifest with an idempotent ensure_volume primitive; rollback/reaper/decommission never touch them without T1 confirmation.
   - id: PIPE-M2-GIT-POLLING
     phase: 2
@@ -327,7 +327,7 @@ requirements:
     phase: 1
     verify: test
     source: deploy-system-plan.md §4.5 / §5.2
-    text_hash: sha256:b504120b907b9affd71be615f9e1a4509e662573ead924b5f6f4feb61f19d25d
+    text_hash: sha256:42d36ed8802e3e31f30062baa333775c2eab850fc9f8edd2183eac85a41a234b
     text: Every wizard answer is validated against the question that produced it (kind, choices, emptiness); unknown question ids are rejected rather than ignored, and a partial save is all-or-nothing.
   - id: WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE
     phase: 1
@@ -401,7 +401,7 @@ requirements:
     phase: 4
     verify: test
     source: plan-addendum-2026-07-30.md §A2/§E9
-    text_hash: sha256:2775ddef32ef119a48e863c8c82485aa73f034e93edcce4a7556528ee01b0831
+    text_hash: sha256:67c3801f51f22753ee6e3c8cc55bfbbce03fd14dcd2e9e344e286dd5eb3c23be
     text: WebAuthn (django-otp-webauthn) becomes the primary second factor with TOTP fallback; step-up hardware touch gates T1 actions via require_recent_touch.
 
   # — Monitoring & alerting (Phases 2-3)
@@ -453,7 +453,7 @@ requirements:
     phase: 2
     verify: test
     source: server-hardening.md R3 / review3 §V1
-    text_hash: sha256:967bec9f4cc453b6a23533faa8c9c07aa25c90cd37214c58c18e3ad6b4603392
+    text_hash: sha256:adf3370784f345bbcea333367e0e1a6652241072d1b8dae23ff3a5e43de1be66
     text: fail2ban ignoreip whitelists only the Hub's mesh IP, never the whole tailnet /10.
   - id: HARD-Q8-SCRIPTS-TESTED
     phase: 2
@@ -511,7 +511,7 @@ requirements:
     phase: 2
     verify: checklist
     source: plan-addendum-2026-07-30.md §F8 / review3 §N2
-    text_hash: sha256:382acb988099cd672d14c540c2c36492f39abd47c605e6c53876b3fedea74ddb
+    text_hash: sha256:7642fa533c38cfb1a25c13ebf7fe29fa46e7ac62b0edc4f1bb7fd452ca4bcc4e
     text: Every screen renders empty/loading/live/error/degraded states in simulation mode, including warming and data-stale badges.
 
   # — Partner surface (Phase 5.5)

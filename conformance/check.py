@@ -55,7 +55,6 @@ import hashlib
 import json
 import pathlib
 import re
-import subprocess
 import sys
 
 import yaml
@@ -64,6 +63,15 @@ import yaml
 # at another tree (the gate's own tests do exactly that), but HEAD is always
 # this checkout's HEAD — that is the sha a run report has to match.
 SELF_REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# Makefile/workflow/WAIVERS parsing and the working-tree fingerprint live in
+# gates.py, imported by this script and by tests/test_gate_parity.py alike (N1).
+# Round 5 left two implementations of "does CI invoke this gate", of differing
+# strictness, which is the R4-8 defect reproduced inside the machinery built to
+# kill it: a step carrying `continue-on-error: true` was neutered to the parity
+# test and a working gate to this script.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gates  # noqa: E402 — the path insert above is its prerequisite
 
 ID_RE = re.compile(r"^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$")
 TEXT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -177,17 +185,6 @@ def collect_markers(root):
 
 # ── run report (rule 1) ─────────────────────────────────────────────────────
 
-def git_head():
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(SELF_REPO), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        )
-        return out.stdout.strip()
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 def load_run_report(path):
     """Return (report, [problems]).  A missing, malformed or stale report is a
     hard failure: a stale report must never be mistaken for a green run."""
@@ -204,7 +201,7 @@ def load_run_report(path):
         return None, [f"run-report unreadable: {rel} ({exc})"]
     if not isinstance(report.get("outcomes"), dict):
         return None, [f"run-report malformed: {rel} has no 'outcomes' object"]
-    head = git_head()
+    head = gates.git_head(SELF_REPO)
     sha = report.get("sha") or "<none>"
     if not head:
         return None, [f"run-report freshness cannot be checked: git rev-parse HEAD failed ({rel})"]
@@ -212,6 +209,29 @@ def load_run_report(path):
         return None, [
             f"run-report stale: {rel} was written at sha {sha}, HEAD is {head} — "
             f"re-run the suite (`make test`) so outcomes describe this tree."
+        ]
+    # Round-5 deferral: HEAD alone does not move when a file is edited, so the report
+    # stayed "fresh" across any uncommitted change made after the run.  That is exactly
+    # the dangerous window — watch a requirement go red, edit the code, re-run the gate
+    # (which reads the *working tree*) and it grades a tree the tests never saw.
+    tree = gates.tree_fingerprint(SELF_REPO)
+    if not tree:
+        return None, [
+            f"run-report freshness cannot be checked: the working-tree fingerprint of "
+            f"{SELF_REPO} could not be computed (is this a git checkout?) ({rel})"
+        ]
+    if "tree" not in report:
+        return None, [
+            f"run-report has no 'tree' fingerprint: {rel} predates the working-tree "
+            f"binding, and an absent binding is not a claim that the tree is unchanged "
+            f"— it is no claim at all. Re-run the suite (`make test`)."
+        ]
+    if report["tree"] != tree:
+        return None, [
+            f"run-report stale: {rel} describes a different working tree "
+            f"(report {report['tree'][:19]}…, tree now {tree[:19]}…) — files have "
+            f"changed since the suite ran, so its outcomes do not describe the tree "
+            f"this gate is grading. Re-run the suite (`make test`), then re-run the gate."
         ]
     # A report from `pytest -k ...`, a single file, or a run cut short by -x
     # describes a subset. Refusing it here is one honest line; accepting it turns
@@ -284,67 +304,9 @@ def check_demo_paths(root, paths):
 
 # ── gates (rule 4) ──────────────────────────────────────────────────────────
 
-def makefile_targets(root):
-    """Targets declared in the Makefile, read from the file as it stands.
-
-    Deliberately not a hard-coded list: a concurrently-added target (log-scrub)
-    must be recognised the moment it lands."""
-    mk = root / "Makefile"
-    if not mk.exists():
-        return set()
-    targets = set()
-    for line in mk.read_text().splitlines():
-        if not line or line.startswith(("\t", " ", "#")):
-            continue
-        m = re.match(r"^([^:#=]+):(?!=)", line)
-        if not m:
-            continue
-        for name in m.group(1).split():
-            if not name.startswith("."):  # .PHONY / .DEFAULT_GOAL are not gates
-                targets.add(name)
-    return targets
-
-
-MAKE_CALL_RE = re.compile(r"\bmake\s+(?:-[A-Za-z-]+\s+)*([A-Za-z0-9_.-]+)")
-
-
-def review_round_prerequisites(root):
-    """Targets `review-round` depends on — i.e. what a review round actually runs.
-
-    Round-5 F3: a `gate:` that merely *names* something is not a gate. Being on this
-    list is what makes a target one of the gates rather than a stray helper."""
-    mk = root / "Makefile"
-    if not mk.exists():
-        return set()
-    m = re.search(r"^review-round:((?:[^\n]*\\\n)*[^\n]*)", mk.read_text(), re.M)
-    return set(m.group(1).replace("\\", " ").split()) if m else set()
-
-
-def workflow_invoked_targets(root):
-    """Make targets some workflow step actually calls (`run: make <target>`).
-
-    Round-5 F3 again, from the other side: a gate CI never invokes is a gate that does
-    not guard the branch. Step *names* are deliberately not read — a step called
-    `noop-gate` whose `run:` is an `echo` used to satisfy `gate: noop-gate`."""
-    invoked = set()
-    wf_dir = root / ".github/workflows"
-    if not wf_dir.is_dir():
-        return invoked
-    for wf in sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml")):
-        try:
-            doc = yaml.safe_load(wf.read_text())
-        except yaml.YAMLError:
-            continue
-        if not isinstance(doc, dict):
-            continue
-        for job in (doc.get("jobs") or {}).values():
-            if not isinstance(job, dict):
-                continue
-            for step in job.get("steps") or []:
-                if isinstance(step, dict) and isinstance(step.get("run"), str):
-                    invoked.update(MAKE_CALL_RE.findall(step["run"]))
-    return invoked
-
+# Makefile targets, `review-round`'s prerequisite list, PR_ONLY_GATES and "which
+# targets does CI honestly invoke" are all `gates.<...>` now — see the import note at
+# the top of this file (N1).
 
 # ── text_hash (rule 6) ──────────────────────────────────────────────────────
 
@@ -355,21 +317,44 @@ def workflow_invoked_targets(root):
 DOC_ROOTS = ("docs/plan", "docs")
 BOLD_LEAD = re.compile(r"^\*\*([A-Za-z]?[A-Za-z0-9]*[0-9](?:\.[0-9]+)*)[.)\s]")
 
+# Shorthands the registry uses for a frozen copy under docs/plan/. `review3 §N2` is a
+# citation of a real section of a real doc; without this it resolved to nothing and the
+# section went unpinned.
+DOC_ALIASES = {
+    "review3": "plan-addendum-2026-08-02-review3.md",
+    "addendum": "plan-addendum-2026-07-30.md",
+    "scanner-node-ts": "plan-addendum-2026-08-02-scanner-node-ts.md",
+}
 
-def _find_doc(root, source):
-    m = re.search(r"([\w./-]+\.md)", source)
-    if not m:
-        return None, None
-    ref = m.group(1)
-    # Only the primary citation counts: `A.md §R3 / review3 §V1` is section R3 of
-    # A.md, not section V1 of some other doc.
-    rest = source[m.end():].split("/")[0].strip()
+# A `source:` may cite more than one section: `§A1/§D7`, `§F8 / review3 §N2`,
+# `§1.5 P3 / §D2`.  Split on a `/` that separates citations — one directly before a `§`,
+# or one surrounded by spaces — and never on a `/` inside a path (`conformance/paths.yaml`).
+CITATION_SPLIT_RE = re.compile(r"\s*/\s*(?=§)|\s+/\s+")
+
+
+def source_citations(source):
+    return [part.strip() for part in CITATION_SPLIT_RE.split(source) if part.strip()]
+
+
+def _resolve_doc(root, ref):
     name = pathlib.PurePosixPath(ref).name
     for base in DOC_ROOTS:
         for cand in ((root / base / name), (root / base / ref)):
             if cand.is_file():
-                return cand, rest
-    return None, rest
+                return cand
+    return None
+
+
+def _find_doc(root, citation, fallback=None):
+    """(doc, rest) for one citation — the doc it names, or `fallback` if it names none."""
+    m = re.search(r"([\w./-]+\.md)", citation)
+    if m:
+        return _resolve_doc(root, m.group(1)), citation[m.end():].strip()
+    for alias, filename in DOC_ALIASES.items():
+        am = re.match(rf"{re.escape(alias)}\b", citation)
+        if am:
+            return _resolve_doc(root, filename), citation[am.end():].strip()
+    return fallback, citation
 
 
 def _anchor_of(rest):
@@ -382,19 +367,12 @@ def _anchor_of(rest):
     return m.group(1).rstrip(".") if m else None
 
 
-def source_section_body(root, source):
-    """Resolve `<doc>.md §<anchor>` to the text of that section.
+def section_body(doc, anchor):
+    """The text of one section of one doc, or None.
 
     Two section shapes exist in the frozen plan copies: a markdown heading
     (`## 4.5 Validation`) and a bold-lead paragraph (`**A1. Decision.** ...`).
-    Returns (docpath, body) or (docpath|None, None) when it cannot be resolved.
     """
-    doc, rest = _find_doc(root, source)
-    if doc is None:
-        return None, None
-    anchor = _anchor_of(rest)
-    if not anchor:
-        return doc, None
     lines = doc.read_text(encoding="utf-8").splitlines()
     esc = re.escape(anchor)
     bold_re = re.compile(rf"^\*\*{esc}[.)\s]")
@@ -411,7 +389,7 @@ def source_section_body(root, source):
             start, level, kind = i, len(m.group(1)), "head"
             break
     if start is None:
-        return doc, None
+        return None
 
     end = len(lines)
     for j in range(start + 1, len(lines)):
@@ -426,27 +404,48 @@ def source_section_body(root, source):
                 end = j
                 break
     body = "\n".join(ln.rstrip() for ln in lines[start:end]).strip()
-    return doc, (body or None)
+    return body or None
 
 
-def text_hash_of(body):
-    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+def resolve_source(root, source):
+    """Resolve every citation in a `source:` — `(resolved, unresolved)`.
+
+    Round-5 deferral: `text_hash` pinned only the *first* `§` of a multi-section
+    source, so `P0-AUTHZ-TOPIC`'s §D7 (the topic vocabulary its §A1 obligation is
+    authorised against) could be rewritten with the pin still green.  A requirement
+    cites two sections because both carry the obligation; the pin has to cover both.
+
+    `resolved` is `[(doc, anchor, body)]` in citation order; `unresolved` is the
+    citations that named no reachable section, so the caller can *say so* rather than
+    hash what it found and call the requirement pinned.
+    """
+    resolved, unresolved, doc = [], [], None
+    for index, citation in enumerate(source_citations(source)):
+        doc, rest = _find_doc(root, citation, fallback=doc)
+        # Only the first citation may name its section by a bare leading token
+        # (`server-hardening.md R3`, `... Quick start`). A later one has to carry an
+        # explicit §, or `build-process.md §5 / conformance/paths.yaml` would go looking
+        # for a section called "conformance".
+        anchor = _anchor_of(rest) if (index == 0 or "§" in rest) else None
+        body = section_body(doc, anchor) if (doc is not None and anchor) else None
+        if body is None:
+            unresolved.append(citation)
+        else:
+            resolved.append((doc, anchor, body))
+    return resolved, unresolved
 
 
-# ── waivers ─────────────────────────────────────────────────────────────────
+def text_hash_of(bodies):
+    """sha256 of one section body, or of the cited bodies joined in citation order.
 
-def waived_ids(root):
-    """Only structured `WAIVED: <id> — reason (date)` lines count (round-1 finding:
-    a bare word-boundary regex let prose mentioning an id silently waive it)."""
-    waivers = root / "WAIVERS.md"
-    if not waivers.exists():
-        return set()
-    out = set()
-    for line in waivers.read_text().splitlines():
-        m = re.match(r"^WAIVED:\s*(\S+)\s+—\s+\S.*\(\d{4}-\d{2}-\d{2}\)", line.strip())
-        if m:
-            out.add(m.group(1))
-    return out
+    A single-citation source hashes to exactly what it hashed before this change, so
+    the 60-odd live single-section pins do not all churn at once — which matters,
+    because a diff in which every hash moved is a diff nobody can review.
+    """
+    if isinstance(bodies, str):
+        bodies = [bodies]
+    joined = "\n\n".join(bodies)
+    return "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -519,19 +518,33 @@ def main():
 
     if args.print_text_hashes:
         for req_id, req in registry.items():
-            doc, body = source_section_body(root, req["source"])
-            if body is None:
-                print(f"{req_id}: UNRESOLVED source {req['source']!r} "
-                      f"(doc={'-' if doc is None else doc.relative_to(root)})")
-            else:
-                print(f"{req_id}: {text_hash_of(body)}  # {doc.relative_to(root)} "
-                      f"— {req['source']}")
+            resolved, unresolved = resolve_source(root, req["source"])
+            if not resolved:
+                print(f"{req_id}: UNRESOLVED source {req['source']!r}")
+                continue
+            where = ", ".join(f"{doc.relative_to(root)} §{anchor}"
+                              for doc, anchor, _ in resolved)
+            tail = f"; UNRESOLVED: {', '.join(unresolved)}" if unresolved else ""
+            print(f"{req_id}: {text_hash_of([b for _, _, b in resolved])}  "
+                  f"# {where} — {req['source']}{tail}")
         return 0
 
     markers = collect_markers(root)
-    waived = waived_ids(root)
+    waived, waiver_problems = gates.parse_waivers(root)
     failures = []
     warnings = []
+
+    # D-010 follow-up item 2: a `WAIVED:` line that does not parse waives nothing, and
+    # used to do so in silence — so did a line naming a requirement id that is not in
+    # the registry. Both read to a human as a waiver in force.
+    failures.extend(waiver_problems)
+    for fingerprint in sorted(waived):
+        if ID_RE.match(fingerprint) and fingerprint not in registry:
+            failures.append(
+                f"WAIVERS.md waives {fingerprint}, which is not a requirement id in "
+                f"conformance/requirements.yaml — a typo'd id waives nothing, forever. "
+                f"(Fingerprints that are not requirement-shaped — paths, artifact trees "
+                f"— are not held to the registry.)")
 
     report, report_problems = load_run_report(report_path)
     if report_problems:
@@ -552,9 +565,11 @@ def main():
             failures.append(
                 f"marker on retired req {req_id}{tail}; update or delete: {tests}")
 
-    targets = makefile_targets(root)
-    round_gates = review_round_prerequisites(root)
-    ci_invoked = workflow_invoked_targets(root)
+    targets = gates.makefile_targets(root)
+    round_gates = gates.review_round_prerequisites(root)
+    pr_only = gates.pr_only_gates(root)
+    ci_invoked, ci_rejected = gates.ci_gate_invocations(root, round_gates, pr_only)
+    failures.extend(gates.pr_only_declaration_problems(root))
 
     matrix = {}
     for req_id, req in registry.items():
@@ -602,14 +617,18 @@ def main():
                         gaps.append("it is not a prerequisite of `review-round`, so no "
                                     "review round runs it")
                     if gate not in ci_invoked:
-                        gaps.append("no workflow step invokes `make " + gate + "`, so CI "
-                                    "does not run it")
+                        gaps.append("no workflow step invokes `make " + gate + "` in a "
+                                    "way that lets it decide the build, so CI does not "
+                                    "run it")
                 if gaps:
                     status = "uncovered"
                     details = [f"{req_id} ({kind}) gate {gate!r} is not a gate: "
                                + "; ".join(gaps)
                                + f". review-round runs {sorted(round_gates)}; CI invokes "
                                f"{sorted(ci_invoked)}"]
+                    # N1: say *why* an invocation did not count. The reviewer should not
+                    # have to diff this against tests/test_gate_parity.py to find out.
+                    details += [f"    rejected: {why}" for why in ci_rejected.get(gate, [])]
                 else:
                     status = "verified"
 
@@ -624,8 +643,23 @@ def main():
         elif due and status in {"uncovered", "skipped-only"} and req_id not in waived:
             failures.extend(details or [f"{req_id} ({kind}) {status} and not waived"])
 
-        # rule 6 — text_hash freshness.
+        # rule 6 — text_hash freshness, over every section the source cites.
         pinned = req.get("text_hash")
+        if status != "retired":
+            resolved, unresolved = resolve_source(root, req["source"])
+            entry["text_hash_sections"] = [
+                f"{doc.relative_to(root)} §{anchor}" for doc, anchor, _ in resolved]
+            if unresolved:
+                entry["text_hash_unresolved"] = unresolved
+                if resolved:
+                    warnings.append(
+                        f"{req_id}: {len(resolved)} of "
+                        f"{len(resolved) + len(unresolved)} cited section(s) are "
+                        f"covered by text_hash; nothing watches "
+                        f"{', '.join(repr(u) for u in unresolved)} in "
+                        f"{req['source']!r} — re-word the citation to a heading or "
+                        f"bold-lead in a frozen docs/plan/ copy, or accept that it is "
+                        f"unanchorable")
         if not pinned and status != "retired":
             # Round-5 F5: no pin used to mean no output at all, so a green run could not
             # be told apart from an unchecked one. Say which requirements the source-text
@@ -633,36 +667,34 @@ def main():
             # doc that is not a frozen copy under docs/plan/, or a section that cannot be
             # anchored, and neither is a defect in this run. (A *pinned* req whose source
             # will not resolve is already a hard failure below.)
-            doc, body = source_section_body(root, req["source"])
-            entry["text_hash_resolved"] = body is not None
-            if body is not None:
+            entry["text_hash_resolved"] = bool(resolved)
+            if resolved:
                 warnings.append(
                     f"{req_id} has no text_hash — its source {req['source']!r} resolves "
-                    f"to a section in {doc.relative_to(root)} and could be pinned; "
+                    f"to {', '.join(entry['text_hash_sections'])} and could be pinned; "
                     f"unpinned means a silent edit to that text never re-opens review "
                     f"(re-pin with `python conformance/check.py --print-text-hashes`)")
             else:
-                where = "-" if doc is None else str(doc.relative_to(root))
                 warnings.append(
                     f"{req_id} has no text_hash and its source {req['source']!r} does not "
-                    f"resolve to a section (doc={where}) — nothing checks this "
+                    f"resolve to a section — nothing checks this "
                     f"requirement's source text; re-word the source: citation to a "
                     f"heading or bold-lead in a frozen docs/plan/ copy, or accept that it "
                     f"is unanchorable")
 
         if pinned:
-            doc, body = source_section_body(root, req["source"])
-            if body is None:
+            if not resolved:
                 failures.append(
                     f"{req_id}: text_hash pinned but its source section could not be "
                     f"resolved: {req['source']!r}")
             else:
-                actual = text_hash_of(body)
+                actual = text_hash_of([body for _, _, body in resolved])
                 entry["text_hash_actual"] = actual
                 if actual != pinned:
                     failures.append(
                         f"{req_id}: text_hash stale — source {req['source']!r} "
-                        f"({doc.relative_to(root)}) changed since it was pinned")
+                        f"({', '.join(entry['text_hash_sections'])}) changed since it "
+                        f"was pinned")
                     failures.append(f"    recomputed: {actual}")
                     failures.append(f"    pinned:     {pinned}")
                     failures.append(

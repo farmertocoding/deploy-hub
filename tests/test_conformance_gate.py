@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 
+import gates
 import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -78,6 +79,10 @@ def write_repo(root, *, reqs, tests_src=None, report="auto", waivers="",
         report = {
             "schema_version": 1,
             "sha": head_sha(),
+            # The report is bound to the working tree, not just to HEAD (round-5
+            # deferral): HEAD does not move when a file is edited. A fixture standing in
+            # for a real run has to carry the same binding the plugin writes.
+            "tree": gates.tree_fingerprint(REPO),
             "generated_at": "2026-08-11T00:00:00Z",
             "pytest_exitstatus": 0,
             # Round-5 F7: an absent full_run key now means "partial", so a fixture that
@@ -233,6 +238,7 @@ def test_issue_r4_9_partial_run_report_is_red_without_a_wall_of_not_collected(tm
         reqs=[_req("FIX-PARTIAL")],
         tests_src={"tests/test_fixture.py": MARKED_TEST.format(rid="FIX-PARTIAL", name="test_a")},
         report={"schema_version": 1, "sha": head_sha(),
+                "tree": gates.tree_fingerprint(REPO),
                 "generated_at": "2026-08-11T00:00:00Z", "pytest_exitstatus": 0,
                 "full_run": False, "invocation_args": ["-q", "tests/test_other.py"],
                 "outcomes": {"tests/test_other.py::test_unrelated": "passed"}},
@@ -708,6 +714,7 @@ def test_issue_f7_run_report_without_a_full_run_key_is_red(tmp_path):
         tests_src={"tests/test_fixture.py":
                    MARKED_TEST.format(rid="FIX-NOFLAG", name="test_a")},
         report={"schema_version": 1, "sha": head_sha(),
+                "tree": gates.tree_fingerprint(REPO),
                 "generated_at": "2026-08-11T00:00:00Z", "pytest_exitstatus": 0,
                 "outcomes": {"tests/test_fixture.py::test_a": "passed"}},
     )

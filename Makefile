@@ -15,6 +15,26 @@ PY_ROOTS := $(shell python3 -c "import pathlib; print(' '.join(sorted(p.name for
 py-roots:
 	@echo $(PY_ROOTS)
 
+# Gates that cannot run on a plain `push`, and may therefore carry
+# `if: github.event_name == 'pull_request'` on their CI step (round-5 N3).
+#
+# Round 5 banned `if:` on any gate step outright (F2), which is right for every gate
+# that CAN run on a push — a gate CI is allowed to skip does not guard the branch. But
+# D-001's `sensitive-path-guard` compares a branch against its merge base, and a push
+# event has no merge base to compare against: run it unconditionally and it is
+# meaningless, guard it and the parity check calls it neutered. So the exemption is
+# declared here, next to the gate list itself, and it is narrow — a target named here
+# must still be a `review-round` prerequisite, must still be invoked as a bare
+# `make <target>`, may still not carry `continue-on-error:`, may use only the one
+# PR-scoping expression above, and must live in a workflow that triggers on
+# `pull_request`. See conformance/gates.py::gate_step_violations.
+#
+# EMPTY TODAY, deliberately: `sensitive-path-guard` in push-checks.yml is still the
+# D-001 placeholder that only echoes, and invokes no make target. This line is where it
+# lands when it becomes real; adding a name here is a reviewable edit in the same diff
+# that spends the exemption.
+PR_ONLY_GATES :=
+
 # §4.5 pipeline: serializers → OpenAPI → generated TS types + zod schemas (D-002).
 # Regenerate after any serializer change; check-generated asserts the mirror is not stale.
 generate-client:

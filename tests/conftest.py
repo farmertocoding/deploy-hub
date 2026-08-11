@@ -14,7 +14,6 @@ if sys.version_info < (3, 11):
 import datetime
 import json
 import pathlib
-import subprocess
 
 import django
 
@@ -34,6 +33,22 @@ django.setup()
 # of the run it is executing inside.
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# conformance/gates.py owns the gate machinery this plugin and the gate tests both read
+# (N1). `conformance/` deliberately has no __init__.py — it is not an importable package,
+# and giving it one would silently add it to the Makefile's $(PY_ROOTS) and so to the
+# bandit and log-scrub scan scope. So its directory goes on the path instead, once, here.
+if str(REPO / "conformance") not in sys.path:
+    sys.path.insert(0, str(REPO / "conformance"))
+
+# And `tests/` itself, so one test module can import another's fixture harness rather
+# than growing a second copy of it — `write_repo`/`run_check` in test_conformance_gate.py
+# is the throwaway-tree builder every gate test needs.
+if str(REPO / "tests") not in sys.path:
+    sys.path.insert(0, str(REPO / "tests"))
+
+import gates  # noqa: E402 — the path insert above is its prerequisite
+
 _OUTCOMES: dict[str, str] = {}
 
 
@@ -46,15 +61,9 @@ def _run_report_path():
     return pathlib.Path(override)
 
 
-def _git_head():
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(REPO), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        )
-        return out.stdout.strip()
-    except Exception:  # noqa: BLE001 - a report with no sha is red downstream, by design
-        return ""
+# HEAD *and* a fingerprint of the working tree. HEAD alone does not move when a file is
+# edited, so a report written before an uncommitted change went on looking fresh to the
+# gate, which reads the working tree — round-5 recorded that as a deliberate deferral.
 
 
 def pytest_runtest_logreport(report):
@@ -133,7 +142,8 @@ def pytest_sessionfinish(session, exitstatus):
     reasons = _narrowing_reasons(session.config, exitstatus)
     payload = {
         "schema_version": 1,
-        "sha": _git_head(),
+        "sha": gates.git_head(REPO),
+        "tree": gates.tree_fingerprint(REPO),
         "generated_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pytest_exitstatus": int(exitstatus),
         "full_run": not reasons,
