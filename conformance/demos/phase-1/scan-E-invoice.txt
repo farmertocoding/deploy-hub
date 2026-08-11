@@ -1,10 +1,27 @@
 modules: django
-summary: ✖ blocker:1  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ ok:13
+summary: ✖ blocker:2  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ ok:18
 
-── BLOCKER (1)
+── BLOCKER (2)
+  ✖ core.secret-scan: Committed secrets detected
+      app/.env.prod.example: committed .env file
+app/docker-compose.prod.yml:70: [proof] connection string with an embedded password
+app/backend/apps/transport/adapters/base.py:79: [heuristic] hardcoded credentials value
+app/backend/apps/tenants/invite_views.py:29: [heuristic] hardcoded bad_token value
+
+Also in test material (not blocking):
+app/backend/apps/webhooks/tests/test_delivery.py:15: [heuristic] hardcoded secret value
+app/backend/apps/webhooks/tests/test_live_http.py:21: [heuristic] hardcoded secret value
+      fix: Move secrets to the vault / environment injection, rotate any value that was committed, and add .env to .gitignore. Committed secrets stay in git history until rotated.
+
+[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.
   ✖ django.secret-key-literal: Secret material is a literal in source
-      config/settings/base.py: DEV_FALLBACK_ENCRYPTION_KEY (high-entropy literal)
-      fix: A secret in source sits in git history forever and in every clone. Load it from the environment — SECRET_KEY = os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
+      config/settings/base.py: DEV_FALLBACK_ENCRYPTION_KEY; config/settings/prod.py: _WEAK_SECRET_KEYS
+      fix: A secret in source sits in git history forever and in every clone. Read it from the environment instead — os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
+
+── WARNING (1)
+  ⚠ core.gitignore: No .gitignore
+      The project has no .gitignore at its root.
+      fix: Add a .gitignore covering at least .env and (for node projects) node_modules, so secrets and dependency trees never enter the repo.
 
 ── PENDING_SANDBOX (3)
   ▸ django.check-deploy: [sandbox] django.check-deploy
@@ -14,7 +31,13 @@ summary: ✖ blocker:1  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ 
   ▸ django.collectstatic: [sandbox] django.collectstatic
       Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
 
-── OK (13)
+── OK (18)
+  ✓ core.lockfile: Dependency manifests are locked
+  ✓ core.tests-exist: Test files found
+  ✓ core.healthz: Health endpoint detected
+  ✓ core.digest-pins: All base images digest-pinned
+  ✓ core.exposure-auth: Authentication indicators found
+      main.tsx: AllowAny
   ✓ django.settings-shape: Settings are a split package
       Found a settings/ package (base + per-environment modules).
   ✓ django.debug-hardcoded: DEBUG is not hardcoded True
@@ -43,4 +66,4 @@ summary: ✖ blocker:1  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ 
       Dockerfile/compose entries use a real app server.
 
 manifest draft: service=django strategy=blue_green exposure=public jobs=3 volumes=0
-wizard: 26 question(s) pending
+wizard: 48 question(s) pending

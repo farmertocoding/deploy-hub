@@ -1,5 +1,50 @@
 modules: django
-summary: ✖ blocker:0  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ ok:14
+summary: ✖ blocker:1  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ ok:19
+
+── BLOCKER (1)
+  ✖ core.secret-scan: Committed secrets detected
+      .env: committed .env file
+Dockerfile:43: [heuristic] hardcoded secret_key value
+frontend/scripts/drill/README.md:25: [heuristic] hardcoded django_superuser_password value
+frontend/scripts/drill/redteam/01_rbac_money.mjs:10: [heuristic] hardcoded staff_password value
+frontend/scripts/drill/redteam/02_public_surface.mjs:8: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/01_shop_to_paid.mjs:23: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/03_regressions.mjs:26: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/03_regressions.mjs:27: [heuristic] hardcoded customer_password value
+frontend/scripts/drill/qa/04_permits_consignments.mjs:31: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/05_archive_results.mjs:35: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/05_archive_results.mjs:36: [heuristic] hardcoded staff_password value
+frontend/scripts/drill/qa/06_admin_shell.mjs:33: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/06_admin_shell.mjs:34: [heuristic] hardcoded staff_password value
+frontend/scripts/drill/qa/07_hardening.mjs:48: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/08_redis_outage.mjs:71: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/08_redis_outage.mjs:72: [heuristic] hardcoded customer_password value
+frontend/scripts/drill/qa/08_redis_outage.mjs:522: [heuristic] hardcoded password value
+frontend/scripts/drill/qa/08_redis_outage.mjs:684: [heuristic] hardcoded password value
+frontend/scripts/drill/qa/09_consent_and_lifecycle.mjs:50: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/09_consent_and_lifecycle.mjs:51: [heuristic] hardcoded customer_password value
+frontend/scripts/drill/qa/10_destinations_and_reconciliation.mjs:36: [heuristic] hardcoded admin_password value
+frontend/scripts/drill/qa/10_destinations_and_reconciliation.mjs:37: [heuristic] hardcoded customer_password value
+backend/.env: committed .env file
+.github/workflows/ci.yml:136: [heuristic] hardcoded secret_key value
+.github/workflows/ci.yml:277: [heuristic] hardcoded secret_key value
+.github/workflows/ci.yml:286: [heuristic] hardcoded db_password value
+.github/workflows/ci.yml:339: [heuristic] hardcoded django_superuser_password value
+.claude/skills/impeccable/scripts/live-browser.js:22: [heuristic] hardcoded token value
+
+Also in test material (not blocking):
+backend/accounts/tests/test_password_reset.py:104: [heuristic] hardcoded password value
+backend/accounts/tests/test_profile.py:106: [heuristic] hardcoded password value
+      fix: Move secrets to the vault / environment injection, rotate any value that was committed, and add .env to .gitignore. Committed secrets stay in git history until rotated.
+
+[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.
+
+── WARNING (1)
+  ⚠ core.digest-pins: Base images not pinned by digest (§6.8)
+      Dockerfile:9: FROM node:24-alpine is not digest-pinned
+Dockerfile:17: FROM python:3.12-slim is not digest-pinned
+Dockerfile:65: FROM caddy:2-alpine is not digest-pinned
+      fix: Pin each FROM to an @sha256: digest so builds cannot silently change under a moving tag.
 
 ── PENDING_SANDBOX (3)
   ▸ django.check-deploy: [sandbox] django.check-deploy
@@ -9,7 +54,13 @@ summary: ✖ blocker:0  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ 
   ▸ django.collectstatic: [sandbox] django.collectstatic
       Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
 
-── OK (14)
+── OK (19)
+  ✓ core.lockfile: Dependency manifests are locked
+  ✓ core.gitignore: .gitignore covers the basics
+  ✓ core.tests-exist: Test files found
+  ✓ core.healthz: Health endpoint detected
+  ✓ core.exposure-auth: Authentication indicators found
+      names.mjs: signin
   ✓ django.settings-shape: Single settings module, env-driven
       settings.py reads its configuration from the environment.
   ✓ django.debug-hardcoded: DEBUG is not hardcoded True

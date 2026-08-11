@@ -231,6 +231,24 @@ requirements:
     source: plan-addendum-2026-08-02-review3.md §Q7
     text_hash: sha256:7cb018843bb7e9a9ec0694d03ed6be8604f1035a321c0799d3dc187326f2572f
     text: sample-node-site fires every S3 detection rule and S4 check at least once, with a mutation set asserting each check's negative case.
+  # R4-10 / D-010 follow-up item 9: the phase-1 demo tree was checked by nothing —
+  # `conformance/demos/phase-1/` held four scan records and no requirement named
+  # them, so they went stale across D-010 and round-6b (four core checks widened,
+  # the common suite composed into Django scans) without a gate noticing. Naming
+  # the artifacts here is what makes deleting or blanking a record turn the phase
+  # gate red. The narrative record is `conformance/demos/phase-1.md`.
+  - id: P1-SCAN-DEMO
+    phase: 1
+    verify: demo
+    source: plan-addendum-2026-08-02-review3.md §Q4
+    demo:
+      - conformance/demos/phase-1.md
+      - conformance/demos/phase-1/
+    text_hash: sha256:f7c131228f88e4bc4db89f976a83efafa76bab1eebe8d68f8415b3465bf449e0
+    text: >
+      The phase-1 milestone demo is recorded: `python -m hub scan` run against the
+      real fleet (E-invoice, hr-saas-starter, SATURDAYS_site) and the in-repo
+      sample-node-site fixture, with each run's report checked in.
 
   # — Pipeline & deploy (Phase 2)
   - id: SEC-B1-BUILD-OFFHUB
