@@ -21,6 +21,7 @@ behaves *when actually invoked*.
 import ast
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -608,6 +609,93 @@ def test_issue_r7_an_unrelated_env_var_on_a_gate_step_is_fine(tmp_path):
         root / ".github/workflows/push-checks.yml",
         gates.review_round_prerequisites(root)) == []
     assert run_check(root).returncode == 0
+
+
+def _make_with_env(env_overrides, target="py-roots", args=()):
+    """Run the repo's real Makefile with a hostile environment, out of tree."""
+    env = dict(os.environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    env.update(env_overrides)
+    return subprocess.run(["make", "-f", str(REPO / "Makefile"), *args, target],
+                          cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+
+
+R8_NEUTERINGS = [
+    ({"MAKEFLAGS": "-n"}, ()),            # dry run: prints the recipe, exits 0
+    ({"MAKEFLAGS": "n"}, ()),             # the short-flag spelling make itself writes
+    ({"MAKEFLAGS": "ni"}, ()),            # combined with another
+    ({"GNUMAKEFLAGS": "-n"}, ()),         # the second variable make reads
+    ({"MAKEFLAGS": "i"}, ()),             # ignore-errors: runs, swallows the failure
+    ({"MAKEFLAGS": "q"}, ()),             # question mode: runs nothing
+    ({"MAKEFLAGS": "t"}, ()),             # touch instead of running
+    ({"MAKEFLAGS": "SHELL=/bin/true"}, ()),        # every recipe through `true`
+    ({"GNUMAKEFLAGS": "SHELL=/bin/true"}, ()),
+    ({"MAKEFLAGS": ".SHELLFLAGS=-c true"}, ()),
+    ({"MAKEFLAGS": "--eval=x:=1"}, ()),   # inject makefile text
+    ({"MAKEFILES": "/tmp/injected.mk"}, ()),       # inject a whole makefile
+    ({}, ("-n",)),                        # and the same flags straight from argv
+    ({}, ("--dry-run",)),
+    ({}, ("-i",)),
+    ({}, ("-q",)),
+    ({}, ("-t",)),
+]
+
+
+@pytest.mark.parametrize("env_overrides,args", R8_NEUTERINGS)
+def test_issue_r8_make_refuses_to_start_when_its_own_inputs_suppress_recipes(
+        env_overrides, args):
+    """The gates defend themselves, because parsing workflows can never be enough.
+
+    Three verification passes each closed one channel and surfaced the next: argv flags
+    (round-6 F1), `env:` at step/job/workflow scope (N1), and then `echo MAKEFLAGS=-n >>
+    $GITHUB_ENV` from an earlier step — which appears in no `env:` block anywhere, so no
+    amount of workflow parsing can see it. Enumerating make's inputs is a losing game.
+    This stops playing it: whatever route the flag took, make refuses to start, and a
+    gate that refuses to start is red rather than falsely green.
+    """
+    result = _make_with_env(env_overrides, args=args)
+    assert result.returncode != 0, (
+        f"make ran with {env_overrides or list(args)} — the recipe is suppressed or "
+        f"faked and the gate would report success:\n{result.stdout}{result.stderr}")
+    assert "refusing to run" in result.stderr, (
+        f"make failed, but not with the guard's message, so this is some other error:\n"
+        f"{result.stderr}")
+
+
+@pytest.mark.parametrize("env_overrides,args", [
+    ({"MAKEFLAGS": "-s"}, ()),
+    ({"MAKEFLAGS": "--no-print-directory"}, ()),
+    ({"MAKEFLAGS": ""}, ()),
+    ({}, ("-s",)),
+    ({}, ()),
+])
+def test_issue_r8_the_guard_leaves_honest_invocations_alone(env_overrides, args):
+    """A guard that refuses everything is not a guard, it is an outage."""
+    result = _make_with_env(env_overrides, args=args)
+    assert result.returncode == 0, (
+        f"an honest invocation with {env_overrides or list(args)} was refused:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" not in result.stderr
+
+
+def test_issue_r8_the_guard_cannot_be_quietly_deleted():
+    """It is one `ifneq` in a file nobody reads twice; say out loud that it must be there.
+
+    Without this, the guard is exactly the kind of check that disappears in a cleanup
+    diff and takes three verification passes to notice.
+    """
+    text = (REPO / "Makefile").read_text(encoding="utf-8")
+    assert "_MF_BAD" in text and "refusing to run" in text, (
+        "the Makefile's self-defence guard is gone — make will again accept a "
+        "recipe-suppressing flag from MAKEFLAGS, GNUMAKEFLAGS, MAKEFILES or argv")
+    assert text.index("_MF_BAD") < text.index("review-round:"), (
+        "the guard must be evaluated before any target is defined")
+    for var in gates.MAKE_ENV_VARS:
+        assert var in text, (
+            f"conformance/gates.py bans `env: {var}` in workflows but the Makefile "
+            f"guard does not mention it — the two halves of this defence have drifted, "
+            f"which is the N1 defect all over again")
 
 
 def test_issue_f3_residual_delegation_survives_an_import_alias(tmp_path):

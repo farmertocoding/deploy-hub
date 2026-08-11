@@ -1,3 +1,42 @@
+# ── the gates defend themselves ─────────────────────────────────────────────
+#
+# make takes its own flags from `MAKEFLAGS`/`GNUMAKEFLAGS` as well as from argv, and
+# `-n` prints a recipe without running it while still exiting 0; `-i` ignores its
+# errors; `-q` runs nothing at all; `-t` touches instead; `MAKEFILES=x.mk` can inject a
+# `SHELL := /bin/true`. Every one of those turns a gate into a step CI reaches and does
+# not run — the same false green as `continue-on-error: true`, with nothing to see in
+# the workflow.
+#
+# Three verification passes each closed one channel and surfaced the next: argv flags
+# (round-6 F1), then `env:` at step/job/workflow scope (N1), then `echo MAKEFLAGS=-n >>
+# $GITHUB_ENV` from an earlier step, which appears in no `env:` block anywhere and which
+# no amount of workflow parsing can see. Enumerating make's inputs is a losing game, so
+# this stops playing it: whatever route the flag took, make refuses to start. The
+# workflow-level checks in conformance/gates.py stay as the early, reviewable signal —
+# they catch the honest mistake in the diff; this catches the rest.
+#
+# `$(error)` fires while the makefile is being read, which happens even under `-n`.
+_MF_HEAD := $(firstword $(MAKEFLAGS))
+_MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
+#
+# `SHELL=` is the one input that does NOT survive into `$(MAKEFLAGS)` as a word — make
+# absorbs it into the variable — so it is caught by its origin instead. It is also the
+# nastiest of them: `MAKEFLAGS=SHELL=/bin/true` runs every recipe through `true`, so
+# the gate prints nothing and exits 0.
+_MF_BAD := $(strip \
+	$(foreach c,n i q t o,$(findstring $(c),$(_MF_SHORT))) \
+	$(filter --dry-run --just-print --recon --ignore-errors --question --touch \
+		--old-file --assume-old,$(MAKEFLAGS)) \
+	$(filter --eval% .SHELLFLAGS=%,$(MAKEFLAGS)) \
+	$(filter-out file default,$(origin SHELL))$(filter-out file default,$(origin .SHELLFLAGS)) \
+	$(MAKEFILES))
+ifneq ($(_MF_BAD),)
+$(error refusing to run: make's environment carries [$(_MF_BAD)], which suppresses or \
+fakes recipes — a gate that does not execute is not a gate. Clear MAKEFLAGS, \
+GNUMAKEFLAGS and MAKEFILES, and drop dry-run/ignore-errors/question/touch flags and \
+any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the Makefile.)
+endif
+
 .PHONY: dev test test-frontend lint conformance review-round generate-client check-generated \
 	log-scrub py-roots
 

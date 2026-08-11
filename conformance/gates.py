@@ -302,7 +302,15 @@ def _swallow_problem(scope, mapping):
 # set make's flags out of band, and "which values of MAKEFLAGS are harmless" is a
 # question this gate should not have to keep answering — the same reasoning that made
 # the flag rule an allow-list in the first place.
-MAKE_ENV_VARS = ("MAKEFLAGS", "GNUMAKEFLAGS")
+MAKE_ENV_VARS = ("MAKEFLAGS", "GNUMAKEFLAGS", "MAKEFILES")
+
+# This check is the early, reviewable signal — it catches the honest mistake in the diff
+# that adds it. It is NOT the last line of defence, and it cannot be: GitHub Actions lets
+# any earlier step set an environment variable for every later step by writing to
+# $GITHUB_ENV, which appears in no `env:` block that any amount of workflow parsing could
+# read. The Makefile refuses to start when make's own inputs carry a recipe-suppressing
+# flag, whatever route it took; see the guard at the top of the Makefile, and
+# tests/test_gate_followup.py::test_issue_r8_* which proves it fires.
 
 
 def _make_env_problem(scope, mapping):
