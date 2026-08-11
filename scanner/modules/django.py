@@ -436,7 +436,7 @@ class DjangoScannerModule:
                 title="Secret material is a literal in source",
                 detail="; ".join(sorted(unmitigated)),
                 fix_hint=("A secret in source sits in git history forever and in every "
-                          "clone. Load it from the environment — SECRET_KEY = "
+                          "clone. Read it from the environment instead — "
                           "os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and "
                           "store the new one through the Hub vault.")))
         if dev_fallbacks:
