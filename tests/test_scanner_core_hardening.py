@@ -699,3 +699,174 @@ def test_a_django_repo_with_a_key_in_github_workflows_is_a_blocker(tmp_path):
     assert checks["core.secret-scan"]["tier"] == "blocker", report["summary"]
     assert ".github/workflows/deploy.yml" in checks["core.secret-scan"]["detail"]
     assert report["summary"]["blocker"] >= 1
+
+
+
+# ── N6: generated output echoed its own source into the report ──────────────
+#
+# Raised by the R4-10 demo record (2026-08-11) as follow-up 1, from the D-011r noise
+# measurement. hr-saas-starter reported a `[heuristic]` finding at
+# `frontend/coverage/lcov-report/src/auth.ts.html` — istanbul's HTML rendering of the
+# very source line reported one entry above it. One underlying literal, counted twice,
+# the second copy in a directory no human has ever reviewed.
+#
+# THE FIRST CUT OF THIS FIX WAS WRONG, and how it was wrong is the reason these tests
+# are shaped as they are. It added the directory names to `_SKIP_DIRS`, which prunes
+# the WALK. An adversarial pass that wrote none of it found that this had reproduced
+# round-6b's mistake one layer down:
+#
+#   * `.vercel/.env.production.local` — the file `vercel env pull` writes, holding the
+#     live production environment — stopped being reported at all;
+#   * `core.gitignore` reads the same walk, so one prune silently cost two checks;
+#   * bundlers INLINE `process.env.*`, so a key can live in the artifact and in an
+#     ignored `.env` and nowhere in source: "generated output only echoes scanned
+#     source" is false for exactly the trees being pruned;
+#   * seven of the eleven added names were asserted by no test at all — deleting them
+#     left the whole suite green.
+#
+# The fix is scoped to the AXIS instead. The heuristic axis does not run over generated
+# trees; the `[proof]` axis and the `.env` handler still do. That removes the measured
+# noise (which was `[heuristic]`) at zero cost in misses.
+
+_N6_TREE = "frontend/coverage/lcov-report/src/auth.ts.html"
+
+
+def test_n6_coverage_html_no_longer_echoes_its_own_source_line(tmp_path):
+    """The measured case: the literal is reported once, from the source file."""
+    root = _project(tmp_path, {
+        "frontend/src/auth.ts": f'const password = "{FAKE_HIGH_ENTROPY}";\n',
+        "frontend/coverage/lcov.info": "TN:\nSF:src/auth.ts\nend_of_record\n",
+        _N6_TREE: f'<span>const password = "{FAKE_HIGH_ENTROPY}";</span>\n',
+    })
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", "the real source finding must survive"
+    lines = [ln for ln in result.detail.splitlines() if ln.strip()]
+    assert lines == ["frontend/src/auth.ts:1: [heuristic] hardcoded password value"], \
+        result.detail
+
+
+@pytest.mark.parametrize("name", sorted(fallbacks._GENERATED_DIRS))
+def test_n6_every_generated_dir_name_suppresses_the_heuristic_axis(tmp_path, name):
+    """Parametrized off the constant itself, so an entry cannot be added without a
+    test — seven of the first cut's eleven names were asserted by nothing."""
+    root = _project(tmp_path, {
+        f"{name}/bundle.js": f'const api_key = "{FAKE_HIGH_ENTROPY}";\n',
+        "src/app.py": "print('hello')\n",
+    })
+    assert _core(root)["core.secret-scan"].tier == "ok", \
+        _core(root)["core.secret-scan"].detail
+
+
+@pytest.mark.parametrize("name", sorted(fallbacks._GENERATED_DIRS))
+def test_n6_a_proof_tier_credential_in_generated_output_still_blocks(tmp_path, name):
+    """The correction to the first cut, and the property that makes this safe: a
+    bundler inlines `process.env.STRIPE_KEY` at build time, so the key exists in the
+    artifact and in an ignored `.env` and NOWHERE in source. Pruning the walk missed
+    it. Suppressing only the heuristic axis does not."""
+    root = _project(tmp_path, {
+        f"{name}/bundle.js": f"const k = 'AKIA{'A' * 16}';\n",
+        "src/app.py": "print('hello')\n",
+    })
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", f"{name} hid a published credential format"
+    assert "[proof]" in result.detail
+
+
+@pytest.mark.parametrize("name", sorted(fallbacks._GENERATED_DIRS | {"coverage"}))
+def test_n6_a_committed_env_file_in_generated_output_still_blocks(tmp_path, name):
+    """`vercel env pull` writes the live production environment into its own state
+    directory, which is gitignored everywhere precisely BECAUSE it holds credentials —
+    so the repos where it IS committed are exactly the ones this blocker exists for.
+    The first cut reported nothing for this tree."""
+    root = _project(tmp_path, {
+        f"{name}/.env.production.local":
+            "DATABASE_URL=postgres://acme:s3cret-but-real@db/app\n",
+        f"{name}/lcov.info": "TN:\n",
+        "src/app.py": "print('hello')\n",
+    })
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", f"{name} hid a committed .env file"
+    assert "committed .env file" in result.detail
+
+
+def test_n6_a_coverage_app_holding_real_source_is_still_scanned(tmp_path):
+    """The over-correction guard, and the round-6b lesson stated as a test: `coverage`
+    is an ordinary English word. An insurance product has `apps/coverage/` and it holds
+    source. Classifying it by name would be exactly the `spec`/`fixtures`/`e2e`
+    mistake."""
+    root = _project(tmp_path, {
+        "apps/coverage/__init__.py": "",
+        "apps/coverage/models.py": "from django.db import models\n",
+        "apps/coverage/client.py": f'API_KEY = "{FAKE_HIGH_ENTROPY}"\n',
+    })
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", "a real app named coverage must still be scanned"
+    assert "apps/coverage/client.py" in result.detail
+
+
+def test_n6_coverage_needs_a_generator_fingerprint(tmp_path):
+    """Jest's html reporter writes straight into `coverage/` with no `lcov-report/`
+    below it, so a name-only rule would miss this shape. The marker is the evidence
+    that a generator, not a person, made the directory."""
+    root = _project(tmp_path, {
+        "coverage/coverage-final.json": '{"a":1}\n',
+        "coverage/index.html": f'<code>token = "{FAKE_HIGH_ENTROPY}"</code>\n',
+        "src/app.py": "print('hello')\n",
+    })
+    assert _core(root)["core.secret-scan"].tier == "ok", \
+        _core(root)["core.secret-scan"].detail
+
+
+@pytest.mark.parametrize("kind", ["empty-file", "directory", "symlink", "wrong-case"])
+def test_n6_a_forged_marker_does_not_silence_a_source_directory(tmp_path, kind):
+    """`exists()` accepted all of these. An empty `touch coverage/lcov.info` is
+    invisible in a diff and would have switched a blocker off; a `lcov.info/` DIRECTORY
+    is a plausible accident; and `exists()` is case-insensitive on macOS and
+    case-sensitive on the Linux runner, so `LCOV.INFO` classified differently depending
+    on whose machine ran the gate — a gate result that depends on the OS is not a gate
+    result. Case is now normalized on both sides, so all four platforms agree."""
+    root = _project(tmp_path, {
+        "apps/coverage/client.py": f'API_KEY = "{FAKE_HIGH_ENTROPY}"\n',
+    })
+    target = root / "apps" / "coverage"
+    if kind == "empty-file":
+        (target / "lcov.info").write_text("", encoding="utf-8")
+    elif kind == "directory":
+        (target / "lcov.info").mkdir()
+    elif kind == "symlink":
+        (target / "lcov.info").symlink_to("/etc/hostname")
+    else:
+        (target / "LCOV.INFO").write_text("TN:\n", encoding="utf-8")
+    result = _core(root)["core.secret-scan"]
+    if kind == "wrong-case":
+        # Normalized: an uppercase marker is a marker, on every platform.
+        assert result.tier == "ok", result.detail
+    else:
+        assert result.tier == "blocker", f"a {kind} marker silenced real source"
+        assert "apps/coverage/client.py" in result.detail
+
+
+def test_n6_the_generated_dir_set_is_frozen():
+    """Parametrizing the tests above off the constant means an ADDED name always gets
+    a test — but a DELETED name silently deletes its own coverage, which is the same
+    hole in a new shape (the mutation `drop .output` left the N6 suite green until
+    this test existed). Freezing the set the way round-6b froze the `supersedes` union
+    makes both directions a deliberate, reviewed act."""
+    assert fallbacks._GENERATED_DIRS == {
+        "htmlcov", "lcov-report", ".nyc_output", "storybook-static",
+        ".output", ".angular", ".astro", ".docusaurus", ".eggs",
+    }
+    assert set(fallbacks._GENERATED_IF_MARKED) == {"coverage"}
+
+
+def test_n6_generated_dirs_and_skip_dirs_stay_disjoint():
+    """The two mechanisms mean opposite things — `_SKIP_DIRS` is never read at all,
+    `_GENERATED_DIRS` is read with one axis off. A name in both is a bug: the walk
+    prune wins and the axis distinction silently stops applying."""
+    assert not (fallbacks._GENERATED_DIRS & fallbacks._SKIP_DIRS)
+    assert not (set(fallbacks._GENERATED_IF_MARKED) & fallbacks._SKIP_DIRS)
+    # `.vercel`/`.netlify` are CLI state directories holding real credentials, not
+    # build output. They were on the first cut's list. They belong on neither.
+    for tool_state in (".vercel", ".netlify"):
+        assert tool_state not in fallbacks._GENERATED_DIRS
+        assert tool_state not in fallbacks._SKIP_DIRS

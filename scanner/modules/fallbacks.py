@@ -38,6 +38,100 @@ _SKIP_DIRS = {
     ".tox", ".nox", ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache",
     ".cache", ".gradle", ".idea", ".terraform", ".serverless", ".yarn", ".pnpm-store",
 }
+# ── N6: machine-written output trees (2026-08-11, follow-up 1 of the R4-10 record) ──
+#
+# These are NOT in `_SKIP_DIRS`, and the difference is the whole finding. `_SKIP_DIRS`
+# prunes the walk: the tree is never opened, so nothing in it is checked by anything.
+# The first cut of N6 added these names there, and an adversarial pass found it had
+# done what round-6b's noise reduction did — opened holes while closing noise:
+#
+#   * a committed `.vercel/.env.production.local` (the file `vercel env pull` writes,
+#     gitignored everywhere precisely BECAUSE it holds live credentials) stopped being
+#     reported at all — `_is_env_file` never saw it;
+#   * `core.gitignore` went quiet on the same repo, because it reads the same walk, so
+#     one prune silently cost two checks;
+#   * every bundler on this list INLINES `process.env.*` at build time, so a key can
+#     exist in the artifact and in an ignored `.env` and NOWHERE in source — the
+#     docstring's claim that generated output "only ever echoes scanned source" is
+#     simply false for `.output/`, `storybook-static/` and friends.
+#
+# So the suppression is scoped to the axis that produced the measured noise. The
+# heuristic axis (a secret-shaped NAME holding a high-entropy literal) does not run
+# over these trees; the `[proof]` axis (published credential formats) and the `.env`
+# handler still do. That kills the entire D-011r case — the measured finding,
+# `frontend/coverage/lcov-report/src/auth.ts.html`, was `[heuristic]` — at zero cost
+# in misses. This mirrors what `_GENERATED_FILE_RE` already does for `.min.js`/`.map`,
+# and `_check_secret_scan` had the correct reasoning written next to it all along.
+#
+# `.vercel` and `.netlify` appear on neither list: they are CLI STATE directories a
+# tool writes secrets into, not build output, and nothing about them is noise.
+_GENERATED_DIRS = {
+    "htmlcov", "lcov-report", ".nyc_output", "storybook-static",
+    ".output", ".angular", ".astro", ".docusaurus", ".eggs",
+}
+
+# A directory whose name is an ordinary English word cannot be classified on the name.
+# That is exactly the round-6b mistake: the test-material downgrade reached `spec`,
+# `fixtures`, `e2e` and `cypress`, all of which name production directories, and a real
+# key at `api/spec/config.py` stopped gating a deploy. An insurance or benefits product
+# has an `apps/coverage/` holding source. So `coverage` needs EVIDENCE a generator
+# wrote it: a marker that is a real, non-empty, non-symlink file sitting directly
+# inside. `lcov-report` is deliberately NOT a marker — it is a generated dir in its own
+# right, and accepting it here would prune the PARENT, taking sibling source with it.
+_GENERATED_IF_MARKED = {
+    "coverage": {
+        "lcov.info", "coverage-final.json", "clover.xml",
+        "cobertura-coverage.xml", "coverage-summary.json", ".resultset.json",
+    },
+}
+
+
+def _dir_is_generated(path):
+    """True when `path` is a machine-written output directory (N6).
+
+    Name comparisons are lowercased on BOTH sides, and the marker lookup reads the
+    directory listing rather than calling `exists()`. Both are deliberate: `exists()`
+    delegates to the filesystem, which is case-insensitive on macOS and case-sensitive
+    on the Linux CI runner, so a `coverage/LCOV.INFO` would have classified differently
+    on the developer's machine than on CI — a gate result that depends on the OS is not
+    a gate result. The marker must also be a real non-empty file: `mkdir lcov.info` and
+    `ln -s /etc/hostname lcov.info` both satisfied `exists()`.
+    """
+    name = path.name.lower()
+    if name in _GENERATED_DIRS:
+        return True
+    markers = _GENERATED_IF_MARKED.get(name)
+    if not markers:
+        return False
+    try:
+        for entry in path.iterdir():
+            if entry.name.lower() not in markers:
+                continue
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            if entry.stat().st_size > 0:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _in_generated_dir(path, root):
+    """True when any directory between `root` and `path` is machine-written output.
+
+    The scan root itself is never classified — a repo that happens to be checked out
+    into a directory called `coverage` is still the project under review.
+    """
+    root, current = Path(root), Path(path).parent
+    while current != root:
+        if _dir_is_generated(current):
+            return True
+        if current.parent == current:      # filesystem root; never met the scan root
+            return False
+        current = current.parent
+    return False
+
+
 _MAX_TEXT_BYTES = 512 * 1024
 
 # ── secret-scan patterns ────────────────────────────────────────────────────────
@@ -385,7 +479,11 @@ def _check_secret_scan(root, texts):
         if _is_env_file(path.name):
             bucket.append(f"{rel}: committed .env file")
             continue
-        generated = bool(_GENERATED_FILE_RE.search(path.name.lower()))
+        # N6: a machine-written FILE (`.min.js`, `.map`, a lockfile) and a file inside
+        # a machine-written DIRECTORY are the same case — the heuristic axis below is
+        # suppressed for both, and axis 1 plus the `.env` handler above still run.
+        generated = (bool(_GENERATED_FILE_RE.search(path.name.lower()))
+                     or _in_generated_dir(path, root))
         for lineno, line in enumerate(text.splitlines(), 1):
             # Axis 1 — a published credential format. Runs even in generated files: a
             # bundler can inline a key, and `AKIA…` in a minified bundle is still a key.

@@ -1,8 +1,9 @@
 # Phase 1 exit demo — recorded (P1-SCAN-DEMO)
 
 **Date:** 2026-08-11 · **Commit under test:** branch `demo-records-r4-10` on `38a0dc4`
-(round-6, round-6b, N4 and D-011r all merged) · **Recorded by:** Cowork session, cloud
-container, `python -m hub scan <path>` — the same CLI entry point a user runs.
+(round-6, round-6b, N4 and D-011r all merged), re-recorded on the same branch after
+**N6** · **Recorded by:** Cowork session, cloud container, `python -m hub scan <path>` —
+the same CLI entry point a user runs.
 
 This record closes **R4-10** and **item 9 of the D-010 follow-up list**: the four
 phase-1 scan records were stale (recorded 2026-08-04, commit `a345630`, before D-010
@@ -68,9 +69,14 @@ tail:
 | Repo | committed `.env` | `[proof]` | `[heuristic]` (blocking) | `[heuristic]` (test material, non-blocking) |
 |---|---|---|---|---|
 | E-invoice | 1 | 1 | 2 | 2 |
-| hr-saas-starter | 0 | 0 | 10 | 5 |
+| hr-saas-starter | 0 | 0 | 10 → **9** | 5 |
 | SATURDAYS_site | 2 | 0 | 26 | 2 |
 | `sample-node-site` | 0 | 0 | 0 | 0 |
+
+(The arrow is N6, below. It is the whole effect of N6 on the fleet: **one line**, and
+the count is left visible in both states because the gap between what follow-up 1 was
+expected to be worth and what it was actually worth is the most useful number in this
+section.)
 
 (`deploy-hub` scanning itself is not a fleet data point and is left out on purpose:
 its blocking evidence is dominated by the scanner's own detector test vectors, which
@@ -95,20 +101,68 @@ Two further clusters are artifacts rather than source:
 dismiss without reading" is roughly 22 of the 38 blocking heuristic lines across
 the fleet, concentrated in two structural classes — *a drill/QA script tree* and
 *generated build artifacts* — rather than distributed randomly. That shape argues the
-next move is **narrowing what gets scanned**, not demoting the tier: excluding
-generated-artifact directories (`coverage/`, `htmlcov/`, `lcov-report/`, `.next/`,
-`dist/`) is unambiguous, and a per-repo opt-out for a declared drill tree is a
-scanner-config question. D-011r's demotion argument is not yet the cheapest fix
-available, so this record does **not** trigger the reopen; it hands Joseph the numbers
-and names the two exclusions as follow-up findings.
+next move is **narrowing what gets scanned**, not demoting the tier. D-011r's demotion
+argument is not the cheapest fix available, so this record does **not** trigger the
+reopen; it hands Joseph the numbers and names the exclusions as follow-up findings.
+
+**Corrected after building follow-up 1 (N6, below).** The two classes are not
+comparable in size and the first estimate implied they were. Generated artifacts were
+**one line**; the drill tree is **twenty**. So the noise problem is, to a first
+approximation, entirely follow-up 2 — a class that needs a product decision, not a
+skip-list. Follow-up 1 was worth building for correctness and for what it exposed
+about the scanner's shape, and it was worth almost nothing as noise reduction. Stated
+plainly because "narrowing what gets scanned" now rests on a single unresolved
+question rather than on two cheap ones.
+
+## N6 — follow-up 1, built on this branch
+
+`core.secret-scan` no longer runs its **heuristic axis** over machine-written output
+trees (`htmlcov/`, `lcov-report/`, `.nyc_output/`, `storybook-static/`, `.output/`,
+`.angular/`, `.astro/`, `.docusaurus/`, `.eggs/`, and `coverage/` when a coverage tool
+demonstrably wrote it). The `[proof]` axis and the committed-`.env` handler still run
+everywhere.
+
+**The first cut of this fix was wrong, and that is the part worth keeping.** It added
+those names to `_SKIP_DIRS`, which prunes the walk — the tree is never opened. An
+adversarial pass that wrote none of it found the change had reproduced round-6b's
+mistake one layer down:
+
+- a committed `.vercel/.env.production.local` — the file `vercel env pull` writes,
+  gitignored everywhere *because* it holds the live production environment — stopped
+  being reported at all;
+- `core.gitignore` reads the same walk, so one prune silently cost two checks, and the
+  second was the one that would have flagged the root cause;
+- every bundler on the list **inlines** `process.env.*` at build time, so a key can
+  exist in the artifact and in an ignored `.env` and **nowhere in source** — the first
+  cut's own justification ("generated output only echoes source that is scanned") is
+  false for exactly the trees it pruned;
+- the marker mechanism accepted an empty file, a directory, and a symlink to
+  `/etc/hostname` as evidence a coverage tool wrote a directory, and `exists()` is
+  case-insensitive on macOS and case-sensitive on the Linux runner — so the gate's
+  verdict depended on whose machine ran it;
+- **seven of the eleven names were asserted by no test**: deleting them left the whole
+  suite green.
+
+Scoping the suppression to the axis dissolves all of it, because the measured noise was
+`[heuristic]` and nothing else needed to be given up. Markers must now be real,
+non-empty, non-symlink files, matched case-insensitively on both sides; `_GENERATED_DIRS`
+is frozen by a test (adding *and* removing a name is now a deliberate act, after a
+mutation run showed the parametrized tests deleted their own coverage when an entry was
+deleted); and `.vercel`/`.netlify` are excluded by name with a test saying why.
 
 ## Follow-up findings raised by this record
 
-1. **Generated-artifact directories are scanned** — `coverage/`, `lcov-report/`,
-   `htmlcov/`, `dist/`, `.next/` produce duplicate findings that echo a source line
-   already reported. Unambiguous exclusion; no judgment call.
-2. **A declared drill/QA tree has no way to say so** — 20 of 38 blocking heuristic
-   lines on one repo. Needs a decision on scanner config before code.
+1. ~~**Generated-artifact directories are scanned**~~ — **CLOSED by N6 on this
+   branch.** Worth one line of the measured noise, not the cluster the first estimate
+   implied.
+2. **A declared drill/QA tree has no way to say so** — 20 of the 37 remaining blocking
+   heuristic lines, all on one repo, and now essentially the entire noise problem.
+   Needs a product decision before code: the tree is test material by intent and by
+   content but not by *path*, and round-6b deliberately narrowed the path-based
+   downgrade after it reached `spec`/`fixtures`/`e2e`/`cypress`. So the answer is
+   probably a declaration in the repo (a scanner config file the wizard can read),
+   not another name list. **This is the next thing that needs Joseph, not the next
+   thing that needs code.**
 3. **`_WEAK_SECRET_KEYS`-shaped values** — a list of known-weak literals a project
    refuses. Residual after N5; waiver-shaped, low volume (one instance fleet-wide).
 4. **E-invoice `core.gitignore` warns at scan root** — the Django project lives at
