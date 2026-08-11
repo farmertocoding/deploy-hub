@@ -516,3 +516,138 @@ def test_pip_wsgi_scan_is_clean_apart_from_the_auth_warning():
         "core.healthz", "core.digest-pins", "core.exposure-auth",
     }
     assert checks["core.healthz"]["tier"] == "advice"
+
+
+# ── N5: dotted-path settings lists read as committed secret material ───────────
+#
+# Found by the R4-10 demo re-record (2026-08-11), the first run of the widened
+# checks against the real fleet. `django.secret-key-literal` fired a BLOCKER on
+# `INSTALLED_APPS` and `MIDDLEWARE` in all three production repos, and on
+# `PASSWORD_HASHERS` in one. Two independent causes, both in `_check_secret_key`:
+#
+#   1. `_string_literal` JOINS a list's elements (added for D-008's real shape,
+#      `FIELD_ENCRYPTION_KEYS = ["<fernet>"]`), so entropy is judged on the
+#      concatenation. A 12-app INSTALLED_APPS joins to ~300 chars of mixed
+#      lowercase and dots — over the 24-char floor and over 4.0 bits — and is
+#      indistinguishable from key material by that measure.
+#   2. The `secretish` axis matches a NAME substring and accepts ANY non-empty
+#      string value, so `PASSWORD_HASHERS` (contains `PASS`) and
+#      `_WEAK_SECRET_KEYS` (contains `SECRET`) qualify on the name alone.
+#
+# Why it matters more than its size: this is a blocker-tier false positive on
+# every Django project that exists, i.e. the whole fleet, and a blocker the
+# operator learns to click past is the exact mechanism D-011r named as the reason
+# to reconsider the heuristic tier. A finding that is always wrong trains bypass.
+#
+# The fix must not undo D-008: a single-element list holding one real Fernet key
+# is the case the joining was written for and still has to block.
+
+
+def _fleet_settings_body():
+    """A settings module in the shape all three real repos share."""
+    return (
+        "INSTALLED_APPS = [\n"
+        "    'django.contrib.admin',\n"
+        "    'django.contrib.auth',\n"
+        "    'django.contrib.contenttypes',\n"
+        "    'django.contrib.sessions',\n"
+        "    'django.contrib.messages',\n"
+        "    'django.contrib.staticfiles',\n"
+        "    'rest_framework',\n"
+        "    'corsheaders',\n"
+        "    'django_celery_beat',\n"
+        "    'apps.tenants',\n"
+        "    'apps.billing',\n"
+        "    'apps.webhooks',\n"
+        "]\n"
+        "MIDDLEWARE = [\n"
+        "    'django.middleware.security.SecurityMiddleware',\n"
+        "    'corsheaders.middleware.CorsMiddleware',\n"
+        "    'django.contrib.sessions.middleware.SessionMiddleware',\n"
+        "    'django.middleware.common.CommonMiddleware',\n"
+        "    'django.middleware.csrf.CsrfViewMiddleware',\n"
+        "    'django.contrib.auth.middleware.AuthenticationMiddleware',\n"
+        "]\n"
+        "AUTHENTICATION_BACKENDS = [\n"
+        "    'django.contrib.auth.backends.ModelBackend',\n"
+        "    'apps.tenants.backends.TenantBackend',\n"
+        "]\n"
+        "PASSWORD_HASHERS = [\n"
+        "    'django.contrib.auth.hashers.Argon2PasswordHasher',\n"
+        "    'django.contrib.auth.hashers.PBKDF2PasswordHasher',\n"
+        "]\n"
+    )
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_dotted_path_settings_lists_are_not_secret_material(tmp_path):
+    """A settings module holding nothing but Django's own dotted-path lists is
+    clean. No blocker, no dev-fallback warning, and no mention of the four names."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "import os\n"
+            + _fleet_settings_body()
+            + "SECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n"
+        ),
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    blockers = [c.id for c in checks.values() if c.tier == "blocker"]
+    assert blockers == [], f"dotted-path settings must not block: {blockers}"
+    assert "django.secret-dev-fallback" not in checks
+    assert checks["django.secret-key-literal"].tier == "ok"
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_pass_and_secret_named_settings_are_judged_on_their_value(tmp_path):
+    """`PASSWORD_HASHERS` matches the `PASS` substring and `_WEAK_SECRET_KEYS`
+    matches `SECRET`, but neither holds credential material. The name axis must
+    still look at what was assigned."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "PASSWORD_HASHERS = ['django.contrib.auth.hashers.Argon2PasswordHasher']\n"
+        ),
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "ok", \
+        checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_one_real_key_among_dotted_paths_still_blocks(tmp_path):
+    """The over-correction guard, and the D-008 shape that motivated the joining:
+    a single-element list holding one Fernet key blocks, and it blocks even when
+    the same module is full of dotted-path lists that must be ignored."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            _fleet_settings_body()
+            + "FIELD_ENCRYPTION_KEYS = "
+            "['aXb9Qz3kLm8Rt2Yw6Fh1Jd4Ns7Pv0Cg5Ke9Ub3Xq2Wz8Ma6=']\n"
+        ),
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    key = checks["django.secret-key-literal"]
+    assert key.tier == "blocker"
+    assert "FIELD_ENCRYPTION_KEYS" in key.detail
+    assert "INSTALLED_APPS" not in key.detail
+    assert "MIDDLEWARE" not in key.detail
+    assert "PASSWORD_HASHERS" not in key.detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_short_low_entropy_password_still_blocks(tmp_path):
+    """The name axis exists to catch exactly this: a weak value no entropy test
+    would ever flag, under a name that says what it is."""
+    root = _proj(
+        tmp_path,
+        base_body="ADMIN_PASSWORD = 'hunter2'\n",
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "ADMIN_PASSWORD" in checks["django.secret-key-literal"].detail

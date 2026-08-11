@@ -63,23 +63,43 @@ def _shannon(s):
     return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
 
 
-def _string_literal(node):
-    """The string content of an assignment, unwrapping one list/tuple level.
+_IMPORT_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+
+
+def _looks_like_import_path(s):
+    """True for a dotted Python path — `django.contrib.admin`, `apps.billing.tasks`.
+
+    N5 (2026-08-11): the one rule that separates Django's own settings lists from
+    committed key material. Every element of INSTALLED_APPS, MIDDLEWARE,
+    AUTHENTICATION_BACKENDS, PASSWORD_HASHERS and TEMPLATES' loaders matches; no
+    published credential format does — Fernet, base64, PEM, hex and every token
+    prefix in the wild carry `=`, `-`, `+`, `/`, `:` or leading digits in a segment,
+    none of which survive this pattern. The check is on the VALUE, so it cannot be
+    fooled by naming a variable after a Django setting.
+    """
+    return bool(_IMPORT_PATH_RE.match(s))
+
+
+def _string_literals(node):
+    """The string values of an assignment, unwrapping one list/tuple/set level.
 
     Found writing the D-008 tests against E-invoice's REAL shape: its dev key is
     `FIELD_ENCRYPTION_KEYS = ["<fernet>"]` — a list — and the check only matched bare
     string constants, so the very finding that prompted D-008 would have been missed
-    by its own regression test. Elements are joined so entropy is judged on the
-    whole committed material.
+    by its own regression test.
+
+    N5 (2026-08-11): this used to JOIN the elements and return one string, so entropy
+    was measured on the concatenation. A 12-app INSTALLED_APPS joins to ~300 chars of
+    mixed lowercase and dots — past the 24-char floor and past 4.0 bits — and read as
+    key material on every Django project in the fleet. Elements are kept separate and
+    judged one at a time; a list is committed material if any single element is.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
+        return [node.value]
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        parts = [el.value for el in node.elts
-                 if isinstance(el, ast.Constant) and isinstance(el.value, str)]
-        if parts:
-            return "".join(parts)
-    return None
+        return [el.value for el in node.elts
+                if isinstance(el, ast.Constant) and isinstance(el.value, str)]
+    return []
 
 
 def _prod_hard_fails_for(name, prod_union):
@@ -414,12 +434,19 @@ class DjangoScannerModule:
         unmitigated, dev_fallbacks = [], []
         for path, text in all_texts.items():
             for name, val in _top_assigns(text).items():
-                literal = _string_literal(val)
-                if literal is None:
+                # N5: dotted import paths are never credential material, and dropping
+                # them BEFORE either axis runs fixes both false-positive routes at
+                # once — the entropy axis stops seeing a joined app list, and the
+                # name axis stops accepting `PASSWORD_HASHERS`' hasher classes as a
+                # committed password. A value that is entirely import paths leaves
+                # nothing to judge and is not a candidate.
+                literals = [s for s in _string_literals(val)
+                            if s and not _looks_like_import_path(s)]
+                if not literals:
                     continue
                 secretish = any(s in name for s in _SECRETISH)
-                high_entropy = len(literal) >= 24 and _shannon(literal) > 4.0
-                if not (name == "SECRET_KEY" or (secretish and literal) or high_entropy):
+                high_entropy = any(len(s) >= 24 and _shannon(s) > 4.0 for s in literals)
+                if not (name == "SECRET_KEY" or secretish or high_entropy):
                     continue
                 label = f"{path.relative_to(root)}: {name}"
                 if high_entropy and not secretish and name != "SECRET_KEY":
