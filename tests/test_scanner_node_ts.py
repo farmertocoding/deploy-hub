@@ -144,8 +144,12 @@ def test_every_node_ts_check_fires_at_its_designed_tier(pristine_report):
     }
     for job_id in jobs:
         assert tiers[job_id] == "pending_sandbox"
-    # the offline pyproject (manual-v1) does not mask the committed pnpm lock
+    # the offline pyproject (manual-v1) does not mask the committed pnpm lock.
+    # "manual-v1" in the detail pins that the module's SUPERSEDING result survived
+    # registry composition (D-010) — the generic core result would warn here, since
+    # sample-node-site's root pyproject.toml has no lock of its own.
     assert tiers["core.lockfile"] == "ok"
+    assert "manual-v1" in by_id(pristine_report, "core.lockfile")["detail"]
 
 
 @pytest.mark.req("Q7-NODE-FIXTURE")
@@ -182,19 +186,21 @@ def test_secrets_env_advises_paper_keys_and_rides_core_secret_scan(pristine_repo
     assert "read-only" in res["fix_hint"] and "paper" in res["fix_hint"]
 
 
-def test_issue_r4_11_node_ts_module_surfaces_the_exposure_auth_check(tmp_path):
+def test_issue_r4_11_a_node_ts_scan_surfaces_the_exposure_auth_check(tmp_path):
     """R4-11 WI-3: SCAN-M4-EXPOSURE-AUTH says *both modules* warn when no
-    authentication is detected. Nothing asserted that a module's own report
+    authentication is detected. Nothing asserted that a scan of a node-ts tree
     carries `core.exposure-auth` at all — the two marked tests called
     `fallbacks.common_checks` directly. This pins the node-ts half.
 
-    Deliberately unmarked: the requirement is waived (WAIVERS.md, 2026-08-11) —
-    the django module never emits this check and the blocker escalation does not
-    exist, so no single test can honestly carry the marker yet. This test is
-    named in the waiver as the proof that retires the node-ts half.
+    Asserted at REPORT level (D-010): since the core suite is composed by
+    `core.scan` rather than by each module, `module.checks()` is deliberately
+    core-free and the report is where the requirement's claim actually lives.
+
+    Deliberately unmarked: the requirement stays waived (WAIVERS.md) — the
+    blocker escalation does not exist, so no single test can honestly carry the
+    marker yet. This test is named in the waiver as the node-ts half of the proof.
     """
-    res = by_id({"checks": [c.as_dict() for c in node_ts.module.checks(FIXTURE)]},
-                "core.exposure-auth")
+    res = by_id(core.scan(FIXTURE), "core.exposure-auth")
     assert res["tier"] == "warning"
     assert "no authentication detected" in res["detail"]
 
@@ -202,9 +208,7 @@ def test_issue_r4_11_node_ts_module_surfaces_the_exposure_auth_check(tmp_path):
     site = copy_fixture(tmp_path)
     (site / "packages" / "server" / "src" / "auth.ts").write_text(
         "export function login(req: Request) { return null; }\n", encoding="utf-8")
-    silenced = by_id({"checks": [c.as_dict() for c in node_ts.module.checks(site)]},
-                     "core.exposure-auth")
-    assert silenced["tier"] == "ok"
+    assert by_id(core.scan(site), "core.exposure-auth")["tier"] == "ok"
 
 
 def test_exclusive_upstream_warns_and_explains_recreate(pristine_report):

@@ -18,6 +18,12 @@ def by_id(results, check_id):
     return matches[0]
 
 
+def _scan_results(root):
+    """Report-level results as CheckResult-shaped objects, so `by_id` reads the same
+    whether the caller is asking a module or a whole scan."""
+    return [core.CheckResult(**c) for c in core.scan(root)["checks"]]
+
+
 def secret_tree(tmp_path):
     """The committed-.env tree. Repo .gitignore ignores `.env` everywhere, so the
     offending file is materialized at test time instead of shipped in the fixture."""
@@ -38,7 +44,8 @@ def test_dockerfile_detects_and_fires_its_three_warnings():
     assert by_id(results, "dockerfile.non-root").tier == "warning"
     assert by_id(results, "dockerfile.latest-tag").tier == "warning"
     # :latest is also unpinned — the common core flags the digest gap too (§6.8).
-    assert by_id(results, "core.digest-pins").tier == "warning"
+    # Report-level: the core suite is composed by core.scan, not by the module (D-010).
+    assert by_id(_scan_results(project), "core.digest-pins").tier == "warning"
     # §M1: image build is pipeline step 1 — the scan emits NO build spec.
     assert mod.sandbox_checks(project) == []
 
@@ -55,7 +62,7 @@ def test_dockerfile_manifest_takes_port_from_expose(tmp_path):
     assert by_id(results, "dockerfile.expose").tier == "ok"
     assert by_id(results, "dockerfile.non-root").tier == "ok"
     assert by_id(results, "dockerfile.latest-tag").tier == "ok"
-    assert by_id(results, "core.digest-pins").tier == "ok"
+    assert by_id(_scan_results(tmp_path), "core.digest-pins").tier == "ok"
 
 
 def test_dockerfile_without_expose_asks_the_port():
@@ -143,12 +150,19 @@ def test_placeholder_values_are_not_flagged(tmp_path):
 #   1. "Blocker when the wizard tags financial/personal data" — `_check_exposure_auth`
 #      returns only ok/warning, and no wizard question tags data sensitivity, so
 #      there is no answer for an escalation to read.
-#   2. "*Both modules* warn" — the django module's `checks()` never calls
-#      `common_checks`, so `core.exposure-auth` never appears in a Django scan
-#      report at all.
-# The markers are therefore removed and the requirement is waived (WAIVERS.md,
-# 2026-08-11) rather than left reading `verified` on a third of its text. The tests
-# stay and still run; they regain the marker when the waiver retires. See D-009.
+#   2. "*Both modules* warn" — the django module's `checks()` never called
+#      `common_checks`, so `core.exposure-auth` never appeared in a Django scan
+#      report at all. RETIRED by D-010: `scanner/core.py::scan` now composes the
+#      whole common core suite into every report, once per scan, and a module can
+#      only supersede a core result by emitting the same id — never omit it. The
+#      warning clause is proven per module at report level by the two tests below
+#      plus test_scanner_node_ts.py::
+#      test_issue_r4_11_a_node_ts_scan_surfaces_the_exposure_auth_check and
+#      test_scanner_django.py::test_a_django_scan_surfaces_the_exposure_auth_check.
+# The markers stay off and the requirement stays waived (WAIVERS.md) on claim 1
+# alone, rather than reading `verified` over an unbuilt escalation. The tests stay
+# and still run; they regain the marker when the waiver fully retires. See D-009,
+# D-010.
 
 
 def test_no_auth_indicators_fires_exposure_auth_warning():

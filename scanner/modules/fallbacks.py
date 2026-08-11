@@ -1,11 +1,15 @@
 """Fallback scanner modules (review3 §V4) + the common-core check suite.
 
-`common_checks(root)` is the shared static check set every module should include
-in its report; framework modules import and call it. The two modules defined
-here — `dockerfile` and `static` — are the LOWEST-precedence fallbacks: core
-consults them only when no framework module matched (§V4). An existing
-Dockerfile is an input we validate (EXPOSE / non-root / :latest), never a
-bypass of the deeper checks.
+`common_checks(root)` is the shared static check set. No module calls it: since
+D-010 `scanner.core.scan` composes it into EVERY report itself, once per scan over
+the scan root, so a module cannot forget it (the django module did, and every
+Django report lacked all seven `core.*` checks). A module may SUPERSEDE a core
+result by emitting the same id — node-ts re-deriving `core.lockfile` is the
+precedent, and it is the only way to express "this check does not apply here";
+absence is impossible. The two modules defined here — `dockerfile` and `static` —
+are the LOWEST-precedence fallbacks: core consults them only when no framework
+module matched (§V4). An existing Dockerfile is an input we validate (EXPOSE /
+non-root / :latest), never a bypass of the deeper checks.
 
 SEC-SCAN-NOEXEC (review3 §M1): everything in this file is `static` — file and
 manifest reading only. Nothing from the scanned tree is ever executed on the
@@ -312,8 +316,8 @@ def _check_exposure_auth(texts):
 
 
 def common_checks(root):
-    """The common-core static check suite (id prefix `core.`), run by both
-    fallback modules and exported for framework modules to include."""
+    """The common-core static check suite (id prefix `core.`), composed into every
+    scan report by `scanner.core.scan` (D-010) and called directly by tests."""
     root = Path(root)
     texts = _text_files(root)
     return [
@@ -363,7 +367,7 @@ class DockerfileModule:
         return (Path(root) / "Dockerfile").is_file()
 
     def checks(self, root):
-        results = common_checks(root)
+        results = []                       # the core suite is composed by core.scan
         has_expose, _, has_user, latest = _parse_root_dockerfile(root)
         if has_expose:
             results.append(core.CheckResult(id="dockerfile.expose", tier="ok",
@@ -459,7 +463,7 @@ class StaticModule:
         return self._site_dir(root) is not None
 
     def checks(self, root):
-        return common_checks(root)
+        return []                          # the core suite is composed by core.scan
 
     def sandbox_checks(self, root):
         return []

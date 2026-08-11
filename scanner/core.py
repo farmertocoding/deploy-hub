@@ -17,6 +17,12 @@ Multiple modules may match one project (monorepo = service + static + offline
 component); their outputs merge into one report and ONE manifest, never several
 Sites (§V5). Fallback modules (`dockerfile`, `static`) run only when no framework
 module matched (§V4) — an existing Dockerfile is validated input, never a bypass.
+
+The common core suite (`core.*`, `modules.fallbacks.common_checks`) is composed
+into every report by `scan()` here, once per scan over the SCAN root — modules
+never call it themselves (D-010). A module may supersede a core result only by
+emitting the same id; absence is impossible, so a Django report can no longer be
+silently missing `core.secret-scan`.
 """
 from dataclasses import dataclass, field
 
@@ -99,6 +105,12 @@ def detect_modules(root):
 def scan(root):
     """Run all matching modules' STATIC checks; emit executing checks as specs.
 
+    Composition (D-010): when any module matches, the common core suite runs here
+    exactly once over the scan root and leads the report — no module composes it.
+    Supersession: a module result whose id is already in the suite REPLACES that
+    entry in place (node-ts re-deriving `core.lockfile` is the precedent); an
+    unknown `core.*` id is a ValueError, never a silent append.
+
     Returns the ScanReport dict (schema_version'd per §D8) that is stored on
     Project.scan_report and rendered by UI + CLI alike.
     """
@@ -123,11 +135,25 @@ def scan(root):
             "warmup_timeout_s": None, "data_staleness_threshold": None,
         },
     }
+    core_suite = []
+    if mods:
+        from .modules.fallbacks import common_checks
+        core_suite = common_checks(root)          # runs over the SCAN root, once
+    core_pos = {c.id: i for i, c in enumerate(core_suite)}
+
     for m in mods:
-        checks.extend(m.checks(root))
+        for c in m.checks(root):
+            if c.id in core_pos:
+                core_suite[core_pos[c.id]] = c    # supersession: same id, position kept
+            elif c.id.startswith("core."):
+                raise ValueError(
+                    f"module {m.name!r} emits unknown core check id {c.id!r}")
+            else:
+                checks.append(c)
         sandbox.extend(m.sandbox_checks(root))
         questions.extend(m.wizard_questions(root))
         _deep_merge(manifest, m.manifest_fragment(root, answers=None))
+    checks = core_suite + checks
     checks.extend(spec.as_result() for spec in sandbox)
 
     tiers = {t: sum(1 for c in checks if c.tier == t) for t in TIERS}

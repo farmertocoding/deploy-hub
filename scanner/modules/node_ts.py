@@ -21,7 +21,6 @@ from pathlib import Path
 import yaml
 
 from scanner.core import CheckResult, SandboxSpec, WizardQuestion, register
-from scanner.modules.fallbacks import common_checks
 
 _SKIP_DIRS = {".git", "node_modules", ".pnpm-store", "dist", "build", "coverage",
               "__pycache__", ".venv", "venv"}
@@ -282,8 +281,10 @@ class NodeTsScannerModule:
     # ── static checks (§S4) ─────────────────────────────────────────────────
     def checks(self, root):
         s = _Survey(root)
-        results = common_checks(root)
-        self._adjust_lockfile(s, results)
+        results = []
+        override = self._lockfile_override(s)
+        if override is not None:
+            results.append(override)
         results.extend(self._detection_recording(s))
         results.append(self._check_strict_build(s))
         results.append(self._check_compiled_js(s))
@@ -305,23 +306,25 @@ class NodeTsScannerModule:
             results.append(self._check_jobs_image(s))
         return results
 
-    def _adjust_lockfile(self, s, results):
+    def _lockfile_override(self, s):
         """Re-derive core.lockfile over the Node side when the pyproject is the
         recognized §N7 offline component: it is manual-v1, never deployed as a
         serving process, and its lock lands with the Phase-3 jobs_image build —
-        an unlocked offline pyproject must not mask the pnpm lock status."""
+        an unlocked offline pyproject must not mask the pnpm lock status.
+
+        Returns a CheckResult that SUPERSEDES the registry-composed generic
+        `core.lockfile` (D-010: same id, replaced in place), or None to leave the
+        generic result standing. `scanner.core.scan` guarantees the entry exists.
+        """
         if not s.offline_deps:
-            return
-        idx = next((i for i, r in enumerate(results) if r.id == "core.lockfile"), None)
-        if idx is None:
-            return
+            return None
         node_locks = ("package-lock.json", "package-lock.yaml",
                       "pnpm-lock.yaml", "yarn.lock")
         has_manifest = any((d / "package.json").is_file()
                            for d in (s.package_dirs or [s.root]))
         node_locked = any((s.root / name).is_file() for name in node_locks)
         if has_manifest and not node_locked:
-            results[idx] = CheckResult(
+            return CheckResult(
                 id="core.lockfile", tier="warning",
                 title="Dependency manifest without a lockfile",
                 detail="package.json without package-lock.json / pnpm-lock.yaml / "
@@ -329,13 +332,12 @@ class NodeTsScannerModule:
                        "CI-honesty check) cannot pass.",
                 fix_hint="Commit the pnpm lockfile so deploys are reproducible — "
                          "the same source must build the same image every time.")
-        else:
-            results[idx] = CheckResult(
-                id="core.lockfile", tier="ok",
-                title="Node dependency manifests are locked",
-                detail="pnpm lockfile present. The Python pyproject.toml is the "
-                       "§N7 offline component (manual-v1): its lock is deferred "
-                       "to the Phase-3 jobs_image build, not a deploy gate.")
+        return CheckResult(
+            id="core.lockfile", tier="ok",
+            title="Node dependency manifests are locked",
+            detail="pnpm lockfile present. The Python pyproject.toml is the "
+                   "§N7 offline component (manual-v1): its lock is deferred "
+                   "to the Phase-3 jobs_image build, not a deploy gate.")
 
     # ── §S3 detection recording — ok-tier informational results ─────────────
     def _detection_recording(self, s):

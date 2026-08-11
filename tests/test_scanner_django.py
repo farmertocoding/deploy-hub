@@ -383,3 +383,94 @@ def test_d008_mixed_project_reports_both(tmp_path):
     assert "API_SIGNING_TOKEN" in checks["django.secret-key-literal"].detail
     assert checks["django.secret-dev-fallback"].tier == "warning"
     assert "FIELD_ENCRYPTION_KEYS" in checks["django.secret-dev-fallback"].detail
+
+
+# ── D-010: the common core suite reaches Django scan reports ───────────────────
+#
+# Everything below is REPORT-level (`core.scan`), never `module.checks()`: after
+# D-010 the core suite is composed by the registry, so a module's own `checks()` is
+# deliberately core-free. The module-level tests above stay as they are.
+#
+# The defect (SPEC-django-common-checks.md): django's `checks()` never called
+# `common_checks`, and nothing composed it either, so a Django scan report carried
+# none of the seven `core.*` checks. Every project in the fleet is Django.
+
+
+def _report_by_id(root):
+    return {c["id"]: c for c in core.scan(root)["checks"]}
+
+
+def test_committed_env_secret_blocks_a_django_scan(tmp_path):
+    """The headline defect, verbatim: a Django project with a committed `.env`
+    holding an AWS access key scanned CLEAN, while the byte-identical Node repo got
+    a `core.secret-scan` blocker. Blocker-tier evidence, silently absent.
+
+    The `.env` is materialized at test time rather than shipped as a fixture — the
+    repo's own .gitignore ignores `.env` everywhere (same pattern as the
+    `secret_tree` fixture in test_scanner_fallbacks.py).
+    """
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2\n")
+    (tmp_path / "settings.py").write_text(
+        "import os\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n")
+    (tmp_path / ".env").write_text("AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n")
+
+    report = core.scan(tmp_path)
+    assert "django" in report["modules"]
+    secret = _report_by_id(tmp_path)["core.secret-scan"]
+    assert secret["tier"] == "blocker", secret
+    assert "committed .env" in secret["detail"]
+    assert report["summary"]["blocker"] >= 1
+
+
+def test_a_django_scan_surfaces_the_exposure_auth_check():
+    """SCAN-M4-EXPOSURE-AUTH's warning clause, on the django side. Named in the
+    amended waiver as the proof that retires clause (b). Deliberately unmarked
+    while the blocker-escalation clause of that requirement stays unbuilt."""
+    res = _report_by_id(LEGACY_BAD)["core.exposure-auth"]
+    assert res["tier"] == "warning"
+    assert "no authentication detected" in res["detail"]
+    # …and it silences when the tree does carry an auth indicator.
+    assert _report_by_id(UV_ASGI)["core.exposure-auth"]["tier"] == "ok"
+
+
+def test_uv_asgi_scan_carries_the_core_suite_all_ok():
+    """The fleet-norm fixture: every core check passes. The `.gitignore` and
+    `tests/smoke.py` in this fixture are stub-artifact fixes — all four inventoried
+    fleet repos ship both, so their absence was fixture noise, not a finding."""
+    checks = _report_by_id(UV_ASGI)
+    core_tiers = {i: c["tier"] for i, c in checks.items() if i.startswith("core.")}
+    assert core_tiers == {
+        "core.secret-scan": "ok", "core.lockfile": "ok", "core.gitignore": "ok",
+        "core.tests-exist": "ok", "core.healthz": "ok", "core.digest-pins": "ok",
+        "core.exposure-auth": "ok",
+    }
+
+
+def test_legacy_bad_scan_surfaces_the_core_findings():
+    """The deliberately-bad fixture: every one of these is a GENUINE finding the
+    report used to be silent about. The fixture is untouched — its gaps are the
+    point."""
+    checks = _report_by_id(LEGACY_BAD)
+    core_tiers = {i: c["tier"] for i, c in checks.items() if i.startswith("core.")}
+    assert core_tiers == {
+        "core.secret-scan": "ok", "core.lockfile": "ok", "core.gitignore": "warning",
+        "core.tests-exist": "advice", "core.healthz": "advice",
+        "core.digest-pins": "warning", "core.exposure-auth": "warning",
+    }
+    assert "python:3.11-slim" in checks["core.digest-pins"]["detail"]
+
+
+def test_pip_wsgi_scan_stays_blocker_and_warning_free():
+    """The classic pip/WSGI fixture passes at report level too. `core.healthz` is
+    `advice` and stays that way: a classic project with no health route earns
+    exactly the §E9 advice — a genuine finding, not a fixture gap."""
+    report = core.scan(PIP_WSGI)
+    loud = [c["id"] for c in report["checks"] if c["tier"] in ("blocker", "warning")]
+    assert loud == []
+    checks = {c["id"]: c for c in report["checks"]}
+    assert {i for i in checks if i.startswith("core.")} == {
+        "core.secret-scan", "core.lockfile", "core.gitignore", "core.tests-exist",
+        "core.healthz", "core.digest-pins", "core.exposure-auth",
+    }
+    assert checks["core.healthz"]["tier"] == "advice"

@@ -4,8 +4,18 @@ import pathlib
 import pytest
 
 from scanner import core
+from scanner.modules.fallbacks import common_checks
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# The common core suite, frozen. `scanner.core.scan` composes it into EVERY report
+# (D-010 / SPEC-django-common-checks.md §1.3): a module may supersede a core result
+# only by emitting the same id, never by omitting it. Adding a check to
+# `common_checks` must be a conscious edit here too.
+FROZEN_CORE_IDS = frozenset({
+    "core.secret-scan", "core.lockfile", "core.gitignore", "core.tests-exist",
+    "core.healthz", "core.digest-pins", "core.exposure-auth",
+})
 
 
 @pytest.mark.req("SEC-SCAN-NOEXEC")
@@ -164,3 +174,109 @@ def test_issue_r4_11_every_real_module_check_is_classified_static_or_executing()
                 assert check["tier"] != "pending_sandbox", check
     assert seen_executing, "no executing check was emitted — the classification " \
                            "clause would be vacuously true"
+
+
+# ── D-010: the core suite is composed by the registry, for every module ─────────
+#
+# The defect this closes (SPEC-django-common-checks.md): `scanner/modules/django.py`
+# never called `common_checks`, so a Django scan report carried ZERO `core.*` checks
+# — including blocker-tier `core.secret-scan`. A Django repo with a committed `.env`
+# holding an `AKIA…` key scanned clean while the byte-identical Node repo blocked.
+# Every project in the fleet is Django. The fix moves composition out of the modules
+# and into `core.scan`, which makes forgetting unrepresentable rather than merely
+# tested-for. These three tests are the three layers silence has to get past.
+
+MODULE_FIXTURES = {
+    "django": REPO / "tests" / "fixtures" / "django" / "uv_asgi",
+    "node-ts": REPO / "sample-node-site",
+    "dockerfile": REPO / "tests" / "fixtures" / "fallbacks" / "dockerfile_project",
+    "static": REPO / "tests" / "fixtures" / "fallbacks" / "static_site",
+}
+
+
+def test_every_registered_module_scan_carries_the_full_core_suite(tmp_path):
+    """The invariant (D-010): every scan report with >=1 matched module carries all
+    seven `core.*` ids, each exactly once. Inapplicability is expressed by
+    supersession (a module emitting the SAME id), never by absence."""
+    import scanner.modules  # noqa: F401 — importing registers the modules
+
+    core_ids = {c.id for c in common_checks(tmp_path)}
+    assert core_ids == set(FROZEN_CORE_IDS), (
+        "the common core suite changed: update FROZEN_CORE_IDS deliberately, and "
+        "check every module's supersessions still line up")
+
+    framework, fallback = core.registered_modules()
+    assert {m.name for m in framework + fallback} == set(MODULE_FIXTURES), (
+        "a module was registered without a MODULE_FIXTURES row. Add one pointing at "
+        "a fixture tree the module detects — otherwise the core-suite invariant "
+        "silently stops covering your module, which is exactly how the django gap "
+        "survived (D-010).")
+
+    for name, root in MODULE_FIXTURES.items():
+        report = core.scan(root)
+        assert name in report["modules"], f"{name}: {root} no longer detects"
+        ids = [c["id"] for c in report["checks"]]
+        assert core_ids <= set(ids), (
+            f"{name}: core suite missing "
+            f"{sorted(core_ids - set(ids))} from the scan report")
+        assert len(ids) == len(set(ids)), (
+            f"{name}: duplicate check ids in the report: "
+            f"{sorted(i for i in set(ids) if ids.count(i) > 1)}")
+
+
+@pytest.mark.req("SCAN-S1-MODULAR-DISPATCH")
+def test_monorepo_match_runs_the_core_suite_exactly_once(tmp_path):
+    """Two framework modules co-match (§V4 permits it) and the outputs merge into
+    ONE report — so the core suite must appear once, not once per module.
+
+    Honesty note for the reviewer: this test is green on `05cd0d5` *by accident* —
+    node-ts supplies the suite there and django's omission is masked. Its red
+    conditions are the two wrong futures: per-module composition (every core id
+    twice) and no composition at all (zero).
+    """
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2\n")
+    (tmp_path / "settings.py").write_text(
+        "import os\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n")
+    (tmp_path / "package.json").write_text(
+        '{"name": "svc", "dependencies": {"fastify": "^4.28.1"}}\n')
+
+    report = core.scan(tmp_path)
+    assert report["modules"] == ["django", "node-ts"]
+    ids = [c["id"] for c in report["checks"]]
+    for core_id in FROZEN_CORE_IDS:
+        assert ids.count(core_id) == 1, (
+            f"{core_id} appeared {ids.count(core_id)} times in a two-module report")
+
+
+def test_module_emitting_unknown_core_id_is_a_loud_error(tmp_path):
+    """The override guard: a module may supersede a core result by emitting the same
+    id, but a typo'd / invented `core.*` id must not silently append itself to the
+    suite — that is how an unreviewed pseudo-core check would enter a report."""
+    class BogusCoreModule:
+        name = "bogus"
+
+        def detect(self, root):
+            return True
+
+        def checks(self, root):
+            return [core.CheckResult(id="core.bogus", tier="ok", title="x")]
+
+        def sandbox_checks(self, root):
+            return []
+
+        def wizard_questions(self, root):
+            return []
+
+        def manifest_fragment(self, root, answers=None):
+            return {}
+
+    fw, fb = core._FRAMEWORK_MODULES[:], core._FALLBACK_MODULES[:]
+    core._FRAMEWORK_MODULES[:] = [BogusCoreModule()]
+    core._FALLBACK_MODULES[:] = []
+    try:
+        with pytest.raises(ValueError):
+            core.scan(tmp_path)
+    finally:
+        core._FRAMEWORK_MODULES[:] = fw
+        core._FALLBACK_MODULES[:] = fb
