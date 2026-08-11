@@ -785,8 +785,10 @@ def test_n6_a_committed_env_file_in_generated_output_still_blocks(tmp_path, name
         "src/app.py": "print('hello')\n",
     })
     result = _core(root)["core.secret-scan"]
-    assert result.tier == "blocker", f"{name} hid a committed .env file"
-    assert "committed .env file" in result.detail
+    assert result.tier == "blocker", f"{name} hid an .env file"
+    # N7 reworded this line: the scan reads a tree and cannot see git, so it reports
+    # presence rather than asserting the file is committed.
+    assert ".env file present in the scan tree" in result.detail
 
 
 def test_n6_a_coverage_app_holding_real_source_is_still_scanned(tmp_path):

@@ -105,11 +105,14 @@ def test_static_does_not_match_when_server_manifests_exist(tmp_path):
 
 # ── common core: secret scan ────────────────────────────────────────────────────
 
-def test_committed_env_file_is_a_blocker(tmp_path):
+def test_an_env_file_in_the_scan_tree_is_a_blocker(tmp_path):
+    # N7 reworded the evidence line: the scanner reads a tree, not git, so it reports
+    # the file's presence and leaves "is it committed?" to the reader (see
+    # test_n7_the_env_finding_does_not_claim_the_file_is_committed).
     tree = secret_tree(tmp_path)
     res = by_id(fallbacks.common_checks(tree), "core.secret-scan")
     assert res.tier == "blocker"
-    assert ".env: committed .env file" in res.detail
+    assert ".env: .env file present in the scan tree" in res.detail
     assert "example" not in res.detail  # .env.example must NOT be flagged
 
 
@@ -139,6 +142,325 @@ def test_placeholder_values_are_not_flagged(tmp_path):
         "TOKEN = \"example_example_example\"\n")
     res = by_id(fallbacks.common_checks(tmp_path), "core.secret-scan")
     assert res.tier == "ok"
+
+
+# ── N7: three false-positive classes the TAKKO scan found (2026-08-11) ──────────
+#
+# The TAKKO scan — a Django + Vite monorepo, the first real repo with a modern frontend
+# in-tree — produced 16 blocking `[heuristic]` lines and 3 "committed .env" lines, and
+# triage found NOT ONE of the 16 was a secret. Three classes, none of them predictable
+# from a fixture, all of them ordinary in the shape of repo the fleet is moving toward.
+#
+# Each fix here carries an over-correction guard, because a noise-reduction that quietly
+# narrows a security check is the failure mode that costs the most: nobody notices a
+# blocker that stopped blocking (the N6 lesson, restated).
+
+_N7_RANDOM = "kQ7pZ2mX9vB4nT6yR1wL8cJ3hF5dS0gAwE4u"   # 36 chars, no marker word
+_N7_GHP_TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+# A JWT of the published shape: base64url header `{"alg"…`, payload `{"sub"…`, signature.
+_N7_JWT = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+           "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0."
+           "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
+# The same shape with every segment crafted to satisfy `^ident(\.ident)+$` — no `-`, no
+# leading digit. This is the hole Fix 2 would open on its own, so it is a fixture.
+_N7_IDENT_SHAPED_JWT = ("eyJhbGciOiJIUzINiJ.eyJzdWIiOiIxMjMJ."
+                        "SflKxwRJSMeKKFQTfwpMeJfPOkyJVadQsswc")
+
+
+def _n7_tree(tmp_path, files, name="n7"):
+    """Write {relpath: content} under a fresh root. Mirrors `_project` in
+    tests/test_scanner_core_hardening.py — nested paths are the point here (a scan
+    reads `docker/.env.prod`, not a flat tmp_path)."""
+    root = tmp_path / name
+    root.mkdir(parents=True, exist_ok=True)
+    for rel, content in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return root
+
+
+def _n7_secret_scan(root):
+    return by_id(fallbacks.common_checks(root), "core.secret-scan")
+
+
+# Fix 1 — a CSS custom-property reference is not a credential.
+
+def test_n7_a_css_var_reference_is_not_a_credential(tmp_path):
+    """TAKKO: `token: "var(--color-pink-fill)"` twelve times in one illustration
+    component. The NAME axis matches `token`, the value is 22 characters with no
+    whitespace and 3.6 bits/char, so it cleared the entropy floor twelve times over.
+    Judging the VALUE (N5's principle): `var(--x)` is a stylesheet lookup and can never
+    be key material."""
+    root = _n7_tree(tmp_path, {"src/EventIllustration.tsx": (
+        'const fill = { token: "var(--color-pink-fill)" };\n'
+        'const line = { token: "var(--color-ink-700)" };\n'
+        'const bg = { secret: "var(--color-cream-base)" };\n')})
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+
+
+def test_n7_fix1_guard_a_real_secret_beside_a_css_var_still_fires(tmp_path):
+    """The over-correction guard. The exclusion is anchored and exact, so it excuses a
+    `var(--x)` reference and nothing that merely starts with one."""
+    proof = _n7_tree(tmp_path, {"src/config.ts": f'const token = "{_N7_GHP_TOKEN}";\n'},
+                     name="proof")
+    assert _n7_secret_scan(proof).tier == "blocker"
+    assert "[proof] GitHub token" in _n7_secret_scan(proof).detail
+
+    heuristic = _n7_tree(tmp_path, {"src/config.ts": f'const token = "{_N7_RANDOM}";\n'},
+                         name="heuristic")
+    assert _n7_secret_scan(heuristic).tier == "blocker"
+    assert "[heuristic] hardcoded token value" in _n7_secret_scan(heuristic).detail
+
+    # A prefix is not the value: `var(--x)` followed by 20 random characters is a key
+    # wearing a stylesheet lookup, and an unanchored rule would have laundered it.
+    prefixed = _n7_tree(tmp_path, {"src/config.ts": (
+        f'const token = "var(--x){_N7_RANDOM}";\n')}, name="prefixed")
+    assert _n7_secret_scan(prefixed).tier == "blocker", (
+        "a `var(--x)` prefix laundered a random key past the blocker")
+
+
+# Fix 2 — a dotted identifier path on the core heuristic axis.
+
+def test_n7_a_dotted_identifier_path_is_not_a_credential(tmp_path):
+    """TAKKO: `qr_token=preorder.pickup_code.token,` — a Python keyword argument, read
+    by the UNQUOTED arm because its value alphabet allows `.`. N5 landed exactly this
+    rule in `django.py::_looks_like_import_path` and it never reached the core axis, so
+    every attribute access whose name carries a secret word was a blocker."""
+    root = _n7_tree(tmp_path, {"marketplace/emails.py": (
+        "queue_mail(\n"
+        "    qr_token=preorder.pickup_code.token,\n"
+        "    api_key=settings.stripe.api_key_name,\n"
+        ")\n")})
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+
+
+# Fix 2, tightened — the adversarial pass found the exclusion was broader than its FP
+# class. `^ident(\.ident)+$` describes a SHAPE, and two credential families wear it:
+# a Doppler service token (`dp.st.prod.<blob>`) and a 5-segment JWE, whose second
+# segment is an encrypted key rather than `eyJ…`, so axis 1 never sees it. Both scanned
+# clean under the first cut. The three-part rule and the measured margins that set its
+# numbers live in `_is_dotted_identifier_path`.
+
+_N7_DOPPLER = "dp.st.prod.aXbYcZdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh"     # H=4.89, seg 37
+_N7_JWE = ("eyJhbGciOiJSUEEtT0FFUCJ9.QXBwRW5jS2V5.SXZWZWN0b3I."
+           "Q2lwaGVyVGV4dERhdGE.QXV0aFRhZw")                          # H=5.02, 5 segs
+# The tightest real values the thresholds were measured against: this Django hasher path
+# is the highest-entropy import path found (4.489 bits against the 4.5 ceiling — an
+# 0.011-bit margin) and its class name is 26 characters against the 28-character
+# segment ceiling. If either threshold moves, this is the value that decides it.
+_N7_BCRYPT_HASHER = "django.contrib.auth.hashers.BCryptSHA256PasswordHasher"
+_N7_PBKDF2_HASHER = "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher"
+
+
+def test_n7_fix2_a_dot_structured_credential_is_not_an_identifier_path(tmp_path):
+    """A Doppler service token is `dp.st.<config>.<40-char blob>` — dot-STRUCTURED, and
+    the first cut of the exclusion read structure as provenance and excused it. Nothing
+    about a dotted shape makes a value harmless; what makes an import path harmless is
+    that its segments are words."""
+    root = _n7_tree(tmp_path, {"config/base.py": f'DOPPLER_TOKEN = "{_N7_DOPPLER}"\n'})
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker", result.detail
+    assert "[heuristic] hardcoded doppler_token value" in result.detail
+
+
+def test_n7_fix2_a_nested_jwe_is_not_an_identifier_path(tmp_path):
+    """The second miss, and the one that shows why Fix 2b was not enough on its own: a
+    5-segment JWE's second segment is the encrypted content key, NOT `eyJ…`, so the JWT
+    format does not match it. Axis 1 misses it and the dotted-ident rule then excused
+    it — a credential laundered by two rules that each looked reasonable alone."""
+    root = _n7_tree(tmp_path, {"src/session.py": f'access_token = "{_N7_JWE}"\n'})
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker", result.detail
+
+
+def test_n7_fix2_guard_the_fleets_own_dotted_paths_stay_quiet(tmp_path):
+    """The over-correction guard: N5's false positive must not come back.
+
+    Measured against the real values rather than invented ones — the two hasher paths
+    are the highest-entropy import paths in the fleet, and a per-SEGMENT entropy floor
+    would have failed on them (`BCryptSHA256PasswordHasher` alone is 4.18 bits,
+    `PBKDF2SHA1PasswordHasher` 4.05), which is why the entropy test is on the whole
+    value.
+    """
+    root = _n7_tree(tmp_path, {"config/base.py": (
+        f'PASSWORD_HASHER = "{_N7_BCRYPT_HASHER}"\n'
+        f'FALLBACK_PASSWORD_HASHER = "{_N7_PBKDF2_HASHER}"\n'
+        'AUTH_TOKEN_BACKEND = "rest_framework_simplejwt.tokens.RefreshToken"\n'
+        'SESSION_SECRET_PROVIDER = "apps.tenants.backends.TenantBackend"\n'
+        "PASSWORD_HASHERS = [\n"
+        f'    "{_N7_BCRYPT_HASHER}",\n'
+        f'    "{_N7_PBKDF2_HASHER}",\n'
+        "]\n")})
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+
+
+def test_n7_fix2_the_segment_ceiling_costs_long_identifier_names(tmp_path):
+    """The measured COST of the 28-character segment ceiling, asserted rather than
+    discovered later.
+
+    Django ships one class name over the ceiling —
+    `UserAttributeSimilarityValidator`, 32 characters — and long method names exist in
+    ordinary code. Under a secret-shaped name, such a value is no longer excused and
+    fires a `[heuristic]`. It stays that way deliberately: the ceiling is what catches
+    a Doppler token's 37-character blob, and a heuristic-tier false positive on a long
+    method name is a cheaper mistake than a blocker-tier MISS on a live credential.
+    This test is where that trade-off is visible; move the ceiling and it fails.
+    """
+    long_segment = "self.request.user.get_signed_authentication_token"   # 31-char tail
+    assert max(len(part) for part in long_segment.split(".")) >= 28
+    root = _n7_tree(tmp_path, {"api/views.py": f'    token = "{long_segment}"\n'})
+    assert _n7_secret_scan(root).tier == "blocker"
+
+
+# Fix 2b — JWTs join axis 1, which is what makes Fix 2 safe to ship.
+
+def test_n7_a_jwt_is_a_published_credential_format(tmp_path):
+    """A JWT carries its own authorization and is a credential whatever it is called —
+    `data = "<jwt>"` names nothing, and before this it was invisible on both axes."""
+    root = _n7_tree(tmp_path, {"src/api.ts": f'const data = "{_N7_JWT}";\n'})
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker", result.detail
+    assert "[proof] JWT" in result.detail
+
+
+def test_n7_fix2_guard_an_ident_shaped_jwt_still_fires(tmp_path):
+    """The hole Fix 2 opens on its own, closed by Fix 2b and by axis ORDER.
+
+    A JWT is dot-separated, and its base64url segments match `^ident(\\.ident)+$`
+    whenever they happen to carry no `-` and no leading digit. A dotted-ident exclusion
+    without a JWT format would have excused it. Axis 1 runs first and never consults the
+    exclusion, so both the crafted shape and a harmless name still block.
+    """
+    import re as _re
+    assert _re.match(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$",
+                     _N7_IDENT_SHAPED_JWT), (
+        "the fixture stopped being ident-shaped — it no longer guards anything")
+
+    for name, line in (("named", f'const token = "{_N7_IDENT_SHAPED_JWT}";\n'),
+                       ("unnamed", f'const data = "{_N7_IDENT_SHAPED_JWT}";\n')):
+        root = _n7_tree(tmp_path, {"src/api.ts": line}, name=name)
+        result = _n7_secret_scan(root)
+        assert result.tier == "blocker", f"{name}: {result.detail}"
+        assert "[proof] JWT" in result.detail
+
+
+# Fix 3 — `.env` template SUFFIXES, not three exact names.
+
+def test_n7_an_env_template_suffix_is_not_a_committed_env_file(tmp_path):
+    """TAKKO's `docker/.env.prod.example` was reported as a committed .env file.
+
+    The exclusion listed three exact names, so every project that keeps one template per
+    environment — `.env.prod.example`, `.env.staging.sample` — was told its documentation
+    was a leak.
+    """
+    root = _n7_tree(tmp_path, {
+        "docker/.env.prod.example": "POSTGRES_PASSWORD=changeme\n",
+        "docker/.env.staging.sample": "POSTGRES_PASSWORD=changeme\n",
+        "backend/.env.local.template": "DEBUG=1\n",
+        "src/app.py": "print('hello')\n",
+    })
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+    for name in (".env.prod.example", ".env.staging.sample", ".env.local.template"):
+        assert not fallbacks._is_env_file(name), name
+
+
+def test_n7_fix3_guard_a_real_env_file_and_a_key_in_a_template_still_block(tmp_path):
+    """Two guards, because the suffix rule could go wrong in two directions.
+
+    `docker/.env.prod` is a real environment file that ships with the tree, and the
+    heuristic and `[proof]` axes keep running over templates — a real key pasted into
+    `.env.example` is a real leak, which is the commonest way one gets committed.
+    """
+    real = _n7_tree(tmp_path, {"docker/.env.prod": "POSTGRES_PASSWORD=hunter2\n"},
+                    name="real")
+    result = _n7_secret_scan(real)
+    assert result.tier == "blocker", result.detail
+    assert "docker/.env.prod" in result.detail
+    assert fallbacks._is_env_file(".env.prod")
+
+    leaked = _n7_tree(tmp_path, {".env.example": f"GITHUB_TOKEN={_N7_GHP_TOKEN}\n"},
+                      name="leaked")
+    result = _n7_secret_scan(leaked)
+    assert result.tier == "blocker", result.detail
+    assert "[proof] GitHub token" in result.detail
+
+
+def test_n7_fix3_a_template_only_repo_still_wants_env_in_gitignore(tmp_path):
+    """`core.gitignore` reads the same predicate, and the first cut of Fix 3 narrowed it
+    by accident: a repo whose only env-ish file is `docker/.env.prod.example` stopped
+    being asked to ignore `.env`.
+
+    A template is EVIDENCE THE PROJECT USES ENV FILES — it is a list of the variables a
+    real `.env` will hold — so it is exactly the repo that needs the rule in place
+    before the real file appears. The secret-scan question ("is this file itself a
+    leak?") and the gitignore question ("will a leak be ignored when it arrives?") have
+    different answers on the same file, and now different predicates.
+    """
+    root = _n7_tree(tmp_path, {
+        "docker/.env.prod.example": "POSTGRES_PASSWORD=changeme\n",
+        ".gitignore": "*.pyc\n__pycache__/\n",
+        "src/app.py": "print('hello')\n",
+    })
+    result = by_id(fallbacks.common_checks(root), "core.gitignore")
+    assert result.tier == "warning", "an env template no longer implied env files"
+    assert ".env" in result.detail
+
+    covered = _n7_tree(tmp_path, {
+        "docker/.env.prod.example": "POSTGRES_PASSWORD=changeme\n",
+        ".gitignore": ".env\n",
+    }, name="covered")
+    assert by_id(fallbacks.common_checks(covered), "core.gitignore").tier == "ok"
+
+
+# Fix 3b — two markers for values that announce they are not secrets.
+
+@pytest.mark.parametrize("line", [
+    'SECRET_KEY = "dev-only-not-a-secret-change-in-prod"',
+    "SECRET_KEY=dev-only-not-a-secret-change-in-prod",
+    'API_KEY = "not-a-secret-local-value-only"',
+])
+def test_n7_a_value_that_announces_it_is_not_a_secret_is_a_placeholder(tmp_path, line):
+    """TAKKO ships `SECRET_KEY=dev-only-not-a-secret-change-in-prod` in `.env.example`
+    and in `config/settings/base.py`. It is 36 characters at 3.8 bits/char, so it
+    cleared both floors — while saying in words that it is not a credential."""
+    root = _n7_tree(tmp_path, {"config/base.py": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _n7_secret_scan(root)
+    assert result.tier == "ok", result.detail
+
+
+def test_n7_fix3b_guard_a_long_random_value_carrying_dev_only_still_fires(tmp_path):
+    """The over-correction guard was already built: D-010 item 5 stopped a marker word
+    from excusing anything ≥40 characters AND ≥4.0 bits/char, because
+    `django-insecure-<50 random chars>` is a real production key on a great many sites.
+    A 45-character random value that happens to start `dev-only-` is the same case."""
+    value = "dev-only-" + _N7_RANDOM          # 45 chars, 5.1 bits/char
+    assert len(value) == 45
+    root = _n7_tree(tmp_path, {"config/base.py": f'SECRET_KEY = "{value}"\n'})
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker", (
+        "a marker word excused a value long and random enough to be a real key")
+
+
+# Fix 4 — the evidence line stops claiming the file is committed.
+
+def test_n7_the_env_finding_does_not_claim_the_file_is_committed(tmp_path):
+    """The scanner reads a TREE. It cannot see git, and TAKKO's `backend/.env` is
+    gitignored and untracked — so "committed .env file" was a statement of fact the
+    check had no way to know, printed as a blocker. What it can see is that the file is
+    there and will ship with a deploy of this tree; whether it is committed is for the
+    reader to check."""
+    root = _n7_tree(tmp_path, {"backend/.env": "DATABASE_PASSWORD=hunter2\n"})
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker"
+    assert "backend/.env: .env file present in the scan tree" in result.detail
+    assert "committed .env file" not in result.detail
+    assert "git status" in result.fix_hint and "rotate" in result.fix_hint
 
 
 # ── common core: exposure-auth heuristic (SCAN-M4-EXPOSURE-AUTH) ────────────────

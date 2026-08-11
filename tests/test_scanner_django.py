@@ -420,7 +420,9 @@ def test_committed_env_secret_blocks_a_django_scan(tmp_path):
     assert "django" in report["modules"]
     secret = _report_by_id(tmp_path)["core.secret-scan"]
     assert secret["tier"] == "blocker", secret
-    assert "committed .env" in secret["detail"]
+    # N7 reworded the evidence line — the scan reads a tree and cannot see git, so it
+    # reports the file's presence rather than asserting it is committed.
+    assert ".env file present in the scan tree" in secret["detail"]
     assert report["summary"]["blocker"] >= 1
 
 
@@ -651,3 +653,67 @@ def test_n5_short_low_entropy_password_still_blocks(tmp_path):
     checks = _tiers(root)
     assert checks["django.secret-key-literal"].tier == "blocker"
     assert "ADMIN_PASSWORD" in checks["django.secret-key-literal"].detail
+
+
+# ── N7: the same exclusion, tightened, and now shared with the core axis ───────
+#
+# N5's rule shipped here and stopped here; N7 ported it to `fallbacks._check_secret_scan`
+# and the adversarial pass on that port found the rule excuses more than import paths.
+# A Doppler service token is `dp.st.<config>.<blob>` — dot-STRUCTURED — and was excused
+# on BOTH sides, including this one. There is now ONE implementation
+# (`fallbacks._is_dotted_identifier_path`) so a hole found on either axis is closed on
+# both; `_looks_like_import_path` delegates to it and keeps N5's name and reasoning.
+
+_N7_DOPPLER_TOKEN = "dp.st.prod.aXbYcZdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh"
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n7_a_dot_structured_token_in_a_settings_literal_still_blocks(tmp_path):
+    """A Doppler token committed as a settings literal was excused by N5's rule: it
+    matches `^ident(\\.ident)+$` exactly, so the shape test dropped it before either
+    axis could look. Shape is not provenance."""
+    root = _proj(
+        tmp_path,
+        base_body=f"DOPPLER_TOKEN = '{_N7_DOPPLER_TOKEN}'\n",
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker", (
+        "a dot-structured credential was excused as an import path")
+    assert "DOPPLER_TOKEN" in checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n7_guard_the_tightened_rule_still_excuses_djangos_own_paths(tmp_path):
+    """The over-correction guard for the shared predicate, measured against the two
+    tightest real values rather than invented ones.
+
+    `django.contrib.auth.hashers.BCryptSHA256PasswordHasher` is the highest-entropy
+    import path found in the fleet — 4.489 bits against the rule's 4.5 ceiling, an
+    0.011-bit margin — and its class name is 26 characters against a 28-character
+    segment ceiling. If a threshold ever moves, N5's false positive comes back here
+    first, on `PASSWORD_HASHERS`, which is where it was found in the first place.
+    """
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "import os\n"
+            + _fleet_settings_body()
+            + "PASSWORD_HASHERS = [\n"
+              "    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',\n"
+              "    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',\n"
+              "]\n"
+              "AUTH_PASSWORD_VALIDATORS = [\n"
+              "    {'NAME': 'django.contrib.auth.password_validation."
+              "UserAttributeSimilarityValidator'},\n"
+              "    {'NAME': 'django.contrib.auth.password_validation."
+              "MinimumLengthValidator'},\n"
+              "]\n"
+              "SECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n"
+        ),
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    blockers = [c.id for c in checks.values() if c.tier == "blocker"]
+    assert blockers == [], f"the tightened rule blocked on Django's own paths: {blockers}"
+    assert checks["django.secret-key-literal"].tier == "ok"

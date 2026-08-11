@@ -172,6 +172,17 @@ _CREDENTIAL_FORMATS = (
     # class name is.
     ("OpenAI key", re.compile(r"\bsk-[A-Za-z0-9]{32,}\b")),
     ("OpenAI project key", re.compile(r"\bsk-proj-[A-Za-z0-9_-]{64,}")),
+    # N7 (TAKKO scan, 2026-08-11). A JWT carries its own authorization, so it is a
+    # credential whatever it is called — and `data = "<jwt>"` names nothing, which is
+    # how they usually appear. It is here for a second reason: the dotted-identifier
+    # exclusion below drops any value shaped `ident.ident`, and a JWT IS dot-separated —
+    # its base64url segments match that pattern whenever they carry no `-` and no
+    # leading digit. Axis 1 runs first and never consults the exclusion, so this entry
+    # is what makes that exclusion safe to ship. Both the header and the payload of a
+    # real JWT are base64url of `{"…`, which is always `eyJ`; no import path starts a
+    # segment that way and then continues in base64.
+    ("JWT", re.compile(
+        r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
     # Twilio's `AC[0-9a-f]{32}` was dropped on review: it is the Account SID, a public
     # identifier, not the Auth Token — and it collides with any content-addressed hex.
     # Flagging a non-secret costs the check's credibility twice over.
@@ -238,6 +249,109 @@ _URL_RE = re.compile(
 _PATH_RE = re.compile(r"^(?:\.{0,2}/|~/|[A-Za-z]:\\)")
 
 
+# N7 (TAKKO scan, 2026-08-11), the first two of three false-positive classes a real
+# Django+Vite monorepo produced. Both are judgments about the VALUE, which is N5's
+# principle: a rule on the name can be fooled by naming a variable after a setting, and
+# a rule on the value cannot.
+#
+# ANCHORED AND EXACT, deliberately. `var(--x)` followed by 36 random characters is a key
+# wearing a stylesheet lookup, and a prefix match would launder it.
+_CSS_VAR_REF_RE = re.compile(r"^var\(--[A-Za-z0-9_-]+\)$")
+# The same regex N5 put in `django.py::_looks_like_import_path`, which is where it
+# stopped — it never reached this axis, so every attribute access whose name carried a
+# secret word was a blocker here: TAKKO's `qr_token=preorder.pickup_code.token,` (an
+# ordinary Python keyword argument) fired the unquoted arm, whose value alphabet allows
+# `.`.
+#
+# THE FIRST CUT OF THIS RULE CLAIMED "no published credential format survives this
+# pattern except a JWT". That claim was the defect, and the adversarial pass produced
+# two counterexamples in one sitting:
+#
+#   dp.st.prod.aXbYcZdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh   a Doppler service token
+#   eyJhbGciOiJSUEEtT0FFUCJ9.QXBwRW5jS2V5.SXZWZWN0b3I.Q2lwaGVyVGV4dERhdGE.QXV0aFRhZw
+#                                                      a 5-segment JWE
+#
+# Both match the pattern exactly. The JWE also slips axis 1: its second segment is the
+# encrypted content key, not `eyJ…`, so the JWT format above does not match it. Dotted
+# STRUCTURE is not provenance; what makes an import path harmless is that its segments
+# are words. So the shape is necessary and no longer sufficient — see
+# `_is_dotted_identifier_path` for the two measurements that bound it.
+_DOTTED_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+# Measured, not guessed, over Django/DRF/Celery/allauth import paths and fleet attribute
+# paths (the numbers below are whole-value Shannon bits/char unless stated):
+#
+#   longest real segment      32  `UserAttributeSimilarityValidator` (Django validator)
+#   longest real segment in a
+#     value that reaches an
+#     axis                    26  `BCryptSHA256PasswordHasher` (PASSWORD_HASHERS)
+#   highest real whole-value
+#     entropy               4.489 `django.contrib.auth.hashers.BCryptSHA256PasswordHasher`
+#   Doppler token          4.887  segment 37
+#   5-segment JWE          5.023  segment 24
+#
+# Hence: a segment ceiling of 28 (clears the 26-char hasher class) and an entropy
+# ceiling of 4.5 on values ≥40 chars (clears the hasher path at 4.489 — an 0.011-bit
+# margin, which is thin, and is why the guard test names that exact value). The Doppler
+# token is over BOTH ceilings (segment 37, entropy 4.89), so its regression test pins
+# the pair without isolating either knob; the JWE (segments ≤24, entropy 5.02) is
+# caught by the entropy ceiling alone and pins it, and the long-identifier cost test
+# is what pins the segment ceiling alone. Second adversarial pass verified each knob
+# goes red under mutation via those two tests.
+#
+# A per-SEGMENT entropy floor was measured and rejected: `BCryptSHA256PasswordHasher`
+# alone is 4.18 bits and `PBKDF2SHA1PasswordHasher` 4.05, so any floor low enough to
+# catch a random blob resurrects N5's PASSWORD_HASHERS false positive.
+#
+# KNOWN COST, accepted deliberately: the segment ceiling un-excuses genuine identifiers
+# longer than 28 characters — Django's own `UserAttributeSimilarityValidator` (32) and
+# long method names such as `get_signed_authentication_token` (31). Under a secret-shaped
+# name those now produce a `[heuristic]`. A heuristic-tier false positive on a long
+# method name is a cheaper mistake than a blocker-tier miss on a live credential, and
+# the Django validator reaches no axis in practice (it is written as a dict entry,
+# `{"NAME": …}`, which neither the core regex nor `django._string_literals` reads).
+# `test_n7_fix2_the_segment_ceiling_costs_long_identifier_names` holds this cost visible.
+_DOTTED_MAX_SEGMENT = 28
+_DOTTED_ENTROPY_CEILING = 4.5
+_DOTTED_ENTROPY_MIN_LEN = 40
+
+
+def _is_css_var_reference(value):
+    """True for `var(--color-pink-fill)` — a stylesheet lookup, never key material.
+
+    TAKKO wrote `token: "var(--color-pink-fill)"` twelve times in one illustration
+    component: the name axis matches `token`, and the value is 22 characters at 3.6
+    bits/char, so it cleared the entropy floor every time.
+    """
+    return bool(_CSS_VAR_REF_RE.match(value))
+
+
+def _is_dotted_identifier_path(value):
+    """True for a value that is an import path or attribute access, and not a credential.
+
+    `preorder.pickup_code.token`, `django.contrib.auth.hashers.Argon2PasswordHasher` —
+    judged before the name/entropy question is asked, on both the core heuristic axis
+    and (via `django._looks_like_import_path`, which delegates here) the Django settings
+    axis. ONE implementation on purpose: N5's rule was ported to the core axis, the
+    adversarial pass found a hole in the port, and the same hole was open in the
+    original — a Doppler token committed as a Django setting was excused too.
+
+    Three conditions, all required, with the measurements behind the two numbers in the
+    comment above `_DOTTED_MAX_SEGMENT`:
+
+      * the dotted-identifier SHAPE (necessary, and on its own not sufficient);
+      * no segment ≥28 characters — a credential's random blob is one long segment
+        (`dp.st.prod.<37 chars>`), an identifier is words;
+      * not both ≥40 characters and ≥4.5 bits/char — the whole-value test that catches
+        a 5-segment JWE, whose segments are individually short.
+    """
+    if not _DOTTED_IDENT_RE.match(value):
+        return False
+    if max(len(segment) for segment in value.split(".")) >= _DOTTED_MAX_SEGMENT:
+        return False
+    return not (len(value) >= _DOTTED_ENTROPY_MIN_LEN
+                and _shannon_entropy(value) >= _DOTTED_ENTROPY_CEILING)
+
+
 def _is_address_not_credential(value):
     """True for a URL or path that carries no credential of its own."""
     if _PATH_RE.match(value):
@@ -282,7 +396,18 @@ _PLACEHOLDER_MARKERS = ("changeme", "change-me", "change_me", "xxx", "example",
                         # this repo with the widened rule: `PASSWORD = "a-long-demo-
                         # password"` in a dev script is a stand-in, not a credential.
                         # `test` is deliberately absent — it is a substring of `latest`.
-                        "demo", "fake", "redacted", "notreal")
+                        "demo", "fake", "redacted", "notreal",
+                        # N7 (TAKKO scan, 2026-08-11): the Django `SECRET_KEY` set to
+                        # `dev-only-not-a-secret-change-in-prod`, shipped in
+                        # `.env.example` and in `config/settings/base.py`. 36 characters
+                        # at 3.8 bits/char, so it cleared both floors while saying in
+                        # words that it is not a credential. The `_looks_placeholder`
+                        # escape below is the over-correction guard and is unchanged: a
+                        # marker never excuses a value long AND random enough to be a
+                        # real key. (The assignment is described rather than quoted so
+                        # this comment does not trip `make log-scrub` — round-5 F10's
+                        # marker exemption is for copy that MUST name the pattern.)
+                        "dev-only", "not-a-secret")
 _ENTROPY_FLOOR_BITS = 2.5  # bits/char; filters "aaaaaaaa…"-style non-secrets
 # Above this length AND entropy, a placeholder marker no longer excuses the value —
 # see `_looks_placeholder` (D-010 follow-up item 5).
@@ -420,10 +545,29 @@ def _looks_placeholder(value):
                 and _shannon_entropy(value) >= _REAL_KEY_MIN_ENTROPY)
 
 
-def _is_env_file(name):
-    if name in (".env.example", ".env.sample", ".env.template"):
-        return False
+def _is_env_family(name):
+    """`.env` or any `.env.*`, TEMPLATES INCLUDED.
+
+    N7: `core.gitignore` asks a different question from the secret scan — not "is this
+    file a leak?" but "will a leak be ignored when it arrives?" — and a template is
+    evidence the project uses env files at all (it is a list of the variables the real
+    one will hold). Tightening `_is_env_file` narrowed that check by accident, so the
+    two questions have two predicates now.
+    """
     return name == ".env" or name.startswith(".env.")
+
+
+def _is_env_file(name):
+    """True for an environment file, False for a template OF one.
+
+    N7 (TAKKO scan, 2026-08-11): the exclusion was three exact names, so
+    `docker/.env.prod.example` — one template per environment, an ordinary layout — was
+    reported as a leak. It is a SUFFIX rule now. Templates still get scanned line by
+    line by both axes above: a real key pasted into `.env.example` is a real key, and
+    that is one of the commonest ways one gets committed.
+    """
+    return (_is_env_family(name)
+            and not name.endswith((".example", ".sample", ".template")))
 
 
 # ── common core checks (id prefix `core.`) ──────────────────────────────────────
@@ -477,7 +621,13 @@ def _check_secret_scan(root, texts):
         rel = path.relative_to(root)
         bucket = test_findings if _is_test_path(rel) else findings
         if _is_env_file(path.name):
-            bucket.append(f"{rel}: committed .env file")
+            # N7 (TAKKO scan, 2026-08-11): this line used to read "committed .env file",
+            # which the scanner has no way to know — it reads a TREE and cannot see git.
+            # TAKKO's `backend/.env` is gitignored and untracked, and the report called
+            # it committed anyway. What the scan CAN see is that the file is here and
+            # will ship with a deploy of this tree; whether it is also in git is for the
+            # reader to check, and the fix_hint says so.
+            bucket.append(f"{rel}: .env file present in the scan tree")
             continue
         # N6: a machine-written FILE (`.min.js`, `.map`, a lockfile) and a file inside
         # a machine-written DIRECTORY are the same case — the heuristic axis below is
@@ -502,7 +652,14 @@ def _check_secret_scan(root, texts):
                 floor = _UNQUOTED_ENTROPY_FLOOR_BITS
             if match:
                 name, value = match.group("name"), match.group("value")
+                # N7: the two value-shape exclusions apply to BOTH arms and run before
+                # the entropy judgment — a stylesheet lookup and an attribute access
+                # both clear the floor comfortably, which is exactly why they were
+                # reported. Nothing here reaches axis 1, which has already run and
+                # `continue`d on this line if it matched.
                 if (not _is_address_not_credential(value)
+                        and not _is_css_var_reference(value)
+                        and not _is_dotted_identifier_path(value)
                         and not _is_identifier_echo(name, value)
                         and not _looks_placeholder(value)
                         and _shannon_entropy(value) >= floor):
@@ -517,9 +674,11 @@ def _check_secret_scan(root, texts):
             id="core.secret-scan", tier="blocker",
             title="Committed secrets detected",
             detail=detail,
-            fix_hint="Move secrets to the vault / environment injection, rotate any "
-                     "value that was committed, and add .env to .gitignore. "
-                     "Committed secrets stay in git history until rotated.\n\n"
+            fix_hint="Move secrets to the vault / environment injection. A .env file "
+                     "in this tree ships with a deploy of it, and is a leak as well if "
+                     "it is committed — check `git status`, add .env to .gitignore, and "
+                     "rotate anything that was committed: it stays in git history until "
+                     "you do.\n\n"
                      "[proof] lines matched a published credential format — a GitHub "
                      "token, a PEM block, an AWS key id — and are not guesses. "
                      "[heuristic] lines are a secret-shaped name assigned a "
@@ -646,7 +805,11 @@ def _check_gitignore(root, texts, files=None):
         return any(token in ln for ln in lines)
 
     gaps = []
-    env_matters = any(_is_env_file(p.name) for p, _ in texts) or (root / ".env").exists()
+    # N7: templates count HERE (`_is_env_family`, not `_is_env_file`) — a repo shipping
+    # `docker/.env.prod.example` and no .gitignore rule is the repo about to commit the
+    # real one.
+    env_matters = (any(_is_env_family(p.name) for p, _ in texts)
+                   or (root / ".env").exists())
     if env_matters and not covered(".env"):
         gaps.append(".env files exist but .gitignore does not cover .env")
     # Nested too (item 6, same reason): a repo whose only package.json is

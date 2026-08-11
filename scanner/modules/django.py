@@ -27,6 +27,11 @@ import yaml
 
 from scanner.core import CheckResult, SandboxSpec, WizardQuestion, register
 
+# N7: the dotted-path rule is shared with the common-core secret scan rather than
+# copied — see `_looks_like_import_path` below for why. fallbacks imports only
+# scanner.core, so this direction adds no cycle.
+from scanner.modules.fallbacks import _is_dotted_identifier_path
+
 _SKIP_DIRS = {".git", ".hg", ".venv", "venv", ".venv-scaffold", "node_modules",
               "__pycache__", ".tox", ".mypy_cache", "staticfiles", "dist", "build"}
 _DEV_STEMS = {"dev", "development", "local", "test", "testing", "ci"}
@@ -63,21 +68,31 @@ def _shannon(s):
     return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
 
 
-_IMPORT_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
-
-
 def _looks_like_import_path(s):
     """True for a dotted Python path — `django.contrib.admin`, `apps.billing.tasks`.
 
     N5 (2026-08-11): the one rule that separates Django's own settings lists from
     committed key material. Every element of INSTALLED_APPS, MIDDLEWARE,
-    AUTHENTICATION_BACKENDS, PASSWORD_HASHERS and TEMPLATES' loaders matches; no
-    published credential format does — Fernet, base64, PEM, hex and every token
-    prefix in the wild carry `=`, `-`, `+`, `/`, `:` or leading digits in a segment,
-    none of which survive this pattern. The check is on the VALUE, so it cannot be
-    fooled by naming a variable after a Django setting.
+    AUTHENTICATION_BACKENDS, PASSWORD_HASHERS and TEMPLATES' loaders matches. The check
+    is on the VALUE, so it cannot be fooled by naming a variable after a Django setting.
+
+    N7 (2026-08-11): the rule and its regex now live in
+    `fallbacks._is_dotted_identifier_path`, and this delegates to it. Two reasons, both
+    from the adversarial pass on N7's port of this rule to the core secret-scan axis:
+
+      1. N5's claim that "no published credential format survives this pattern" was
+         false. A Doppler service token (`dp.st.prod.<37-char blob>`) and a 5-segment
+         JWE both match it exactly, so both were excused HERE too — a Doppler token
+         committed as a settings literal scanned clean. The shared rule adds a segment
+         ceiling and a whole-value entropy ceiling; the measurements are in fallbacks.
+      2. One implementation means a hole found on either axis is closed on both. Two
+         copies of a security rule drift, and the copy nobody re-audits is the one that
+         is wrong.
+
+    Django's own paths still pass, hasher class names included — that guard is
+    `test_n7_guard_the_tightened_rule_still_excuses_djangos_own_paths`.
     """
-    return bool(_IMPORT_PATH_RE.match(s))
+    return _is_dotted_identifier_path(s)
 
 
 def _string_literals(node):
