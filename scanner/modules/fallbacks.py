@@ -585,8 +585,16 @@ def _credential_format_in(line):
     # Reviewed as a miss: `DATABASE_URL = "postgres://user:pass@host"` is the single
     # commonest committed database credential, and the name carries no keyword, so the
     # name-driven axis never saw it. As a value format it fires regardless of the name.
-    match = _CONNECTION_STRING_RE.search(line)
-    if match:
+    # EVERY match on the line, not the first (N8 follow-up, adversarial pass): the tests
+    # below are per-MATCH, and a per-match test that ends the search hides everything
+    # after it. `DB=postgres://app:<REPLACE_ME>@db1 REAL=postgres://app:Tr0ub4dor3xK9@db2`
+    # returned None — the documentation URL shadowed the real credential standing beside
+    # it, and that line had been a (noisy) blocker before the angle-bracket veto existed,
+    # so the veto made a real finding disappear. The rule this encodes outlives the
+    # particular veto: a test that excuses a value may skip ITS OWN match and may never
+    # end the search. The 6-character floor and `_looks_placeholder` were per-match all
+    # along and shadowed exactly the same way.
+    for match in _CONNECTION_STRING_RE.finditer(line):
         password = match.group("password")
         # N7 follow-up (fleet re-record, 2026-08-11): E-invoice's
         # `app/.env.prod.example` documents the format as

@@ -519,6 +519,58 @@ def test_n7_guard_the_angle_bracket_rule_is_an_rfc_3986_validity_test(
         assert "[proof] connection string" in result.detail
 
 
+# ── N8 follow-up: a vetoed match must not end the search ────────────────────────
+#
+# The adversarial pass on N8 found the veto could HIDE a real credential rather than
+# just excuse a fake one. `_credential_format_in` took the FIRST connection-string match
+# on the line and judged only that one, so a documentation URL standing before a real
+# one shadowed it — and this shape got worse, not better, with N8: before the veto, that
+# line at least surfaced as a (noisy) blocker.
+#
+# The general lesson, which outlives this particular veto: a per-match test may skip ITS
+# OWN match and must never end the search. Both existing tests are per-match — the
+# 6-character floor and `_looks_placeholder` — so both had the same shadowing behaviour;
+# only `finditer` makes any of them safe.
+
+@pytest.mark.parametrize("line", [
+    # The demonstrated case: an angle-bracket documentation URL, then a real one.
+    "DB=postgres://app:<REPLACE_ME>@db1 REAL=postgres://app:Tr0ub4dor3xK9@db2",
+    # The same shadowing through the placeholder veto, which predates N8.
+    "DB=postgres://app:changeme@db1 REAL=postgres://app:Tr0ub4dor3xK9@db2",
+    # …and through the length floor.
+    "DB=redis://:short@cache REAL=postgres://app:Tr0ub4dor3xK9@db2",
+])
+def test_n8_a_vetoed_connection_string_does_not_shadow_a_real_one(tmp_path, line):
+    """A veto excuses one match, not the rest of the line."""
+    root = _n7_tree(tmp_path, {"app/settings.py": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _n7_secret_scan(root)
+    assert result.tier == "blocker", f"the real credential was shadowed: {line!r}"
+    assert "[proof] connection string" in result.detail
+
+
+def test_n8_guard_the_natural_ordering_and_the_all_vetoed_line(tmp_path):
+    """Two guards around the widening.
+
+    The natural order — real credential first, documentation after — already fired and
+    must keep firing; and a line whose connection strings are ALL documentation must
+    stay quiet, which is the N8 finding itself and the thing `finditer` could most
+    easily have undone.
+    """
+    natural = _n7_tree(tmp_path, {"app/settings.py": (
+        "REAL=postgres://app:Tr0ub4dor3xK9@db2  " + _N7_URL_FORMAT_COMMENT + "\n")},
+        name="natural")
+    result = _n7_secret_scan(natural)
+    assert result.tier == "blocker"
+    assert "[proof] connection string" in result.detail
+
+    all_vetoed = _n7_tree(tmp_path, {"app/.env.prod.example": (
+        "# postgres://user:<password>@host:5432/db  redis://:<this>@redis:6379/0\n"
+        "# amqp://svc:changeme@rabbit:5672/\n")}, name="all_vetoed")
+    assert _n7_secret_scan(all_vetoed).tier == "ok", \
+        _n7_secret_scan(all_vetoed).detail
+
+
 # ── common core: exposure-auth heuristic (SCAN-M4-EXPOSURE-AUTH) ────────────────
 #
 # R4-11 WI-3: these two tests carried `@pytest.mark.req("SCAN-M4-EXPOSURE-AUTH")`,
