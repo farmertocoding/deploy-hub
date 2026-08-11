@@ -322,3 +322,36 @@ section nothing watches — each now named in a warning instead of hashed over i
 warnings. `--print-text-hashes` byte-identical to `88d503f` across all 79 reqs; the
 master-vs-branch pin diff is exactly the 8 intended entries. Gate machinery and the
 registry are human-merge-only: awaiting Joseph.
+
+## 11. N4 — the guard accused GNU make 3.81 of an override it cannot express (branch `fix-make381-guard-false-positive`, 2026-08-11)
+
+Found live, during the round-6 merge itself: Joseph's first `make test` on the Mac was
+refused with `carries [undefined]`, and after switching his shell to Homebrew make 4.x,
+seven tests still failed — every test that spawns `make` as a subprocess found stock
+`/usr/bin/make` on PATH, which is GNU make **3.81** (2006, the newest Apple ships).
+
+The mechanism: `.SHELLFLAGS` does not exist before make 3.82, so on 3.81
+`$(origin .SHELLFLAGS)` is the string `undefined`, and the guard's
+`$(filter-out file default,…)` passed it straight into `_MF_BAD`. The guard did exactly
+what round 6's own test warned against: "a guard that refuses everything is not a guard,
+it is an outage" — on an entire platform, for honest invocations, with an accusation
+naming no actionable input.
+
+The repair is one word per origin check: `undefined` joins `file default` as a clean
+origin. A variable that does not exist cannot carry an override — on 3.81 the feature is
+absent (its `-c` is hardcoded), and on ≥3.82 the only route to an undefined `.SHELLFLAGS`
+is an `undefine` in a makefile: this repo's own (reviewed), or an injected one via
+`MAKEFILES` (already refused). A real override still arrives with origin `command line`
+or `environment` and is still refused — held by a residual test.
+
+The regression test does not require a 2006 make on the box: `undefine .SHELLFLAGS`
+before `include`-ing the real Makefile puts the origin in exactly the state 3.81 reports
+natively, and the guard evaluates while the makefile is read. (The shim restores the
+variable after the include — simulation plumbing only, so the recipe itself can run on
+modern make.) Verified failing against the unfixed Makefile, passing against the fix.
+
+Per the broken-gate-repair rule (build-process.md, round 4), this rides its own branch
+and touches nothing else: `Makefile` + `tests/test_gate_followup.py` + this entry.
+Working-environment note recorded alongside: the Mac's PATH now fronts Homebrew make
+via gnubin in `~/.zshrc`, but any tool that constructs its own PATH may still find 3.81
+— after this fix, that is fine.

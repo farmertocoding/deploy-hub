@@ -29,12 +29,21 @@ _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
 # absorbs it into the variable — so it is caught by its origin instead. It is also the
 # nastiest of them: `MAKEFLAGS=SHELL=/bin/true` runs every recipe through `true`, so
 # the gate prints nothing and exits 0.
+#
+# `undefined` is a CLEAN origin, not an offense (N4). `.SHELLFLAGS` does not exist
+# before GNU make 3.82, so on 3.81 — stock macOS `/usr/bin/make` — its origin is the
+# string `undefined`, and treating that as an override refused every honest invocation
+# on that platform with the accusation `[undefined]`. A variable that does not exist
+# cannot carry an override: on 3.81 the feature is absent, and on ≥3.82 the only route
+# to `undefined` is an `undefine` in a makefile — this file, which is reviewed, or an
+# injected one via MAKEFILES, which is caught below. A real override still shows origin
+# `command line` or `environment` and is still refused.
 _MF_BAD := $(strip \
 	$(foreach c,n i q t o,$(findstring $(c),$(_MF_SHORT))) \
 	$(filter --dry-run --just-print --recon --ignore-errors --question --touch,\
 		$(MAKEFLAGS)) \
 	$(filter --eval% .SHELLFLAGS=%,$(MAKEFLAGS)) \
-	$(filter-out file default,$(origin SHELL))$(filter-out file default,$(origin .SHELLFLAGS)) \
+	$(filter-out file default undefined,$(origin SHELL))$(filter-out file default undefined,$(origin .SHELLFLAGS)) \
 	$(MAKEFILES))
 ifneq ($(_MF_BAD),)
 $(error refusing to run: make's environment carries [$(_MF_BAD)], which suppresses or \

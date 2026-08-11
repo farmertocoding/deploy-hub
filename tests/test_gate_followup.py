@@ -679,6 +679,70 @@ def test_issue_r8_the_guard_leaves_honest_invocations_alone(env_overrides, args)
     assert "refusing to run" not in result.stderr
 
 
+def test_issue_n4_a_make_without_shellflags_is_not_accused_of_overriding_it(tmp_path):
+    """GNU make 3.81 — stock macOS `/usr/bin/make` — has no `.SHELLFLAGS` at all.
+
+    On that make, `$(origin .SHELLFLAGS)` is the string `undefined`, and the guard read
+    it as an override: every honest invocation on the platform was refused with the
+    accusation `[undefined]` (found live during the 2026-08-11 round-6 merge, as 7 test
+    failures in whatever spawns `make` from PATH). A variable that does not exist
+    cannot carry an override. Simulated here on modern make: `undefine .SHELLFLAGS`
+    before including the real Makefile puts the origin in exactly the state 3.81
+    reports natively, so this test fails on the unfixed guard without needing a 2006
+    make on the box.
+    """
+    # The guard is evaluated while the Makefile is being read, so the undefine is what
+    # it sees. The restoration afterward is simulation plumbing only: real 3.81 needs
+    # none — its `-c` is hardcoded — but on modern make an actually-undefined
+    # .SHELLFLAGS invokes `sh` without `-c` and the recipe itself breaks, which would
+    # test the wrong thing.
+    shim = tmp_path / "make381.mk"
+    shim.write_text(
+        "undefine .SHELLFLAGS\n"
+        "include " + str(REPO / "Makefile") + "\n"
+        ".SHELLFLAGS := -c\n",
+        encoding="utf-8")
+    env = dict(os.environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    result = subprocess.run(
+        ["make", "-f", str(shim), "py-roots"],
+        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    assert result.returncode == 0, (
+        f"a make whose .SHELLFLAGS does not exist was refused — the guard is again "
+        f"accusing GNU make 3.81 of an override it cannot express:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" not in result.stderr
+
+
+def test_issue_n4_residual_a_real_shellflags_override_is_still_refused():
+    """Demoting `undefined` to clean must not have taken `command line` with it."""
+    result = _make_with_env({}, args=(".SHELLFLAGS=-c true",))
+    assert result.returncode != 0 and "refusing to run" in result.stderr, (
+        f"a command-line .SHELLFLAGS override ran — the N4 fix widened the hole it sat "
+        f"next to:\n{result.stdout}{result.stderr}")
+
+
+def test_issue_n4_residual_an_undefined_shell_is_also_clean_not_an_offense(tmp_path):
+    """The same reasoning covers `SHELL`, symmetrically, should a make ever lack it."""
+    # Same simulation plumbing as the .SHELLFLAGS test: the guard reads the undefined
+    # origin at include time; the restoration only lets the recipe execute afterward.
+    shim = tmp_path / "noshell.mk"
+    shim.write_text(
+        "undefine SHELL\n"
+        "include " + str(REPO / "Makefile") + "\n"
+        "SHELL := /bin/sh\n",
+        encoding="utf-8")
+    env = dict(os.environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    result = subprocess.run(
+        ["make", "-f", str(shim), "py-roots"],
+        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    assert result.returncode == 0, (
+        f"an undefined SHELL was treated as an override:\n{result.stdout}{result.stderr}")
+
+
 def test_issue_r8_the_guard_cannot_be_quietly_deleted():
     """It is one `ifneq` in a file nobody reads twice; say out loud that it must be there.
 
