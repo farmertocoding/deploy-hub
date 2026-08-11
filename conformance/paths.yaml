@@ -15,3 +15,8 @@ sensitive:
   - conformance/check.py
   - scripts/**
   - intake/**
+  # D-010 follow-up item 1: a scanner module can supersede a core check by emitting the
+  # same id, which replaces it outright — tier included. `supersedes` now makes that a
+  # declared, one-line act, but the thing being weakened can be `core.secret-scan`, a
+  # blocker, so the declaration is worth a human's eyes.
+  - scanner/modules/**

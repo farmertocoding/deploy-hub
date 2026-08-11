@@ -23,23 +23,105 @@ from pathlib import Path
 from scanner import core
 
 # Directories that are dependency/build/data output, never reviewed source.
-_SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "data",
-              "__pycache__", ".git", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+#
+# Dot-directories used to be skipped WHOLESALE, which meant a committed key in
+# `.github/workflows/deploy.yml` — a classic place for one — scanned clean (D-010
+# follow-up item 4). They are enumerated here instead. A skip-list rather than an
+# allow-list, deliberately: an allow-list means the next dot-directory anyone invents
+# is silently unscanned, and the direction to fail in is "scanned something dull",
+# not "missed a key".
+_SKIP_DIRS = {
+    "node_modules", ".venv", "venv", "dist", "build", "data",
+    "__pycache__", ".git", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    # generated / cache dot-dirs: large, machine-written, and never reviewed source
+    ".tox", ".nox", ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache",
+    ".cache", ".gradle", ".idea", ".terraform", ".serverless", ".yarn", ".pnpm-store",
+}
 _MAX_TEXT_BYTES = 512 * 1024
 
 # ── secret-scan patterns ────────────────────────────────────────────────────────
 _AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+
+# The keyword may sit ANYWHERE in the identifier, and that is the whole point of the
+# widening (D-010 follow-up item 3). The previous pattern required the keyword to be
+# followed immediately by `=` or `:`, so the two commonest shapes in the fleet never
+# matched: in `AWS_SECRET_ACCESS_KEY` the keyword is followed by `_ACCESS_KEY`, and in
+# `SECRET_KEY` by `_KEY`. Inside a Django settings file `django.secret-key-literal`
+# covered them; in any other file nothing did.
+#
+# Both markers below are the round-5 F10 shape — a rule that has to name the pattern
+# trips the source scans looking for it, and the remedy is a marked line, not degraded
+# product copy.
+_SECRET_WORD = (r"(?:secret|token|passwd|password|api[_-]?key|apikey|"  # nosec B105
+                r"access[_-]?key|private[_-]?key|client[_-]?secret|credential)")
+#
+# The VALUE is "anything quoted that contains no whitespace", not a fixed alphabet.
+# A base64/hex alphabet looked safe and was wrong in the direction that matters:
+# Django's `startproject` draws its SECRET_KEY from
+# `abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*(-_=+)`, so a real generated key
+# contains punctuation and a narrow alphabet simply failed to match it. Requiring the
+# CLOSING quote is what keeps this from running away — it bounds the match to one
+# literal instead of to the rest of the line.
 _ASSIGNMENT_RE = re.compile(
-    r"(secret|token|password|api_key)\s*[=:]\s*['\"]([A-Za-z0-9+/_-]{16,})",
+    rf"(?P<name>[A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)\s*[=:]\s*"
+    rf"(?P<quote>['\"])(?P<value>[^\s'\"]{{16,}})(?P=quote)",
     re.IGNORECASE,
 )
+# Values that are addresses rather than credentials. A URL or a path is long and
+# high-entropy enough to clear both filters, and `token_url`, `secret_path` and
+# `credentials_file` are ordinary names.
+_ADDRESS_RE = re.compile(r"^(?:\w+://|\.{0,2}/|~/|[A-Za-z]:\\)")
+
+# Directory names whose contents are test material. A password in a test helper is a
+# fixture, and blocking a deployment on it teaches people to route around the check —
+# but it is not nothing either, so it is reported at a lower tier rather than dropped.
+_TEST_DIR_NAMES = {"tests", "test", "spec", "specs", "__tests__", "testdata",
+                   "fixtures", "e2e", "cypress"}
+
+
+def _is_test_path(rel):
+    parts = [p.lower() for p in rel.parts]
+    return (bool(_TEST_FILE_RE.search(rel.name))
+            or any(part in _TEST_DIR_NAMES for part in parts[:-1])
+            or rel.name.lower().startswith(("conftest", "factories")))
 _PLACEHOLDER_MARKERS = ("changeme", "change-me", "change_me", "xxx", "example",
-                        "dummy", "insecure", "placeholder", "sample", "your_", "your-")
+                        "dummy", "insecure", "placeholder", "sample", "your_", "your-",
+                        # Same class as `sample`/`dummy`/`example`, added after scanning
+                        # this repo with the widened rule: `PASSWORD = "a-long-demo-
+                        # password"` in a dev script is a stand-in, not a credential.
+                        # `test` is deliberately absent — it is a substring of `latest`.
+                        "demo", "fake", "redacted", "notreal")
 _ENTROPY_FLOOR_BITS = 2.5  # bits/char; filters "aaaaaaaa…"-style non-secrets
+# Above this length AND entropy, a placeholder marker no longer excuses the value —
+# see `_looks_placeholder` (D-010 follow-up item 5).
+_REAL_KEY_MIN_LEN = 40
+_REAL_KEY_MIN_ENTROPY = 4.0
 
 _HEALTH_ROUTE_RE = re.compile(r"['\"/](healthz?|ping|health[-_]?check)\b", re.IGNORECASE)
+
+# Auth INDICATORS, not auth-adjacent vocabulary (D-010 follow-up item 7). The previous
+# pattern matched the bare substring `session`, so `SESSION_COOKIE_SECURE = True` alone
+# satisfied it — meaning every project that passed `django.security-settings`
+# auto-passed this check regardless of whether it had any authentication at all. What
+# is wanted is evidence of an authentication *decision*: a guard, a check, a middleware,
+# a token verification. Still a heuristic — the wizard's exposure question is what
+# decides whether a miss matters — but a heuristic that can fail.
 _AUTH_INDICATOR_RE = re.compile(
-    r"(session|login|jwt|authenticate|api_key|authorization)", re.IGNORECASE)
+    r"(?:@?login_required|is_authenticated|request\.user\b|current_user\b"
+    r"|\blogin\b|\blogout\b|\bsignin\b|\bsign_in\b|\bLOGIN_URL\b"
+    r"|permission_classes|IsAuthenticated|AllowAny|authenticate\s*\("
+    r"|LoginRequiredMixin|PermissionRequiredMixin|AuthenticationMiddleware"
+    r"|passport\.(?:authenticate|use)|require[_-]?auth|ensureAuthenticated"
+    r"|jwt\.(?:sign|verify|decode)|verify[_-]?jwt|jsonwebtoken"
+    r"|next[-_]?auth|getServerSession|useSession"
+    r"|req\.session\b|request\.session\b|session\[|flask_login|Depends\s*\(\s*get_current"
+    r"|Authorization\s*:\s*Bearer|WWW-Authenticate|OAuth2?|OpenID)",
+    re.IGNORECASE,
+)
+# Only source and templates can carry an auth decision. A hit in a lockfile, a
+# .gitignore or a committed .env is vocabulary, not evidence.
+_AUTH_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".go",
+                  ".html", ".htm", ".vue", ".svelte", ".php", ".java", ".kt", ".cs"}
 
 # ── Dockerfile line patterns ────────────────────────────────────────────────────
 _FROM_RE = re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?",
@@ -54,9 +136,14 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".
 # ── file walking (static reads only) ────────────────────────────────────────────
 
 def _iter_files(root):
-    """Yield tracked-looking files under root, skipping dependency/build/data
-    dirs and hidden dirs. Dotfiles (e.g. `.env`) are yielded; dot-dirs are not."""
+    """Yield tracked-looking files under root, skipping dependency/build/cache dirs.
+
+    Dotfiles (`.env`) and dot-directories (`.github/`) are both yielded — only the
+    names in `_SKIP_DIRS` are pruned. Symlinked directories are not followed: a link
+    out of the tree is not the project's source, and a link back into it is a loop.
+    """
     stack = [Path(root)]
+    seen = set()
     while stack:
         directory = stack.pop()
         try:
@@ -64,9 +151,19 @@ def _iter_files(root):
         except OSError:
             continue
         for path in entries:
+            if path.is_symlink():
+                continue
             if path.is_dir():
-                if path.name not in _SKIP_DIRS and not path.name.startswith("."):
-                    stack.append(path)
+                if path.name in _SKIP_DIRS:
+                    continue
+                try:
+                    key = path.resolve()
+                except OSError:
+                    continue
+                if key in seen:
+                    continue
+                seen.add(key)
+                stack.append(path)
             elif path.is_file():
                 yield path
 
@@ -111,8 +208,20 @@ def _shannon_entropy(value):
 
 
 def _looks_placeholder(value):
+    """True when a marker word excuses this value as documentation, not a key.
+
+    D-010 follow-up item 5: a marker used to excuse the value outright, which hides the
+    single most common real finding there is. `django-insecure-<50 random chars>` is
+    what Django's own `startproject` writes into `settings.py`, it contains the marker
+    `insecure`, and on a great many sites it is the production key. So a marker excuses
+    a *low-signal* value — `changeme`, `your_api_key_here` — and stops excusing anything
+    long and random enough to be a real credential.
+    """
     lowered = value.lower()
-    return any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+    if not any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+        return False
+    return not (len(value) >= _REAL_KEY_MIN_LEN
+                and _shannon_entropy(value) >= _REAL_KEY_MIN_ENTROPY)
 
 
 def _is_env_file(name):
@@ -123,60 +232,134 @@ def _is_env_file(name):
 
 # ── common core checks (id prefix `core.`) ──────────────────────────────────────
 
+def _is_identifier_echo(name, value):
+    """`CLOUD_CREDENTIAL = "cloud_credential"` — the value IS the name.
+
+    Enum labels, choice values, header names and field names all take this shape, and
+    the widened keyword match walks straight into them: `cloud_credential` is 16
+    characters and clears the entropy floor comfortably. Compared exactly rather than
+    by "looks like an identifier", because a 40-character lowercase hex token also
+    looks like an identifier and is a real key.
+    """
+    return name.lower().strip("_") == value.lower().replace("-", "_").strip("_")
+
+
 def _check_secret_scan(root, texts):
-    findings = []
+    findings, test_findings = [], []
     for path, text in texts:
         rel = path.relative_to(root)
+        bucket = test_findings if _is_test_path(rel) else findings
         if _is_env_file(path.name):
-            findings.append(f"{rel}: committed .env file")
+            bucket.append(f"{rel}: committed .env file")
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             if _AWS_KEY_RE.search(line):
-                findings.append(f"{rel}:{lineno}: AWS access key id (AKIA…)")
+                bucket.append(f"{rel}:{lineno}: AWS access key id (AKIA…)")
                 continue
             match = _ASSIGNMENT_RE.search(line)
             if match:
-                value = match.group(2)
-                if (not _looks_placeholder(value)
+                name, value = match.group("name"), match.group("value")
+                if (not _ADDRESS_RE.match(value)
+                        and not _is_identifier_echo(name, value)
+                        and not _looks_placeholder(value)
                         and _shannon_entropy(value) >= _ENTROPY_FLOOR_BITS):
-                    findings.append(
-                        f"{rel}:{lineno}: hardcoded {match.group(1).lower()} value")
+                    bucket.append(f"{rel}:{lineno}: hardcoded {name.lower()} value")
     if findings:
+        detail = "\n".join(findings)
+        if test_findings:
+            detail += ("\n\nAlso in test material (not blocking):\n"
+                       + "\n".join(test_findings))
         return core.CheckResult(
             id="core.secret-scan", tier="blocker",
             title="Committed secrets detected",
-            detail="\n".join(findings),
+            detail=detail,
             fix_hint="Move secrets to the vault / environment injection, rotate any "
                      "value that was committed, and add .env to .gitignore. "
                      "Committed secrets stay in git history until rotated.",
+        )
+    if test_findings:
+        # Reported, not blocked. A fixture password is not a deployable credential, and
+        # a blocker that fires on every test suite is a blocker people learn to route
+        # around — but a real key does get committed to a test file sometimes, so the
+        # finding still has to appear in the report with its file and line.
+        return core.CheckResult(
+            id="core.secret-scan", tier="warning",
+            title="Secret-shaped values in test material only",
+            detail="\n".join(test_findings),
+            fix_hint="These are in test files, so they do not block a deploy. Confirm "
+                     "each one is a fixture rather than a real credential that was "
+                     "pasted into a test — if any is real, rotate it: it is in git "
+                     "history either way.",
         )
     return core.CheckResult(id="core.secret-scan", tier="ok",
                             title="No committed secrets found")
 
 
-def _has_pinned_requirements(root):
-    for req in Path(root).glob("requirements*.txt"):
+def _has_pinned_requirements(directory):
+    for req in Path(directory).glob("requirements*.txt"):
         text = _read_text(req)
         if text and "==" in text:
             return True
     return False
 
 
+# How deep to look for a nested manifest. D-010 follow-up item 6: this check read only
+# the scan ROOT, but every repo in the fleet nests — `backend/pyproject.toml`,
+# `frontend/package.json`, `packages/*/package.json` — so on a real adopt-path scan it
+# was vacuously `ok` and the frontend lockfile was covered by nothing at all. Three
+# levels reaches `packages/<name>/package.json` and stops well short of walking a
+# monorepo's whole tree.
+_MANIFEST_MAX_DEPTH = 3
+_NODE_LOCKS = ("package-lock.json", "package-lock.yaml", "pnpm-lock.yaml", "yarn.lock",
+               "bun.lockb", "bun.lock")
+_PY_LOCKS = ("uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock")
+
+
+def _find_manifests(root, names, max_depth=_MANIFEST_MAX_DEPTH):
+    """[Path] for every `names` file at or under root, to `max_depth` directories."""
+    root = Path(root)
+    found = []
+    for path in _iter_files(root):
+        if path.name not in names:
+            continue
+        if len(path.relative_to(root).parts) - 1 > max_depth:
+            continue
+        found.append(path)
+    return sorted(found)
+
+
+def _locked_at_or_above(manifest, root, lock_names):
+    """A lock beside the manifest, or at any ancestor up to the scan root.
+
+    npm/pnpm/yarn workspaces put ONE lockfile at the workspace root and none beside the
+    member packages, so requiring a sibling lock would report every well-run monorepo as
+    unlocked — which is how a check earns its way into being ignored.
+    """
+    directory = manifest.parent
+    root = Path(root).resolve()
+    while True:
+        if any((directory / name).is_file() for name in lock_names):
+            return True
+        if directory.resolve() == root or directory.parent == directory:
+            return False
+        directory = directory.parent
+
+
 def _check_lockfile(root):
     root = Path(root)
     missing = []
-    if (root / "package.json").is_file():
-        node_locks = ("package-lock.json", "package-lock.yaml",
-                      "pnpm-lock.yaml", "yarn.lock")
-        if not any((root / name).is_file() for name in node_locks):
-            missing.append("package.json without package-lock.json / "
-                           "pnpm-lock.yaml / yarn.lock")
-    if (root / "pyproject.toml").is_file():
-        py_locked = ((root / "uv.lock").is_file() or (root / "poetry.lock").is_file()
-                     or _has_pinned_requirements(root))
-        if not py_locked:
-            missing.append("pyproject.toml without uv.lock / poetry.lock / "
-                           "pinned (==) requirements file")
+    for manifest in _find_manifests(root, {"package.json"}):
+        if not _locked_at_or_above(manifest, root, _NODE_LOCKS):
+            missing.append(f"{manifest.relative_to(root)} without a lockfile "
+                           f"({' / '.join(_NODE_LOCKS[:4])}) beside it or above it")
+    for manifest in _find_manifests(root, {"pyproject.toml"}):
+        locked = (_locked_at_or_above(manifest, root, _PY_LOCKS)
+                  or _has_pinned_requirements(manifest.parent)
+                  or _has_pinned_requirements(root))
+        if not locked:
+            missing.append(f"{manifest.relative_to(root)} without "
+                           f"{' / '.join(_PY_LOCKS[:2])} or a pinned (==) "
+                           f"requirements file")
     if missing:
         return core.CheckResult(
             id="core.lockfile", tier="warning",
@@ -211,7 +394,12 @@ def _check_gitignore(root, texts):
     env_matters = any(_is_env_file(p.name) for p, _ in texts) or (root / ".env").exists()
     if env_matters and not covered(".env"):
         gaps.append(".env files exist but .gitignore does not cover .env")
-    node_matters = (root / "package.json").is_file() or (root / "node_modules").is_dir()
+    # Nested too (item 6, same reason): a repo whose only package.json is
+    # `frontend/package.json` is still a node project, and its node_modules still must
+    # not enter the repo. One root .gitignore covers subdirectories, so only the
+    # DETECTION needed widening, not the coverage lookup.
+    node_matters = (bool(_find_manifests(root, {"package.json"}))
+                    or (root / "node_modules").is_dir())
     if node_matters and not covered("node_modules"):
         gaps.append("node project but .gitignore does not cover node_modules")
     if gaps:
@@ -299,11 +487,14 @@ def _check_exposure_auth(texts):
     """SCAN-M4-EXPOSURE-AUTH heuristic. Core emits a warning only — the wizard's
     exposure question decides whether this escalates for a public site."""
     for path, text in texts:
-        if _is_env_file(path.name):
+        if _is_env_file(path.name) or path.suffix.lower() not in _AUTH_SUFFIXES:
             continue
-        if _AUTH_INDICATOR_RE.search(text):
-            return core.CheckResult(id="core.exposure-auth", tier="ok",
-                                    title="Authentication indicators found")
+        match = _AUTH_INDICATOR_RE.search(text)
+        if match:
+            return core.CheckResult(
+                id="core.exposure-auth", tier="ok",
+                title="Authentication indicators found",
+                detail=f"{path.name}: {match.group(0)}")
     return core.CheckResult(
         id="core.exposure-auth", tier="warning",
         title="No authentication detected",
