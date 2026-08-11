@@ -222,3 +222,103 @@ one tautological assertion and two reflow-brittle doc assertions (N4).
 semantic edits across the branch — one removed `gate:` line, plus added `demo:`,
 `gate:`, `text_hash:` keys and comments. Sensitive paths (CI workflows, gate scripts,
 the registry) are human-merge-only: awaiting Joseph.
+
+---
+
+## 10. Round 6 — the gate follow-up (branch `gate-followup-n1-n3`, 2026-08-11)
+
+Round 5 closed ten findings and wrote down five it deliberately did not. This branch
+closes four of them, plus item 2 of the D-010 scanner follow-up list, which is the same
+defect class as N1 and belonged with it. **N2 stays open** — a wired-in no-op target
+still resolves as a gate — documented in three places, and it surfaced a second time
+during this round (see below).
+
+**Five commits on `8faa666`**, built by an Implementer and audited across **four
+adversarial verification passes** by a session that wrote none of it. Each pass closed
+what it found; the fourth found no active defect and called the iteration converged.
+
+| commit | contents |
+|---|---|
+| `88d503f` | N1, N3, the two deferrals, D-010 item 2 |
+| `c988796` | verifier findings F1–F9 |
+| `84d145f` | re-verification finding N1 (`env: MAKEFLAGS`) + the fail-safe residuals |
+| `3cb28b2` | GF-R8 — the Makefile refuses to start |
+| `fe3f6fe` | fourth-pass nits |
+
+### What was built
+
+**N1 — one implementation of "does CI invoke this gate".** `check.py` and
+`tests/test_gate_parity.py` had each grown their own answer, at different strictnesses:
+check.py accepted the substring `make lint` anywhere in any `run:`, while the parity test
+— since round-5 F2 — required a bare `make <target>`. So a workflow could neuter a gate
+step and check.py would go on reporting the requirement it guards as `verified` while the
+parity test failed. One rule, two declarations, drifting: R4-8's own defect reproduced
+inside the machinery built to kill it. Both now import `conformance/gates.py`.
+
+**N3 — the `if:` ban gets a declared escape hatch.** D-001's `sensitive-path-guard`
+compares a branch to its merge base and a push has none, so under the blanket ban that
+gate has no legal shape. `PR_ONLY_GATES` in the Makefile, beside the gate list; a
+declared gate must still be a `review-round` prerequisite, still a bare `make <target>`,
+still free of `continue-on-error:`, may use only `github.event_name == 'pull_request'`,
+and must live in a workflow that triggers on `pull_request`. Ships empty.
+
+**The run report is bound to the working tree, not to HEAD.** HEAD does not move when a
+file is edited, which is the dangerous window exactly: watch a requirement go red, edit
+the code, re-run the gate — which reads the working tree — and it grades a tree the tests
+never saw. Probed by hand in both directions.
+
+**`text_hash` pins every section a source cites.** `P0-AUTHZ-TOPIC` is §A1 (every
+subscribe is authorised) *and* §D7 (the vocabulary it is authorised against); §D7 could
+be rewritten with the pin green. Single-citation hashes are byte-identical, so 66 of 74
+pins did not move and the 8 that did are exactly the 8 with two resolvable citations —
+checked mechanically against `master`, not asserted.
+
+**A malformed waiver line is a gate failure.** check.py's parser had no end anchor and
+matched any parenthesised date in the line; the parity test's was anchored. They
+disagreed about `SCAN-M4-EXPOSURE-AUTH`, whose real tail is prose — waived to one file,
+unwaived to the other.
+
+### What four verification passes cost, and the lesson
+
+Pass one found **ten**: a `make --dry-run` step read as an honest gate invocation (F1);
+a retired requirement that kept its `text_hash` crashed the gate (F2); the structural
+"no second implementation" ban had four holes (F3); near-miss waiver ids stayed silent
+(F4); broken steps were keyed by name alone (F5); the exemption's narrowness was social
+(F6); a `workflow_dispatch`-only workflow resolved a gate (F7); duplicate waivers
+collapsed (F8); a doc alias matched on a prefix (F9). Pass two found `env: MAKEFLAGS: -n`
+— the same false green through the environment. Pass three found
+`echo "MAKEFLAGS=-n" >> "$GITHUB_ENV"`, which appears in **no `env:` block anywhere**, so
+no amount of workflow parsing can reach it.
+
+**That is the meta-lesson of this round, and it is worth more than any single finding:
+three passes in a row, each closing one input channel to `make` and surfacing the next.
+Enumerating a tool's inputs is a losing game.** So the gates stopped playing it and
+defend themselves: a parse-time `$(error)` at the top of the Makefile refuses to start
+when make's own inputs carry a recipe-suppressing flag — and `$(error)` fires while the
+makefile is *read*, which happens even under `-n`. Route no longer matters. The workflow
+`env:` check stays as the early, reviewable signal that catches the honest mistake in the
+diff, and no longer claims to be the last line of defence.
+
+Both halves are held to the same variable list by a test that *runs make* rather than
+grepping the Makefile for a name — because a name in a comment satisfies a substring
+check while enforcing nothing, which is N1 in miniature.
+
+### N2's cost, surfacing twice
+
+An exemption naming every gate but a no-op one passes, because knowing a target is a
+no-op is N2. Recorded rather than fixed, deliberately: it is one defect, and it is
+already open.
+
+### Open, deliberately
+
+N2 (a wired-in no-op target still resolves as a gate). Outside the threat model by
+construction, and no in-repo check can change either: deleting the Makefile guard (a
+reviewable diff, caught by a test that runs inside `review-round`) and prepending a fake
+`make` to `PATH` (an attacker who owns the runner). Five requirements' sources cite a
+section nothing watches — each now named in a warning instead of hashed over in silence.
+
+**State at hand-off:** 383 passed (was 296), ruff clean, `make lint` / `log-scrub` /
+`test-frontend` / `check-generated` green, `check.py --phase 1` exit 0 with honest
+warnings. `--print-text-hashes` byte-identical to `88d503f` across all 79 reqs; the
+master-vs-branch pin diff is exactly the 8 intended entries. Gate machinery and the
+registry are human-merge-only: awaiting Joseph.
