@@ -74,20 +74,55 @@ def pytest_runtest_logreport(report):
 # Anything that narrows or truncates the run makes the report describe less than
 # the suite. check.py must refuse such a report outright, otherwise every marker
 # outside the selection reads as `not-collected` and the real signal drowns.
-SELECTIVE_OPTS = ("-k", "-m", "--deselect", "-x", "--exitfirst", "--maxfail",
-                  "--last-failed", "--lf", "--failed-first", "--ff", "--stepwise", "--sw")
+#
+# Round-5 F7: this used to scan `config.invocation_params.args` — the words on the
+# command line — so narrowing that arrived any other way was invisible. The reviewer
+# reproduced `PYTEST_ADDOPTS="-k test_smoke" pytest -q` writing `full_run: True` over 5
+# of 250 outcomes: argv was clean, the selection came from the environment. Read the
+# options pytest actually parsed, plus the count of anything deselected during
+# collection, so ini `addopts`, PYTEST_ADDOPTS, a plugin and a conftest hook are all
+# caught by the same rule.
+_DESELECTED = 0
 
 
-def _is_full_run(config, exitstatus):
-    args = [str(a) for a in config.invocation_params.args]
-    for arg in args:
-        if arg.startswith("-"):
-            if any(arg == o or arg.startswith(o + "=") for o in SELECTIVE_OPTS):
-                return False
-        else:
-            return False  # a positional target (path or nodeid) is a selection
+def pytest_deselected(items):
+    """Anything removed during collection narrows the run, whoever removed it."""
+    global _DESELECTED
+    _DESELECTED += len(items)
+
+
+def _narrowing_reasons(config, exitstatus):
+    """Human-readable reasons this session covered less than the whole suite."""
+    option = config.option
+    reasons = []
+
+    def flag(name, label):
+        if getattr(option, name, None):
+            reasons.append(label)
+
+    if (getattr(option, "keyword", "") or "").strip():
+        reasons.append(f"-k {option.keyword!r}")
+    if (getattr(option, "markexpr", "") or "").strip():
+        reasons.append(f"-m {option.markexpr!r}")
+    if getattr(option, "deselect", None):
+        reasons.append(f"--deselect {list(option.deselect)}")
+    if getattr(option, "file_or_dir", None):
+        reasons.append(f"positional target(s) {list(option.file_or_dir)}")
+    if getattr(option, "ignore", None):
+        reasons.append(f"--ignore {list(option.ignore)}")
+    flag("exitfirst", "-x/--exitfirst")
+    flag("last_failed", "--lf/--last-failed")
+    flag("failed_first", "--ff/--failed-first")
+    flag("stepwise", "--sw/--stepwise")
+    flag("collectonly", "--collect-only")
+    if int(getattr(option, "maxfail", 0) or 0):
+        reasons.append(f"--maxfail={option.maxfail}")
+    if _DESELECTED:
+        reasons.append(f"{_DESELECTED} test(s) deselected during collection")
     # 0 = all passed, 1 = tests failed; anything else means the session was cut short.
-    return int(exitstatus) in (0, 1)
+    if int(exitstatus) not in (0, 1):
+        reasons.append(f"session ended with exitstatus {int(exitstatus)}")
+    return reasons
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -95,12 +130,14 @@ def pytest_sessionfinish(session, exitstatus):
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    reasons = _narrowing_reasons(session.config, exitstatus)
     payload = {
         "schema_version": 1,
         "sha": _git_head(),
         "generated_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pytest_exitstatus": int(exitstatus),
-        "full_run": _is_full_run(session.config, exitstatus),
+        "full_run": not reasons,
+        "narrowed_by": reasons,
         "invocation_args": [str(a) for a in session.config.invocation_params.args],
         "outcomes": dict(sorted(_OUTCOMES.items())),
     }

@@ -16,15 +16,23 @@ What it does now, by SPEC-gate-integrity §3.2 rule number:
           AST walk survives as the source of the `not-collected` check.
   rule 2  skipped/xfailed outcomes never count toward `verified`.
   rule 3  `verify: demo` reqs name their artifacts in a `demo:` key; each named
-          path must exist and be non-empty (a directory must hold >=1 non-empty
-          file).  Falling back to `conformance/demos/phase-N.md` warns.
+          path must exist and hold content (a directory must hold >=1 file with
+          content).  Round-5 F4: "content" means non-whitespace, not non-zero
+          bytes — a record truncated to a newline recorded nothing.  Falling
+          back to `conformance/demos/phase-N.md` warns.
   rule 4  `verify: checklist` / `static-gate` reqs name their enforcing gate in
-          a `gate:` key; the gate must be a real target in the Makefile or a
-          named step in a workflow, else the req is `uncovered`.
+          a `gate:` key.  Round-5 F3 tightened what resolves: the gate must be a
+          Makefile *target*, listed as a prerequisite of `review-round` (a review
+          round runs it) and invoked by at least one workflow step (CI runs it).
+          A workflow step *name* is no longer a gate value — `noop-gate:\t@true`
+          and a step called `noop-gate` that only echoes both used to pass.
   rule 5  A marker on a `status: retired` id is red, naming the replacement
           from `retired_reason`.
   rule 6  `text_hash:` pins sha256 of the req's source section body in
           docs/plan/; a mismatch is red and prints the linked test ids.
+          Round-5 F5: a req with *no* pin, or whose `source:` will not resolve
+          to a section, warns — silence used to be indistinguishable from a
+          check that had run and found nothing wrong.
   rule 7  matrix.json carries the real status plus a `sha` / `verified_at`
           header.
 
@@ -136,6 +144,25 @@ def _req_ids_from_decorators(node):
     return ids
 
 
+def _collect_from(node, relpath, classes, found):
+    """Recurse module/class bodies, recording `path::Class::...::func` nodeids.
+
+    Round-5 F6: this used `ast.walk` and built `path::func`, with no class ancestry,
+    while pytest reports `path::Class::func` — so a marked method on a test class was
+    always `not-collected`, however green it ran. Descent stops at a function body:
+    pytest does not collect defs nested inside a test, so a marker there is not a
+    nodeid either way."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            _collect_from(child, relpath, classes + [child.name], found)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not child.name.startswith("test"):
+                continue
+            nodeid = "::".join([relpath, *classes, child.name])
+            for req_id in _req_ids_from_decorators(child):
+                found.setdefault(req_id, []).append(nodeid)
+
+
 def collect_markers(root):
     """Map req id -> [test node ids] by AST walk (round-1 finding: a text grep
     counted markers in comments/docstrings/dead code as coverage, and silently
@@ -144,13 +171,7 @@ def collect_markers(root):
     found = {}
     for py in sorted((root / "tests").rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not node.name.startswith("test"):
-                    continue
-                for req_id in _req_ids_from_decorators(node):
-                    found.setdefault(req_id, []).append(
-                        f"{py.relative_to(root)}::{node.name}")
+        _collect_from(tree, str(py.relative_to(root)), [], found)
     return found
 
 
@@ -195,12 +216,22 @@ def load_run_report(path):
     # A report from `pytest -k ...`, a single file, or a run cut short by -x
     # describes a subset. Refusing it here is one honest line; accepting it turns
     # every marker outside the subset into a bogus `not-collected`.
-    if report.get("full_run") is False:
+    #
+    # Round-5 F7: the test was `is False`, so an *absent* full_run key read as a full
+    # run. Absent is not a claim of completeness, it is the absence of one — and this
+    # gate exists precisely so that it stops inferring good news nobody told it.
+    if report.get("full_run") is not True:
+        missing = "full_run" not in report
+        why = ("has no 'full_run' key, so it makes no claim to cover the suite"
+               if missing else
+               f"came from a narrowed pytest run (narrowed by: "
+               f"{report.get('narrowed_by') or 'unrecorded'})")
         return None, [
-            f"run-report partial: {rel} came from a narrowed pytest run "
+            f"run-report partial: {rel} {why} "
             f"(args: {report.get('invocation_args')}, exitstatus "
             f"{report.get('pytest_exitstatus')}). The conformance gate needs a "
-            f"full-suite report — run `make test`, then re-run the gate."
+            f"full-suite report with full_run: true — run `make test`, then re-run "
+            f"the gate."
         ]
     return report, []
 
@@ -216,6 +247,18 @@ def outcomes_for(ast_nodeid, outcomes):
 
 # ── demo artifacts (rule 3) ─────────────────────────────────────────────────
 
+def _has_content(path):
+    """True if the file holds anything but whitespace.
+
+    Round-5 F4: emptiness used to be `st_size == 0`, so a demo record truncated to a
+    newline — or a blank template nobody filled in — counted as a recorded demo. Read as
+    bytes: these artifacts include PNGs, and `bytes.strip()` needs no decoding."""
+    try:
+        return bool(path.read_bytes().strip())
+    except OSError:
+        return False
+
+
 def check_demo_paths(root, paths):
     """Return list of problem strings for the named demo artifacts."""
     problems = []
@@ -227,10 +270,15 @@ def check_demo_paths(root, paths):
             files = [f for f in p.rglob("*") if f.is_file()]
             if not files:
                 problems.append(f"demo artifact directory is empty: {rel}")
-            elif not any(f.stat().st_size > 0 for f in files):
-                problems.append(f"demo artifact directory holds only empty files: {rel}")
-        elif p.stat().st_size == 0:
-            problems.append(f"demo artifact is empty (0 bytes): {rel}")
+            elif not any(_has_content(f) for f in files):
+                problems.append(
+                    f"demo artifact directory holds no file with content: {rel} "
+                    f"({len(files)} file(s), all empty or whitespace-only)")
+        elif not _has_content(p):
+            size = p.stat().st_size
+            problems.append(
+                f"demo artifact is empty: {rel} "
+                f"({'0 bytes' if size == 0 else f'{size} bytes of whitespace'})")
     return problems
 
 
@@ -257,12 +305,31 @@ def makefile_targets(root):
     return targets
 
 
-def workflow_step_names(root):
-    """`name:` of every step in every workflow (a gate may be a CI step)."""
-    names = set()
+MAKE_CALL_RE = re.compile(r"\bmake\s+(?:-[A-Za-z-]+\s+)*([A-Za-z0-9_.-]+)")
+
+
+def review_round_prerequisites(root):
+    """Targets `review-round` depends on — i.e. what a review round actually runs.
+
+    Round-5 F3: a `gate:` that merely *names* something is not a gate. Being on this
+    list is what makes a target one of the gates rather than a stray helper."""
+    mk = root / "Makefile"
+    if not mk.exists():
+        return set()
+    m = re.search(r"^review-round:((?:[^\n]*\\\n)*[^\n]*)", mk.read_text(), re.M)
+    return set(m.group(1).replace("\\", " ").split()) if m else set()
+
+
+def workflow_invoked_targets(root):
+    """Make targets some workflow step actually calls (`run: make <target>`).
+
+    Round-5 F3 again, from the other side: a gate CI never invokes is a gate that does
+    not guard the branch. Step *names* are deliberately not read — a step called
+    `noop-gate` whose `run:` is an `echo` used to satisfy `gate: noop-gate`."""
+    invoked = set()
     wf_dir = root / ".github/workflows"
     if not wf_dir.is_dir():
-        return names
+        return invoked
     for wf in sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml")):
         try:
             doc = yaml.safe_load(wf.read_text())
@@ -274,9 +341,9 @@ def workflow_step_names(root):
             if not isinstance(job, dict):
                 continue
             for step in job.get("steps") or []:
-                if isinstance(step, dict) and isinstance(step.get("name"), str):
-                    names.add(step["name"])
-    return names
+                if isinstance(step, dict) and isinstance(step.get("run"), str):
+                    invoked.update(MAKE_CALL_RE.findall(step["run"]))
+    return invoked
 
 
 # ── text_hash (rule 6) ──────────────────────────────────────────────────────
@@ -486,7 +553,8 @@ def main():
                 f"marker on retired req {req_id}{tail}; update or delete: {tests}")
 
     targets = makefile_targets(root)
-    step_names = workflow_step_names(root)
+    round_gates = review_round_prerequisites(root)
+    ci_invoked = workflow_invoked_targets(root)
 
     matrix = {}
     for req_id, req in registry.items():
@@ -521,13 +589,29 @@ def main():
             if not gate:
                 status = "uncovered"
                 details = [f"{req_id} ({kind}) names no gate: — add a gate: key naming the "
-                           f"Makefile target or CI step that enforces it, or waive it"]
-            elif gate in targets or gate in step_names:
-                status = "verified"
+                           f"Makefile target that enforces it, or waive it"]
             else:
-                status = "uncovered"
-                details = [f"{req_id} ({kind}) gate {gate!r} is neither a Makefile target "
-                           f"nor a named workflow step"]
+                # rule 4, tightened by round-5 F3: a gate is a Makefile target that a
+                # review round runs (review-round prerequisite) and that CI runs
+                # (invoked by a workflow step). A name alone proves neither.
+                gaps = []
+                if gate not in targets:
+                    gaps.append("it is not a target in the Makefile")
+                else:
+                    if gate not in round_gates:
+                        gaps.append("it is not a prerequisite of `review-round`, so no "
+                                    "review round runs it")
+                    if gate not in ci_invoked:
+                        gaps.append("no workflow step invokes `make " + gate + "`, so CI "
+                                    "does not run it")
+                if gaps:
+                    status = "uncovered"
+                    details = [f"{req_id} ({kind}) gate {gate!r} is not a gate: "
+                               + "; ".join(gaps)
+                               + f". review-round runs {sorted(round_gates)}; CI invokes "
+                               f"{sorted(ci_invoked)}"]
+                else:
+                    status = "verified"
 
         entry["status"] = status
         entry["notes"] = details
@@ -542,6 +626,30 @@ def main():
 
         # rule 6 — text_hash freshness.
         pinned = req.get("text_hash")
+        if not pinned and status != "retired":
+            # Round-5 F5: no pin used to mean no output at all, so a green run could not
+            # be told apart from an unchecked one. Say which requirements the source-text
+            # check is not covering, and why — warning, not failure: the source may be a
+            # doc that is not a frozen copy under docs/plan/, or a section that cannot be
+            # anchored, and neither is a defect in this run. (A *pinned* req whose source
+            # will not resolve is already a hard failure below.)
+            doc, body = source_section_body(root, req["source"])
+            entry["text_hash_resolved"] = body is not None
+            if body is not None:
+                warnings.append(
+                    f"{req_id} has no text_hash — its source {req['source']!r} resolves "
+                    f"to a section in {doc.relative_to(root)} and could be pinned; "
+                    f"unpinned means a silent edit to that text never re-opens review "
+                    f"(re-pin with `python conformance/check.py --print-text-hashes`)")
+            else:
+                where = "-" if doc is None else str(doc.relative_to(root))
+                warnings.append(
+                    f"{req_id} has no text_hash and its source {req['source']!r} does not "
+                    f"resolve to a section (doc={where}) — nothing checks this "
+                    f"requirement's source text; re-word the source: citation to a "
+                    f"heading or bold-lead in a frozen docs/plan/ copy, or accept that it "
+                    f"is unanchorable")
+
         if pinned:
             doc, body = source_section_body(root, req["source"])
             if body is None:

@@ -28,7 +28,7 @@
             ]
           },
           "gate": {
-            "description": "R4-9 §3.2 rule 4 — Makefile target or workflow step name that enforces a verify: checklist / static-gate requirement. Required once the requirement's phase is due; missing or unresolvable = uncovered (red unless waived).",
+            "description": "R4-9 §3.2 rule 4, tightened by round-5 F3 — a Makefile target that enforces a verify: checklist / static-gate requirement, is a prerequisite of `review-round`, and is invoked by at least one workflow step. Workflow step names are not gate values. Required once the requirement's phase is due; missing or unresolvable = uncovered (red unless waived).",
             "type": "string",
             "minLength": 1
           },

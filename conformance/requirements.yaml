@@ -11,17 +11,29 @@
 # R4-9 keys (SPEC-gate-integrity.md §3.2), all validated by conformance/check.py:
 #   demo:      repo-relative artifact path(s); a trailing / means "directory with
 #              at least one non-empty file" (rule 3)
-#   gate:      Makefile target or workflow step name; missing/unresolvable once the
+#   gate:      a Makefile target that is a prerequisite of `review-round` AND is invoked
+#              by at least one workflow step (round-5 F3 — a name alone proved nothing:
+#              `noop-gate:\t@true`, or a workflow step *named* after the gate whose run:
+#              was an echo, both made a req verified). Missing/unresolvable once the
 #              req's phase is due = uncovered = red unless WAIVERS.md says otherwise
-#              (rule 4). It asserts the gate is *declared*, not that it passes today.
+#              (rule 4). It asserts the gate is *declared and run*, not that it passes
+#              today — and never that it enforces this particular req's text: claiming
+#              a gate that enforces something else is round-5 F1 (see SEC-69-NO-SECRETS-
+#              IN-EXHAUST, now waived).
 #   text_hash: sha256 of the source section body in docs/plan/ (rule 6). Recomputed
 #              on every run; a doc edit goes red until the req is re-reviewed and the
 #              hash re-pinned from `python conformance/check.py --print-text-hashes`.
-#              Five reqs carry no text_hash because their `source:` cites a doc that
-#              is not a frozen copy under docs/plan/ (claude/project-inventory.md,
-#              DECISIONS.md) or a section that no longer exists in it
-#              (HARD-V2-MESH-BEFORE-FIREWALL cites a "Quick start" section that the
-#              frozen server-hardening.md does not have).
+#              Five reqs carry no text_hash. Four cite a doc that is not a frozen copy
+#              under docs/plan/ (claude/project-inventory.md, DECISIONS.md), so there is
+#              nothing to hash. The fifth, HARD-V2-MESH-BEFORE-FIREWALL, is different and
+#              the note here used to be wrong (round-5 F5): the cited text *does* exist,
+#              at docs/plan/server-hardening.md:17 — "Quick start on a fresh Ubuntu
+#              server:" — but as a prose lead-in inside `## The scripts`, not as a heading
+#              or a bold-lead, which are the only two section shapes check.py can anchor
+#              to. So it is unanchorable, not missing: pin it by promoting that line to a
+#              heading in the frozen copy, or by re-citing §V2 of the review3 addendum.
+#              check.py now warns, per requirement, for every one of these five instead of
+#              covering them in silence.
 schema_version: 1
 requirements:
   - id: P0-LOGIN
@@ -352,7 +364,13 @@ requirements:
     phase: 1
     verify: static-gate
     source: deploy-system-plan.md §6.9
-    gate: log-scrub
+    # No gate: key. Round-5 F1: `make log-scrub` greps *source files* for an assignment
+    # literal; this requirement is about *exhaust* (logs, Celery task args, API responses
+    # after write) and names a CI scrubber over captured **test output**. Claiming
+    # log-scrub here reported the req `verified` on a gate that enforces materially less.
+    # Waived in WAIVERS.md until the real gate exists; log-scrub itself stays as the
+    # source-scan gate it is. See tests/test_gate_parity.py::
+    # test_issue_f1_secrets_in_exhaust_is_waived_not_gated_by_log_scrub.
     text_hash: sha256:3b07eb437137dfaeb7a3457e8209653e3f7e6189548ce5c8f027be455caaede7
     text: Secrets never appear in logs, Celery task args, or frontend responses after write; a CI log-scrubber greps test output for plaintext markers.
   - id: SEC-B4-REDIS-CROWN-JEWEL

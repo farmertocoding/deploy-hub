@@ -35,12 +35,33 @@ OWNED_TOOLS = ("ruff ", "bandit ", "pip-audit ", "pytest ", "conformance/check.p
 # a `with:` argument, none of which are `run:` strings.
 ACCEPTANCE_RE = re.compile(r"(ruff|bandit|pip-audit|pytest|check\.py)")
 
-# Every gate the Makefile owns must be reachable from CI (SPEC-gate-integrity.md §2.2).
-REQUIRED_TARGETS = {
-    "lint", "test", "test-frontend", "conformance", "check-generated", "log-scrub",
-}
-
 MAKE_CALL_RE = re.compile(r"\bmake\s+(?:-[A-Za-z-]+\s+)*([A-Za-z0-9_.-]+)")
+
+# A gate step is one command: `make <target>`, optionally with make's own flags. Anything
+# that joins a second command to it can change the verdict (round-5 F2).
+BARE_MAKE_RE = re.compile(r"^make(?:\s+-[A-Za-z-]+)*\s+([A-Za-z0-9_.-]+)$")
+SHELL_JOINERS = ("&&", "||", ";", "|")
+
+
+def _review_round_prerequisites(makefile_text=None):
+    """The gate set, read from `review-round`'s prerequisite list.
+
+    Round-5 F8: this used to be a hand-typed `REQUIRED_TARGETS` — the same defect class
+    R4-12 records (a gate list declared twice drifts in the copy nobody runs), declared a
+    third time. `review-round` is what a round actually executes, so it is the one place
+    the gate list is stated and every other consumer derives from it.
+    """
+    if makefile_text is None:
+        makefile_text = (REPO / "Makefile").read_text(encoding="utf-8")
+    match = re.search(r"^review-round:((?:[^\n]*\\\n)*[^\n]*)", makefile_text, re.M)
+    if not match:
+        return set()
+    return set(match.group(1).replace("\\", " ").split())
+
+
+# Every gate the Makefile owns must be reachable from CI (SPEC-gate-integrity.md §2.2),
+# and the Makefile — not this file — says which those are.
+REQUIRED_TARGETS = _review_round_prerequisites()
 
 
 def _command(line):
@@ -59,12 +80,93 @@ def _command(line):
     return text
 
 
+def _strip_comment(command):
+    """Drop a trailing shell comment (` # ...`), which is inert to the shell."""
+    return re.sub(r"(^|\s)#.*$", "", command).strip()
+
+
+def _bare_make_target(command):
+    """The target of `command` if it is exactly one `make <target>` call, else None.
+
+    Round-5 F2: `make lint && pytest -q --no-header || true` starts with `make ` and used
+    to be waved through. It is two commands, the second of which decides the exit status.
+    """
+    match = BARE_MAKE_RE.match(_strip_comment(command))
+    return match.group(1) if match else None
+
+
 def _is_allowed(line):
-    """A workflow line may carry a gate tool name only as a comment or a make call."""
+    """A workflow line may carry a gate tool name only as a comment or a bare make call."""
     text = line.strip()
     if text.startswith("#"):
         return True
-    return _command(line).startswith("make ")
+    return _bare_make_target(_command(line)) is not None
+
+
+def _run_commands(run):
+    """The meaningful command lines of a `run:` block (comments and blanks dropped)."""
+    return [line.strip() for line in run.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
+def _guard_problem(scope, mapping):
+    """`continue-on-error:`/`if:` on a step or job, as an offending-token string."""
+    if "if" in mapping:
+        return f"{scope} carries an `if:` expression ({mapping['if']!r})"
+    cont = mapping.get("continue-on-error")
+    if cont is not None and cont is not False and str(cont).strip().lower() != "false":
+        return f"{scope} carries `continue-on-error: {cont}`"
+    return None
+
+
+def gate_step_violations(workflow):
+    """Ways a workflow step could invoke a required gate without obeying it (round-5 F2).
+
+    A step that calls one of `review-round`'s gate targets must be exactly one
+    `make <target>` command, and neither it nor its job may be conditional or allowed to
+    fail. Steps that call no gate target are none of this check's business — `cd frontend
+    && npm ci` is a perfectly good setup step.
+    """
+    document = yaml.safe_load(pathlib.Path(workflow).read_text(encoding="utf-8")) or {}
+    problems = []
+    for job_name, job in (document.get("jobs") or {}).items():
+        for index, step in enumerate(job.get("steps") or [], 1):
+            run = step.get("run")
+            if not run:
+                continue
+            commands = _run_commands(run)
+            targets = {t for line in commands for t in MAKE_CALL_RE.findall(line)}
+            gated = sorted(targets & REQUIRED_TARGETS)
+            if not gated:
+                continue
+            name = step.get("name") or f"step #{index}"
+            where = f"{pathlib.Path(workflow).name}: job '{job_name}': step '{name}'"
+            gates = ", ".join(gated)
+
+            if len(commands) != 1:
+                problems.append(
+                    f"{where}: invokes gate(s) {gates} inside a {len(commands)}-command "
+                    f"run block (offending token: {commands[0]!r}) — a gate step must be "
+                    f"exactly one `make <target>` call so its exit status is the step's")
+            else:
+                command = _strip_comment(commands[0])
+                if _bare_make_target(command) is None:
+                    joiner = next((j for j in SHELL_JOINERS if j in command), None)
+                    token = joiner or command[len("make"):].strip().split(" ", 1)[-1]
+                    problems.append(
+                        f"{where}: invokes gate(s) {gates} as {command!r} (offending "
+                        f"token: {token!r}) — a gate step must be exactly one "
+                        f"`make <target>` call: no {' '.join(SHELL_JOINERS)}, no "
+                        f"trailing arguments")
+
+            for scope, mapping in ((f"step '{name}'", step), (f"job '{job_name}'", job)):
+                guard = _guard_problem(scope, mapping)
+                if guard:
+                    problems.append(
+                        f"{where}: invokes gate(s) {gates} but {guard} (offending token: "
+                        f"{'if' if 'if' in mapping else 'continue-on-error'}) — CI that "
+                        f"reaches a gate and then ignores its verdict has no gate")
+    return problems
 
 
 def _annotate(text):
@@ -227,3 +329,372 @@ def test_issue_r4_12_scan_scope_is_derived_from_the_package_roots():
             f"Makefile: target '{target}' does not use $(PY_ROOTS); a hand-typed root "
             f"list is the defect R4-12 records. Recipe:\n{recipe}"
         )
+
+
+# ── F1: a gate may not be claimed for a requirement it does not enforce ──────
+
+def _registry():
+    return yaml.safe_load((REPO / "conformance/requirements.yaml").read_text(encoding="utf-8"))
+
+
+def _req(req_id):
+    for entry in _registry()["requirements"]:
+        if entry["id"] == req_id:
+            return entry
+    raise AssertionError(f"{req_id} is not in conformance/requirements.yaml")
+
+
+def _waived_fingerprints():
+    """`WAIVED: <fingerprint> — reason (YYYY-MM-DD)` lines, as check.py parses them."""
+    text = (REPO / "WAIVERS.md").read_text(encoding="utf-8")
+    return {
+        match.group(1): match.group(0)
+        for match in re.finditer(
+            r"^WAIVED:\s*(\S+)\s+—\s+\S.*\(\d{4}-\d{2}-\d{2}\)$", text, re.M)
+    }
+
+
+def test_issue_f1_secrets_in_exhaust_is_waived_not_gated_by_log_scrub():
+    """`make log-scrub` is a source scan; SEC-69-NO-SECRETS-IN-EXHAUST is about exhaust.
+
+    Round-5 finding F1: the requirement says secrets never reach logs, Celery task args
+    or frontend responses *after write*, and that CI greps **test output** for plaintext
+    markers. `make log-scrub` greps **source files** for `SECRET_KEY\\s*=`. Naming it in
+    `gate:` made check.py report the requirement `verified` on the strength of a gate
+    that enforces materially less — the same defect class R4-9 exists to kill, one level
+    up: not a gate that does nothing, a gate that does something *else*.
+
+    Until a gate exists that scans captured test output and Celery task kwargs for the
+    vault's plaintext markers, the honest state is an explicit waiver.
+    """
+    req = _req("SEC-69-NO-SECRETS-IN-EXHAUST")
+    assert "gate" not in req, (
+        f"SEC-69-NO-SECRETS-IN-EXHAUST names gate: {req['gate']!r}, but no gate on this "
+        f"tree enforces what the requirement says ('secrets never appear in logs, Celery "
+        f"task args, or frontend responses after write; a CI log-scrubber greps test "
+        f"output for plaintext markers'). `make log-scrub` greps source files for an "
+        f"assignment literal — a different property. Remove the gate: key and carry the "
+        f"requirement in WAIVERS.md until the real gate exists."
+    )
+
+    waivers = _waived_fingerprints()
+    assert "SEC-69-NO-SECRETS-IN-EXHAUST" in waivers, (
+        "SEC-69-NO-SECRETS-IN-EXHAUST has no gate and no WAIVERS.md line — "
+        "build-process.md §4 allows a fix-with-regression-test or a waiver, nothing else. "
+        f"Waived today: {sorted(waivers)}"
+    )
+    line = waivers["SEC-69-NO-SECRETS-IN-EXHAUST"]
+    assert "test output" in line and "Celery" in line, (
+        "the waiver must name its retirement condition — a gate that scans captured test "
+        f"output and Celery task kwargs for the vault's plaintext markers. Line:\n  {line}"
+    )
+
+    # The source scan itself is useful and stays; it is simply not this req's gate.
+    assert "log-scrub" in _phony_targets(), (
+        "make log-scrub was deleted along with the claim — it is a real source-scan gate "
+        "and review-round runs it; only the requirement mapping was wrong"
+    )
+
+
+def test_issue_f9_phase_1_demo_artifacts_are_checked_or_recorded_as_unchecked():
+    """Nothing reads conformance/demos/phase-1/ — say so out loud until something does.
+
+    Round-5 F9. check.py only opens the paths a `demo:` key names (plus the
+    `conformance/demos/phase-N.md` fallback), and the only `verify: demo` requirement is
+    P0-WS-DEMO at phase 0. So the four phase-1 scan records are checked by nothing, which
+    is why R4-10 did not surface when SPEC-gate-integrity.md §3.4 predicted the demo
+    content check would surface it. This test retires itself: add a phase-1 demo
+    requirement and it goes green on the first branch of the assertion instead.
+    """
+    tree = REPO / "conformance/demos/phase-1"
+    if not tree.is_dir():
+        return  # nothing to account for
+
+    registry = _registry()["requirements"]
+    watched = any(
+        entry.get("verify") == "demo"
+        and any("demos/phase-1" in str(path)
+                for path in ([entry["demo"]] if isinstance(entry.get("demo"), str)
+                             else entry.get("demo") or []))
+        for entry in registry
+    )
+    if watched:
+        return
+
+    fingerprint = "conformance/demos/phase-1+unchecked-by-any-requirement"
+    waivers = _waived_fingerprints()
+    assert fingerprint in waivers, (
+        f"{len(list(tree.iterdir()))} artifact(s) live under {tree.relative_to(REPO)} and no "
+        f"requirement points at them: no registry entry is `verify: demo` at phase 1, so "
+        f"check.py never opens that tree. Either add such a requirement or record the gap "
+        f"as `WAIVED: {fingerprint} — ... (YYYY-MM-DD)`. Waived today: {sorted(waivers)}"
+    )
+
+
+# ── F2: invoking a gate is not the same as letting it decide the build ───────
+
+NEUTERED_WORKFLOW = """\
+name: neutered
+on: [push]
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: lint gate
+        run: make lint && pytest -q --no-header || true
+      - name: conformance gate
+        continue-on-error: true
+        run: make conformance
+      - name: unit tests
+        if: github.ref == 'refs/heads/main'
+        run: make test
+      - name: log scrub
+        run: make log-scrub --keep-going
+      - name: frontend contract tests
+        run: |
+          cd frontend
+          make test-frontend
+"""
+
+HONEST_WORKFLOW = """\
+name: honest
+on: [push]
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -r requirements-dev.txt
+      - name: lint gate
+        run: make lint
+      - name: conformance gate
+        run: make conformance
+      - name: frontend deps
+        run: cd frontend && npm ci
+"""
+
+
+def test_issue_f2_a_gate_step_cannot_be_neutered(tmp_path):
+    """A step may *invoke* a gate; it may not chain, swallow or skip it.
+
+    Round-5 finding F2, reproduced by the reviewer against the round-4 tests: adding
+    `run: make lint && pytest -q --no-header || true` plus `continue-on-error: true` on
+    the conformance step left all three parity tests green. `_is_allowed()` exempted any
+    line beginning with `make `, and nothing looked at `continue-on-error:` or `if:`.
+
+    So a gate step's `run:` must be exactly one `make <target>` command — no `&&`, `||`,
+    `;`, `|`, no trailing arguments — and neither the step nor its job may carry
+    `continue-on-error: true` or an `if:` expression. CI that reaches the gate and then
+    ignores its verdict is CI that has no gate.
+    """
+    # The hole itself: the old allow-list said this line was fine because it starts with
+    # `make `, so the `pytest ` in it never reached the re-declaration check.
+    neutered_line = "        run: make lint && pytest -q --no-header || true"
+    assert not _is_allowed(neutered_line), (
+        f"a workflow line that chains a foreign tool onto a make call is treated as an "
+        f"allowed make invocation: {neutered_line.strip()!r}. Only a bare `make <target>` "
+        f"may carry a gate."
+    )
+
+    workflow = tmp_path / "neutered.yml"
+    workflow.write_text(NEUTERED_WORKFLOW, encoding="utf-8")
+    problems = gate_step_violations(workflow)
+    blob = "\n".join(problems)
+
+    expected = [
+        ("lint gate", "&&"),               # chained with another command
+        ("conformance gate", "continue-on-error"),  # verdict swallowed
+        ("unit tests", "if"),              # gate made conditional
+        ("log scrub", "--keep-going"),     # trailing argument changes what runs
+        ("frontend contract tests", "cd frontend"),  # multi-command run block
+    ]
+    for step, token in expected:
+        matching = [p for p in problems if step in p]
+        assert matching, f"no violation reported for step {step!r}:\n{blob}"
+        assert any(token in p for p in matching), (
+            f"the violation for step {step!r} does not name the offending token "
+            f"{token!r}:\n" + "\n".join(matching))
+        assert any("neutered.yml" in p and "lint-and-unit" in p for p in matching), (
+            f"the violation for step {step!r} must name the workflow and the job:\n"
+            + "\n".join(matching))
+
+    # The same two escapes one level up: a job may not be conditional or allowed to fail
+    # either, or every gate step inside it is decorative.
+    job_level = tmp_path / "job-level.yml"
+    job_level.write_text("""\
+name: job-level
+on: [push]
+jobs:
+  soft-gates:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: lint gate
+        run: make lint
+  conditional-gates:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: conformance gate
+        run: make conformance
+""", encoding="utf-8")
+    job_problems = gate_step_violations(job_level)
+    assert any("soft-gates" in p and "continue-on-error" in p for p in job_problems), (
+        "a job-level `continue-on-error: true` swallowed its gate steps:\n"
+        + "\n".join(job_problems))
+    assert any("conditional-gates" in p and "if" in p for p in job_problems), (
+        "a job-level `if:` made its gate steps conditional:\n" + "\n".join(job_problems))
+
+    honest = tmp_path / "honest.yml"
+    honest.write_text(HONEST_WORKFLOW, encoding="utf-8")
+    assert gate_step_violations(honest) == [], (
+        "a workflow whose gate steps are bare `make <target>` calls was rejected; "
+        "non-gate steps (`cd frontend && npm ci`) are none of this check's business:\n"
+        + "\n".join(gate_step_violations(honest)))
+
+
+def test_issue_f2_the_real_workflows_run_their_gates_unconditionally():
+    """The same check, against the tree it exists to protect."""
+    problems = []
+    for workflow in WORKFLOWS:
+        problems.extend(gate_step_violations(workflow))
+    assert not problems, (
+        "workflow steps invoke a required gate but do not let it decide the build "
+        "(round-5 F2):\n  " + "\n  ".join(problems))
+
+
+# ── F8: `review-round` is the single declaration of what the gates are ──────
+
+def test_issue_f8_the_required_gate_set_is_read_from_review_round():
+    """A hand-typed list of gates is the R4-12 defect class; don't declare it a third time.
+
+    Round-5 finding F8. The gates were declared in the Makefile (`review-round`'s
+    prerequisites), in the workflows, and a third time as `REQUIRED_TARGETS` here — so
+    adding a gate to `review-round` and to CI still left this test asserting the old set,
+    and dropping one from `review-round` left it asserting a gate nobody runs. The
+    required set is now parsed out of `review-round`, which makes that one line the
+    single place the gate list is stated.
+    """
+    synthetic = (
+        ".PHONY: lint new-gate test review-round\n"
+        "review-round: lint new-gate test\n"
+        "\t@echo mechanical gates green\n"
+    )
+    assert _review_round_prerequisites(synthetic) == {"lint", "new-gate", "test"}, (
+        "a gate added to review-round must show up in the required set without anyone "
+        "editing this test")
+
+    # Line continuations are how the list will grow; they must not silently truncate it.
+    wrapped = (
+        "review-round: lint log-scrub test \\\n"
+        "\ttest-frontend check-generated conformance\n"
+        "\t@echo ok\n"
+    )
+    assert _review_round_prerequisites(wrapped) == {
+        "lint", "log-scrub", "test", "test-frontend", "check-generated", "conformance",
+    }, "a wrapped prerequisite list was truncated"
+
+    live = _review_round_prerequisites()
+    assert live == REQUIRED_TARGETS, (
+        f"REQUIRED_TARGETS ({sorted(REQUIRED_TARGETS)}) is not the set review-round "
+        f"declares ({sorted(live)}) — it is a fourth hand-typed copy")
+    assert live, "Makefile: review-round declares no prerequisites; there are no gates left"
+
+
+# ── F10: log-scrub needs a documented way out that is not "reword the product" ──
+
+def _run_log_scrub(root):
+    make = shutil.which("make")
+    assert make, "make is not installed — the Makefile gates cannot run at all"
+    return subprocess.run(
+        [make, "-C", str(root), "-s", "log-scrub"],
+        capture_output=True, text=True, timeout=60,
+    )
+
+
+def _scrub_tree(tmp_path, name, files):
+    root = tmp_path / name
+    root.mkdir(parents=True)
+    shutil.copy(REPO / "Makefile", root / "Makefile")
+    for rel, content in files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return root
+
+
+def test_issue_f10_log_scrub_has_a_documented_exemption_marker(tmp_path):
+    """A source scan with no escape hatch gets paid for in product copy (round-5 F10).
+
+    `log-scrub` greps every Python package root for `SECRET_KEY\\s*=` with one exemption,
+    the substring `settings`. It has already cost once: widening the scope to $(PY_ROOTS)
+    hit a `fix_hint` string in the scanner that quoted the assignment form as remediation
+    advice, and the remedy was to reword the advice. The next docstring, error message or
+    scanner rule that has to name the pattern faces the same choice — degrade what the
+    user reads, or move the file out of scope. Give it a marker instead: an explicit,
+    greppable, reviewable `# log-scrub: allow` on the line.
+    """
+    hit = _scrub_tree(tmp_path, "hit", {
+        "pkg/__init__.py": "",
+        "pkg/leak.py": 'SECRET_KEY = "django-insecure-hardcoded"\n',
+    })
+    res = _run_log_scrub(hit)
+    assert res.returncode != 0, (
+        f"log-scrub stopped catching a plain assignment — the gate itself is broken:\n"
+        f"{res.stdout}{res.stderr}")
+
+    allowed = _scrub_tree(tmp_path, "allowed", {
+        "pkg/__init__.py": "",
+        "pkg/advice.py": (
+            "FIX_HINT = "
+            '"Replace the literal with SECRET_KEY = os.environ[\'DJANGO_SECRET_KEY\']"'
+            "  # log-scrub: allow — remediation copy, not a secret\n"
+        ),
+    })
+    res2 = _run_log_scrub(allowed)
+    assert res2.returncode == 0, (
+        f"a line carrying the documented `# log-scrub: allow` marker still failed the "
+        f"gate, so the only remedy left is degrading the string:\n{res2.stdout}{res2.stderr}")
+
+    # The marker is line-scoped, and must stay that way: the grep is line-based, so a
+    # marker anywhere else exempts nothing. Pinned so nobody "fixes" it into a
+    # file-level or block-level exemption, which is how an escape hatch becomes a hole.
+    elsewhere = _scrub_tree(tmp_path, "elsewhere", {
+        "pkg/__init__.py": "",
+        "pkg/advice.py": (
+            "# log-scrub: allow — this file quotes the pattern deliberately\n"
+            'SECRET_KEY = "django-insecure-hardcoded"\n'
+        ),
+    })
+    res_elsewhere = _run_log_scrub(elsewhere)
+    assert res_elsewhere.returncode != 0, (
+        f"a marker on another line exempted the whole file — the exemption must sit on "
+        f"the line it excuses:\n{res_elsewhere.stdout}")
+
+    # The pre-existing exemption keeps working, and the marker did not widen it.
+    settings = _scrub_tree(tmp_path, "settings", {
+        "pkg/__init__.py": "",
+        "pkg/settings/base.py": "SECRET_KEY = env('DJANGO_SECRET_KEY')\n",
+    })
+    assert _run_log_scrub(settings).returncode == 0
+
+    both = _scrub_tree(tmp_path, "both", {
+        "pkg/__init__.py": "",
+        "pkg/advice.py": 'HINT = "SECRET_KEY = ..."  # log-scrub: allow\n',
+        "pkg/leak.py": 'SECRET_KEY = "django-insecure-hardcoded"\n',
+    })
+    res3 = _run_log_scrub(both)
+    assert res3.returncode != 0, (
+        f"one exempted line silenced an unexempted one in the same tree:\n{res3.stdout}")
+
+
+def test_issue_f10_the_log_scrub_exemptions_and_scope_are_documented_in_the_makefile():
+    """An undocumented escape hatch is just a hole. Say where the gate does not look."""
+    text = (REPO / "Makefile").read_text(encoding="utf-8")
+    comment = text.split("log-scrub:\n")[0].split("\n\n")[-1]
+    for phrase in ("log-scrub: allow", "settings", "conformance/", "scripts_dev/", "tests/"):
+        assert phrase in comment, (
+            f"the Makefile comment above `log-scrub:` does not mention {phrase!r} — both "
+            f"exemptions and everything outside $(PY_ROOTS) have to be written down where "
+            f"the gate is. Comment block:\n{comment}")

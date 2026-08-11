@@ -44,16 +44,36 @@ lint:
 conformance:
 	python conformance/check.py --phase 1
 
-# Plaintext secrets must not sit in source (SEC-69-NO-SECRETS-IN-EXHAUST). Command and
-# `settings` exemption carried over verbatim from the push-checks step this replaces;
-# the only change is scope, which is now $(PY_ROOTS) instead of the four packages that
-# existed when it was written — it had never looked at wizard/ or scanner/ (R4-12).
-# NOTE (2026-08-11): widening to $(PY_ROOTS) surfaced one hit on first run — a fix_hint
-# string in scanner/modules/django.py that quoted the assignment form as remediation
-# advice. Resolved by rewording that string (own commit), NOT by loosening the pattern
-# or exempting the path; see the branch's second commit.
+# Plaintext secrets must not sit in source. Command carried over verbatim from the
+# push-checks step this replaces; the only change to it is scope, which is now
+# $(PY_ROOTS) instead of the four packages that existed when it was written — it had
+# never looked at wizard/ or scanner/ (R4-12).
+#
+# NOT the gate for SEC-69-NO-SECRETS-IN-EXHAUST (round-5 F1). That requirement is about
+# exhaust after write — logs, Celery task args, API responses — and names a CI scrubber
+# over captured *test output*. This greps *source files* for an assignment literal, which
+# is materially less; the requirement is waived in WAIVERS.md until the real gate exists.
+# This target stays because a plaintext key committed to source is worth catching anyway.
+#
+# TWO EXEMPTIONS, both deliberate, both greppable:
+#   1. `settings`  — any path containing it. Settings modules read the key by name; that
+#                    is the correct place for the assignment to appear.
+#   2. `# log-scrub: allow` — a trailing comment on the offending line. NOTE (2026-08-11):
+#                    widening to $(PY_ROOTS) surfaced a fix_hint string in
+#                    scanner/modules/django.py that quoted the assignment form as
+#                    remediation advice, and the only remedy available was to reword the
+#                    advice — degrading product copy to satisfy a grep (round-5 F10). Any
+#                    docstring, error message or scanner rule that must name the pattern
+#                    now marks the line instead. The marker is on the line it exempts, so
+#                    it shows up in the diff that adds it and a reviewer sees the claim.
+#
+# OUT OF SCOPE, because $(PY_ROOTS) is "top-level dirs with an __init__.py, minus tests":
+#   conformance/ and scripts_dev/ have no __init__.py, and tests/ is excluded by name.
+#   Nothing scans those three for secret literals — they are fixtures, gate machinery and
+#   dev scripts, and a real key committed there would be caught only by review.
 log-scrub:
 	! grep -rn "SECRET_KEY\s*=" --include="*.py" $(PY_ROOTS) | grep -v "settings" \
+		| grep -v "# log-scrub: allow" \
 		|| (echo "possible secret in code" && exit 1)
 
 # One review round (build-process.md §4). Agent review sweep is run from a
