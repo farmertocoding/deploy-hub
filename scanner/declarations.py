@@ -27,12 +27,40 @@ file: `fallbacks._check_secret_scan` decides what a declaration does, and does i
 axis (the N6 rule — scope the axis, never the walk).
 """
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import yaml
 
 DECLARATION_FILE = "deployhub.yaml"
+
+# ── adversarial round 1: THE REPORT IS PART OF THE ATTACK SURFACE ───────────────
+#
+# `reason` and `path` come from the scanned repo and are printed into the check detail
+# — the header, every `[heuristic, declared: …]` label — and into the wizard prompt.
+# Until this round they were printed verbatim, newlines included, so a repo author could
+# write whole lines into the evidence a reviewer reads to decide whether a deploy is
+# safe. Demonstrated: a reason of
+#
+#     drill scripts"\n\nAlso in test material (not blocking):\nsrc/app.py:1: [heuristic] …
+#
+# produced a fake section header and a fake finding in the report, at warning tier.
+#
+# The rule is refuse, never repair. Text that will be read as the justification for
+# hiding findings is exactly what was written or it is rejected — a collapsed forgery is
+# still a claim nobody wrote, and it would be printed as if somebody had.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# A cap, because length is the other way to edit the report: the findings count sits at
+# the END of the header line, and a wall of prose in front of it buries the number the
+# reader came for.
+MAX_REASON_CHARS = 200
+# A config file bigger than this is not a config file. `load` used to read it unbounded,
+# so a repo could hand the scanner a gigabyte of YAML to parse.
+MAX_DECLARATION_BYTES = 256 * 1024
+# How much repo-controlled text a REFUSAL may quote back, and it is quoted with `repr`
+# so a control character shows up as an escape rather than acting on the terminal.
+_QUOTE_LIMIT = 80
 
 # Files whose presence means "the scanner keys on this directory" — a declaration
 # wrapped around one is refused. Each name is here because something reads it:
@@ -55,12 +83,22 @@ SCANNER_KEY_FILES = frozenset({
     "pnpm-workspace.yaml", "settings.py", DECLARATION_FILE,
 })
 
-# Pruned when looking for those files inside a declared tree: a vendored `node_modules`
-# under a drill directory holds thousands of `package.json` files and none of them is
-# the project's manifest. Same names the walk prunes, kept local so this module imports
-# nothing from `modules/`.
-_PRUNE_DIRS = {".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__",
-               "dist", "build", ".next", ".nuxt", ".cache", "vendor", ".tox"}
+def guard_prune_dirs():
+    """Directory names the manifest guard may skip — DERIVED, never a private copy.
+
+    Adversarial round 1, and it is the N6 class one layer in: the first cut kept its own
+    list here, which pruned `vendor`, `.hg` and `.svn` while `fallbacks._iter_files`
+    does not. So `svc/vendor/package.json` was invisible to this guard, the declaration
+    of `svc` was accepted, and `svc/**` was downgraded — a guard that skips a directory
+    the check still READS is a guard with a hole in it.
+
+    Deriving it from the walk's own skip set makes the safe direction structural: this
+    may only skip what the secret scan already refuses to open. Imported lazily because
+    `fallbacks` imports this module; a test asserts the subset property directly.
+    """
+    from scanner.modules import fallbacks
+
+    return frozenset(fallbacks._SKIP_DIRS)
 
 _GLOB_CHARS = set("*?[]{}")
 _ROOTISH = {"", ".", "./", "/", "./."}
@@ -127,6 +165,20 @@ def load(root):
         return NONE
 
     try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return Declarations(problems=(f"{DECLARATION_FILE} could not be read ({exc}); "
+                                      f"no declaration was applied",), present=True)
+    if size > MAX_DECLARATION_BYTES:
+        # Refused BEFORE the parser sees it: `yaml.safe_load` on repo-controlled input
+        # of unbounded size is the scan's cheapest denial of service.
+        return Declarations(
+            problems=(f"{DECLARATION_FILE} is too large ({size} bytes; the limit is "
+                      f"{MAX_DECLARATION_BYTES}) — a config file that size is not a "
+                      f"config file; it was not parsed and no declaration was applied",),
+            present=True)
+
+    try:
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return Declarations(problems=(f"{DECLARATION_FILE} could not be read ({exc}); "
@@ -185,26 +237,53 @@ def _read_entry(root, index, entry):
     if not isinstance(raw_path, str):
         return None, f"{where} has no string `path`; ignored"
     if not isinstance(reason, str) or not reason.strip():
-        return None, (f"{where} ({raw_path!r}) has no `reason` — a downgrade with no "
-                      f"stated reason is not reviewable; ignored")
+        return None, (f"{where} ({_quote(raw_path)}) has no `reason` — a downgrade with "
+                      f"no stated reason is not reviewable; ignored")
+
+    # Checked on the RAW strings, before any stripping: a leading newline would be
+    # stripped away and the forgery with it, which would be a validator that hides the
+    # very thing it exists to catch. The refusal names the entry and quotes at most
+    # `_QUOTE_LIMIT` characters through `repr`, so the attacker's text can never reach
+    # the report as text — that is the point of the whole rule.
+    for field_name, value in (("path", raw_path), ("reason", reason)):
+        hit = _CONTROL_CHARS_RE.search(value)
+        if hit:
+            # NOTHING of the offending value is quoted, not even escaped: the value is
+            # by definition text crafted to be read as something it is not, and an
+            # escaped copy of a forged section header is still a forged section header
+            # sitting in the report where a reader greps for one. The coordinates —
+            # entry, field, offset, codepoint — are what a maintainer needs to fix it,
+            # and they cannot be authored.
+            return None, (
+                f"{where} has a control character in its `{field_name}` "
+                f"(\\x{ord(hit.group()):02x} at offset {hit.start()} of "
+                f"{len(value)} characters; the value is not quoted here on purpose) — "
+                f"the report prints this text as evidence, and a newline or a tab in it "
+                f"writes lines a reviewer would read as the scanner's own findings; "
+                f"rejected rather than repaired")
+    if len(reason) > MAX_REASON_CHARS:
+        return None, (f"{where} ({_quote(raw_path)}) has a `reason` of {len(reason)} "
+                      f"characters; the limit is {MAX_REASON_CHARS} — the findings "
+                      f"count is printed after the reason, and a wall of text buries "
+                      f"it; rejected")
     reason = reason.strip()
 
     candidate = raw_path.strip()
     normalized = candidate.rstrip("/")
     if candidate in _ROOTISH or normalized in _ROOTISH or not normalized:
-        return None, (f"{where} declares the scan root ({raw_path!r}) — a declaration "
-                      f"that swallows the whole repo is indistinguishable from hiding; "
-                      f"rejected")
+        return None, (f"{where} declares the scan root ({_quote(raw_path)}) — a "
+                      f"declaration that swallows the whole repo is indistinguishable "
+                      f"from hiding; rejected")
     if _GLOB_CHARS & set(normalized):
-        return None, (f"{where} ({raw_path!r}) looks like a glob; a declaration names "
-                      f"one directory, so the reviewer reads the same tree the scanner "
-                      f"does; rejected")
+        return None, (f"{where} ({_quote(raw_path)}) looks like a glob; a declaration "
+                      f"names one directory, so the reviewer reads the same tree the "
+                      f"scanner does; rejected")
     posix = PurePosixPath(normalized.replace(os.sep, "/"))
     if posix.is_absolute() or normalized.startswith("/") or ":" in posix.parts[0]:
-        return None, (f"{where} ({raw_path!r}) is an absolute path; declarations are "
-                      f"relative to the scan root; rejected")
+        return None, (f"{where} ({_quote(raw_path)}) is an absolute path; declarations "
+                      f"are relative to the scan root; rejected")
     if ".." in posix.parts:
-        return None, (f"{where} ({raw_path!r}) escapes the scan root with `..`; "
+        return None, (f"{where} ({_quote(raw_path)}) escapes the scan root with `..`; "
                       f"rejected")
 
     path = str(posix)
@@ -222,10 +301,25 @@ def _read_entry(root, index, entry):
     return Declaration(path=path, reason=reason), None
 
 
+def _quote(text):
+    """Repo-controlled text, safe to print in a REFUSAL.
+
+    `repr` turns a newline into `\\n` and `\\x7f` into an escape, so a rejected string
+    cannot forge a line in the very message that rejects it; the truncation stops a
+    megabyte-long `path` from becoming the report.
+    """
+    if not isinstance(text, str):
+        return repr(text)[:_QUOTE_LIMIT]
+    if len(text) > _QUOTE_LIMIT:
+        return repr(text[:_QUOTE_LIMIT]) + " (truncated)"
+    return repr(text)
+
+
 def _scanner_key_file_in(directory):
     """The first `SCANNER_KEY_FILES` name inside `directory` (recursively), or None."""
+    prune = guard_prune_dirs()
     for current, dirnames, filenames in os.walk(directory):
-        dirnames[:] = sorted(d for d in dirnames if d not in _PRUNE_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in prune)
         for name in sorted(filenames):
             if name in SCANNER_KEY_FILES:
                 rel = Path(current, name).relative_to(directory)

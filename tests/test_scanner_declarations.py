@@ -349,3 +349,158 @@ def test_no_other_check_reads_the_declaration(tmp_path):
                 if c.id != "core.secret-scan"}
 
     assert others(plain) == others(declared)
+
+
+# ── adversarial round 1: the report is part of the attack surface ──────────────
+#
+# Everything below came out of the independent adversarial pass on the first cut, and
+# every one of them was demonstrated by a real scan rather than argued. The theme of
+# finding 1 is the one worth carrying forward: the check detail is EVIDENCE a reviewer
+# reads to decide whether a deploy is safe, and until this round the scanned repo could
+# write arbitrary lines into it.
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_reason_cannot_forge_report_lines(tmp_path):
+    """The forged-evidence case, verbatim from the adversarial pass.
+
+    `reason` was copied into the header, into every `[heuristic, declared: …]` label and
+    into the wizard prompt, newlines and all — so a repo author could write a fake
+    section header and fake findings into the report a reviewer trusts, at every tier
+    including `ok`. Text that will be read as the justification for hiding findings is
+    exactly what was written or it is refused; it is never quietly repaired, because a
+    collapsed forgery is still a claim nobody wrote.
+    """
+    forged = ('drill scripts\\"\\n\\nAlso in test material (not blocking):\\n'
+              'src/app.py:1: [heuristic] hardcoded api_key value')
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/drill\n"
+        f'      reason: "{forged}"\n')
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+    # None of the forged text may reach the report as text a reader could mistake for
+    # the scanner's own output.
+    assert "Also in test material (not blocking):" not in result.detail
+    assert "src/app.py:1: [heuristic] hardcoded api_key value" not in result.detail
+    # The refusal names the entry by index and field and gives the offset, and quotes
+    # NONE of the value: an escaped copy of a forged section header is still that
+    # header, sitting in the report where a reader greps for one.
+    assert "entry 1" in result.detail
+    assert "control character" in result.detail
+    assert "`reason`" in result.detail
+    assert "drill scripts" not in result.detail
+    for line in result.detail.splitlines():
+        assert not line.startswith("src/app.py:1"), line
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("payload,where", [
+    ('"line one\\nline two"', "reason"),
+    ('"tabbed\\there"', "reason"),
+    ('"carriage\\rreturn"', "reason"),
+    ('"bell\\a"', "reason"),
+    ('"delete\\x7f"', "reason"),
+])
+def test_any_control_character_in_a_reason_is_a_malformed_entry(tmp_path, payload, where):
+    """Not just newline. A tab fakes indentation, a CR overwrites the line a terminal
+    already drew, and `\\x7f` renders as nothing at all — every one of them edits what
+    the reviewer sees rather than what the file says."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/drill\n"
+        f"      {where}: {payload}\n")
+    result = _secret_scan(_tree(tmp_path, files, name=f"c{abs(hash(payload))}"))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "control character" in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_control_character_in_a_path_is_a_malformed_entry(tmp_path):
+    """The path is embedded in the same three places the reason is."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        '    - path: "frontend/scripts/drill\\nfaked"\n'
+        f"      reason: {DRILL_REASON}\n")
+    result = _secret_scan(_tree(tmp_path, files))
+    assert result.tier == "blocker", result.detail
+    assert "control character" in result.detail
+    assert "Downgrades claimed" not in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_reason_longer_than_the_cap_is_a_malformed_entry(tmp_path):
+    """A wall of text is the other way to edit the report: the findings count sits at
+    the end of the header line, and 40 KB of prose in front of it buries the number the
+    reader came for. The boundary is asserted in both directions so the cap cannot
+    drift by an off-by-one."""
+    at_cap = "x" * declarations.MAX_REASON_CHARS
+    over_cap = "x" * (declarations.MAX_REASON_CHARS + 1)
+
+    accepted = _tree(tmp_path, dict(_drill_files(), **{
+        "deployhub.yaml": _declaration("frontend/scripts/drill", at_cap)}),
+        name="at_cap")
+    assert _secret_scan(accepted).tier == "warning", _secret_scan(accepted).detail
+
+    refused = _tree(tmp_path, dict(_drill_files(), **{
+        "deployhub.yaml": _declaration("frontend/scripts/drill", over_cap)}),
+        name="over_cap")
+    result = _secret_scan(refused)
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert str(declarations.MAX_REASON_CHARS) in result.detail
+    assert over_cap not in result.detail, "the refusal pasted the wall of text back in"
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_manifest_the_scanner_walks_is_never_hidden_from_the_guard(tmp_path):
+    """The N6 class, one layer in: the guard pruned `vendor`, `.hg` and `.svn` while the
+    secret scanner's own walk does not, so `svc/vendor/package.json` was invisible to
+    the rejection guard and `svc/**` was downgraded anyway. A guard that skips a
+    directory the check still reads is a guard with a hole in it."""
+    files = {
+        "svc/vendor/package.json": '{"name": "svc"}\n',
+        "svc/drill.mjs": f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n',
+        "deployhub.yaml": _declaration("svc"),
+    }
+    result = _secret_scan(_tree(tmp_path, files))
+    assert result.tier == "blocker", result.detail
+    assert "package.json" in result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_the_guard_prunes_nothing_the_secret_scanner_walks():
+    """The parity assertion behind the test above, stated as a property so the two
+    lists cannot drift apart again: the guard may skip a directory only where the
+    scanner skips it too."""
+    assert declarations.guard_prune_dirs() <= fallbacks._SKIP_DIRS
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_an_oversized_declaration_file_is_refused_unparsed(tmp_path):
+    """`load` used to read the file unbounded, so a repo could hand the scanner a
+    gigabyte of YAML. A config file larger than a quarter of a megabyte is not a config
+    file; it is refused before the parser sees it, and downgrades nothing."""
+    body = _declaration("frontend/scripts/drill") + ("# " + "y" * 200 + "\n") * 2000
+    assert len(body.encode("utf-8")) > declarations.MAX_DECLARATION_BYTES
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = body
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "too large" in result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
