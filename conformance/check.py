@@ -351,7 +351,10 @@ def _find_doc(root, citation, fallback=None):
     if m:
         return _resolve_doc(root, m.group(1)), citation[m.end():].strip()
     for alias, filename in DOC_ALIASES.items():
-        am = re.match(rf"{re.escape(alias)}\b", citation)
+        # Round-6 F9: `\b` let `addendum` match the prefix of `addendum-2026-08-02`, so
+        # a future citation would silently resolve against the wrong frozen copy. The
+        # alias has to be the whole word: followed by whitespace, a §, or end of string.
+        am = re.match(rf"{re.escape(alias)}(?=\s|§|$)", citation)
         if am:
             return _resolve_doc(root, filename), citation[am.end():].strip()
     return fallback, citation
@@ -421,7 +424,12 @@ def resolve_source(root, source):
     """
     resolved, unresolved, doc = [], [], None
     for index, citation in enumerate(source_citations(source)):
-        doc, rest = _find_doc(root, citation, fallback=doc)
+        # A later citation inherits the running document only when it is nothing but a
+        # section reference (`§D7`). Round-6 F9: anything else names its own document,
+        # and if that name does not resolve the citation is unresolved — inheriting
+        # would silently pin a same-numbered section of the wrong doc.
+        inherit = doc if (index > 0 and citation.startswith("§")) else None
+        doc, rest = _find_doc(root, citation, fallback=inherit)
         # Only the first citation may name its section by a bare leading token
         # (`server-hardening.md R3`, `... Quick start`). A later one has to carry an
         # explicit §, or `build-process.md §5 / conformance/paths.yaml` would go looking
@@ -539,7 +547,21 @@ def main():
     # the registry. Both read to a human as a waiver in force.
     failures.extend(waiver_problems)
     for fingerprint in sorted(waived):
-        if ID_RE.match(fingerprint) and fingerprint not in registry:
+        # Round-6 F4: `ID_RE` alone left the near-misses silent — an em dash *inside*
+        # the id (the very transcription slip the parser's own hint anticipates for the
+        # separator), or a lowercased id, is not requirement-shaped, so it escaped the
+        # registry check and went on reading to a human as a waiver in force.
+        if fingerprint in registry:
+            continue
+        normalized = re.sub(r"[—–]", "-", fingerprint).upper()
+        if not ID_RE.match(normalized):
+            continue  # a path, an artifact tree: not the registry's business
+        if normalized in registry:
+            failures.append(
+                f"WAIVERS.md waives {fingerprint}, which is not spelled the way the "
+                f"registry spells {normalized} — waivers are matched exactly, so this "
+                f"line waives nothing. Fix the spelling (dash or case).")
+        else:
             failures.append(
                 f"WAIVERS.md waives {fingerprint}, which is not a requirement id in "
                 f"conformance/requirements.yaml — a typo'd id waives nothing, forever. "
@@ -644,7 +666,15 @@ def main():
             failures.extend(details or [f"{req_id} ({kind}) {status} and not waived"])
 
         # rule 6 — text_hash freshness, over every section the source cites.
-        pinned = req.get("text_hash")
+        # Round-6 F2: `resolved` was bound only on the non-retired path while the
+        # `if pinned:` block below ran unconditionally, so a retired requirement that
+        # kept its `text_hash` — the natural way to retire one — crashed the gate with
+        # UnboundLocalError, or silently compared its pin against the *previous*
+        # requirement's sections. There are no retired reqs today, which is why nothing
+        # caught it. Bind per iteration, and let a retired req skip the check outright:
+        # its text is no longer an obligation, so nothing hangs on the pin being fresh.
+        pinned = req.get("text_hash") if status != "retired" else None
+        resolved, unresolved = [], []
         if status != "retired":
             resolved, unresolved = resolve_source(root, req["source"])
             entry["text_hash_sections"] = [

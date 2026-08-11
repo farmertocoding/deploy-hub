@@ -38,8 +38,21 @@ MAKE_CALL_RE = re.compile(r"\bmake\s+(?:-[A-Za-z-]+\s+)*([A-Za-z0-9_.-]+)")
 
 # A gate step is one command: `make <target>`, optionally with make's own flags. Anything
 # that joins a second command to it can change the verdict (round-5 F2).
-BARE_MAKE_RE = re.compile(r"^make(?:\s+-[A-Za-z-]+)*\s+([A-Za-z0-9_.-]+)$")
+BARE_MAKE_RE = re.compile(r"^make((?:\s+-[A-Za-z-]+)*)\s+([A-Za-z0-9_.-]+)$")
 SHELL_JOINERS = ("&&", "||", ";", "|")
+
+# Round-6 verifier F1: round 5 wrote `(?:\s+-[A-Za-z-]+)*` for "make's own flags" and
+# left it at that, so `run: make --dry-run lint` read as a bare, honest invocation —
+# and a dry run prints the recipe and exits 0 without executing it. So do `-i`
+# (ignore-errors), `-q` (question mode, exit status only), `-t` (touch), `-o` (pretend
+# a prerequisite is old). Each is a gate that CI reaches and does not run: the same
+# false green as `continue-on-error: true`, arriving through the syntax the parity test
+# was built to bless.
+#
+# Allow-list, not deny-list. A deny-list has to be right about every make flag that
+# exists now and every one added later; an allow-list only has to be right about the
+# two that are actually useful in CI, and a new one is a reviewable edit here.
+ALLOWED_MAKE_FLAGS = frozenset({"-s", "--silent", "--quiet", "--no-print-directory"})
 
 
 def makefile_text(root):
@@ -107,7 +120,11 @@ def pr_only_gates(root=None, text=None):
     # line as its value — which is the state this repo ships in. Caught by
     # `pr_only_declaration_problems` on the first honest run, which is the point of
     # having that check at all.
-    m = re.search(r"^PR_ONLY_GATES[ \t]*:?=[ \t]*([^\n]*)", _text(root, text), re.M)
+    # Round-6 F6: `export PR_ONLY_GATES := sp` used to slip past the `^` anchor and read
+    # as an empty declaration with no diagnostic — silently un-declaring an exemption
+    # someone believed they had written.
+    m = re.search(r"^(?:export[ \t]+)?PR_ONLY_GATES[ \t]*:?=[ \t]*([^\n]*)",
+                  _text(root, text), re.M)
     return set(m.group(1).split()) if m else set()
 
 
@@ -177,14 +194,29 @@ def strip_comment(command):
 
 
 def bare_make_target(command):
-    """The target of `command` if it is exactly one `make <target>` call, else None.
+    """The target of `command` if it is exactly one honest `make <target>` call, else None.
 
     Round-5 F2: `make lint && pytest -q --no-header || true` starts with `make ` and
     used to be waved through. It is two commands, the second of which decides the exit
     status.
+
+    Round-6 F1: and `make --dry-run lint` is one command that does not run the gate.
+    Only `ALLOWED_MAKE_FLAGS` may appear. NOTE that `-q` is make's *question* mode and
+    is refused, while `--quiet` is a synonym for `-s` and is allowed — they are not the
+    long and short spelling of one flag.
     """
     m = BARE_MAKE_RE.match(strip_comment(command))
-    return m.group(1) if m else None
+    if not m:
+        return None
+    if set(m.group(1).split()) - ALLOWED_MAKE_FLAGS:
+        return None
+    return m.group(2)
+
+
+def rejected_make_flags(command):
+    """The flags in `command` that disqualify it as a gate invocation (round-6 F1)."""
+    m = BARE_MAKE_RE.match(strip_comment(command))
+    return sorted(set(m.group(1).split()) - ALLOWED_MAKE_FLAGS) if m else []
 
 
 # The only `if:` expressions a declared PR-only gate may carry. Frozen, because the
@@ -245,7 +277,7 @@ def _swallow_problem(scope, mapping):
 
 
 def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
-    """`[(step_name, (gate targets...), message)]` — the structured form.
+    """`[(job_name, step_name, (gate targets...), message)]` — the structured form.
 
     `gate_step_violations` is the message-only view the parity test asserts on;
     `check.py` needs to know *which gate* each problem disqualifies, so that a
@@ -273,7 +305,9 @@ def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
             command = strip_comment(commands[0])
             if bare_make_target(command) is None:
                 joiner = next((j for j in SHELL_JOINERS if j in command), None)
-                token = joiner or command[len("make"):].strip().split(" ", 1)[-1]
+                flags = rejected_make_flags(command)
+                token = (joiner or (" ".join(flags) if flags else None)
+                         or command[len("make"):].strip().split(" ", 1)[-1])
                 found.append(
                     f"{where}: invokes gate(s) {gates} as {command!r} (offending "
                     f"token: {token!r}) — a gate step must be exactly one "
@@ -291,7 +325,8 @@ def gate_step_problems(workflow, required_targets, pr_only=frozenset()):
                         f"token: {token!r}) — CI that reaches a gate and then ignores "
                         f"its verdict has no gate")
 
-        problems.extend((step_name, tuple(gated), message) for message in found)
+        problems.extend((job_name, step_name, tuple(gated), message)
+                        for message in found)
     return problems
 
 
@@ -304,7 +339,7 @@ def gate_step_violations(workflow, required_targets, pr_only=frozenset()):
     target are none of this check's business: `cd frontend && npm ci` is a perfectly
     good setup step.
     """
-    return [message for _step, _gated, message
+    return [message for _job, _step, _gated, message
             in gate_step_problems(workflow, required_targets, pr_only)]
 
 
@@ -323,13 +358,25 @@ def ci_gate_invocations(root, required_targets=None, pr_only=None):
 
     invoked, rejected = {}, {}
     for workflow in workflow_paths(root):
+        # Round-6 F7: a gate CI can only run by hand does not guard the branch. Trigger
+        # awareness arrived with N3 but was consulted only on the exemption path, so an
+        # honest `make lint` in a `workflow_dispatch`-only file resolved the gate.
+        wf_triggers = triggers(workflow)
+        if not wf_triggers & {"push", "pull_request"}:
+            for target in required:
+                rejected.setdefault(target, [])
+            continue
+        # Round-6 F5: keyed by step *name* alone, a dishonest step named `build` in one
+        # job suppressed an honest step of the same name in another — and unnamed steps
+        # collide by construction, since they are all `step #1`, `step #2`, ...
         broken = set()
-        for step_name, gated, message in gate_step_problems(workflow, required, only):
-            broken.add(step_name)
+        for job_name, step_name, gated, message in gate_step_problems(
+                workflow, required, only):
             for target in gated:
                 rejected.setdefault(target, []).append(message)
+            broken.add((workflow.name, job_name, step_name))
         for job_name, _job, step_name, step in steps(workflow):
-            if step_name in broken:
+            if (workflow.name, job_name, step_name) in broken:
                 continue
             for line in run_commands(step["run"]):
                 for target in MAKE_CALL_RE.findall(line):
@@ -342,12 +389,22 @@ def pr_only_declaration_problems(root):
     """A PR-only declaration that names something which is not a gate is dead text."""
     problems = []
     required = review_round_prerequisites(root)
-    for target in sorted(pr_only_gates(root)):
+    declared = pr_only_gates(root)
+    for target in sorted(declared):
         if target not in required:
             problems.append(
                 f"Makefile: PR_ONLY_GATES names {target!r}, which is not a prerequisite "
                 f"of `review-round` — the exemption may only be spent on a real gate. "
                 f"review-round runs {sorted(required)}")
+    # Round-6 F6: the exemption's narrowness was social — declaring every gate PR-only
+    # was accepted with no diagnostic, and a direct push to the default branch would
+    # then run no gates at all. An exemption that can cover everything is not one.
+    if required and declared >= required:
+        problems.append(
+            f"Makefile: PR_ONLY_GATES declares every gate `review-round` runs "
+            f"({sorted(required)}) as PR-only, so a push to the default branch would "
+            f"run no gate at all. The exemption is for the gates that genuinely cannot "
+            f"run on a push event; at least one gate must remain unconditional")
     return problems
 
 
@@ -385,6 +442,14 @@ def parse_waivers(root=None, text=None):
             continue
         m = WAIVER_RE.match(line)
         if m:
+            # Round-6 F8: two lines waiving one fingerprint used to collapse silently to
+            # whichever came last, so a superseded reason could sit in the file reading
+            # as current.
+            if m.group(1) in waivers:
+                problems.append(
+                    f"WAIVERS.md:{lineno}: duplicate waiver for {m.group(1)!r} — one "
+                    f"fingerprint, one line (build-process.md §4); an earlier line for "
+                    f"the same fingerprint is silently superseded")
             waivers[m.group(1)] = line
             continue
         hint = ""
