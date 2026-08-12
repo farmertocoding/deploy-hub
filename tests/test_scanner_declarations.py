@@ -34,8 +34,15 @@ DRILL_REASON = "red-team / QA drill scripts; deliberate fake credentials"
 # operator accepts the claim it IS blocking — the old wording asserted an outcome the
 # scanner cannot know, since the scanner has no answers.
 DECLARED_SECTION_HEADER = (
-    "Declared test material (downgrade requested by deployhub.yaml — blocks until you "
-    "accept it in the wizard):")
+    "Declared test material (downgrade requested by deployhub.yaml — these findings "
+    "block until you accept it in the wizard):")
+
+
+def _drill_confirm_id(reason=DRILL_REASON, path="frontend/scripts/drill"):
+    """The confirm id, derived rather than typed. Round 7's second veto made the id a
+    function of the CLAIM, so a literal in a test would be a second implementation of
+    the very derivation the fix exists to keep single."""
+    return declarations.confirm_question_id(path, reason)
 
 
 def _tree(tmp_path, files, name="proj"):
@@ -737,7 +744,7 @@ def test_issue_r7_1_the_acceptance_contract_names_the_confirms_that_clear_it(tmp
 
     check = [c for c in report["checks"] if c["id"] == "core.secret-scan"][0]
     assert check["acceptance"] == {
-        "questions": ["scanner.test_material.1.frontend-scripts-drill"],
+        "questions": [_drill_confirm_id()],
         "blocking_only_declared": True,
     }
     asked = [q["id"] for q in report["wizard_questions"]
@@ -762,8 +769,7 @@ def test_issue_r7_1_a_real_blocker_beside_a_declaration_is_never_only_declared(t
     assert check["tier"] == "blocker"
     assert check["title"] == "Committed secrets detected"
     assert check["acceptance"]["blocking_only_declared"] is False
-    assert check["acceptance"]["questions"] == [
-        "scanner.test_material.1.frontend-scripts-drill"]
+    assert check["acceptance"]["questions"] == [_drill_confirm_id()]
 
 
 @pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
@@ -782,8 +788,7 @@ def test_issue_r7_1_a_declaration_that_downgraded_nothing_is_not_a_gate_key(tmp_
         f"    - path: frontend/scripts/quiet\n      reason: {DRILL_REASON}\n")
     result = _secret_scan(_tree(tmp_path, files))
 
-    assert result.acceptance["questions"] == [
-        "scanner.test_material.1.frontend-scripts-drill"]
+    assert result.acceptance["questions"] == [_drill_confirm_id()]
     # The claim is still printed for both — a declaration that quiets nothing today is
     # still a live assertion about the tree (D-012, unchanged by round 7).
     assert result.detail.count("Downgrades claimed by deployhub.yaml") == 2
@@ -924,3 +929,156 @@ def test_issue_r7_14_the_env_name_defense_travelled_with_the_slug_scheme(tmp_pat
     assert len(questions) == 1, questions
     assert ".env." not in questions[0].id, questions[0].id
     assert questions[0].default is None
+
+
+# ── round 7, second veto: the id is of a CLAIM, not of a slot ─────────────────
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_the_confirm_id_changes_when_only_the_reason_changes(tmp_path):
+    """The id used to be `(index, slug(path))`, so the `reason` — the ENTIRE reviewable
+    content of a declaration, and the one field `_read_entry` refuses an entry for
+    lacking — was mutable underneath an acceptance that had already been given. A
+    stored `True` then meant "somebody once approved this directory", which is not what
+    the operator was asked and not what the record claims they said."""
+    same_path = _tree(tmp_path, dict(_drill_files(), **{
+        "deployhub.yaml": _declaration("frontend/scripts/drill")}), name="a")
+    swapped = _tree(tmp_path, dict(_drill_files(), **{
+        "deployhub.yaml": _declaration("frontend/scripts/drill",
+                                       "ACTUALLY covers prod secrets now")}), name="b")
+
+    first = declarations.confirm_questions(declarations.load(same_path))[0]
+    second = declarations.confirm_questions(declarations.load(swapped))[0]
+    assert first.id != second.id
+    # Still legible, and still the path a human recognizes.
+    assert first.id.startswith("scanner.test_material.frontend-scripts-drill--")
+    assert second.id.startswith("scanner.test_material.frontend-scripts-drill--")
+
+    # Re-reading the same declaration is stable — an id that moved on its own would
+    # re-block every deploy for no reason and train the operator to re-accept blind.
+    assert declarations.confirm_questions(declarations.load(same_path))[0].id == first.id
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_the_id_is_a_function_of_the_claim_not_of_its_position(tmp_path):
+    """The other half of the round-trip attack, at the unit, and the design decision it
+    forced. The index used to be part of the key, which made the id a SLOT — something
+    an orphaned answer can be left lying in and re-apply from when a declaration comes
+    back to it. Content-only keys have no old slot: moving a declaration does not change
+    what is being asked, so it does not change the question, and the answer the operator
+    already gave still answers it. What changes the question is changing the claim.
+    """
+    root = _tree(tmp_path, dict(_drill_files(), **{
+        "frontend/scripts/aaa/readme.md": "nothing\n",
+        "deployhub.yaml": (
+            "scanner:\n"
+            "  test_material:\n"
+            "    - path: frontend/scripts/aaa\n      reason: prepended tree\n"
+            f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n")}))
+    moved = declarations.confirm_questions(declarations.load(root))[1]
+    assert moved.id == _drill_confirm_id()
+    assert "scanner.test_material.2." not in moved.id, (
+        "the confirm id still encodes a position, which is a slot an orphan can sit in")
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_one_claim_written_twice_is_asked_about_once(tmp_path):
+    """The cost of dropping the index, paid deliberately. Two entries with the same path
+    AND the same reason collapse to one confirm — one claim written twice, and asking
+    the operator the same question twice is how you teach them to answer without
+    reading. Two entries over one path with DIFFERENT reasons stay two questions,
+    because they are two claims."""
+    twice = _tree(tmp_path, dict(_drill_files(), **{"deployhub.yaml": (
+        "scanner:\n"
+        "  test_material:\n"
+        f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n"
+        f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n")}),
+        name="twice")
+    assert len(declarations.confirm_questions(declarations.load(twice))) == 1
+
+    two_claims = _tree(tmp_path, dict(_drill_files(), **{"deployhub.yaml": (
+        "scanner:\n"
+        "  test_material:\n"
+        f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n"
+        "    - path: frontend/scripts/drill\n      reason: a second, different claim\n")}),
+        name="twoclaims")
+    questions = declarations.confirm_questions(declarations.load(two_claims))
+    assert len({q.id for q in questions}) == 2
+    # Only the first is credited with findings, so only the first gates the blocker —
+    # the second is asked and recorded, and holds nothing shut.
+    result = _secret_scan(two_claims)
+    assert result.acceptance["questions"] == [_drill_confirm_id()]
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_1r_a_directory_named_env_cannot_forge_an_environment_variable(
+        tmp_path):
+    """The `_env_name` defense, re-asserted against the shape that nearly broke it.
+
+    Appending the digest as a new DOT segment would have reopened the exact hole the id
+    scheme exists to close: a repo with a real directory called `env` slugs to `env`,
+    and `scanner.test_material.1.env.<digest>` contains `.env.`, so
+    `wizard.materialize._env_name` would have turned the digest into an environment
+    variable name. The digest is joined to the slug with `--` instead, which the slug
+    itself can never contain (runs of non-alphanumerics collapse to one `-`), so the id
+    has exactly the dot structure it had before.
+    """
+    for path in ("env", "docker/.env.d", "config/env"):
+        root = _tree(tmp_path, {
+            f"{path}/leak.mjs": f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n',
+            "deployhub.yaml": _declaration(path),
+        }, name=f"envdir-{abs(hash(path))}")
+        questions = declarations.confirm_questions(declarations.load(root))
+        assert len(questions) == 1, (path, questions)
+        assert ".env." not in questions[0].id, (path, questions[0].id)
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_1r_the_confirm_id_fits_the_column_it_is_stored_in(tmp_path):
+    """`WizardAnswer.question_id` is `CharField(max_length=128)` and the slug comes from
+    a path the scanned repo chooses, so its length is repo-controlled. The slug is
+    bounded; truncating it is safe only BECAUSE the digest is over the full path and
+    reason, so two paths that truncate alike still get different ids."""
+    deep = "/".join(f"averyverylongdirectorysegment{i}" for i in range(12))
+    a = declarations.confirm_question_id(deep + "/alpha", "r")
+    b = declarations.confirm_question_id(deep + "/beta", "r")
+    assert len(a) <= 128, (len(a), a)
+    assert a != b, "two long paths truncated into the same confirm id"
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_the_acceptance_contract_publishes_the_content_keyed_id(tmp_path):
+    """The three derivations must still agree after the id gained a digest: what the
+    wizard asks, what the check publishes, and what the manifest records."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    check = [c for c in report["checks"] if c["id"] == "core.secret-scan"][0]
+    asked = [q["id"] for q in report["wizard_questions"]
+             if q["id"].startswith("scanner.test_material.")]
+    assert check["acceptance"]["questions"] == asked
+    assert asked[0] == declarations.confirm_question_id(
+        "frontend/scripts/drill", DRILL_REASON)
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_8r_the_legend_does_not_promise_a_deploy_it_cannot_deliver(tmp_path):
+    """The copy nuance the verifier flagged, and SATURDAYS_site is exactly the case:
+    it has two `.env` files, so `blocking_only_declared` is False and accepting the
+    drill declaration will NOT let it deploy. The legend told that operator that
+    accepting clears the block. The narrative in the demo record was already honest
+    about this; the report the operator actually reads has to be too."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    declared_only = _secret_scan(_tree(tmp_path, files, name="declonly"))
+    assert declared_only.acceptance["blocking_only_declared"] is True
+    assert "still block" not in declared_only.fix_hint
+
+    files[".env"] = "API_KEY=x\n"
+    mixed = _secret_scan(_tree(tmp_path, files, name="mixed"))
+    assert mixed.acceptance["blocking_only_declared"] is False
+    assert "still block" in mixed.fix_hint, (
+        "the legend promises that accepting clears a deploy that no answer can clear")
+    assert "these findings block until you accept" in mixed.detail

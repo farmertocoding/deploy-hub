@@ -14,9 +14,10 @@ ruling on the security expert's veto is that a declaration is a **request**, and
 record is the first one taken with that enforced.
 
 SATURDAYS_site's record moves in two places: the third bucket's section header now says
-the downgrade was *requested* and blocks until accepted, and the blocker `fix_hint`
-carries the declaration legend it never had (R7-8). Its **tier does not move** — it
-reported `blocker` before and reports `blocker` now, for the reason given below. The
+the downgrade was *requested* and that **these findings** block until accepted, and the
+blocker `fix_hint` carries the declaration legend it never had (R7-8) — including the
+clause that says accepting will not, on this repo, clear the deploy. Its **tier does not
+move** — it reported `blocker` before and reports `blocker` now, for the reason below. The
 other three fleet records and the fixture JSON were re-run and are **byte-identical** to
 the 2026-08-11 recording, verified with `cmp`: no repo without a declaration moved, which
 is the control for a change that must reach exactly one mechanism.
@@ -138,13 +139,46 @@ What the record shows, and what each part is there to prove:
   this repo — the one the whole feature was built for — has always reported at blocker
   tier, so its operator read the labels and the `Downgrades claimed` header with
   nothing anywhere on the report saying what either meant.
-- The wizard raises one confirm question, `scanner.test_material.1.frontend-scripts-drill`,
-  with **no default** — an unanswered claim is not an accepted one, now pinned by a test
-  (R7-11) rather than only asserted in prose. It is **required**: unanswered refuses
-  materialization in the same shape as a missing `site.domain`. The frozen manifest
-  records what was answered — accepted declarations under `declared_test_material`,
-  refused ones under `declared_test_material_refused`, because an audit trail that drops
-  the refusals is the same defect pointing the other way.
+- The wizard raises one confirm question,
+  `scanner.test_material.frontend-scripts-drill--<16 hex>`, with **no default** — an
+  unanswered claim is not an accepted one, now pinned by a test (R7-11) rather than only
+  asserted in prose. It is **required**: unanswered refuses materialization in the same
+  shape as a missing `site.domain`. The frozen manifest records what was answered —
+  accepted declarations under `declared_test_material`, refused ones under
+  `declared_test_material_refused`, because an audit trail that drops the refusals is
+  the same defect pointing the other way.
+- **The id is keyed on the claim, not on its position** (second round-7 veto, below).
+  The trailing hex is a digest of the normalized path *and* the reason, so editing
+  either produces a question nobody has answered and the deploy re-blocks; re-scanning
+  an unchanged `deployhub.yaml` asks the same question and keeps its answer.
+
+## The second round-7 correction — an acceptance is of a claim, not of a slot
+
+The remedy above closed the veto and opened a smaller one, filed against the remedy
+itself and demonstrated end to end against a real database. The confirm id was
+`(index, slug(path))`, and a stored answer is never invalidated by a re-scan, so the
+operator's `True` was locked to a **position**:
+
+- **Reason swap.** Accept `frontend/scripts/drill` for "deliberate fake credentials";
+  the repo then rewrites the reason to "ACTUALLY covers prod secrets now" — same path,
+  same index — and re-scans. Same id, stale `True` still matched, preflight returned
+  `[]`, and manifest v2 froze the *new* reason as accepted. `deployhub.yaml` refuses an
+  entry with no reason on the stated ground that a downgrade with no stated reason is
+  not reviewable; a reason that is mutable underneath a granted acceptance is worse than
+  none, because it arrives with a signature on it.
+- **Index round-trip.** Prepend a declaration and drill moved to index 2, re-blocking;
+  remove it and drill returned to index 1, where the orphaned `True` was still sitting,
+  and cleared with no re-confirmation.
+
+The id is now keyed on the declaration's content — 16 hex characters of
+`sha256(path + "\n" + reason)`, appended to the still-legible path slug with `--`. The
+**index left the key entirely**, which is what closes the second attack by construction:
+an index is a slot, and a slot is somewhere an orphaned answer can wait. With
+content-only keys there is no old slot to come back to, so nothing depends on the
+hygiene sweep having run at the right moment. Stale confirm rows are still swept from
+the answers table on every write, but that is hygiene — the digest is the security
+property, and if the sweep is ever what stands between a stale `True` and a downgrade,
+the design has regressed.
 
 ## D-011r revisit data — the full arc, and its closure
 

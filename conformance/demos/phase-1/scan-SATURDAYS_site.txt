@@ -17,7 +17,7 @@ Also in test material (not blocking):
 backend/accounts/tests/test_password_reset.py:104: [heuristic] hardcoded password value
 backend/accounts/tests/test_profile.py:106: [heuristic] hardcoded password value
 
-Declared test material (downgrade requested by deployhub.yaml — blocks until you accept it in the wizard):
+Declared test material (downgrade requested by deployhub.yaml — these findings block until you accept it in the wizard):
 frontend/scripts/drill/README.md:25: [heuristic, declared: frontend/scripts/drill — "red-team / QA drill scripts; deliberate fake credentials"] hardcoded django_superuser_password value
 frontend/scripts/drill/redteam/01_rbac_money.mjs:10: [heuristic, declared: frontend/scripts/drill — "red-team / QA drill scripts; deliberate fake credentials"] hardcoded staff_password value
 frontend/scripts/drill/qa/03_regressions.mjs:27: [heuristic, declared: frontend/scripts/drill — "red-team / QA drill scripts; deliberate fake credentials"] hardcoded customer_password value
@@ -32,7 +32,7 @@ frontend/scripts/drill/qa/10_destinations_and_reconciliation.mjs:37: [heuristic,
 
 [proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.
 
-The `Downgrades claimed` header above, and any `[heuristic, declared: …]` line, is this repo's own deployhub.yaml REQUESTING that those findings stop blocking. Asking is not getting: they block until you accept that declaration in the wizard. Accepting clears exactly those lines and is recorded in the frozen manifest; refusing leaves them blocking and records the refusal — so refusing is how you say the declaration is wrong, and it costs the deploy until the repo is fixed.
+The `Downgrades claimed` header above, and any `[heuristic, declared: …]` line, is this repo's own deployhub.yaml REQUESTING that those findings stop blocking. Asking is not getting: they block until you accept that declaration in the wizard. Accepting clears exactly those lines and no more: the other findings above are covered by no declaration, so this check still blocks whatever you answer. Your answer is recorded in the frozen manifest against the exact wording you were shown — edit the path or the reason and you will be asked again. Refusing leaves them blocking and records the refusal, so refusing is how you say the declaration is wrong.
 
 ── WARNING (1)
   ⚠ core.digest-pins: Base images not pinned by digest (§6.8)

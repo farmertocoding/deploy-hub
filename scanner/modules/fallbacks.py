@@ -803,8 +803,8 @@ def _declared_section(declared_findings):
     if not declared_findings:
         return ""
     return ("Declared test material (downgrade requested by "
-            f"{declarations.DECLARATION_FILE} — blocks until you accept it in the "
-            "wizard):\n"
+            f"{declarations.DECLARATION_FILE} — these findings block until you accept "
+            "it in the wizard):\n"
             + "\n".join(declared_findings))
 
 
@@ -829,14 +829,28 @@ _CONFIDENCE_LEGEND = (
 # the declaration is wrong" was printed against a confirm whose answer was read by no
 # code; it is true now, and it is stated with the mechanism attached so the next reader
 # can check it rather than trust it.
-_DECLARED_LEGEND = (
-    "The `Downgrades claimed` header above, and any `[heuristic, declared: …]` line, "
-    f"is this repo's own {declarations.DECLARATION_FILE} REQUESTING that those "
-    "findings stop blocking. Asking is not getting: they block until you accept that "
-    "declaration in the wizard. Accepting clears exactly those lines and is recorded "
-    "in the frozen manifest; refusing leaves them blocking and records the refusal — "
-    "so refusing is how you say the declaration is wrong, and it costs the deploy "
-    "until the repo is fixed.")
+#
+# AND IT TAKES `declared_only`, because the second veto's copy note lands right here.
+# The unhedged sentence — "accepting clears exactly those lines" — reads as "accepting
+# lets this deploy", and on SATURDAYS_site, the repo the whole feature was built for,
+# that is false: it has two `.env` files, so `blocking_only_declared` is False and no
+# answer clears the check. The demo narrative was already honest about it; the report
+# the operator actually reads has to be too, or the copy is doing to them exactly what
+# the frozen manifest was doing to the audit trail.
+def _declared_legend(declared_only):
+    outcome = (
+        "Accepting clears exactly those lines and lets this check pass."
+        if declared_only else
+        "Accepting clears exactly those lines and no more: the other findings above are "
+        "covered by no declaration, so this check still blocks whatever you answer.")
+    return (
+        "The `Downgrades claimed` header above, and any `[heuristic, declared: …]` "
+        f"line, is this repo's own {declarations.DECLARATION_FILE} REQUESTING that "
+        "those findings stop blocking. Asking is not getting: they block until you "
+        f"accept that declaration in the wizard. {outcome} Your answer is recorded in "
+        "the frozen manifest against the exact wording you were shown — edit the path "
+        "or the reason and you will be asked again. Refusing leaves them blocking and "
+        "records the refusal, so refusing is how you say the declaration is wrong.")
 
 
 def _blocker_fix_hint(declared, declared_only):
@@ -854,7 +868,7 @@ def _blocker_fix_hint(declared, declared_only):
                 "you do.")
     parts = [lead, _CONFIDENCE_LEGEND]
     if declared.accepted:
-        parts.append(_DECLARED_LEGEND)
+        parts.append(_declared_legend(declared_only))
     return "\n\n".join(parts)
 
 
@@ -871,13 +885,16 @@ def _acceptance(declared, counts, declared_only):
     that declares nothing serializes exactly as it did before this field existed.
     """
     questions, seen = [], set()
-    for index, declaration in enumerate(declared.accepted, 1):
-        # Keyed by path, first index wins — the same rule `Declarations.covering` uses
-        # to pick which of two identical declarations gets the credit for a finding.
+    for declaration in declared.accepted:
+        # Keyed by path, FIRST DECLARATION WINS — the same rule `Declarations.covering`
+        # uses to pick which of two declarations over one path gets the credit for a
+        # finding. The second is still asked about and still recorded; it just is not a
+        # key to this gate, because it was credited with nothing.
         if declaration.path in seen or counts.get(declaration.path, 0) < 1:
             continue
         seen.add(declaration.path)
-        questions.append(declarations.confirm_question_id(index, declaration.path))
+        questions.append(
+            declarations.confirm_question_id(declaration.path, declaration.reason))
     if not questions:
         return None
     return {"questions": questions, "blocking_only_declared": bool(declared_only)}

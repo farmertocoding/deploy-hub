@@ -28,6 +28,7 @@ import pytest
 
 from core.models import Project, Site
 from scanner import core as scanner_core
+from scanner import declarations
 from wizard import service
 from wizard.materialize import MaterializeRefused, materialize, preflight
 from wizard.questions import missing_required, question_set
@@ -37,7 +38,8 @@ pytestmark = pytest.mark.django_db
 FAKE_HIGH_ENTROPY = "hT4pQz8LmVx2Nb9RkS6wYc3JdF7gA5eUq1XoZi0P"
 GHP_TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
 DRILL_REASON = "red-team / QA drill scripts; deliberate fake credentials"
-DRILL_CONFIRM = "scanner.test_material.1.frontend-scripts-drill"
+DRILL_CONFIRM = declarations.confirm_question_id(
+    "frontend/scripts/drill", DRILL_REASON)
 
 
 def _declaration(path, reason=DRILL_REASON):
@@ -298,7 +300,8 @@ def test_issue_r7_1_the_manifest_never_carries_an_unaccepted_declaration(tmp_pat
         f"    - path: frontend/scripts/spare\n      reason: spare drill tree\n")
     site = _site(tmp_path, files, name="tworefused")
     _answer_domain(site)
-    spare_confirm = "scanner.test_material.2.frontend-scripts-spare"
+    spare_confirm = declarations.confirm_question_id(
+        "frontend/scripts/spare", "spare drill tree")
     service.set_answers(site, {DRILL_CONFIRM: True, spare_confirm: False})
 
     body = materialize(site, confirm_warnings=True).body
@@ -329,3 +332,210 @@ def test_issue_r7_1_a_manifest_with_no_declaration_gains_no_key(tmp_path):
     body = materialize(site, confirm_warnings=True).body
     assert "declared_test_material" not in body
     assert "declared_test_material_refused" not in body
+
+
+# ── round 7, second veto: an acceptance is of a CLAIM, not of a path ──────────
+#
+# The remedy above closed R7-1 and opened this. `confirm_question_id` was keyed on
+# `(index, slug(path))` alone, and a stored answer is never invalidated by a re-scan, so
+# the operator's `True` was locked to a POSITION rather than to the claim they read.
+# Two attacks, both demonstrated against a real preflight/materialize with a database:
+#
+#   * REASON SWAP. The `reason` is the entire reviewable content of a declaration —
+#     `_read_entry` refuses an entry without one on the stated ground that "a downgrade
+#     with no stated reason is not reviewable". Keying the id on the path alone made the
+#     reason mutable UNDER a locked-in acceptance, which is worth less than refusing it:
+#     the operator is then on record as having accepted a justification nobody showed
+#     them.
+#   * INDEX ROUND-TRIP. Moving a declaration re-blocked it (fail-closed, correct), but
+#     the orphaned `True` sat in the answers table and re-applied the moment the
+#     declaration came back to its old index.
+#
+# The fix folds a digest of the declaration's CONTENT — normalized path and reason —
+# into the id, so any edit to either produces an id nobody has answered, `missing_required`
+# fires, and the already-proven fail-closed machinery re-blocks.
+
+
+def _rescan(site, files, name="proj"):
+    """Re-scan the project's tree after the repo changed, as an adopt-path re-scan does."""
+    project = site.project
+    project.scan_report = scanner_core.scan(_tree(site_tmp[site.pk], files, name=name))
+    project.save(update_fields=["scan_report"])
+    return project
+
+
+site_tmp = {}
+
+
+def _site_tracked(tmp_path, files, name="proj"):
+    site = _site(tmp_path, files, name=name)
+    site_tmp[site.pk] = tmp_path
+    return site
+
+
+def _confirm_ids(site):
+    return [q.id for q in question_set(site.project)
+            if q.id.startswith("scanner.test_material.")]
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_changing_only_the_reason_re_blocks_and_needs_a_new_answer(tmp_path):
+    """Attack 1, the verifier's scenario verbatim: same path, same index, new reason.
+
+    The operator accepted "red-team / QA drill scripts; deliberate fake credentials".
+    The repo then rewrites the reason to say the tree covers production secrets and
+    changes nothing else. Before the digest, `preflight` returned `[]` — the stale
+    `True` still matched — and the deploy proceeded on a justification the operator had
+    never been shown.
+    """
+    site = _site_tracked(tmp_path, _drill_files())
+    _answer_domain(site)
+    original = _confirm_ids(site)[0]
+    service.set_answers(site, {original: True})
+    assert preflight(site) == []
+
+    swapped = dict(_drill_files())
+    swapped["deployhub.yaml"] = _declaration(
+        "frontend/scripts/drill", "ACTUALLY covers prod secrets now")
+    _rescan(site, swapped)
+
+    assert _confirm_ids(site) != [original], (
+        "the reason changed and the confirm id did not — the acceptance is keyed on a "
+        "position, not on the claim the operator read")
+    assert "blockers_present" in _codes(preflight(site))
+    assert "answers_missing" in _codes(preflight(site))
+    with pytest.raises(MaterializeRefused):
+        materialize(site, confirm_warnings=True)
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r7_1r_a_swapped_reason_is_never_recorded_as_accepted(tmp_path):
+    """The audit half of attack 1. Manifest v2 recorded `reason: "ACTUALLY covers prod
+    secrets now", accepted: True` against an operator who accepted a different sentence
+    — the append-only record asserting a consent that was never given, which is the
+    same defect R7-1 was ruled on, one layer in."""
+    site = _site_tracked(tmp_path, _drill_files(), name="swapaudit")
+    _answer_domain(site)
+    service.set_answers(site, {_confirm_ids(site)[0]: True})
+    materialize(site, confirm_warnings=True)
+
+    swapped = dict(_drill_files())
+    swapped["deployhub.yaml"] = _declaration(
+        "frontend/scripts/drill", "ACTUALLY covers prod secrets now")
+    _rescan(site, swapped, name="swapaudit")
+
+    with pytest.raises(MaterializeRefused):
+        materialize(site, confirm_warnings=True)
+    # And when the operator DOES answer the new claim, refusing it, the record says so.
+    service.set_answers(site, {_confirm_ids(site)[0]: False})
+    with pytest.raises(MaterializeRefused):
+        materialize(site, confirm_warnings=True)
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_the_index_round_trip_has_no_slot_to_resurrect_from(tmp_path):
+    """Attack 2, the verifier's scenario verbatim — prepend a declaration, then remove
+    it — and the design decision it forced.
+
+    Under `(index, slug(path))` keys the trip ended on the id it started on and the
+    ORPHANED `True` re-applied, so the only thing that could have stopped it was the
+    hygiene sweep running at the right moment. That is unacceptable as a boundary: the
+    sweep runs on writes, and a vulnerability whose defence depends on somebody having
+    saved a form in between is not defended.
+
+    So the index left the key entirely. There is no old slot, because ids are not slots:
+    drill's confirm does not move when an unrelated declaration is added in front of it,
+    and it does not need to — nothing about drill's claim changed, and the operator's
+    acceptance is of the claim. The deploy is still refused throughout, by the confirm
+    the NEW declaration raises, which nobody has answered.
+    """
+    site = _site_tracked(tmp_path, _drill_files(), name="roundtrip")
+    _answer_domain(site)
+    first = _confirm_ids(site)[0]
+    service.set_answers(site, {first: True})
+    assert preflight(site) == []
+
+    prepended = dict(_drill_files())
+    prepended["frontend/scripts/aaa/readme.md"] = "nothing to see\n"
+    prepended["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/aaa\n      reason: prepended tree\n"
+        f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n")
+    _rescan(site, prepended, name="roundtrip")
+
+    assert first in _confirm_ids(site), (
+        "drill's confirm moved because something unrelated was added in front of it — "
+        "the id is encoding a position again")
+    # Refused throughout: the prepended declaration is a claim nobody has answered.
+    assert "answers_missing" in _codes(preflight(site))
+    with pytest.raises(MaterializeRefused):
+        materialize(site, confirm_warnings=True)
+
+    # …and back again, to a file byte-identical to the one the operator accepted.
+    # Clearing here is correct and is the point: consent is to the claim, and the claim
+    # is the one they read. What must NOT clear is an edited claim — the test below.
+    _rescan(site, _drill_files(), name="roundtrip")
+    assert _confirm_ids(site) == [first]
+    assert preflight(site) == []
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1r_a_re_scan_that_changes_nothing_keeps_the_acceptance(tmp_path):
+    """The property the digest is deliberately NOT strict enough to break, stated on its
+    own so nobody 'hardens' it away. If a re-scan invalidated acceptances, every re-scan
+    would re-ask an identical question, and a wizard that asks the same question every
+    time is a wizard whose answers stop being read — the D-008 argument, applied to the
+    one answer in the system that authorizes a downgrade."""
+    site = _site_tracked(tmp_path, _drill_files(), name="stable")
+    _answer_domain(site)
+    service.set_answers(site, {_confirm_ids(site)[0]: True})
+    assert preflight(site) == []
+
+    _rescan(site, _drill_files(), name="stable")
+    assert preflight(site) == []
+    materialize(site, confirm_warnings=True)
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_issue_r7_1r_orphaned_confirm_answers_are_scrubbed_on_write(tmp_path):
+    """Hygiene, not the security property — the digest is what makes an orphan inert,
+    and this is what stops the answers table accumulating dead consent forever. Ordered
+    that way deliberately: a scrub that ran on a schedule, or was skipped by one code
+    path, must never be the thing standing between a stale `True` and a downgrade."""
+    site = _site_tracked(tmp_path, _drill_files(), name="orphans")
+    _answer_domain(site)
+    stale = _confirm_ids(site)[0]
+    service.set_answers(site, {stale: True})
+
+    swapped = dict(_drill_files())
+    swapped["deployhub.yaml"] = _declaration(
+        "frontend/scripts/drill", "a different justification entirely")
+    _rescan(site, swapped, name="orphans")
+
+    from wizard.models import WizardAnswer
+    assert WizardAnswer.objects.filter(site=site, question_id=stale).exists()
+    service.set_answers(site, {"site.domain": "app.example.com"})
+    assert not WizardAnswer.objects.filter(site=site, question_id=stale).exists(), (
+        "a dead declaration confirm outlived the declaration that raised it")
+    # The live answers are untouched.
+    assert WizardAnswer.objects.filter(site=site, question_id="site.domain").exists()
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_issue_r7_1r_the_scrub_leaves_answers_alone_when_there_is_no_scan(tmp_path):
+    """The guard on the hygiene sweep: with no scan report the question set is the base
+    set alone, so every declaration answer would look orphaned. "I cannot see the
+    questions" is not "these questions are gone", and deleting an operator's answers on
+    that reading would lose real work."""
+    site = _site_tracked(tmp_path, _drill_files(), name="noscan")
+    _answer_domain(site)
+    live = _confirm_ids(site)[0]
+    service.set_answers(site, {live: True})
+
+    site.project.scan_report = {}
+    site.project.save(update_fields=["scan_report"])
+
+    from wizard.models import WizardAnswer
+    service.set_answers(site, {"site.domain": "app.example.com"})
+    assert WizardAnswer.objects.filter(site=site, question_id=live).exists()

@@ -204,9 +204,13 @@ def materialize(site, *, actor=None, confirm_warnings=False):
     # telling the operator what to re-enter would leave a site that won't start and
     # no visible reason (the exact failure the original test pinned). The refusal is
     # composed from what THIS call scrubbed, plus everything preflight still sees.
-    from .service import scrub_downgraded_answers
+    from .service import scrub_downgraded_answers, scrub_orphaned_declaration_answers
 
     scrubbed = scrub_downgraded_answers(site)
+    # Hygiene only, and it changes no outcome here: a confirm whose declaration changed
+    # has a different id, so the gate below has already stopped seeing it. See that
+    # function's docstring for why that ordering is the security property.
+    scrub_orphaned_declaration_answers(site)
     problems = []
     if scrubbed:
         known = question_map(site.project)
@@ -363,7 +367,7 @@ def _record_declarations(body, answers):
     if not draft:
         return
     accepted, refused = [], []
-    for index, entry in enumerate(draft, 1):
+    for entry in draft:
         # Read with `.get`, not `[]`: this is a STORED report, and materialization
         # refusing loudly is the contract while materialization raising KeyError on a
         # report written by an older schema is a 500 on ordinary state.
@@ -372,8 +376,10 @@ def _record_declarations(body, answers):
             continue
         # Same derivation as the question the operator answered and as the check's
         # `acceptance.questions`; `scanner.declarations` owns it precisely so these
-        # three cannot drift (R7-14).
-        qid = declarations.confirm_question_id(index, path)
+        # three cannot drift (R7-14). The id covers the REASON as well as the path, so
+        # a `True` recorded here can only ever be against the sentence the operator was
+        # shown — the reason-swap attack that vetoed the first remedy.
+        qid = declarations.confirm_question_id(path, reason)
         record = {"path": path, "reason": reason,
                   "question_id": qid, "accepted": answers.get(qid) is True}
         (accepted if record["accepted"] else refused).append(record)

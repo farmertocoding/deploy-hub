@@ -35,6 +35,7 @@ made core the composer, not the author of every string in the report. `core.scan
 gate opens for is derived once, in one place, and cannot drift from the id the operator
 was actually asked about.
 """
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -212,26 +213,96 @@ NONE = Declarations()
 
 CONFIRM_ID_PREFIX = "scanner.test_material."
 
+# ROUND 7, SECOND VETO — an acceptance is of a CLAIM, not of a slot.
+#
+# The first remedy keyed this id on `(index, slug(path))`, and a stored answer is never
+# invalidated by a re-scan, so the operator's `True` was locked to a POSITION. Two
+# attacks came out of that, both demonstrated end to end against a real database:
+#
+#   * REASON SWAP. Accept `frontend/scripts/drill` for "deliberate fake credentials";
+#     the repo then rewrites the reason to "ACTUALLY covers prod secrets now", same
+#     path, same index, and re-scans. Same id, stale `True` still matches, preflight
+#     clears, and the manifest freezes the NEW reason as accepted. `_read_entry` refuses
+#     an entry with no reason on the stated ground that "a downgrade with no stated
+#     reason is not reviewable" — a reason that is mutable underneath a granted
+#     acceptance is worth less than no reason at all, because it comes with a signature
+#     on it.
+#   * INDEX ROUND-TRIP. Prepend a declaration and drill moves to index 2, which
+#     correctly re-blocks; remove it again and drill returns to index 1, where the
+#     orphaned `True` was still sitting, and clears with no re-confirmation.
+#
+# So the id is keyed on the declaration's CONTENT and on nothing else. Any edit to the
+# path or the reason yields an id nobody has answered, `missing_required` fires, and the
+# fail-closed machinery that is already proven re-blocks.
+#
+# THE INDEX IS GONE FROM THE ID, and that is what closes the second attack rather than
+# merely surviving it. An index is a SLOT, and a slot is something an answer can be left
+# lying in: while position was part of the key, the round trip ended on the id it started
+# on and the orphan re-applied, so the only thing that could have stopped it was the
+# hygiene sweep in `wizard.service` running at the right moment — and a sweep that has to
+# run between two events to prevent a downgrade IS the security boundary, which the
+# ordering below says it must never be. With content-only keys there is no old slot to
+# come back to: moving a declaration does not change the question, because moving it does
+# not change what is being asked, and the acceptance the operator gave still answers it.
+# What changes the question is changing the claim.
+#
+# The index was only ever there to keep two paths that slug alike apart, and the digest
+# does that far better — it is taken over the FULL path, not the lossy slug. Two entries
+# with an identical path AND an identical reason now collapse to one id, which is right:
+# that is one claim written twice, and asking the operator the same question twice is how
+# you teach them to click through it.
+#
+# SIXTEEN HEX CHARACTERS (64 bits), and the length is not a birthday-bound argument.
+# The attacker here CONTROLS BOTH INPUTS and is aiming at one specific stored id, so
+# the work is a second preimage — 2^n, not 2^(n/2). At 32 bits that is ~4e9 hashes, a
+# few minutes on a laptop, and the attacker can pad a plausible-sounding reason freely
+# while grinding; 64 bits puts it out of reach of anyone who would bother. The full
+# digest is not used because this id is READ BY THE OPERATOR in the wizard and in the
+# refusal, and it must fit `WizardAnswer.question_id`, a CharField(max_length=128).
+_CONFIRM_DIGEST_CHARS = 16
+# Budget for the rest of the id: prefix (22) + slug + "--" + digest (16) = 40 + slug.
+# The path is repo-controlled, so the slug is the only unbounded part and it is capped
+# here, well inside `WizardAnswer.question_id`'s CharField(max_length=128). Truncating it
+# is safe ONLY because the digest is taken over the full path and reason: two paths that
+# truncate alike still get different ids, which is asserted by a test.
+_MAX_SLUG_CHARS = 72
 
-def confirm_question_id(index, path):
-    """The confirm id for the `index`-th (1-based) accepted declaration of `path`.
 
-    The id carries an INDEX and a slug, never the raw path, for one specific reason:
+def confirm_question_id(path, reason):
+    """The confirm id for the accepted declaration `(path, reason)`.
+
+    The id carries a SLUG, never the raw path, for one specific reason:
     `wizard.materialize._env_name` turns any question id containing `.env.` into an
     environment variable name, and a declared path is text the scanned repo controls —
     `docker/.env.d` would otherwise turn a confirm into an env var. The slug is
-    non-alphanumerics collapsed to `-`, so it can hold no dot at all; the index keeps
-    two paths that slug alike apart, and the scan draft's `declared_test_material` list
-    is in the same order, so an answer is always resolvable to its path.
+    non-alphanumerics collapsed to `-`, so it can hold no dot at all.
 
-    Round 7 made this a public function because three call sites now need the SAME id:
-    the question the wizard asks, the `acceptance.questions` a blocker check publishes,
-    and the manifest record `materialize` builds from the answer. Recomputed
-    independently they would agree until the day they did not, and the day they did not
-    the gate would open for a question nobody was asked.
+    THE DIGEST IS JOINED WITH `--`, NOT WITH A DOT, and that is the whole of why this
+    function did not reopen the hole it exists to close. A repo with a real directory
+    called `env` slugs to `env`; appending the digest as a new dot segment would produce
+    `scanner.test_material.env.<digest>`, which contains `.env.`, and `_env_name` would
+    have turned the digest into an environment variable name. `--` cannot occur inside a
+    slug — runs of non-alphanumerics collapse to a single `-` — so it is an unambiguous
+    separator that leaves the id's dot structure exactly as it was.
+
+    Round 7 made this a public function because three call sites need the SAME id: the
+    question the wizard asks, the `acceptance.questions` a blocker check publishes, and
+    the manifest record `materialize` builds from the answer. Recomputed independently
+    they would agree until the day they did not, and the day they did not the gate would
+    open for a question nobody was asked.
+
+    `path` and `reason` are the NORMALIZED values `_read_entry` produced — posix, no
+    trailing slash, reason stripped — so the id is stable across the cosmetic
+    differences a YAML file can carry, and moves for the ones a reviewer would notice.
+    A re-scan that finds the same claim asks the same question and keeps its answer;
+    that is not laxity, it is the property that stops every re-scan re-asking an
+    identical question until the operator answers it without reading it.
     """
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", path).strip("-").lower()
-    return f"{CONFIRM_ID_PREFIX}{index}.{slug}"
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", path).strip("-").lower()[:_MAX_SLUG_CHARS]
+    digest = hashlib.sha256(
+        f"{path}\n{reason}".encode("utf-8")
+    ).hexdigest()[:_CONFIRM_DIGEST_CHARS]
+    return f"{CONFIRM_ID_PREFIX}{slug}--{digest}"
 
 
 def confirm_questions(declared):
@@ -241,21 +312,33 @@ def confirm_questions(declared):
     unanswered claim is not an accepted one, the whole acceptance gate rests on that,
     and a client that submits the defaults it was handed would pre-accept every
     declaration in the file if this ever became `True`.
+
+    De-duplicated by id, which since the id became content-keyed means de-duplicated by
+    CLAIM: a file that declares the same path with the same reason twice is one claim
+    written twice, and the wizard asks about it once. Two entries for the same path with
+    DIFFERENT reasons stay two questions — they are two claims, and only the first of
+    them will ever be credited with a finding (`Declarations.covering` takes the first
+    match), so the second is asked about and recorded but gates nothing.
     """
-    return [
-        WizardQuestion(
-            id=confirm_question_id(index, declaration.path),
+    questions, seen = [], set()
+    for declaration in declared.accepted:
+        qid = confirm_question_id(declaration.path, declaration.reason)
+        if qid in seen:
+            continue
+        seen.add(qid)
+        questions.append(WizardQuestion(
+            id=qid,
             kind="bool",
             default=None,
             prompt=(f"This repo declares `{declaration.path}` as test material — "
                     f'"{declaration.reason}". Accept that claim? Until you do, the '
                     f"heuristic secret findings under that path BLOCK the deploy like "
                     f"any other; accepting reports them without blocking. Published "
-                    f"credential formats and .env files there block either way, and "
-                    f"refusing is recorded in the manifest."),
-        )
-        for index, declaration in enumerate(declared.accepted, 1)
-    ]
+                    f"credential formats and .env files there block either way; "
+                    f"refusing is recorded in the manifest, and editing the path or the "
+                    f"reason brings this question back."),
+        ))
+    return questions
 
 
 def load(root):
