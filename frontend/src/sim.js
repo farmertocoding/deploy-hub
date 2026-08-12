@@ -9,11 +9,24 @@
 // SPEC §4b, and this is the whole reason that spec had to be written twice: a zod
 // schema cannot tell you a fixture is a LIE, only that it is well-shaped. The first
 // remedy for R8-1 hand-wrote a `blocking` list that `preflight` never produces, and the
-// UI was then reviewed against it and passed. So: every `blocking` list, every refusal
-// `detail`, every field of the declared-tree blocker, both manifests and the 409 below
-// are COPIED FROM A REAL RUN. The command that produced each one is named above it.
-// Nothing in this file is written by hand except the ids, names and dates that stitch
-// the fixtures together.
+// UI was then reviewed against it and passed. So every payload here is COPIED FROM A
+// REAL RUN against a tree built to produce it, and the readiness reports and the messy
+// wizard state below are PASTED JSON from that run rather than retyped:
+//
+//   ReadinessSerializer(...).data   → CLEAN_REPORT, MESSY_REPORT, DRILL_REPORT
+//   wizard.views._state(site)       → CLEAN_WIZARD, MESSY_WIZARD, DRILL_WIZARD_*
+//   wizard.materialize.materialize  → CLEAN_MANIFEST, DRILL_MANIFEST, REFUSAL_409
+//
+// The trees: a Django repo with a hardcoded SECRET_KEY, DEBUG=True in prod settings, a
+// dev-fallback the prod module hard-fails without, and a declared drill tree
+// (legacy-shop); the same declared tree alone (qa-drills); and a clean digest-pinned
+// service with /healthz, auth and tests (takko).
+//
+// What IS written by hand: project/site ids, names, slugs and the `scanned_at` /
+// `changed_at` dates that stitch the fixtures together, plus the comments. Every check
+// id, title, detail, fix_hint, acceptance contract, refusal code, refusal detail and
+// manifest body is the server's own output. R8-4's whole finding was that a fixture
+// nobody could check is a UI nobody reviewed.
 
 // ── project 1: takko, nothing to report ───────────────────────────────────────
 // python -m hub scan <tree with a digest-pinned Dockerfile, /healthz, auth, tests>
@@ -26,9 +39,24 @@ const CLEAN_PROJECT = {
             latest_manifest_version: 3, manifest_current: true }],
 };
 
+// Pasted from the run against the clean tree: no findings at all, which is a state the
+// screen has to render too ("✓ No findings").
 const CLEAN_REPORT = {
-  scanned_at: "2026-08-09T10:00:00Z", modules: ["dockerfile"], summary: {},
-  blockers: [], warnings: [], advice: [], pending_sandbox: [],
+  "scanned_at": "2026-08-09T10:00:00Z",
+  "modules": [
+    "dockerfile"
+  ],
+  "summary": {
+    "blocker": 0,
+    "warning": 0,
+    "advice": 0,
+    "ok": 10,
+    "pending_sandbox": 0
+  },
+  "blockers": [],
+  "warnings": [],
+  "advice": [],
+  "pending_sandbox": []
 };
 
 const CLEAN_WIZARD = {
@@ -89,36 +117,6 @@ const DRILL_CONFIRM_PROMPT =
   "files there block either way; refusing is recorded in the manifest, and editing " +
   "the path or the reason brings this question back.";
 
-// The state R8-1 was invisible in: a blocker no repo change can clear, because there is
-// nothing in the repo to fix — only an operator's answer clears it, and the stored scan
-// report goes on reporting it afterwards.
-const DECLARED_BLOCKER = {
-  id: "core.secret-scan", tier: "blocker",
-  title: "Secrets in a declared tree — your acceptance is required",
-  detail: "Downgrades claimed by deployhub.yaml: frontend/scripts/drill (\"red-team / " +
-    "QA drill scripts; deliberate fake credentials\", 1 findings)\n\nDeclared test " +
-    "material (downgrade requested by deployhub.yaml — these findings block until you " +
-    "accept it in the wizard):\nfrontend/scripts/drill/qa/03_regressions.mjs:1: " +
-    "[heuristic, declared: frontend/scripts/drill — \"red-team / QA drill scripts; " +
-    "deliberate fake credentials\"] hardcoded staff_password value",
-  fix_hint: "Every blocking line here is a heuristic finding inside a tree this repo's " +
-    "deployhub.yaml declares as test material, so the deploy is refused for exactly " +
-    "one reason: nobody has accepted that claim yet. Read the reason and read the " +
-    "lines, then answer the wizard's confirm.\n\n[proof] lines matched a published " +
-    "credential format — a GitHub token, a PEM block, an AWS key id — and are not " +
-    "guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy " +
-    "literal: real most of the time, and worth a look before you decide.\n\nThe " +
-    "`Downgrades claimed` header above, and any `[heuristic, declared: …]` line, is " +
-    "this repo's own deployhub.yaml REQUESTING that those findings stop blocking. " +
-    "Asking is not getting: they block until you accept that declaration in the " +
-    "wizard. Accepting clears exactly those lines and lets this check pass. Your " +
-    "answer is recorded in the frozen manifest against the exact wording you were " +
-    "shown — edit the path or the reason and you will be asked again. Refusing leaves " +
-    "them blocking and records the refusal, so refusing is how you say the " +
-    "declaration is wrong.",
-  acceptance: { questions: [DRILL_CONFIRM], blocking_only_declared: true },
-};
-
 // preflight's own detail lines. The clause after the dash exists because someone on the
 // server side knew "fix them and re-scan" is false for a pending acceptance; the client
 // must not paraphrase it, and materialize-gate.test.ts greps to make sure it does not.
@@ -141,82 +139,245 @@ const AWAITING_ITEM = {
 // preflight returns them in ONE `blockers_present`, and the button must stay blocked.
 const MESSY_PROJECT = {
   id: 2, name: "legacy-shop", slug: "legacy-shop", scanned_at: "2026-08-09T09:30:00Z",
-  tiers: { blocker: 3, warning: 1, advice: 1, pending_sandbox: 1 },
+  tiers: { blocker: 3, warning: 2, advice: 1, pending_sandbox: 3 },
   sites: [{ id: 2, name: "prod", domain: "",
             latest_manifest_version: 1, manifest_current: false }],
 };
 
+// Pasted from the run above. `summary` is the scanner's own count and every check
+// carries its `execution` field — both are in what the serializer sends, and leaving
+// them out was a fixture that quietly described a smaller API than the real one.
 const MESSY_REPORT = {
-  scanned_at: "2026-08-09T09:30:00Z", modules: ["django"], summary: {},
-  blockers: [
-    { id: "django.secret-key-literal", tier: "blocker",
-      title: "Secret material is a literal in source",
-      detail: "config/settings/base.py: SECRET_KEY",
-      fix_hint: "Load it from the environment, rotate the leaked value, and store the new one through the Hub vault." },
-    { id: "django.debug-on", tier: "blocker", title: "DEBUG is on in prod settings",
-      detail: "config/settings/prod.py", fix_hint: "Set DEBUG = False in prod." },
-    DECLARED_BLOCKER,
+  "scanned_at": "2026-08-09T09:30:00Z",
+  "modules": [
+    "django"
   ],
-  warnings: [
-    { id: "django.secret-dev-fallback", tier: "warning",
-      title: "Dev-fallback secret committed (prod provably rejects it)",
-      detail: "config/settings/base.py: FIELD_ENCRYPTION_KEYS",
-      fix_hint: "Production hard-fails without the real value, so this cannot ship — but it lives in git history. Rotate if the repo was ever shared. (Tier per D-008.)" },
+  "summary": {
+    "blocker": 3,
+    "warning": 2,
+    "advice": 1,
+    "ok": 14,
+    "pending_sandbox": 3
+  },
+  "blockers": [
+    {
+      "id": "core.secret-scan",
+      "tier": "blocker",
+      "title": "Secrets in a declared tree — your acceptance is required",
+      "detail": "Downgrades claimed by deployhub.yaml: frontend/scripts/drill (\"red-team / QA drill scripts; deliberate fake credentials\", 1 findings)\n\nDeclared test material (downgrade requested by deployhub.yaml — these findings block until you accept it in the wizard):\nfrontend/scripts/drill/qa/03_regressions.mjs:1: [heuristic, declared: frontend/scripts/drill — \"red-team / QA drill scripts; deliberate fake credentials\"] hardcoded staff_password value",
+      "fix_hint": "Every blocking line here is a heuristic finding inside a tree this repo's deployhub.yaml declares as test material, so the deploy is refused for exactly one reason: nobody has accepted that claim yet. Read the reason and read the lines, then answer the wizard's confirm.\n\n[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.\n\nThe `Downgrades claimed` header above, and any `[heuristic, declared: …]` line, is this repo's own deployhub.yaml REQUESTING that those findings stop blocking. Asking is not getting: they block until you accept that declaration in the wizard. Accepting clears exactly those lines and lets this check pass. Your answer is recorded in the frozen manifest against the exact wording you were shown — edit the path or the reason and you will be asked again. Refusing leaves them blocking and records the refusal, so refusing is how you say the declaration is wrong.",
+      "execution": "static",
+      "acceptance": {
+        "questions": [
+          "scanner.test_material.frontend-scripts-drill--a38574e34e643d90"
+        ],
+        "blocking_only_declared": true
+      }
+    },
+    {
+      "id": "django.debug-hardcoded",
+      "tier": "blocker",
+      "title": "DEBUG is hardcoded True in prod-reachable settings",
+      "detail": "DEBUG = True in: config/settings/prod.py",
+      "fix_hint": "DEBUG=True serves full tracebacks and settings dumps to every visitor. Read it from the environment — DEBUG = os.environ.get('DJANGO_DEBUG', '0') == '1' — and leave DJANGO_DEBUG unset in production.",
+      "execution": "static"
+    },
+    {
+      "id": "django.secret-key-literal",
+      "tier": "blocker",
+      "title": "Secret material is a literal in source",
+      "detail": "config/settings/base.py: SECRET_KEY",
+      "fix_hint": "A secret in source sits in git history forever and in every clone. Read it from the environment instead — os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.",
+      "execution": "static"
+    }
   ],
-  advice: [
-    { id: "django.staticfiles", tier: "advice", title: "No WhiteNoise or static route",
-      detail: "", fix_hint: "Add WhiteNoise or let the Hub serve the static artifact." },
+  "warnings": [
+    {
+      "id": "django.secret-dev-fallback",
+      "tier": "warning",
+      "title": "Dev-fallback secret committed (prod provably rejects it)",
+      "detail": "config/settings/base.py: FIELD_ENCRYPTION_KEYS",
+      "fix_hint": "Production reassigns this from os.environ[...] and hard-fails without it, so the committed value cannot ship — but it lives in git history and every clone. If this repo was ever shared, rotate the value at its source. (Tier per D-008.)",
+      "execution": "static"
+    },
+    {
+      "id": "django.security-settings",
+      "tier": "warning",
+      "title": "Security settings missing in prod",
+      "detail": "Missing: SECURE_PROXY_SSL_HEADER",
+      "fix_hint": "These settings make sessions HTTPS-only behind the proxy: without them cookies leak over plain HTTP and Django cannot see the TLS termination. Add to prod settings: SECURE_SSL_REDIRECT = True, SESSION_COOKIE_SECURE = True, CSRF_COOKIE_SECURE = True, SECURE_HSTS_SECONDS = 31536000, SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https').",
+      "execution": "static"
+    }
   ],
-  pending_sandbox: [
-    { id: "django.migrate-check", tier: "pending_sandbox",
-      title: "manage.py migrate --check (runs in the build sandbox, never on the Hub)",
-      detail: "", fix_hint: "" },
+  "advice": [
+    {
+      "id": "django.runtime-versions",
+      "tier": "advice",
+      "title": "Runtime versions outside the supported window",
+      "detail": "Python: 3.12 (requires-python); Django: 4.2 (dependency spec).",
+      "fix_hint": "The fleet standard is Python 3.12–3.14 and Django 5.2–6.x; outside that window the base images and playbooks here are untested. Bump requires-python / the Django pin, or expect manual image work.",
+      "execution": "static"
+    }
   ],
+  "pending_sandbox": [
+    {
+      "id": "django.check-deploy",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] django.check-deploy",
+      "detail": "Runs off-Hub (review3 §M1): python manage.py check --deploy",
+      "fix_hint": "Django's own deploy checklist; needs the app importable, so sandbox.",
+      "execution": "executing"
+    },
+    {
+      "id": "django.migrations-check",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] django.migrations-check",
+      "detail": "Runs off-Hub (review3 §M1): python manage.py makemigrations --check --dry-run",
+      "fix_hint": "Detects model changes missing a migration; imports the app, so sandbox.",
+      "execution": "executing"
+    },
+    {
+      "id": "django.collectstatic",
+      "tier": "pending_sandbox",
+      "title": "[sandbox] django.collectstatic",
+      "detail": "Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run",
+      "fix_hint": "Proves static collection succeeds before a deploy depends on it.",
+      "execution": "executing"
+    }
+  ]
 };
 
+// Pasted whole from `_state(site)` with `site.exposure` and the SECRET_KEY answered,
+// the domain and the declaration confirm not. Three things the hand-written version got
+// wrong and this cannot: the base `site.exposure` question wins over the module's alias
+// (prompt "How should this site be reachable?", choices public/mesh_only — `vpn-only` is
+// not a value this product has), the confirm sits in scan order rather than last, and
+// `warnings` is [{id, title}], not [{code, detail}].
 const MESSY_WIZARD = {
-  // Shape mirrors WizardStateSerializer EXACTLY — the contract test rejected a
-  // first draft that invented required/source fields and omitted secret/warnings.
-  questions: [
-    { id: "site.domain", kind: "domain", prompt: "Public domain for this site (e.g. app.example.com)",
-      choices: [], default: null, secret: false },
-    { id: "site.exposure", kind: "choice", prompt: "Who should reach this site?",
-      choices: ["public", "vpn-only"], default: "public", secret: false },
-    { id: "django.env.DATABASE_URL", kind: "text", prompt: "Value for DATABASE_URL",
-      choices: [], default: null, secret: false },
-    { id: "django.env.SECRET_KEY", kind: "secret", prompt: "Value for SECRET_KEY",
-      choices: [], default: null, secret: true },
-    // `default: null` is the scanner's, not a nicety: an unanswered claim is not an
-    // accepted one, so this question cannot arrive pre-ticked.
-    { id: DRILL_CONFIRM, kind: "bool", prompt: DRILL_CONFIRM_PROMPT,
-      choices: [], default: null, secret: false },
+  "questions": [
+    {
+      "id": "site.domain",
+      "prompt": "Public domain for this site (e.g. app.example.com)",
+      "kind": "domain",
+      "default": null,
+      "choices": [],
+      "secret": false
+    },
+    {
+      "id": "site.exposure",
+      "prompt": "How should this site be reachable?",
+      "kind": "choice",
+      "default": "public",
+      "choices": [
+        "public",
+        "mesh_only"
+      ],
+      "secret": false
+    },
+    {
+      "id": "scanner.test_material.frontend-scripts-drill--a38574e34e643d90",
+      "prompt": "This repo declares `frontend/scripts/drill` as test material — \"red-team / QA drill scripts; deliberate fake credentials\". Accept that claim? Until you do, the heuristic secret findings under that path BLOCK the deploy like any other; accepting reports them without blocking. Published credential formats and .env files there block either way; refusing is recorded in the manifest, and editing the path or the reason brings this question back.",
+      "kind": "bool",
+      "default": null,
+      "choices": [],
+      "secret": false
+    },
+    {
+      "id": "django.db",
+      "prompt": "Database for production",
+      "kind": "choice",
+      "default": "postgres",
+      "choices": [
+        "postgres",
+        "mysql",
+        "sqlite"
+      ],
+      "secret": false
+    },
+    {
+      "id": "django.env.DATABASE_URL",
+      "prompt": "Value for environment variable DATABASE_URL",
+      "kind": "text",
+      "default": null,
+      "choices": [],
+      "secret": false
+    },
+    {
+      "id": "django.env.FIELD_ENCRYPTION_KEYS",
+      "prompt": "Value for environment variable FIELD_ENCRYPTION_KEYS",
+      "kind": "secret",
+      "default": null,
+      "choices": [],
+      "secret": true
+    },
+    {
+      "id": "django.env.SECRET_KEY",
+      "prompt": "Value for environment variable SECRET_KEY",
+      "kind": "secret",
+      "default": null,
+      "choices": [],
+      "secret": true
+    }
   ],
-  answered: {
+  "answered": {
     "site.exposure": "public",
-    "django.env.SECRET_KEY": { answered: true, is_secret: true, changed_at: "2026-08-08T12:00:00Z" },
+    "django.env.SECRET_KEY": {
+      "answered": true,
+      "is_secret": true,
+      "changed_at": "2026-08-08T12:00:00Z"
+    }
   },
-  warnings: [
-    { code: "warning", detail: "Dev-fallback secret committed (prod provably rejects it)" },
+  "blocking": [
+    {
+      "code": "blockers_present",
+      "detail": "the readiness report has blockers; these must be fixed and the project re-scanned — except where a declaration is awaiting acceptance, which you clear by answering its confirm in this wizard, not by changing the repo",
+      "items": [
+        {
+          "id": "core.secret-scan",
+          "title": "Secrets in a declared tree — your acceptance is required",
+          "awaiting_acceptance": [
+            {
+              "id": "scanner.test_material.frontend-scripts-drill--a38574e34e643d90",
+              "prompt": "This repo declares `frontend/scripts/drill` as test material — \"red-team / QA drill scripts; deliberate fake credentials\". Accept that claim? Until you do, the heuristic secret findings under that path BLOCK the deploy like any other; accepting reports them without blocking. Published credential formats and .env files there block either way; refusing is recorded in the manifest, and editing the path or the reason brings this question back."
+            }
+          ]
+        },
+        {
+          "id": "django.debug-hardcoded",
+          "title": "DEBUG is hardcoded True in prod-reachable settings"
+        },
+        {
+          "id": "django.secret-key-literal",
+          "title": "Secret material is a literal in source"
+        }
+      ]
+    },
+    {
+      "code": "answers_missing",
+      "detail": "required questions are unanswered",
+      "items": [
+        {
+          "id": "scanner.test_material.frontend-scripts-drill--a38574e34e643d90",
+          "prompt": "This repo declares `frontend/scripts/drill` as test material — \"red-team / QA drill scripts; deliberate fake credentials\". Accept that claim? Until you do, the heuristic secret findings under that path BLOCK the deploy like any other; accepting reports them without blocking. Published credential formats and .env files there block either way; refusing is recorded in the manifest, and editing the path or the reason brings this question back."
+        },
+        {
+          "id": "site.domain",
+          "prompt": "Public domain for this site (e.g. app.example.com)"
+        }
+      ]
+    }
   ],
-  can_materialize: false,
-  // Verbatim from `preflight(site)` for a project carrying exactly these three blocker
-  // checks with the confirm unanswered. Note what it does NOT look like: a separate
-  // problem per blocker, or an `answers_missing`-only refusal. One `blockers_present`
-  // holds all three items, and only the declared one carries `awaiting_acceptance` —
-  // which is precisely what makes this the blocked case and not the answerable one.
-  blocking: [
-    { code: "blockers_present", detail: BLOCKERS_AWAITING_DETAIL,
-      items: [
-        { id: "django.secret-key-literal", title: "Secret material is a literal in source" },
-        { id: "django.debug-on", title: "DEBUG is on in prod settings" },
-        AWAITING_ITEM,
-      ] },
-    { code: "answers_missing", detail: ANSWERS_MISSING_DETAIL,
-      items: [
-        { id: DRILL_CONFIRM, prompt: DRILL_CONFIRM_PROMPT },
-        { id: "site.domain", prompt: "Public domain for this site (e.g. app.example.com)" },
-      ] },
+  "warnings": [
+    {
+      "id": "django.secret-dev-fallback",
+      "title": "Dev-fallback secret committed (prod provably rejects it)"
+    },
+    {
+      "id": "django.security-settings",
+      "title": "Security settings missing in prod"
+    }
   ],
+  "can_materialize": false
 };
 
 // ── project 3: qa-drills, where the declaration is the ONLY blocker ───────────
@@ -231,29 +392,81 @@ const DRILL_PROJECT = {
             latest_manifest_version: null, manifest_current: false }],
 };
 
+// Pasted from the same run. One blocker, and it is the declared tree — which is what
+// makes this the project where answering the confirm really does empty preflight.
 const DRILL_REPORT = {
-  scanned_at: "2026-08-11T18:05:00Z", modules: ["dockerfile"], summary: {},
-  blockers: [DECLARED_BLOCKER],
-  warnings: [
-    { id: "core.gitignore", tier: "warning", title: "No .gitignore",
-      detail: "The project has no .gitignore at its root.",
-      fix_hint: "Add a .gitignore covering at least .env and (for node projects) node_modules, so secrets and dependency trees never enter the repo." },
-    { id: "core.digest-pins", tier: "warning", title: "Base images not pinned by digest (§6.8)",
-      detail: "Dockerfile:1: FROM python:3.12 is not digest-pinned",
-      fix_hint: "Pin each FROM to an @sha256: digest so builds cannot silently change under a moving tag." },
-    { id: "core.exposure-auth", tier: "warning", title: "No authentication detected",
-      detail: "no authentication detected — Blocker if this site will be public with financial/personal data (wizard will ask)",
-      fix_hint: "If the site is meant to be public and handles financial or personal data, add authentication before deploying, or set exposure to mesh_only in the wizard." },
+  "scanned_at": "2026-08-11T18:05:00Z",
+  "modules": [
+    "dockerfile"
   ],
-  advice: [
-    { id: "core.tests-exist", tier: "advice", title: "No test files found",
-      detail: "No test_*.py / *_test.py / *.test.* / *.spec.* files or tests/ directory were found.",
-      fix_hint: "Even a small smoke-test suite lets the pipeline verify a build before it ships." },
-    { id: "core.healthz", tier: "advice", title: "No health endpoint detected",
-      detail: "No route containing health/healthz/ping was found. The deploy pipeline will fall back to probing an existing 200 route or a TCP connect (§E9) — deploys still work, with a weaker readiness signal.",
-      fix_hint: "Add a cheap /healthz route returning 200 for first-class readiness and warmup gating (§N2)." },
+  "summary": {
+    "blocker": 1,
+    "warning": 3,
+    "advice": 2,
+    "ok": 4,
+    "pending_sandbox": 0
+  },
+  "blockers": [
+    {
+      "id": "core.secret-scan",
+      "tier": "blocker",
+      "title": "Secrets in a declared tree — your acceptance is required",
+      "detail": "Downgrades claimed by deployhub.yaml: frontend/scripts/drill (\"red-team / QA drill scripts; deliberate fake credentials\", 1 findings)\n\nDeclared test material (downgrade requested by deployhub.yaml — these findings block until you accept it in the wizard):\nfrontend/scripts/drill/qa/03_regressions.mjs:1: [heuristic, declared: frontend/scripts/drill — \"red-team / QA drill scripts; deliberate fake credentials\"] hardcoded staff_password value",
+      "fix_hint": "Every blocking line here is a heuristic finding inside a tree this repo's deployhub.yaml declares as test material, so the deploy is refused for exactly one reason: nobody has accepted that claim yet. Read the reason and read the lines, then answer the wizard's confirm.\n\n[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.\n\nThe `Downgrades claimed` header above, and any `[heuristic, declared: …]` line, is this repo's own deployhub.yaml REQUESTING that those findings stop blocking. Asking is not getting: they block until you accept that declaration in the wizard. Accepting clears exactly those lines and lets this check pass. Your answer is recorded in the frozen manifest against the exact wording you were shown — edit the path or the reason and you will be asked again. Refusing leaves them blocking and records the refusal, so refusing is how you say the declaration is wrong.",
+      "execution": "static",
+      "acceptance": {
+        "questions": [
+          "scanner.test_material.frontend-scripts-drill--a38574e34e643d90"
+        ],
+        "blocking_only_declared": true
+      }
+    }
   ],
-  pending_sandbox: [],
+  "warnings": [
+    {
+      "id": "core.gitignore",
+      "tier": "warning",
+      "title": "No .gitignore",
+      "detail": "The project has no .gitignore at its root.",
+      "fix_hint": "Add a .gitignore covering at least .env and (for node projects) node_modules, so secrets and dependency trees never enter the repo.",
+      "execution": "static"
+    },
+    {
+      "id": "core.digest-pins",
+      "tier": "warning",
+      "title": "Base images not pinned by digest (§6.8)",
+      "detail": "Dockerfile:1: FROM python:3.12 is not digest-pinned",
+      "fix_hint": "Pin each FROM to an @sha256: digest so builds cannot silently change under a moving tag.",
+      "execution": "static"
+    },
+    {
+      "id": "core.exposure-auth",
+      "tier": "warning",
+      "title": "No authentication detected",
+      "detail": "no authentication detected — Blocker if this site will be public with financial/personal data (wizard will ask)",
+      "fix_hint": "If the site is meant to be public and handles financial or personal data, add authentication before deploying, or set exposure to mesh_only in the wizard.",
+      "execution": "static"
+    }
+  ],
+  "advice": [
+    {
+      "id": "core.tests-exist",
+      "tier": "advice",
+      "title": "No test files found",
+      "detail": "No test_*.py / *_test.py / *.test.* / *.spec.* files or tests/ directory were found.",
+      "fix_hint": "Even a small smoke-test suite lets the pipeline verify a build before it ships.",
+      "execution": "static"
+    },
+    {
+      "id": "core.healthz",
+      "tier": "advice",
+      "title": "No health endpoint detected",
+      "detail": "No route containing health/healthz/ping was found. The deploy pipeline will fall back to probing an existing 200 route or a TCP connect (§E9) — deploys still work, with a weaker readiness signal.",
+      "fix_hint": "Add a cheap /healthz route returning 200 for first-class readiness and warmup gating (§N2).",
+      "execution": "static"
+    }
+  ],
+  "pending_sandbox": []
 };
 
 const DRILL_QUESTIONS = [
