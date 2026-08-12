@@ -20,3 +20,12 @@ sensitive:
   # declared, one-line act, but the thing being weakened can be `core.secret-scan`, a
   # blocker, so the declaration is worth a human's eyes.
   - scanner/modules/**
+  # R7-9 (round 7): `scanner/declarations.py` holds the same authority as the modules
+  # above and matched no glob here. It decides which findings are ELIGIBLE for the
+  # `deployhub.yaml` downgrade — the validators, the manifest guard, the refusal rules —
+  # and since R7-14 it also derives the confirm id the acceptance gate opens for. Change
+  # either and `core.secret-scan` weakens, or the gate opens for a question the operator
+  # was never asked. Named as a file rather than broadening to `scanner/**` so this
+  # process edit stays the reviewable one-line act it is; `scanner/core.py` composes the
+  # suite and is arguably the next candidate, which is a decision for its own PR.
+  - scanner/declarations.py

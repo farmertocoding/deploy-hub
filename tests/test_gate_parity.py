@@ -595,3 +595,22 @@ def test_issue_f10_the_log_scrub_exemptions_and_scope_are_documented_in_the_make
             f"the Makefile comment above `log-scrub:` does not mention {phrase!r} — both "
             f"exemptions and everything outside $(PY_ROOTS) have to be written down where "
             f"the gate is. Comment block:\n{comment}")
+
+
+def test_issue_r7_9_the_declaration_module_is_a_sensitive_path():
+    """R7-9. `scanner/modules/**` is on the human-merge list because code there can
+    weaken `core.secret-scan`. `scanner/declarations.py` holds the same authority and
+    matched no glob on it: it decides which findings are eligible for the downgrade,
+    and it derives the confirm id the acceptance gate opens for — change either and the
+    gate opens for a question nobody was asked. Round 7 moved that id derivation into
+    this module (R7-14), so the omission got worse in the same round that found it.
+
+    Matched the way the guard matches, not by eye: a glob list is exactly the place a
+    path is "obviously covered" by a pattern that does not cover it."""
+    paths = yaml.safe_load(
+        (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
+    patterns = paths["sensitive"]
+    target = pathlib.PurePosixPath("scanner/declarations.py")
+    assert any(target.full_match(p) if hasattr(target, "full_match")
+               else target.match(p) for p in patterns), (
+        f"scanner/declarations.py is matched by no sensitive-path glob in {patterns}")
