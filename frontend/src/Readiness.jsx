@@ -4,10 +4,11 @@
 //
 // §F9 rules applied here: status is never color-only (every tier carries a symbol +
 // word); dark palette matches Phase 0; every data panel carries its staleness stamp.
-// §F8: the states (empty/loading/live/accepted/error/degraded) are reachable without a
-// backend via ?sim=<state> — see sim.js, and the contract test that pins the fixtures
-// to the generated zod schemas. `accepted` is the declaration-accepted state R8-1 was
-// invisible in: the report still reports the blocker, and the deploy may proceed.
+// §F8: the states (empty/loading/live/accepted/stale/error/degraded) are reachable
+// without a backend via ?sim=<state> — see sim.js, and the contract test that pins the
+// fixtures to the generated zod schemas. `accepted` is the declaration-accepted state
+// R8-1 was invisible in — the report still reports the blocker and the deploy may
+// proceed — and `stale` is the one that still refuses at the POST.
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
@@ -36,30 +37,31 @@ function Badge({ tier, n }) {
 // identical reasons. It used to be gated on the parent's `report.blockers`, which an
 // acceptance never rewrites: the button stayed disabled after the very answer that
 // unblocked the deploy, under a tooltip telling the operator to re-scan — the one
-// operation pinned to change nothing. Pinned by tests/materialize-gate.test.ts.
+// operation pinned to change nothing.
+//
+// THE TOOLTIP IS THE SERVER'S, ALWAYS (spec §4b). `preflight` already distinguishes the
+// two refusals in its own detail — it appends "except where a declaration is awaiting
+// acceptance, which you clear by answering its confirm in this wizard, not by changing
+// the repo" when a pending acceptance is among the blockers — and the first remedy
+// discarded that for a string typed here, which is R8-1's own shape one layer down.
+// Nothing in this file authors refusal copy; tests/materialize-gate.test.ts greps for
+// it. The label is the client's only word, because it is the one thing the payload does
+// not say in two syllables and it is what the eye reads before the tooltip.
+//
+// `hard` is what no answer can clear: `blockers_present` items with no
+// `awaiting_acceptance` list. An item carrying one is waiting on this very wizard.
 export function materializeGate(state) {
   const blocking = state?.blocking || [];
-  const codes = blocking.map((p) => p.code);
   if (state?.can_materialize)
     return { disabled: false, label: "Materialize manifest", title: "" };
-  if (codes.includes("blockers_present"))
-    return {
-      disabled: true, label: "⛔ Blocked",
-      title: "Blockers must be fixed and rescanned first — materialization will refuse.",
-    };
-  if (codes.length && codes.every((c) => c === "answers_missing"))
-    return {
-      disabled: true, label: "Answer required",
-      // Not "fix and rescan": a declaration confirm is cleared by answering it here,
-      // and a re-scan of an unchanged tree produces the identical report forever.
-      title: "Some required questions are unanswered — including any declaration you " +
-        "must accept or refuse. Answering them here is what clears them; re-scanning " +
-        "will not.",
-    };
-  return {
-    disabled: true, label: "⛔ Blocked",
-    title: blocking.map((p) => p.detail).filter(Boolean).join(" · "),
-  };
+  const title = blocking.map((p) => p.detail).filter(Boolean).join(" · ");
+  const blockerProblems = blocking.filter((p) => p.code === "blockers_present");
+  const hard = blockerProblems
+    .flatMap((p) => p.items || [])
+    .filter((item) => !(item.awaiting_acceptance || []).length);
+  if (blockerProblems.length && !hard.length)
+    return { disabled: true, label: "Answer required", title };
+  return { disabled: true, label: "⛔ Blocked", title };
 }
 
 // Round-7 carried note 5: a blocker-tier check that an ANSWER clears has to say so on

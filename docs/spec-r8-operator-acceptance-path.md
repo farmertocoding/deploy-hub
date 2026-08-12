@@ -208,6 +208,109 @@ is judged by is the §4 anti-gaming case.
 - No `hasBlockers` prop remains anywhere.
 - One commit per finding where the split is honest; `docs/` spec included.
 
+## 4b. SPEC DEFECT — §2.1's table was wrong, and the correction is the finding
+
+**Filed by the reviewing session, confirmed against `wizard/materialize.py::preflight`
+by the spec's author. This supersedes §2.1's table and parts of §2.3.**
+
+§2.1 assumed an acceptance-pending blocker arrives as `answers_missing`-only. It does
+not. `preflight` emits **`blockers_present`** for it, with each pending check carrying an
+`awaiting_acceptance` list — *and then appends the truthful clause to its own detail*:
+
+> "the readiness report has blockers; these must be fixed and the project re-scanned —
+> **except where a declaration is awaiting acceptance, which you clear by answering its
+> confirm in this wizard, not by changing the repo**"
+
+with this comment sitting directly above it in the server source:
+
+> `# §3: name what is being waited on. "Fix them and re-scan" is the wrong instruction`
+> `# for this one — there is nothing in the repo to fix and the re-scan produces the`
+> `# identical report forever.`
+
+**So the correct copy already existed, in the payload, written by someone who knew
+exactly why the old tooltip was false — and the client threw it away for a hardcoded
+string.** That is R8-1's own shape one layer down, and it makes the rule for this fix
+plain:
+
+> **Never hardcode a refusal string the server already sends.**
+
+Under the original table, the "Answer required" branch keyed on `answers_missing` and is
+therefore **unreachable on any real server**; the built branch still shows
+"⛔ Blocked / Blockers must be fixed and rescanned first" in exactly the case R8-1 exists
+to remove, and `?sim=live` passed only because the fixture carried a `blocking` shape no
+server sends. My error, not the Implementer's — they flagged the conflict and I had told
+them the wrong thing.
+
+### 4b.1 The gate, restated (replaces §2.1's table)
+
+From `state.blocking`, let `hard` = the `blockers_present` items that carry **no**
+`awaiting_acceptance` key.
+
+| condition | `disabled` | label | `title` |
+|---|---|---|---|
+| `state.can_materialize` | false | `Materialize manifest` | `""` |
+| a `blockers_present` entry exists and `hard.length === 0` | true | `Answer required` | the **server's own** joined `detail` of every `state.blocking` entry |
+| otherwise | true | `⛔ Blocked` | the **server's own** joined `detail` of every `state.blocking` entry |
+
+Rows two and three now differ only in the label; both take their tooltip from the
+payload. No refusal string is authored in the client — delete the two hardcoded ones.
+The label split still earns its keep: it is the one thing the server does not say in a
+word, and it is what a scanning eye reads before the tooltip.
+
+### 4b.2 Fixtures rebuilt from real output (replaces §2.3b/c, keeps §2.3a/d)
+
+The reviewer measured that **both** `?sim=live`'s and `?sim=accepted`'s wizard `blocking`
+are shapes no server sends for `MESSY_REPORT` — `preflight` keeps `blockers_present` for
+the two undeclared `django.*` blockers no matter what is answered. §2.3c's `accepted`
+precedent was the same fiction one step earlier. Both are wrong; do not preserve either.
+
+- Add a **third fixture project** whose *only* blocker is the acceptance-pending
+  `core.secret-scan` — `tiers: { blocker: 1, … }`, one site. That project is what makes
+  the pending state and the accepted state both real: declared-only + confirm unanswered
+  → `blockers_present` with `awaiting_acceptance`; confirm answered → `preflight == []`.
+- Restore `MESSY_PROJECT`'s wizard `blocking` to what `preflight` actually returns for
+  its report, with the acceptance-pending `core.secret-scan` blocker among its
+  `blockers_present` items. It is then the honest **mixed** case — one blocker an answer
+  clears, two it never will — and it exercises row three.
+- Every `blocking` entry, and every `detail` in it, is **copied from a real `preflight`
+  run**, not written. Put the command that produced it in a comment above the fixture.
+- Delete the `sim.js` comment that explains the held-out `blockers_present`. It was
+  candid about the shallower half of a fiction that no longer exists.
+
+### 4b.3 The 409 becomes reachable again (Finding 3)
+
+On `ffec190` the clean project's enabled button reached `REFUSAL_409`; on the branch no
+sim state can fire the POST, so §2.3d's own edit is reviewable nowhere — R8-4's class,
+reintroduced by the change closing R8-4. Model the one state that really produces a
+client-allowed 409: **stale wizard state** — the GET said `can_materialize`, a re-scan
+added a blocker before the POST. Add sim state `stale`: wizard says go, manifest POST
+returns `REFUSAL_409`, whose strings are copied from a real `preflight` (the current
+`blockers_present.detail` in that fixture is not one the server sends).
+
+### 4b.4 Additional pins
+
+- `sim-contract.test.ts`: every blocker-tier check carrying `acceptance` in a state's
+  readiness report must appear in that state's wizard `blocking` as a `blockers_present`
+  item with a matching `awaiting_acceptance` — and vice versa. This is the alarm that
+  would have caught the fiction, and it must go red when either side is edited alone.
+- `materialize-gate.test.ts`: a case built from the **real** pending payload
+  (`blockers_present` + `awaiting_acceptance`, no `answers_missing`) asserting
+  `Answer required` and a tooltip containing the server's "not by changing the repo"
+  clause. **This case fails on the branch as built** — it is the regression test for this
+  spec defect.
+- A case asserting the mixed shape (one `awaiting_acceptance` item, one without) gives
+  `⛔ Blocked`.
+- No string literal in `Readiness.jsx` duplicates a `detail` the server sends; grep for
+  "rescanned" and "re-scanned" in `frontend/src` and expect nothing.
+
+### 4b.5 Ruled: the `?sim=accepted` 201 handler stays
+
+The Implementer added it beyond the spec so the enabled button does not 404 on a
+reviewer's click. The reviewer judged it required for coherence and verified the body is
+a real materialize output. Agreed — keep it, on the new fixture project.
+
+---
+
 ## 5. What the reviewing session should attack
 
 - Does `materializeGate` actually get used by the rendered button, or does JSX still
