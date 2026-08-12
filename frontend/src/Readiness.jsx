@@ -4,9 +4,10 @@
 //
 // §F9 rules applied here: status is never color-only (every tier carries a symbol +
 // word); dark palette matches Phase 0; every data panel carries its staleness stamp.
-// §F8: the five states (empty/loading/live/error/degraded) are reachable without a
+// §F8: the states (empty/loading/live/accepted/error/degraded) are reachable without a
 // backend via ?sim=<state> — see sim.js, and the contract test that pins the fixtures
-// to the generated zod schemas.
+// to the generated zod schemas. `accepted` is the declaration-accepted state R8-1 was
+// invisible in: the report still reports the blocker, and the deploy may proceed.
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
@@ -59,6 +60,18 @@ export function materializeGate(state) {
     disabled: true, label: "⛔ Blocked",
     title: blocking.map((p) => p.detail).filter(Boolean).join(" · "),
   };
+}
+
+// Round-7 carried note 5: a blocker-tier check that an ANSWER clears has to say so on
+// its own card, or the screen reads as a red count next to an enabled button with
+// nothing connecting them. Text, not colour (§F5).
+function acceptanceHint(acceptance) {
+  const n = (acceptance.questions || []).length;
+  if (acceptance.blocking_only_declared === true)
+    return `Awaiting your acceptance — answer the declaration question${n === 1 ? "" : "s"}` +
+      " in the site configuration below to clear this. Re-scanning will not.";
+  return "This check also carries findings that are not declared, so accepting the " +
+    "declarations will not clear it.";
 }
 
 function Stamp({ at }) {
@@ -166,6 +179,7 @@ function ReadinessPanel({ projectId, project, onChanged }) {
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
               <summary>{c.title}</summary>
               {c.detail && <p>{c.detail}</p>}
+              {c.acceptance && <p>{acceptanceHint(c.acceptance)}</p>}
               {c.fix_hint && <p style={{ color: "#8b949e" }}>Fix: {c.fix_hint}</p>}
             </details>
           ))}

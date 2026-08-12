@@ -1,8 +1,8 @@
 // Shared fetch wrapper (extracted from App.jsx, gaining a method argument for the
 // wizard's PATCH) + the §F8 simulation harness.
 //
-// ?sim=empty|loading|live|degraded|error serves canned responses instead of the
-// network, so every review round can walk all five §F8 states with no backend at
+// ?sim=empty|loading|live|accepted|degraded|error serves canned responses instead of
+// the network, so every review round can walk every §F8 state with no backend at
 // all. The fixtures live in sim.js and are pinned to the GENERATED zod schemas by
 // frontend/tests/sim-contract.test.ts — a sim state that drifts from the real API
 // shape fails the build rather than silently reviewing a fiction.
