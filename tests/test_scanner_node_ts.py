@@ -679,3 +679,30 @@ def test_wizard_answers_flow_into_the_manifest_fragment():
         FIXTURE, answers={"node-ts.exposure": "mesh_only"})
     assert fragment["exposure"] == "mesh_only"
     assert fragment["deploy_strategy"] == "recreate"
+
+
+# ── out of round-7 scope, fixed on the round-7 branch ──────────────────────────
+
+def test_a_symlinked_directory_loop_does_not_hang_the_walk(tmp_path):
+    """`_iter_source_files` followed symlinked directories, so one link pointing at an
+    ancestor was an infinite walk — and it runs during MODULE DETECTION, before any
+    check, so an operator scanning a repo with one symlink got a scan that never
+    returned. Found by the SRE reviewer while testing loops; not a round-7 finding (this
+    function is unchanged in the round's diff), fixed here because it is a real hang.
+
+    `fallbacks._iter_files` already had the treatment — prune symlinked directories,
+    `resolve()` into a `seen` set — and this is that treatment, not a second one.
+
+    The consumption is bounded on purpose: `islice` is what makes the RED run of this
+    test finish. Unbounded, the failing case does not fail, it hangs, and a test that
+    hangs is not evidence of anything."""
+    import itertools
+
+    root = tmp_path / "svc"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "index.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    (root / "src" / "loop").symlink_to(root / "src", target_is_directory=True)
+    (root / "sibling").symlink_to(root, target_is_directory=True)
+
+    found = list(itertools.islice(node_ts._iter_source_files(root), 50))
+    assert [p.relative_to(root).as_posix() for p in found] == ["src/index.ts"], found

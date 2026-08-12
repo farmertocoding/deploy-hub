@@ -72,7 +72,22 @@ def _load_tsconfig(path):
 
 
 def _iter_source_files(base):
+    """Yield the module's source files under `base`.
+
+    OUT OF ROUND-7 SCOPE, fixed on the round-7 branch: this followed symlinked
+    directories, so a repo containing one link back at an ancestor was an infinite walk
+    — and it runs during MODULE DETECTION, before any check, so the operator's scan never
+    returned at all. Found by the SRE reviewer while testing loops.
+
+    `fallbacks._iter_files` already had the treatment and this is that treatment rather
+    than a second one: a symlinked DIRECTORY is not followed (a link out of the tree is
+    not the project's source and a link back into it is a loop), and `resolve()` into a
+    `seen` set catches the loops that a hard link or a `..`-shaped path can still make.
+    Symlinked FILES are still read, which is the same distinction `fallbacks` draws for
+    the same reason: a committed symlinked config file is real source.
+    """
     stack = [Path(base)]
+    seen = set()
     while stack:
         directory = stack.pop()
         try:
@@ -80,9 +95,19 @@ def _iter_source_files(base):
         except OSError:
             continue
         for path in entries:
+            if path.is_symlink() and path.is_dir():
+                continue
             if path.is_dir():
-                if path.name not in _SKIP_DIRS and not path.name.startswith("."):
-                    stack.append(path)
+                if path.name in _SKIP_DIRS or path.name.startswith("."):
+                    continue
+                try:
+                    key = path.resolve()
+                except OSError:
+                    continue
+                if key in seen:
+                    continue
+                seen.add(key)
+                stack.append(path)
             elif path.is_file() and path.suffix in _SOURCE_SUFFIXES:
                 yield path
 
