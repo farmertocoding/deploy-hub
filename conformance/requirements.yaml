@@ -232,9 +232,9 @@ requirements:
   - id: SCAN-DECLARED-TEST-MATERIAL
     phase: 1
     verify: test
-    source: spec-declared-test-material.md §What a declaration does — and does not — change
-    text_hash: sha256:5430d49de73ef1903240287448dc652edad14abad5a6282ec8b715dbfdeb9803
-    text: A repo declares drill/QA trees in deployhub.yaml (scanner.test_material, each entry a path plus a mandatory reason); only core.secret-scan's heuristic findings under a declared path move to a third, non-blocking bucket labelled with the path and the verbatim reason, never merged with auto-detected test material, and the report always shows the claim in a header line naming the declaration and its finding count — even when that count is zero.
+    source: spec-declared-test-material.md §What a declaration does — and does not — change / spec-r7-enforce-declaration-acceptance.md §1
+    text_hash: sha256:b8b41af1e4fc3233c050a32e559a1c24dfe5be3da9358c2adabc8996ba99a0e2
+    text: A repo declares drill/QA trees in deployhub.yaml (scanner.test_material, each entry a path plus a mandatory reason); only core.secret-scan's heuristic findings under a declared path move to a third bucket labelled with the path and the verbatim reason, never merged with auto-detected test material; those findings still block until the operator accepts that declaration in the wizard, and the report always shows the claim in a header line naming the declaration and its finding count — even when that count is zero.
   - id: SCAN-DECLARED-GUARDS
     phase: 1
     verify: test

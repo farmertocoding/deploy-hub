@@ -822,3 +822,26 @@ def test_issue_f7_pytest_addopts_cannot_forge_a_full_run(tmp_path):
     # A positional target on the command line was already caught; keep it caught.
     positional, _ = run_child_pytest(tmp_path / "pos", "test_child.py")
     assert positional["full_run"] is False
+
+
+def test_issue_r7_registry_text_matches_what_the_declaration_tests_prove():
+    """R7 registry correction. `SCAN-DECLARED-TEST-MATERIAL`'s `text:` described declared
+    findings as moving to a "third, non-blocking bucket". Round 7's veto made that false
+    — they block until the operator accepts the claim — and a registry entry that states
+    the pre-veto behaviour is the requirement asserting the very thing the round removed.
+
+    The `text:` is the sentence a reader is handed instead of the code; when it and the
+    tests disagree, the tests are what ships. Checked here rather than by eye because the
+    registry is not otherwise read by any test."""
+    registry = yaml.safe_load(
+        (REPO / "conformance/requirements.yaml").read_text(encoding="utf-8"))
+    req = {r["id"]: r for r in registry["requirements"]}["SCAN-DECLARED-TEST-MATERIAL"]
+
+    assert "non-blocking" not in req["text"], req["text"]
+    assert "third bucket" in req["text"] or "third," in req["text"], req["text"]
+    assert "accept" in req["text"], (
+        "the requirement does not say that the downgrade waits on the operator's "
+        "acceptance, which is the whole of the round-7 correction")
+    # And the source citation has to reach the spec that RULED it, or the pinned
+    # text_hash watches a section that says the opposite of the requirement.
+    assert "spec-r7-enforce-declaration-acceptance.md" in req["source"], req["source"]
