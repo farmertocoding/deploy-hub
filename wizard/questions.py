@@ -36,6 +36,22 @@ ALIASES = {
 
 REQUIRED_IDS = {"site.domain"}
 
+# Round 7 (R7-1). Every question under this prefix is a declaration confirm: the
+# scanned repo asked, in its own `deployhub.yaml`, for heuristic secret findings under
+# a tree it named to stop blocking, and this is the answer that grants or refuses it.
+#
+# It is required, and `REQUIRED_IDS` could never have said so: these ids carry the
+# declared PATH, so they are per-project and a static set cannot name them. The confirm
+# was therefore optional by construction — unanswered meant "not required", the
+# downgrade had already been applied at scan time regardless, and D-012's "the operator
+# confirms it" was a question with no consequence attached to either answer.
+#
+# `missing_required`'s "module questions are advisory in v1" is still right for a
+# module's env var (a module cannot know which the operator supplies at the target) and
+# exactly wrong for this one: nobody but the operator can supply it, and the deploy
+# hangs on it.
+DECLARATION_PREFIX = "scanner.test_material."
+
 
 class UnknownQuestion(ValidationError):
     pass
@@ -160,8 +176,28 @@ def validate_answers(project, incoming: dict):
     return cleaned
 
 
+def declaration_question_ids(project):
+    """Every declaration confirm this project's scan raised, in id order.
+
+    Read off the project's own question set rather than kept in a second list: the set
+    is what the operator is shown, so an id that can be required here is by construction
+    an id they were asked. A project with no `deployhub.yaml` has none of these and sees
+    the wizard it saw before round 7.
+    """
+    return sorted(q.id for q in question_set(project)
+                  if q.id.startswith(DECLARATION_PREFIX))
+
+
 def missing_required(project, answered_ids):
-    """Required questions still unanswered. Domain is required; module questions are
-    advisory in v1 because a module cannot know which of its env vars the operator
-    intends to supply at the target instead."""
-    return sorted(REQUIRED_IDS - set(answered_ids))
+    """Required questions still unanswered. Domain is required, and so is every
+    declaration confirm (see DECLARATION_PREFIX); other module questions are advisory
+    in v1 because a module cannot know which of its env vars the operator intends to
+    supply at the target instead.
+
+    ANSWERED, not accepted: `False` satisfies this. Refusing a declaration is an answer,
+    and it is a different refusal from never having been asked — the first keeps the
+    findings blocking and is recorded in the manifest, the second means the operator
+    never saw the claim at all.
+    """
+    required = REQUIRED_IDS | set(declaration_question_ids(project))
+    return sorted(required - set(answered_ids))

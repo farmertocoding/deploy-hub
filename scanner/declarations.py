@@ -22,9 +22,18 @@ So the claim lives in the scanned repo, in a file that shows up in that repo's d
 its review, the report always prints the claim, and the wizard makes accepting it the
 operator's logged act.
 
-This module is PARSING AND VALIDATION ONLY. It changes no tier and reads no source
-file: `fallbacks._check_secret_scan` decides what a declaration does, and does it to one
-axis (the N6 rule — scope the axis, never the walk).
+This module is PARSING AND VALIDATION ONLY plus the confirm it raises. It changes no
+tier and reads no source file: `fallbacks._check_secret_scan` decides what a declaration
+does, and does it to one axis (the N6 rule — scope the axis, never the walk).
+
+ROUND 7 (R7-1), and it is the reason the confirm now lives here rather than in
+`scanner/core.py`: a declaration is a REQUEST, and the confirm is the only thing that
+grants it. Its id, its prompt copy and the `_env_name` defense behind its slug scheme
+are rules about a declaration, so they belong beside the rules that accepted it — D-010
+made core the composer, not the author of every string in the report. `core.scan` calls
+`confirm_questions` and extends; `fallbacks` calls `confirm_question_id` so the id the
+gate opens for is derived once, in one place, and cannot drift from the id the operator
+was actually asked about.
 """
 import os
 import re
@@ -32,6 +41,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import yaml
+
+from scanner.core import WizardQuestion
 
 DECLARATION_FILE = "deployhub.yaml"
 
@@ -195,6 +206,56 @@ class Declarations:
 
 
 NONE = Declarations()
+
+
+# ── the confirm: the operator's half of the bargain (R7-14) ────────────────────
+
+CONFIRM_ID_PREFIX = "scanner.test_material."
+
+
+def confirm_question_id(index, path):
+    """The confirm id for the `index`-th (1-based) accepted declaration of `path`.
+
+    The id carries an INDEX and a slug, never the raw path, for one specific reason:
+    `wizard.materialize._env_name` turns any question id containing `.env.` into an
+    environment variable name, and a declared path is text the scanned repo controls —
+    `docker/.env.d` would otherwise turn a confirm into an env var. The slug is
+    non-alphanumerics collapsed to `-`, so it can hold no dot at all; the index keeps
+    two paths that slug alike apart, and the scan draft's `declared_test_material` list
+    is in the same order, so an answer is always resolvable to its path.
+
+    Round 7 made this a public function because three call sites now need the SAME id:
+    the question the wizard asks, the `acceptance.questions` a blocker check publishes,
+    and the manifest record `materialize` builds from the answer. Recomputed
+    independently they would agree until the day they did not, and the day they did not
+    the gate would open for a question nobody was asked.
+    """
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", path).strip("-").lower()
+    return f"{CONFIRM_ID_PREFIX}{index}.{slug}"
+
+
+def confirm_questions(declared):
+    """One confirm per accepted declaration, in declaration order.
+
+    `default=None` is load-bearing and R7-11 is why it is now pinned by a test: an
+    unanswered claim is not an accepted one, the whole acceptance gate rests on that,
+    and a client that submits the defaults it was handed would pre-accept every
+    declaration in the file if this ever became `True`.
+    """
+    return [
+        WizardQuestion(
+            id=confirm_question_id(index, declaration.path),
+            kind="bool",
+            default=None,
+            prompt=(f"This repo declares `{declaration.path}` as test material — "
+                    f'"{declaration.reason}". Accept that claim? Until you do, the '
+                    f"heuristic secret findings under that path BLOCK the deploy like "
+                    f"any other; accepting reports them without blocking. Published "
+                    f"credential formats and .env files there block either way, and "
+                    f"refusing is recorded in the manifest."),
+        )
+        for index, declaration in enumerate(declared.accepted, 1)
+    ]
 
 
 def load(root):

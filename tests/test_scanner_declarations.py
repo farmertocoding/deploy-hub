@@ -30,6 +30,13 @@ GHP_TOKEN = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
 
 DRILL_REASON = "red-team / QA drill scripts; deliberate fake credentials"
 
+# Round 7 (R7-1). The section header stopped saying "not blocking", because until the
+# operator accepts the claim it IS blocking — the old wording asserted an outcome the
+# scanner cannot know, since the scanner has no answers.
+DECLARED_SECTION_HEADER = (
+    "Declared test material (downgrade requested by deployhub.yaml — blocks until you "
+    "accept it in the wizard):")
+
 
 def _tree(tmp_path, files, name="proj"):
     root = tmp_path / name
@@ -68,14 +75,19 @@ def _secret_scan(root):
 
 @pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_declared_tree_downgrades_its_heuristic_findings_with_the_label(tmp_path):
-    """The measured case. Two deliberate credentials in a declared drill tree stop
-    blocking, and every one of them still appears — with the path and the repo's own
-    words attached, so the reader sees who claimed what."""
+    """The measured case. Two deliberate credentials in a declared drill tree move into
+    the third bucket, and every one of them still appears — with the path and the repo's
+    own words attached, so the reader sees who claimed what.
+
+    ROUND 7 (R7-1) CHANGED THE TIER THIS ASSERTS. The routing is the same; what the
+    routing costs is not. Until the operator accepts the declaration these findings
+    still block, so the tier stays `blocker` — see the round-7 section below.
+    """
     files = dict(_drill_files())
     files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
     result = _secret_scan(_tree(tmp_path, files))
 
-    assert result.tier == "warning", result.detail
+    assert result.tier == "blocker", result.detail
     label = f'[heuristic, declared: frontend/scripts/drill — "{DRILL_REASON}"]'
     assert result.detail.count(label) == 2, result.detail
     for rel in ("frontend/scripts/drill/qa/03_regressions.mjs:1",
@@ -118,10 +130,9 @@ def test_declared_material_never_merges_with_auto_detected_test_material(tmp_pat
     files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
     result = _secret_scan(_tree(tmp_path, files))
 
-    assert result.tier == "warning", result.detail
+    assert result.tier == "blocker", result.detail
     assert "Also in test material (not blocking):" in result.detail
-    assert ("Declared test material (downgrade claimed by deployhub.yaml, not "
-            "blocking):") in result.detail
+    assert DECLARED_SECTION_HEADER in result.detail
     auto_section = result.detail.split("Also in test material (not blocking):", 1)[1]
     auto_lines = auto_section.split("Declared test material", 1)[0]
     assert "tests/test_login.py:1" in auto_lines
@@ -451,7 +462,8 @@ def test_a_reason_longer_than_the_cap_is_a_malformed_entry(tmp_path):
     accepted = _tree(tmp_path, dict(_drill_files(), **{
         "deployhub.yaml": _declaration("frontend/scripts/drill", at_cap)}),
         name="at_cap")
-    assert _secret_scan(accepted).tier == "warning", _secret_scan(accepted).detail
+    assert _secret_scan(accepted).tier == "blocker", _secret_scan(accepted).detail
+    assert "Downgrades claimed" in _secret_scan(accepted).detail
 
     refused = _tree(tmp_path, dict(_drill_files(), **{
         "deployhub.yaml": _declaration("frontend/scripts/drill", over_cap)}),
@@ -634,7 +646,7 @@ def test_an_ordinary_non_ascii_reason_is_accepted_end_to_end(tmp_path):
     files["deployhub.yaml"] = _declaration("frontend/scripts/drill", CHINESE_REASON)
     result = _secret_scan(_tree(tmp_path, files))
 
-    assert result.tier == "warning", result.detail
+    assert result.tier == "blocker", result.detail
     assert (f"Downgrades claimed by deployhub.yaml: frontend/scripts/drill "
             f'("{CHINESE_REASON}", 2 findings)') in result.detail
     assert f'declared: frontend/scripts/drill — "{CHINESE_REASON}"' in result.detail
@@ -662,3 +674,253 @@ def test_the_json_cli_emits_the_reason_raw_so_the_validator_is_the_guarantee(
     out = capsys.readouterr().out
     assert CHINESE_REASON in out, "the CLI stopped emitting raw non-ASCII"
     assert "\\u2028" not in out and LSEP not in out
+
+
+# ── round 7: no acceptance, no downgrade (R7-1 veto) ───────────────────────────
+#
+# What three reviewers found independently: D-012's trust model had three controls and
+# only one of them existed. The claim was printed (control 1, real). The confirm was
+# raised (control 2, cosmetic — not in REQUIRED_IDS, answer written to `module_answers`
+# and read by nothing, refusing it changed nothing). The manifest recorded the
+# acceptance (control 3, false — populated straight from the scan draft, so it asserted
+# an acceptance that may never have happened).
+#
+# Joseph's ruling, 2026-08-12: NO ACCEPTANCE, NO DOWNGRADE. A declaration is a REQUEST.
+# The tests below are the two halves of that: the scanner reports the request and keeps
+# the findings blocking (here), and the wizard owns the acceptance
+# (tests/test_wizard_declaration_acceptance.py).
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1_a_declared_only_repo_blocks_until_the_operator_accepts(tmp_path):
+    """The veto, at its narrowest. The repo's only blocking evidence is heuristic lines
+    under a tree it declared itself, and before round 7 that was enough to make the
+    scan report `warning` — a repo downgrading its own blockers with a file it writes.
+    The findings still route to the third bucket; the tier no longer drops for them.
+    """
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    assert result.title == "Secrets in a declared tree — your acceptance is required"
+    # Still the third bucket, still labelled, still not merged with anything.
+    assert result.detail.count("[heuristic, declared: frontend/scripts/drill") == 2
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1_the_section_header_no_longer_asserts_an_outcome(tmp_path):
+    """`not blocking` was a claim about the operator's answer, made by the one component
+    that has no answers to read. What the scanner can say honestly is what was asked
+    for and what would clear it."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert DECLARED_SECTION_HEADER in result.detail
+    assert "Declared test material (downgrade claimed by deployhub.yaml, not " \
+           "blocking):" not in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1_the_acceptance_contract_names_the_confirms_that_clear_it(tmp_path):
+    """§2's structured field, so preflight never parses this prose to decide a gate.
+
+    `questions` is exactly the confirm ids whose `True` clears what this check
+    downgraded, and it is the SAME id the wizard raises — one derivation, in
+    `declarations`, or the gate opens for a question nobody was asked.
+    """
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    check = [c for c in report["checks"] if c["id"] == "core.secret-scan"][0]
+    assert check["acceptance"] == {
+        "questions": ["scanner.test_material.1.frontend-scripts-drill"],
+        "blocking_only_declared": True,
+    }
+    asked = [q["id"] for q in report["wizard_questions"]
+             if q["id"].startswith("scanner.test_material.")]
+    assert asked == check["acceptance"]["questions"], (
+        "the ids the gate opens for and the ids the wizard asks about diverged")
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_1_a_real_blocker_beside_a_declaration_is_never_only_declared(tmp_path):
+    """§2/§3's guard: acceptance may clear what the declaration downgraded and nothing
+    else. A `[proof]` line inside the declared tree is the case that matters — the tree
+    is the same tree, the operator's answer is the same answer, and the deploy must
+    stay refused however they answer it."""
+    files = dict(_drill_files())
+    files["frontend/scripts/drill/real.mjs"] = f'const t = "{GHP_TOKEN}";\n'
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    check = [c for c in report["checks"] if c["id"] == "core.secret-scan"][0]
+    assert check["tier"] == "blocker"
+    assert check["title"] == "Committed secrets detected"
+    assert check["acceptance"]["blocking_only_declared"] is False
+    assert check["acceptance"]["questions"] == [
+        "scanner.test_material.1.frontend-scripts-drill"]
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1_a_declaration_that_downgraded_nothing_is_not_a_gate_key(tmp_path):
+    """`questions` is "what would clear what this check downgraded", not "every
+    declaration in the file". A second declaration quieting nothing must not become
+    another id that has to be answered `True` before the first one's findings clear —
+    and, the direction that matters, must not become an id whose `True` clears
+    findings it never touched."""
+    files = dict(_drill_files())
+    files["frontend/scripts/quiet/readme.md"] = "nothing to see\n"
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n"
+        f"    - path: frontend/scripts/quiet\n      reason: {DRILL_REASON}\n")
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.acceptance["questions"] == [
+        "scanner.test_material.1.frontend-scripts-drill"]
+    # The claim is still printed for both — a declaration that quiets nothing today is
+    # still a live assertion about the tree (D-012, unchanged by round 7).
+    assert result.detail.count("Downgrades claimed by deployhub.yaml") == 2
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_1_a_report_with_no_declaration_carries_no_acceptance_key(tmp_path):
+    """The five recorded demo artifacts, again. `acceptance` is omitted from
+    `as_dict()` rather than serialized as `null`, so every check of every repo that
+    declares nothing is byte-identical to the records taken before it existed."""
+    files = dict(_drill_files())
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    for check in report["checks"]:
+        assert "acceptance" not in check, check
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_8_the_blocker_path_explains_the_declared_lines_at_all(tmp_path):
+    """R7-8. On SATURDAYS_site — the repo that motivated the whole feature — the
+    declaration legend lived only on the warning-tier fix_hint, and that repo has two
+    `.env` files, so it reports at blocker tier and always did. The operator therefore
+    read `[heuristic, declared: …]` lines and a `Downgrades claimed` header with
+    nothing anywhere telling them what either meant.
+    """
+    files = dict(_drill_files())
+    files[".env"] = "API_KEY=x\n"                       # a real blocker beside the claim
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed by deployhub.yaml" in result.detail
+    assert declarations.DECLARATION_FILE in result.fix_hint, (
+        "the blocker fix_hint explains [proof] and [heuristic] and says nothing about "
+        "the third label the reader is looking at")
+    assert "accept" in result.fix_hint and "refus" in result.fix_hint
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_8_the_fix_hint_no_longer_claims_a_refusal_it_cannot_honour(tmp_path):
+    """The false sentence: "refusing it is how you say the declaration is wrong", on a
+    confirm whose answer was read by no code. It is true after this change, so it may
+    be said — but it has to be said about the mechanism that now exists, and the
+    warning tier is no longer where declared findings land at all."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    blocker = _secret_scan(_tree(tmp_path, files))
+    assert "refusing it is how you say the declaration is wrong" not in blocker.fix_hint
+
+    warning = _secret_scan(_tree(tmp_path, {
+        "tests/test_login.py": f'password = "{FAKE_HIGH_ENTROPY}"\n',
+        "src/app.py": "print('hello')\n",
+    }, name="autoonly"))
+    assert warning.tier == "warning", warning.detail
+    assert "declared" not in warning.fix_hint, (
+        "the warning tier still describes a declared bucket that can no longer reach "
+        "it — declared findings block now")
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_11_the_confirm_question_has_no_default(tmp_path):
+    """R7-11. "An unanswered claim is not an accepted one" is the property the whole
+    acceptance gate rests on, it is written down in the D-012 record, and until now it
+    was pinned by nothing — mutating `default=None` to `default=True` survived the
+    entire suite, and would have pre-answered every confirm `True` in any client that
+    submits the defaults it was handed."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    confirms = [q for q in report["wizard_questions"]
+                if q["id"].startswith("scanner.test_material.")]
+    assert confirms, report["wizard_questions"]
+    for question in confirms:
+        assert question["kind"] == "bool"
+        assert question["default"] is None, (
+            "a declaration confirm arrived pre-answered")
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_13_the_declaration_file_is_read_exactly_once_per_scan(
+        tmp_path, monkeypatch):
+    """R7-13. `deployhub.yaml` was parsed twice — once by `common_checks` for the
+    check, once by `scan` for the questions and the manifest — under a comment claiming
+    "parsed once; two readers below". It is a file the SCANNED REPO controls, so two
+    reads can disagree: a write landing between them makes the check downgrade findings
+    the confirm never mentions, or raises a confirm for a tree nothing was downgraded
+    in. One read, threaded through."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    root = _tree(tmp_path, files)
+
+    calls = []
+    real_load = declarations.load
+    monkeypatch.setattr(declarations, "load",
+                        lambda r: (calls.append(str(r)), real_load(r))[1])
+    core.scan(root)
+    assert len(calls) == 1, f"deployhub.yaml was parsed {len(calls)} times: {calls}"
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_14_the_confirm_questions_are_built_by_the_declarations_module(
+        tmp_path, monkeypatch):
+    """R7-14. D-010 made `scanner/core.py` the COMPOSER; the prompt copy, the slug
+    scheme and the `_env_name` defense that motivates it are validation rules about a
+    declaration, and they belong beside the ones that accepted it. `scan` calls and
+    extends."""
+    import inspect
+
+    assert "scanner.test_material" not in inspect.getsource(core), (
+        "the confirm id scheme is back in the composer")
+
+    sentinel = core.WizardQuestion(id="scanner.test_material.9.sentinel",
+                                   prompt="sentinel", kind="bool")
+    monkeypatch.setattr(declarations, "confirm_questions", lambda declared: [sentinel])
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = "FROM python:3.12\nCMD [\"app\"]\n"
+    report = core.scan(_tree(tmp_path, files))
+
+    assert "scanner.test_material.9.sentinel" in [
+        q["id"] for q in report["wizard_questions"]]
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_14_the_env_name_defense_travelled_with_the_slug_scheme(tmp_path):
+    """The defense the id scheme exists for, asserted where the scheme now lives:
+    `wizard.materialize._env_name` turns any question id containing `.env.` into an
+    environment variable name, and a declared path is text the scanned repo writes."""
+    root = _tree(tmp_path, {
+        "docker/.env.d/leak.mjs": f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n',
+        "deployhub.yaml": _declaration("docker/.env.d"),
+    })
+    questions = declarations.confirm_questions(declarations.load(root))
+    assert len(questions) == 1, questions
+    assert ".env." not in questions[0].id, questions[0].id
+    assert questions[0].default is None

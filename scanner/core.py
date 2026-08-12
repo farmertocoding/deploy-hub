@@ -24,7 +24,6 @@ never call it themselves (D-010). A module may supersede a core result only by
 emitting the same id; absence is impossible, so a Django report can no longer be
 silently missing `core.secret-scan`.
 """
-import re
 from dataclasses import dataclass, field
 
 SCHEMA_VERSION = 1
@@ -41,11 +40,30 @@ class CheckResult:
     detail: str = ""
     fix_hint: str = ""      # §6.6 voice: what / why it matters / exact fix
     execution: str = "static"
+    # Round 7 (R7-1, spec-r7-enforce-declaration-acceptance.md §2). The smallest
+    # structured contract that lets the wizard gate on a check without parsing its
+    # prose: `{"questions": [confirm id, …], "blocking_only_declared": bool}`.
+    #
+    #   questions                 the confirm ids whose `True` accepts every
+    #                             declaration this check downgraded findings under
+    #   blocking_only_declared    True when accepting them all leaves NOTHING blocking;
+    #                             False when a real blocker (a [proof] line, a .env
+    #                             file, an undeclared heuristic line) is also present,
+    #                             and then no answer clears the check at all
+    #
+    # Deliberately the minimum: the §F2 per-finding array is a later, separate change.
+    # A check with nothing to accept leaves this None and `as_dict` OMITS the key —
+    # serializing `"acceptance": null` on every check of every repo would have moved
+    # all five recorded demo artifacts to say nothing had changed.
+    acceptance: dict = None
 
     def as_dict(self):
-        return {"id": self.id, "tier": self.tier, "title": self.title,
+        data = {"id": self.id, "tier": self.tier, "title": self.title,
                 "detail": self.detail, "fix_hint": self.fix_hint,
                 "execution": self.execution}
+        if self.acceptance is not None:
+            data["acceptance"] = self.acceptance
+        return data
 
 
 @dataclass
@@ -164,18 +182,33 @@ def scan(root):
     }
     core_suite = []
     if mods:
+        from . import declarations
         from .modules.fallbacks import common_checks
-        core_suite = common_checks(root)          # runs over the SCAN root, once
+
         # Follow-up 2 (spec-declared-test-material.md §The report shows the claim): the
         # DOWNGRADE is the repo's claim, made in its own `deployhub.yaml` and printed in
-        # the check detail; the ACCEPTANCE is the operator's, asked here and logged in
-        # the manifest, per §F5 action-tier friction. A repo that declares nothing adds
+        # the check detail; the ACCEPTANCE is the operator's, asked here and enforced by
+        # the wizard, per §F5 action-tier friction. A repo that declares nothing adds
         # no question and no manifest key, so every report predating this feature is
         # unchanged byte for byte.
-        from . import declarations
-        declared = declarations.load(root)        # parsed once; two readers below
-        questions.extend(_declaration_questions(declared))
+        #
+        # ONE READ, and R7-13 is why the previous comment here ("parsed once; two
+        # readers below") was worth fixing rather than deleting: it was false — the
+        # suite loaded the file again for the check. Two reads of a file the SCANNED
+        # REPO owns can disagree inside one scan (an edit landing between them, a
+        # symlink swapped), and the halves that disagree are the downgrade and the
+        # confirm that is supposed to authorize it.
+        declared = declarations.load(root)
+        core_suite = common_checks(root, declared)   # runs over the SCAN root, once
+        # R7-14: the prompt copy, the slug scheme and the `_env_name` defense behind it
+        # are rules about a declaration and live with the code that validated it. D-010
+        # made this module the composer; composing is what it does here.
+        questions.extend(declarations.confirm_questions(declared))
         if declared.accepted:
+            # The DRAFT list — what the repo asked for, in declaration order. What gets
+            # frozen into the manifest is the answer-derived list built by
+            # `wizard.materialize` (R7-A §5); before round 7 this draft was frozen
+            # verbatim, so the audit artifact asserted an acceptance nobody had given.
             manifest["declared_test_material"] = [
                 {"path": d.path, "reason": d.reason} for d in declared.accepted]
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
@@ -217,33 +250,6 @@ def scan(root):
         "manifest_draft": manifest,
         "summary": tiers,
     }
-
-
-def _declaration_questions(declared):
-    """One confirm per accepted declaration, in declaration order.
-
-    The id carries an INDEX and a slug, never the raw path, for one specific reason:
-    `wizard.materialize._env_name` turns any question id containing `.env.` into an
-    environment variable name, and a declared path is text the scanned repo controls —
-    `docker/.env.d` would otherwise turn a confirm into an env var. The slug is
-    non-alphanumerics collapsed to `-`, so it can hold no dot at all; the index keeps
-    two paths that slug alike apart, and the manifest's `declared_test_material` list is
-    in the same order, so an answer is always resolvable to its path.
-    """
-    questions = []
-    for index, declaration in enumerate(declared.accepted, 1):
-        slug = re.sub(r"[^A-Za-z0-9]+", "-", declaration.path).strip("-").lower()
-        questions.append(WizardQuestion(
-            id=f"scanner.test_material.{index}.{slug}",
-            kind="bool",
-            default=None,          # no default: an unanswered claim is not an accepted one
-            prompt=(f"This repo declares `{declaration.path}` as test material — "
-                    f'"{declaration.reason}". Accept that claim? Heuristic secret '
-                    f"findings under that path are reported without blocking the "
-                    f"deploy; published credential formats and .env files there still "
-                    f"block."),
-        ))
-    return questions
 
 
 def _deep_merge(base, fragment):
