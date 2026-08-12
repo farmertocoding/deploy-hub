@@ -38,6 +38,14 @@ Rules:
 
 ## What a declaration does — and does not — change
 
+**ERRATUM (round 7, 2026-08-12):** "the non-blocking bucket" below is no longer true and
+is left in place because this text is cited and hashed. Joseph's ruling on the security
+expert's R7-1 veto — `docs/spec-r7-enforce-declaration-acceptance.md §1` — is that a
+declaration is a *request*: the routing into the third bucket is unchanged, and those
+findings **block until the operator accepts the declaration in the wizard**. Read the
+bullet below as "routes findings … into the third bucket"; the tier no longer drops on
+account of a declaration.
+
 Mirrors N6's axis scoping exactly:
 
 - The **heuristic axis** of `core.secret-scan` routes findings under a declared path

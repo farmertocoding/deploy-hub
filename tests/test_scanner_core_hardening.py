@@ -972,14 +972,23 @@ def test_issue_r7_2_a_file_the_scanner_declined_to_read_does_not_warn(tmp_path, 
 def test_issue_r7_2_the_skipped_list_is_capped_and_counted(monkeypatch, tmp_path):
     """A repo can make the unreadable set as large as it likes, and an error message
     that is 3000 lines long is the same wall of text `MAX_REASON_CHARS` exists to stop.
-    The cap keeps the count — which is the number the reader needs — and drops the tail."""
+    The cap keeps the count — which is the number the reader needs — and drops the tail.
+
+    ASSERTED WITH LITERALS, and the first cut of this test is why it is worth saying.
+    It bounded the printed lines with `<= fallbacks._MAX_SKIPPED_REPORTED + 1`, derived
+    from the constant under test — so raising the cap to 10**9 printed all 40 paths and
+    the test still passed, because its own expectation had moved with the mutation. An
+    assertion that tracks the thing it is measuring measures nothing (R4-11's class,
+    found by the quality reviewer's mutation sweep on this branch)."""
     files = {f"deny{i}/x.py": "print(1)\n" for i in range(40)}
     root = _project(tmp_path, files)
     _deny(monkeypatch, [root / f"deny{i}" for i in range(40)])
     result = _core(root)["core.secret-scan"]
     assert result.tier == "warning", result.detail
-    assert "40" in result.detail
-    assert result.detail.count("deny") <= fallbacks._MAX_SKIPPED_REPORTED + 1
+    assert "40 paths" in result.detail, result.detail
+    named = [ln for ln in result.detail.splitlines() if ln.startswith("deny")]
+    assert len(named) == 10, named
+    assert "… and 30 more" in result.detail, result.detail
 
 
 def test_issue_r7_2_the_walk_still_serves_every_other_check(monkeypatch, tmp_path):

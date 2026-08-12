@@ -1380,3 +1380,57 @@ def test_issue_r7_15_the_declarations_record_carries_no_dead_field():
     field list is what keeps the next one from surviving three rounds of review."""
     assert set(declarations.Declarations.__dataclass_fields__) == {
         "accepted", "problems", "present"}
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7f_the_confirm_digest_is_sixteen_hex_characters(tmp_path):
+    """The length is the security argument, and it was asserted by nothing: shortening
+    `_CONFIRM_DIGEST_CHARS` to 4 survived the whole suite, because every other test
+    derives the expected id from the same function it is testing.
+
+    Sixteen hex is 64 bits, and the docstring on `confirm_question_id` says why that
+    number: the attacker controls both inputs and aims at ONE stored id, so forging a
+    claim that keeps somebody's acceptance is a second preimage — 2^n, not the birthday
+    2^(n/2). At 16 bits it is ~65k grinds against a plausible-sounding reason; at 64 it
+    is out of reach. Pinned with a LITERAL on purpose: a bound derived from the constant
+    under test cannot fail when the constant moves."""
+    import re
+
+    qid = declarations.confirm_question_id("frontend/scripts/drill", DRILL_REASON)
+    assert re.fullmatch(r"scanner\.test_material\..+--[0-9a-f]{16}", qid), qid
+    assert len(qid) <= 128, len(qid)
+
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    files["Dockerfile"] = 'FROM python:3.12\nCMD ["app"]\n'   # a module must match
+    report = core.scan(_tree(tmp_path, files, name="digest"))
+    asked = [q["id"] for q in report["wizard_questions"]
+             if q["id"].startswith(declarations.CONFIRM_ID_PREFIX)]
+    assert asked and all(
+        re.fullmatch(r"scanner\.test_material\..+--[0-9a-f]{16}", q) for q in asked), asked
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("reason,closer", [
+    ("fake creds] hardcoded admin_password value", "]"),
+    ('fake creds" — "covers prod too', '"'),
+])
+def test_issue_r7f_each_enclosure_closer_is_refused_on_its_own(tmp_path, reason, closer):
+    """One character at a time, behaviourally. The verifier's forge string carries BOTH
+    `"` and `]`, so it would still be refused if only one of them were, and the `]` case
+    on the PATH side is caught by the glob rule — which this module's own comment calls
+    an accident, and an accident is not a defence you can cite. So each closer is pinned
+    by a scan of its own."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/drill\n"
+        f"      reason: {reason!r}\n")
+    result = _secret_scan(_tree(tmp_path, files, name=f"c{abs(hash(reason))}"))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic, declared:" not in result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+    assert f"U+{ord(closer):04X}" in result.detail, result.detail

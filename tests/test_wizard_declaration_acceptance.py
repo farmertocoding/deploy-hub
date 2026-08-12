@@ -539,3 +539,65 @@ def test_issue_r7_1r_the_scrub_leaves_answers_alone_when_there_is_no_scan(tmp_pa
     from wizard.models import WizardAnswer
     service.set_answers(site, {"site.domain": "app.example.com"})
     assert WizardAnswer.objects.filter(site=site, question_id=live).exists()
+
+
+# ── round-7 follow-up: guards that existed in code and were pinned by nothing ──
+#
+# R4-11's class, on the gate this branch built. The quality reviewer mutated the two
+# defensive readings below and both mutations survived all 672 tests: every existing
+# test here writes through `service.set_answers`, so `coerce_answer` had already turned
+# every confirm into a real `bool` before the gate ever saw it, and no test constructed
+# the empty-`questions` contract at all. A guard nothing exercises is a guard nobody
+# will notice being deleted.
+
+@pytest.mark.parametrize("stored", ["True", "true", 1, "yes"])
+def test_issue_r7f_a_confirm_that_is_not_exactly_true_is_not_an_acceptance(
+        tmp_path, stored):
+    """`answers.get(qid) is not True`, and the strictness is the point: `coerce_answer`
+    produces a real bool for a `kind="bool"` question, so anything else arriving here is
+    a value this gate does not understand — a half-written row, a fixture, a future
+    writer, a hand-edited database — and the safe reading of a value it does not
+    understand is "not accepted".
+
+    Written STRAIGHT INTO THE TABLE on purpose. Going through `set_answers` cannot
+    express this state, which is exactly why the mutation to a truthy test survived the
+    suite: the only writer in the repo happens to sanitize its input, so the gate's own
+    reading was exercised by nothing. A defence that depends on every future writer
+    behaving is not a defence — it is a note.
+    """
+    from wizard.models import WizardAnswer
+
+    site = _site(tmp_path, _drill_files())
+    _answer_domain(site)
+    WizardAnswer.objects.create(site=site, question_id=DRILL_CONFIRM,
+                                value=stored, is_secret=False)
+
+    problems = preflight(site)
+    assert "blockers_present" in _codes(problems), (
+        f"a stored {stored!r} was read as an acceptance")
+    item = _problem(problems, "blockers_present")["items"][0]
+    assert [q["id"] for q in item["awaiting_acceptance"]] == [DRILL_CONFIRM]
+
+    with pytest.raises(MaterializeRefused):
+        materialize(site, confirm_warnings=True)
+
+
+def test_issue_r7f_an_empty_questions_list_never_clears_a_blocker():
+    """The other unexercised guard. `{"questions": [], "blocking_only_declared": True}`
+    reads as "this blocker clears itself, ask nobody" — the one shape that must never
+    clear anything, because there is no answer behind it.
+
+    The scanner cannot emit it (`_acceptance` returns None when it has no questions),
+    which is precisely why only a direct unit test can pin it: the realistic carrier is
+    a `scan_report` from an older or foreign scanner, and that is STORED JSON on
+    `Project`, read back long after whoever wrote it is gone. The gate is what has to
+    refuse it.
+    """
+    from wizard.materialize import _pending_acceptance
+
+    check = {"id": "core.secret-scan", "tier": "blocker",
+             "acceptance": {"questions": [], "blocking_only_declared": True}}
+    assert _pending_acceptance(check, {}) is None, (
+        "an acceptance contract naming no question cleared a blocker")
+    # And the same shape with an answers dict that would satisfy anything.
+    assert _pending_acceptance(check, {"anything": True}) is None
