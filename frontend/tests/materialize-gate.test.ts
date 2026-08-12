@@ -21,7 +21,8 @@
 // the commit message for the command that produced each one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { materializeGate } from "../src/Readiness.jsx";
 
@@ -136,14 +137,40 @@ test("r8-1: a refusal code this UI has never seen still disables and shows its d
 });
 
 // §4b.4. The rule, enforced rather than remembered: the client authors no refusal copy.
-// sim.js is excluded on purpose and is not an exception to the rule — it is a
-// transcript of server responses, and a fixture that avoided the server's own wording
-// would be the fiction §4b was filed about. Everything else here is client code.
+//
+// THE FILE SET IS DERIVED, NOT TYPED. A hand-typed list is R4-12's class — the Makefile
+// says so in as many words above `PY_ROOTS`, which exists because `wizard/` landed and
+// two hand-typed gate lists both missed it. A reviewer defeated the typed version of
+// this pin in one move: a new `src/Deploys.jsx` carrying the verbatim old tooltip passed
+// all seven tests. Walking the tree means the next module is inside the pin the moment
+// it exists, which is the only version of this rule worth having.
+//
+// Two exclusions, both narrow and both for a stated reason:
+//   src/sim.js  — a TRANSCRIPT of server responses, not client copy. Its refusal strings
+//                 are `preflight`'s own, copied verbatim on purpose; a fixture that
+//                 dodged the server's wording to satisfy a grep would be the exact
+//                 fiction §4b was filed about.
+//   src/api/    — generated from the serializers by `make generate-client`; nothing is
+//                 authored there and `make check-generated` owns it.
+function clientSources(dir = fileURLToPath(new URL("../src", import.meta.url)), rel = "") {
+  const found: Array<[string, string]> = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const here = rel ? `${rel}/${entry.name}` : entry.name;
+    if (here === "sim.js" || here === "api") continue;
+    if (entry.isDirectory()) found.push(...clientSources(join(dir, entry.name), here));
+    else if (/\.(jsx?|tsx?)$/.test(entry.name))
+      found.push([here, readFileSync(join(dir, entry.name), "utf8")]);
+  }
+  return found;
+}
+
 test("r8-1: no client module authors a refusal string the server already sends", () => {
-  const CLIENT = ["Readiness.jsx", "App.jsx", "api.js", "useEvents.js", "main.jsx"];
-  for (const name of CLIENT) {
-    const src = readFileSync(
-      fileURLToPath(new URL(`../src/${name}`, import.meta.url)), "utf8");
+  const sources = clientSources();
+  // The walk itself is load-bearing: an empty or truncated one would pass silently.
+  assert.ok(sources.length >= 4, `only walked ${sources.length} client modules`);
+  assert.ok(sources.some(([name]) => name === "Readiness.jsx"),
+    "the walk missed Readiness.jsx, which is the file this rule is about");
+  for (const [name, src] of sources) {
     assert.ok(!/rescanned|re-scanned/.test(src),
       `${name} spells out a refusal the server sends — take the tooltip from state.blocking`);
     assert.ok(!/readiness report has blockers/.test(src), `${name}: same`);
