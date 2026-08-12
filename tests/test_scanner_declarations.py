@@ -1082,3 +1082,301 @@ def test_issue_r7_8r_the_legend_does_not_promise_a_deploy_it_cannot_deliver(tmp_
     assert "still block" in mixed.fix_hint, (
         "the legend promises that accepting clears a deploy that no answer can clear")
     assert "these findings block until you accept" in mixed.detail
+
+
+# ── round 7-B: the rest of the queue (spec-r7-scanner-findings.md) ─────────────
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_3_a_reason_cannot_forge_a_second_finding_inside_one_line(tmp_path):
+    """The forgery class reopening a THIRD way. Rounds 1 and 2 closed the structure
+    BETWEEN lines (a reason that writes lines of its own); this is the structure WITHIN
+    one line. The label packs four fields into a string delimited by `[`, `]`, `"`, `—`
+    and `:`, and the round-1/2 validator refuses only code points that break or reorder
+    lines — a `"` and a `]` walk straight through it.
+
+    The verifier's exact reason string, which renders as a line reading as though it
+    carried a second finding."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/drill\n"
+        '      reason: fake creds"] hardcoded prod_master_key value — "see docs\n')
+    result = _secret_scan(_tree(tmp_path, files))
+
+    assert result.tier == "blocker", result.detail
+    # Nothing was downgraded: the claim was refused, so the drill findings block on
+    # their own account and the label was never rendered.
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+    assert "prod_master_key" not in result.detail, (
+        "the forged label text reached the report")
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_3_a_directory_name_cannot_forge_a_second_finding_either(tmp_path):
+    """The same hole through the other field of the same label. `path` is repo-controlled
+    text too — a real directory may be named `drill" — "anything` on every filesystem this
+    runs on — and it is rendered into the same label, ahead of the reason, with the same
+    delimiters. Fixing one field and not the other is this codebase's recurring defect
+    written small.
+
+    The `]` half of the path attack was already closed, by accident rather than by
+    intent: `]` is in `_GLOB_CHARS`, so a path carrying one is refused as a glob. The
+    quote was not, and a label reading `declared: drill" — "stale — "drill scripts"`
+    leaves a reader unable to say where the claimed path ends and the repo's words
+    begin — which is the whole content of the evidence."""
+    evil = 'drill" — "covers everything'
+    files = {
+        f"{evil}/qa.mjs": f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n',
+        "deployhub.yaml": ("scanner:\n"
+                           "  test_material:\n"
+                           f'    - path: {evil!r}\n'
+                           "      reason: drill scripts\n"),
+    }
+    result = _secret_scan(_tree(tmp_path, files, name="evilpath"))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic, declared:" not in result.detail, (
+        "a directory name was rendered into an evidence label it can forge")
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("reason", [
+    "red-team drill — deliberate fake credentials",      # em dash, the label's own
+    "QA's drill scripts, don't panic",                   # apostrophes
+    "drills (see docs/security.md) for the rota",        # parens close no enclosure
+    "測試用的假憑證（紅隊演練）",                              # the fleet's own language
+])
+def test_issue_r7_3_a_legitimate_reason_is_not_collateral(tmp_path, reason):
+    """The over-correction guard the spec names, and it is why the refusal is the
+    ENCLOSURE CLOSERS rather than "every character the label uses": the em dash IS a
+    label delimiter and a reason that contains one forges nothing, because the reason is
+    rendered inside a quoted region an em dash cannot end."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill", reason)
+    result = _secret_scan(_tree(tmp_path, files, name=f"ok{abs(hash(reason))}"))
+
+    assert f'[heuristic, declared: frontend/scripts/drill — "{reason}"]' in result.detail
+    assert result.detail.count("[heuristic, declared:") == 2, result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_3_the_labels_structural_characters_are_frozen(tmp_path):
+    """The drift test, and it is the answer to "the next delimiter someone adds".
+
+    Enumerating characters to refuse has now failed twice, so what is frozen here is the
+    LABEL'S OWN PUNCTUATION. Add a delimiter to `Declaration.label()` and this test goes
+    red, which puts the author in front of the one question that matters: can a `reason`
+    or a `path` close the enclosure it is rendered inside? If it can, the character joins
+    `LABEL_ENCLOSURE_CLOSERS`; if it cannot — as the em dash cannot — it does not.
+    A frozen refusal set alone would have gone green on that change."""
+    rendered = declarations.Declaration(path="PATH", reason="REASON").label()
+    skeleton = rendered.replace("PATH", "").replace("REASON", "")
+    punctuation = {ch for ch in skeleton if not ch.isalnum() and not ch.isspace()}
+    assert punctuation == {":", "—", '"'}, (
+        f"the evidence label's punctuation changed to {punctuation!r} — decide, for "
+        f"every character that is new, whether a repo-controlled field can close the "
+        f"enclosure it is rendered inside, and put it in LABEL_ENCLOSURE_CLOSERS if it "
+        f"can")
+    # The bracket pair belongs to the caller in `_check_secret_scan`, which is why the
+    # closer set holds `]` although `label()` never prints one.
+    assert set(declarations.LABEL_ENCLOSURE_CLOSERS) == {'"', "]"}
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_4_a_declared_split_settings_package_is_rejected(tmp_path):
+    """The fleet's own layout. `SCANNER_KEY_FILES` names a literal `settings.py`, and
+    not one repo in the fleet has one: they all carry a settings PACKAGE
+    (`config/settings/base.py`, `prod.py`) that `django._settings_files` discovers by the
+    PARENT DIRECTORY's name. So declaring `backend/config` was accepted, and a heuristic
+    secret beside `base.py` was downgraded by a file the repo writes."""
+    files = {
+        "backend/config/settings/base.py": "DEBUG = False\n",
+        "backend/config/settings/prod_extras.py":
+            f'stripe_secret_key = "{FAKE_HIGH_ENTROPY}"\n',
+        "deployhub.yaml": _declaration("backend/config"),
+    }
+    result = _secret_scan(_tree(tmp_path, files, name="splitsettings"))
+
+    assert result.tier == "blocker", result.detail
+    assert "Downgrades claimed" not in result.detail
+    assert "[heuristic] hardcoded stripe_secret_key value" in result.detail
+    assert "settings" in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_4_the_guard_reads_djangos_own_settings_rule(tmp_path):
+    """DERIVED, not restated — the N6/N7 lesson, and R7-4 is precisely that drift: the
+    guard held its own idea of what a settings file is, django held another, and the
+    fleet's layout fell in the gap.
+
+    Every shape below is asked of both sides at once: whatever `django` discovers as a
+    settings file, the guard must refuse a declaration wrapped around it, and whatever
+    django does not, the guard must not refuse on this account."""
+    from scanner.modules import django as django_module
+
+    shapes = {
+        "svc/settings.py": True,
+        "svc/config/settings/base.py": True,
+        "svc/config/settings/prod.py": True,
+        "svc/config/settings/__init__.py": False,      # a package marker, not settings
+        "svc/settings/theme.json": False,              # not python
+        "svc/settings.py.bak": False,
+    }
+    for rel, expected in shapes.items():
+        root = tmp_path / f"shape{abs(hash(rel))}"
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("X = 1\n", encoding="utf-8")
+        discovered = [p for p in django_module.DjangoScannerModule()._settings_files(root)]
+        assert bool(discovered) is expected, (rel, discovered)
+        assert bool(declarations._settings_package_file_in(root / "svc")) is expected, (
+            f"{rel}: the manifest guard and django._settings_files disagree, which is "
+            f"the drift R7-4 is")
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_4_a_settings_directory_of_non_python_files_is_not_rejected(tmp_path):
+    """The over-correction guard the spec names. The rule is "django would read a
+    settings module here", not "a directory called settings exists here" — the second is
+    round-6b's classify-by-name mistake in a new costume, and it would refuse a drill
+    tree holding `settings/keymap.json`."""
+    files = dict(_drill_files())
+    files["frontend/scripts/drill/settings/keymap.json"] = '{"a": 1}\n'
+    files["frontend/scripts/drill/settings/README.md"] = "not python\n"
+    files["deployhub.yaml"] = _declaration("frontend/scripts/drill")
+    result = _secret_scan(_tree(tmp_path, files, name="jsonsettings"))
+
+    assert "Downgrades claimed" in result.detail, result.detail
+    assert result.detail.count("[heuristic, declared:") == 2, result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_5_a_deeply_nested_declaration_file_cannot_crash_the_scan(tmp_path):
+    """The module docstring promises `load` never raises for anything the scanned repo
+    controls. It did: 100k `[` characters is 100 KB — comfortably under the 256 KB byte
+    cap that is supposed to bound this input — and `yaml.safe_load` recurses per opening
+    bracket, so a `RecursionError` came out of `load`, out of `scan`, and onto the
+    operator's terminal as a traceback. A byte cap is not a depth cap."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = "scanner:\n  test_material: " + "[" * 100_000
+    root = _tree(tmp_path, files, name="deep")
+
+    loaded = declarations.load(root)          # must not raise
+    assert loaded.accepted == ()
+    assert loaded.problems, "a file that could not be parsed produced no problem line"
+    result = _secret_scan(root)
+    assert result.tier == "blocker", result.detail
+    assert "deployhub.yaml" in result.detail
+    assert "Downgrades claimed" not in result.detail
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_10_the_declaration_count_is_capped(tmp_path):
+    """`MAX_REASON_CHARS` stops one entry burying the findings count under a wall of
+    prose; ~3000 entries fit under the byte cap and rebuild the wall out of header lines
+    — and out of wizard questions, which is the worse half: 3004 questions is a wizard
+    nobody reads to the end.
+
+    The cap is on ENTRIES READ, not on entries accepted, because 3000 REFUSED entries
+    build the same wall out of problem lines."""
+    entries = "".join(f"    - path: d{i}\n      reason: drill {i}\n" for i in range(120))
+    files = {"src/app.py": "print('hello')\n",
+             "deployhub.yaml": "scanner:\n  test_material:\n" + entries}
+    for i in range(120):
+        files[f"d{i}/qa.mjs"] = f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n'
+    root = _tree(tmp_path, files, name="many")
+
+    loaded = declarations.load(root)
+    assert len(loaded.accepted) == declarations.MAX_DECLARATIONS
+    assert any("120" in p and "50" in p for p in loaded.problems), loaded.problems
+    result = _secret_scan(root)
+    # The entries past the cap were never applied, so their findings still block —
+    # a cap that DOWNGRADED the overflow would be a wall of text with a hole under it.
+    assert result.tier == "blocker", result.detail
+    assert "[heuristic] hardcoded staff_password value" in result.detail
+    assert result.detail.count("Downgrades claimed") == declarations.MAX_DECLARATIONS
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_issue_r7_6_auto_detected_test_material_wins_over_a_declaration(tmp_path):
+    """The precedence clause is written in the requirement text and in a code comment,
+    and a mutation dropping it survived the whole suite — every fixture keeps the two
+    path sets disjoint, so nothing ever exercised the overlap.
+
+    It matters because it is a credit claim: relabelling an ALREADY non-blocking finding
+    as declared lets a declaration take credit for a downgrade it did not make, and the
+    header's `N findings` — the number the reader came for — is what carries the lie."""
+    files = {
+        "tests/drills/probe.py": f'admin_password = "{FAKE_HIGH_ENTROPY}"\n',
+        "deployhub.yaml": _declaration("tests/drills"),
+    }
+    result = _secret_scan(_tree(tmp_path, files, name="overlap"))
+
+    assert result.tier == "warning", result.detail
+    assert "tests/drills/probe.py:1: [heuristic] hardcoded admin_password value" \
+        in result.detail
+    assert "[heuristic, declared:" not in result.detail
+    assert ('Downgrades claimed by deployhub.yaml: tests/drills '
+            f'("{DRILL_REASON}", 0 findings)') in result.detail
+    assert result.acceptance is None, (
+        "a declaration credited with nothing became a key to the gate")
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_7_one_bad_entry_does_not_take_its_siblings_down(tmp_path):
+    """Entry-level isolation: whole-file structure is fatal to the whole file, a bad
+    ENTRY costs only itself. A mutation making one bad entry drop every sibling survived
+    the suite because NO test anywhere built a two-entry `deployhub.yaml` — and on a real
+    repo that mutation turns a `warning` into a `blocker`, so the direction it fails in
+    is "the deploy is refused for a typo in an unrelated entry"."""
+    files = dict(_drill_files())
+    files["deployhub.yaml"] = (
+        "scanner:\n"
+        "  test_material:\n"
+        "    - path: frontend/scripts/gone\n"
+        "      reason: a tree that was deleted three releases ago\n"
+        "    - path: frontend/scripts/drill\n"
+        f"      reason: {DRILL_REASON}\n")
+    result = _secret_scan(_tree(tmp_path, files, name="siblings"))
+
+    assert result.tier == "blocker", result.detail
+    # the valid sibling still applies …
+    assert result.detail.count("[heuristic, declared:") == 2, result.detail
+    assert ('Downgrades claimed by deployhub.yaml: frontend/scripts/drill '
+            f'("{DRILL_REASON}", 2 findings)') in result.detail
+    # … and the stale one still warns, by name.
+    assert "frontend/scripts/gone" in result.detail
+    assert "rejected as stale" in result.detail
+    assert result.acceptance == {
+        "questions": [_drill_confirm_id()], "blocking_only_declared": True}
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r7_12_the_warning_title_says_which_of_the_two_things_happened(tmp_path):
+    """`_warning_title` has three branches and collapsing all three to one string left
+    the suite green. The title is the one line a reader sees in a summary listing, and
+    "declarations need attention" versus "test material only" are different jobs."""
+    stale = {"src/app.py": "print('hello')\n",
+             "deployhub.yaml": _declaration("frontend/scripts/drill")}
+    assert _secret_scan(_tree(tmp_path, stale, name="t1")).title == (
+        "deployhub.yaml declarations need attention")
+
+    merged = dict(stale)
+    merged["tests/test_login.py"] = f'password = "{FAKE_HIGH_ENTROPY}"\n'
+    assert _secret_scan(_tree(tmp_path, merged, name="t2")).title == (
+        "Secret-shaped values in test material only; "
+        "deployhub.yaml declarations need attention")
+
+    clean = {"tests/test_login.py": f'password = "{FAKE_HIGH_ENTROPY}"\n'}
+    assert _secret_scan(_tree(tmp_path, clean, name="t3")).title == (
+        "Secret-shaped values in test material only")
+
+
+def test_issue_r7_15_the_declarations_record_carries_no_dead_field():
+    """`_by_path` was declared, written by nothing and read by nothing. Freezing the
+    field list is what keeps the next one from surviving three rounds of review."""
+    assert set(declarations.Declarations.__dataclass_fields__) == {
+        "accepted", "problems", "present"}

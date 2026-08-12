@@ -452,12 +452,27 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".
 
 # ── file walking (static reads only) ────────────────────────────────────────────
 
-def _iter_files(root):
+def _iter_files(root, skipped=None):
     """Yield tracked-looking files under root, skipping dependency/build/cache dirs.
 
     Dotfiles (`.env`) and dot-directories (`.github/`) are both yielded — only the
     names in `_SKIP_DIRS` are pruned. Symlinked directories are not followed: a link
     out of the tree is not the project's source, and a link back into it is a loop.
+
+    R7-2: `skipped`, when given, is a list this appends every path the filesystem
+    REFUSED to it — a permission-denied directory, one that vanished mid-walk. It used
+    to swallow those with a bare `continue`, so a subtree the walk could not open
+    produced no problem line, no warning and no tier change: a real AWS secret under a
+    `prodcfg/` whose `iterdir` raised `PermissionError` turned the same tree from
+    `blocker` into `tier: ok`, "No committed secrets found", empty detail. A security
+    gate must degrade to an honest error, never to `ok`.
+
+    AN OPTIONAL OUT-PARAMETER, and the shape is chosen for blast radius: this walk feeds
+    `core.lockfile`, `core.gitignore` and `core.tests-exist` as well, and only
+    `core.secret-scan` has anything to say about a skip. A return-tuple would have
+    rewritten every caller (and every test that calls one) to carry a value they ignore;
+    a raise would turn a dull unreadable directory into a failed scan. Callers that pass
+    nothing behave exactly as they did.
     """
     stack = [Path(root)]
     seen = set()
@@ -466,6 +481,8 @@ def _iter_files(root):
         try:
             entries = sorted(directory.iterdir())
         except OSError:
+            if skipped is not None:
+                skipped.append(directory)
             continue
         for path in entries:
             # Symlinked DIRECTORIES are not followed — a link out of the tree is not the
@@ -480,6 +497,8 @@ def _iter_files(root):
                 try:
                     key = path.resolve()
                 except OSError:
+                    if skipped is not None:
+                        skipped.append(path)
                     continue
                 if key in seen:
                     continue
@@ -489,13 +508,31 @@ def _iter_files(root):
                 yield path
 
 
-def _read_text(path):
-    """Return decoded text, or None for binary / oversized / unreadable files."""
+def _read_text(path, skipped=None):
+    """Return decoded text, or None for binary / oversized / unreadable files.
+
+    R7-2 RULING, and the spec asked for it either way as long as it was stated: an
+    unreadable FILE joins the same skip list as an unreadable directory, and a file this
+    function DECLINED to read does not.
+
+    The line is not "file versus directory", it is "the scanner chose not to look"
+    versus "the filesystem refused to let it". A `PermissionError` on `creds.py` is the
+    same blindness as one on `prodcfg/`, one level down — the scanner knows a file is
+    there and cannot see a byte of it, and answering "no secrets" about it is the same
+    lie at a smaller scale. A binary blob, an oversized bundle and an undecodable byte
+    sequence are the opposite case: the scanner knows exactly what it passed over and
+    why, the set is bounded by rules in this file rather than by the repo, and every
+    repository on earth contains one. Warning on those would fire the check on every
+    scan, and a warning that is always on is a warning that is read as off — which is
+    how a real one gets missed. That is the over-correction this fix must not make.
+    """
     try:
         if path.stat().st_size > _MAX_TEXT_BYTES:
             return None
         raw = path.read_bytes()
     except OSError:
+        if skipped is not None:
+            skipped.append(path)
         return None
     if b"\x00" in raw[:8192]:
         return None
@@ -508,11 +545,16 @@ def _read_text(path):
             return None
 
 
-def _text_files(root):
-    """[(path, text)] for every scannable text file under root."""
+def _text_files(root, skipped=None):
+    """[(path, text)] for every scannable text file under root.
+
+    `skipped` is threaded to both halves of the walk (R7-2) — the directories that could
+    not be opened and the files that could not be read are one list, because they are
+    one fact about the report: this is not everything.
+    """
     out = []
-    for path in _iter_files(root):
-        text = _read_text(path)
+    for path in _iter_files(root, skipped):
+        text = _read_text(path, skipped)
         if text is not None:
             out.append((path, text))
     return out
@@ -639,7 +681,7 @@ def _is_identifier_echo(name, value):
     return name.lower().strip("_") == value.lower().replace("-", "_").strip("_")
 
 
-def _check_secret_scan(root, texts, declared=None):
+def _check_secret_scan(root, texts, declared=None, skipped=()):
     """Follow-up 2 (spec-declared-test-material.md): `declared` is what the scanned repo
     said about itself in `deployhub.yaml`, and it reaches exactly ONE thing — the
     heuristic axis's bucket. The N6 rule, restated: scope the axis, never the walk. The
@@ -657,6 +699,13 @@ def _check_secret_scan(root, texts, declared=None):
     and, in `acceptance`, exactly which confirms would clear it; `wizard.materialize`
     owns the decision. That split is why the section header no longer says "not
     blocking": the scanner was asserting an outcome only the answer store knows.
+
+    ROUND 7 (R7-2): `skipped` is what the walk could not open — see `_iter_files`. The
+    same rule as the sentence above, pointed at the scanner's own blind spots rather
+    than at the repo's claims: this check may not report `ok` about a subtree it never
+    read, so a skip alone is a `warning`, and where there are findings the skip list
+    rides the detail. It is the only core check that takes the list, for the reason the
+    declaration is the only thing `declared` reaches — scope the axis, not the walk.
     """
     declared = declared or declarations.NONE
     findings, test_findings = [], []
@@ -725,6 +774,7 @@ def _check_secret_scan(root, texts, declared=None):
                         f"{rel}:{lineno}: [heuristic] hardcoded {name.lower()} value")
 
     header = _declaration_header(declared, declared_counts)
+    unread = _skipped_section(root, skipped)
     if findings or declared_findings:
         # `declared_only`: the check's whole blocking case is findings the repo asked to
         # have downgraded, so accepting every one of those declarations leaves nothing
@@ -736,6 +786,7 @@ def _check_secret_scan(root, texts, declared=None):
             "\n".join(findings),
             _test_material_section(test_findings),
             _declared_section(declared_findings),
+            unread,
         )
         return core.CheckResult(
             id="core.secret-scan", tier="blocker",
@@ -758,7 +809,7 @@ def _check_secret_scan(root, texts, declared=None):
         # refusals, and the copy no longer describes a declared bucket that cannot
         # appear in it. The auto-detected bucket is therefore never labelled here: on
         # its own it is what the whole result is about, and the title says so.
-        detail = _join_sections(header, "\n".join(test_findings))
+        detail = _join_sections(header, "\n".join(test_findings), unread)
         return core.CheckResult(
             id="core.secret-scan", tier="warning",
             title=_warning_title(test_findings, declared),
@@ -767,6 +818,23 @@ def _check_secret_scan(root, texts, declared=None):
                      "Confirm each one is a fixture rather than a real credential that "
                      "was pasted into a test — if any is real, rotate it: it is in git "
                      "history either way.",
+        )
+    if unread:
+        # R7-2, and this branch is the entire finding: without it the return below said
+        # "No committed secrets found" about a tree the walk could not open. `ok` is a
+        # claim, and this check has not earned it here — the honest answer is that it
+        # does not know. A separate result rather than a fourth branch of
+        # `_warning_title`, because "we could not look" is not a finding about the repo's
+        # test material and reads as noise filed under that title.
+        return core.CheckResult(
+            id="core.secret-scan", tier="warning",
+            title="Secret scan incomplete — part of the tree could not be read",
+            detail=_join_sections(header, unread),
+            fix_hint="Nothing was found in what could be read, and that is not the same "
+                     "as nothing being there. Give the scanner read access to the paths "
+                     "above (or remove them from the tree you are deploying) and scan "
+                     "again — a permission-denied directory is also worth a look on its "
+                     "own account, since it is unusual in a repository.",
         )
     return core.CheckResult(id="core.secret-scan", tier="ok",
                             title="No committed secrets found", detail=header)
@@ -783,6 +851,42 @@ def _warning_title(test_findings, declared):
 
 def _join_sections(*sections):
     return "\n\n".join(s for s in sections if s)
+
+
+# How many unreadable paths a report names before it stops. Same reasoning as
+# `MAX_REASON_CHARS` and `MAX_DECLARATIONS`: the COUNT is the number the reader needs
+# and it is printed first, so the list can be truncated without truncating the fact.
+_MAX_SKIPPED_REPORTED = 10
+
+
+def _report_path(root, path):
+    """A skipped path, rendered so it cannot forge a line of the report (R7-3's rule).
+
+    Directory and file names are repo-controlled text — a directory name may contain a
+    newline on every filesystem this runs on — and this section is new report surface
+    built out of them. A value that occupies two lines is printed through `repr` so it
+    occupies one; everything else is printed as itself, because a report of escaped
+    paths is a report nobody can paste into a shell.
+    """
+    try:
+        text = str(Path(path).relative_to(root))
+    except ValueError:                     # pragma: no cover - defensive
+        text = str(path)
+    return text if text.splitlines() == [text] else repr(text)
+
+
+def _skipped_section(root, skipped):
+    """The paths the walk could not read, capped and counted (R7-2)."""
+    if not skipped:
+        return ""
+    shown = [_report_path(root, p) for p in skipped[:_MAX_SKIPPED_REPORTED]]
+    rest = len(skipped) - len(shown)
+    lines = [f"Could not be read, so these results may be incomplete "
+             f"({len(skipped)} path{'' if len(skipped) == 1 else 's'}):"]
+    lines.extend(shown)
+    if rest > 0:
+        lines.append(f"… and {rest} more")
+    return "\n".join(lines)
 
 
 def _test_material_section(test_findings):
@@ -1152,7 +1256,10 @@ def common_checks(root, declared=None):
     and get the load for free.
     """
     root = Path(root)
-    texts = _text_files(root)
+    # R7-2: one list, filled by the one walk the suite makes, read by the one check that
+    # has anything to say about it.
+    skipped = []
+    texts = _text_files(root, skipped)
     paths = [path for path, _ in texts]
     if declared is None:
         declared = declarations.load(root)
@@ -1160,7 +1267,7 @@ def common_checks(root, declared=None):
         # Follow-up 2: the declaration reaches ONE check. No other check takes it as an
         # argument, which is the scope rule written as a call signature rather than as
         # a promise.
-        _check_secret_scan(root, texts, declared),
+        _check_secret_scan(root, texts, declared, skipped),
         _check_lockfile(root, paths),
         _check_gitignore(root, texts, paths),
         _check_tests_exist(root),

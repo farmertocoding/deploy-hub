@@ -872,3 +872,128 @@ def test_n6_generated_dirs_and_skip_dirs_stay_disjoint():
     for tool_state in (".vercel", ".netlify"):
         assert tool_state not in fallbacks._GENERATED_DIRS
         assert tool_state not in fallbacks._SKIP_DIRS
+
+
+# ── R7-2 (round 7): a subtree the walk cannot open is silently dropped ─────────
+#
+# `_iter_files` swallowed `OSError` with `continue` and `_read_text` returned `None`, so
+# a permission-denied directory — or one that vanished mid-walk — was skipped with no
+# problem line, no warning and no tier change. A security gate must degrade to an honest
+# error, never to `ok`.
+#
+# The denial is injected rather than made with `chmod`, for the plain reason that this
+# suite runs as root on the CI image and root reads a 0o000 directory happily. What is
+# under test is the walk's reaction to `OSError`, and that is what is provoked.
+
+def _deny(monkeypatch, denied, method="iterdir"):
+    """Make `Path.<method>` raise PermissionError for exactly the paths in `denied`."""
+    real = getattr(pathlib.Path, method)
+    denied = {pathlib.Path(p).resolve() for p in denied}
+
+    def guarded(self, *args, **kwargs):
+        try:
+            here = self.resolve()
+        except OSError:                        # pragma: no cover - defensive
+            here = self
+        if here in denied:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, method, guarded)
+
+
+def test_issue_r7_2_an_unreadable_directory_never_reports_ok(monkeypatch, tmp_path):
+    """The demonstrated case, and it is the whole finding: the same tree reports
+    `blocker` when the walk can open `prodcfg/` and reported `tier: ok`, "No committed
+    secrets found", empty detail when it could not. A check that answers "clean" about a
+    subtree it never opened is worse than one that crashes."""
+    root = _project(tmp_path, {
+        "prodcfg/creds.py": f'aws_secret_access_key = "{FAKE_AWS_SECRET}"\n',
+        "app.py": "print('hello')\n",
+    })
+    assert _core(root)["core.secret-scan"].tier == "blocker"
+
+    _deny(monkeypatch, [root / "prodcfg"])
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "warning", result.detail
+    assert "prodcfg" in result.detail
+    assert "incomplete" in result.detail.lower() or "incomplete" in result.title.lower()
+
+
+def test_issue_r7_2_a_skipped_path_rides_the_detail_of_a_real_finding(
+        monkeypatch, tmp_path):
+    """When something WAS found the tier is already right, and the skip list still has to
+    travel: "we found two things and could not look in three places" is a different
+    report from "we found two things"."""
+    root = _project(tmp_path, {
+        "prodcfg/creds.py": f'aws_secret_access_key = "{FAKE_AWS_SECRET}"\n',
+        "other/keys.py": f'api_key = "{FAKE_HIGH_ENTROPY}"\n',
+    })
+    _deny(monkeypatch, [root / "prodcfg"])
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "blocker", result.detail
+    assert "other/keys.py:1: [heuristic] hardcoded api_key value" in result.detail
+    assert "prodcfg" in result.detail
+
+
+def test_issue_r7_2_an_unreadable_file_counts_too(monkeypatch, tmp_path):
+    """THE RULING, stated in the code and pinned here: what joins the skip list is not
+    "a directory" but "the filesystem refused". An unreadable FILE is the same blindness
+    one level down — the scanner knows a file is there and cannot see a byte of it — so
+    it rides the same list. What does NOT join it is a file the scanner DECLINED to read
+    (binary, oversized): those are policy, they are bounded, and the scanner knows
+    exactly what it passed over and why."""
+    root = _project(tmp_path, {
+        "prodcfg/creds.py": f'aws_secret_access_key = "{FAKE_AWS_SECRET}"\n',
+        "app.py": "print('hello')\n",
+    })
+    _deny(monkeypatch, [root / "prodcfg" / "creds.py"], method="read_bytes")
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "warning", result.detail
+    assert "prodcfg/creds.py" in result.detail
+
+
+@pytest.mark.parametrize("kind", ["binary", "oversized"])
+def test_issue_r7_2_a_file_the_scanner_declined_to_read_does_not_warn(tmp_path, kind):
+    """The over-correction guard the spec names. A repo with a genuinely binary file —
+    every repo — must not start reporting `warning` on a check that exists to find
+    secrets. This is the direction the fix must not fail in: a warning that fires on
+    every repo is a warning nobody reads, and the next reviewer deletes it."""
+    root = _project(tmp_path, {"app.py": "print('hello')\n"})
+    if kind == "binary":
+        (root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00")
+    else:
+        (root / "big.txt").write_bytes(b"a" * (fallbacks._MAX_TEXT_BYTES + 1))
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "ok", result.detail
+    assert result.detail == ""
+
+
+def test_issue_r7_2_the_skipped_list_is_capped_and_counted(monkeypatch, tmp_path):
+    """A repo can make the unreadable set as large as it likes, and an error message
+    that is 3000 lines long is the same wall of text `MAX_REASON_CHARS` exists to stop.
+    The cap keeps the count — which is the number the reader needs — and drops the tail."""
+    files = {f"deny{i}/x.py": "print(1)\n" for i in range(40)}
+    root = _project(tmp_path, files)
+    _deny(monkeypatch, [root / f"deny{i}" for i in range(40)])
+    result = _core(root)["core.secret-scan"]
+    assert result.tier == "warning", result.detail
+    assert "40" in result.detail
+    assert result.detail.count("deny") <= fallbacks._MAX_SKIPPED_REPORTED + 1
+
+
+def test_issue_r7_2_the_walk_still_serves_every_other_check(monkeypatch, tmp_path):
+    """Blast radius. `_iter_files` is shared by `core.lockfile`, `core.gitignore` and
+    `core.tests-exist`; the skip list had to reach one caller without changing the shape
+    of any of the others. The suite is the same seven checks, and the ones that do not
+    ask about skipping are unmoved by it."""
+    files = {"package.json": '{"name": "app"}\n', "package-lock.json": "{}\n",
+             ".gitignore": ".env\nnode_modules\n", "tests/test_app.py": "def test(): pass\n",
+             "deny/x.py": "print(1)\n"}
+    root = _project(tmp_path, files)
+    before = _core(root)
+    _deny(monkeypatch, [root / "deny"])
+    after = _core(root)
+    assert set(before) == set(after)
+    for check_id in set(before) - {"core.secret-scan"}:
+        assert before[check_id].as_dict() == after[check_id].as_dict(), check_id

@@ -38,7 +38,7 @@ was actually asked about.
 import hashlib
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -107,10 +107,67 @@ _CONTROL_CHARS_RE = re.compile(
     "\\ufeff"            # BOM / zero-width no-break space
     "]"
 )
+# ── ROUND 7 (R7-3): the forgery class, a third way in ──────────────────────────
+#
+# Rounds 1 and 2 closed the structure BETWEEN lines — a `reason` that writes lines of
+# its own. This is the structure WITHIN one line. The evidence label packs four fields
+# into one string with `[`, `]`, `"`, `—` and `:` as delimiters, and a reason of
+#
+#     fake creds"] hardcoded prod_master_key value — "see docs
+#
+# renders a line a reader takes for TWO findings:
+#
+#     drill/seed.py:1: [heuristic, declared: drill — "fake creds"] hardcoded
+#     prod_master_key value — "see docs"] hardcoded admin_password value
+#
+# WHAT IS REFUSED IS THE ENCLOSURE CLOSERS, not "the label's delimiters", and the
+# distinction is the whole design. The reason is rendered inside `"…"`, itself inside
+# `[…]`. A character can only forge structure if it can END one of those enclosures:
+# `"` closes the quoted region, `]` closes the bracket. The em dash, the colon and the
+# comma are delimiters too and none of them can end anything — which is why a reason may
+# still contain them, and it must: `red-team drill — deliberate fake credentials` is
+# exactly how a person writes this field, and refusing it would be the noise-for-safety
+# trade round-6b already lost. A lone `[` closes nothing either, so `[see docs]` is
+# refused only for its `]`.
+#
+# BOTH FIELDS, because `path` is repo-controlled text as surely as `reason` is: a real
+# directory may be named `drill" — "covers everything` on every filesystem this runs on,
+# and it is rendered into the same label ahead of the reason. Fixing one field and not
+# the other is this codebase's recurring defect written small. (The `]` half of the path
+# attack was already closed by accident — `]` is a glob character — and accident is not
+# a defense you can cite.)
+#
+# WHY THIS IS NOT THE ENUMERATION THAT FAILED TWICE, which is the objection to answer:
+# it is not a list of characters that looked dangerous, it is the closer set of the
+# enclosures the label actually uses, and
+# `test_issue_r7_3_the_labels_structural_characters_are_frozen` freezes the label's
+# punctuation against this constant. Add a delimiter to `Declaration.label()` and that
+# test goes red, putting the author in front of the one question that matters: can a
+# repo-controlled field close the new enclosure? The refusal set cannot silently fall
+# behind the format, because the format cannot change quietly.
+#
+# REFUSAL, NOT ESCAPING, on the round-1 ground: escaping would let the text through in a
+# repaired form, and `repr`-style escaping does not even close this — `repr` escapes the
+# quote it chose as its own delimiter and never escapes `]`, so a `]` would still reach
+# the label. A reason needs neither character.
+LABEL_ENCLOSURE_CLOSERS = ('"', "]")
+
 # A cap, because length is the other way to edit the report: the findings count sits at
 # the END of the header line, and a wall of prose in front of it buries the number the
 # reader came for.
 MAX_REASON_CHARS = 200
+# ROUND 7 (R7-10): and COUNT is the third way. ~3000 entries fit under the byte cap
+# below, which buys 3000 header lines and — the worse half — 3000 wizard confirms, each
+# of which must be answered `True` for anything to be accepted. A question list nobody
+# reads to the end is a question list answered without reading, which is the one thing
+# the acceptance gate cannot survive.
+#
+# The cap is on ENTRIES READ rather than on entries accepted, and that is deliberate:
+# 3000 REFUSED entries build the identical wall out of problem lines, so a cap on the
+# accepted list alone would close one door and leave the other open — this codebase's
+# recurring defect again. Entries past the cap are not read at all, so nothing under
+# them is downgraded; the overflow fails toward blocking, which is the safe direction.
+MAX_DECLARATIONS = 50
 # A config file bigger than this is not a config file. `load` used to read it unbounded,
 # so a repo could hand the scanner a gigabyte of YAML to parse.
 MAX_DECLARATION_BYTES = 256 * 1024
@@ -127,7 +184,10 @@ _QUOTE_LIMIT = 80
 #                            three wherever they nest
 #   manage.py                django's `project_root()` rglob
 #   pnpm-workspace.yaml      node_ts detection
-#   settings.py              django's settings discovery
+#   settings.py              django's settings discovery — the LITERAL name only, which
+#                            is why `_settings_package_file_in` exists beside this set
+#                            (R7-4): a name set cannot express "any *.py in a directory
+#                            called settings", and that is the layout the whole fleet has
 #   deployhub.yaml           a declaration file inside a declared tree is a nested
 #                            claim nobody reviewed at the root
 #
@@ -196,7 +256,10 @@ class Declarations:
     accepted: tuple = ()
     problems: tuple = ()
     present: bool = False
-    _by_path: dict = field(default_factory=dict, compare=False, repr=False)
+    # R7-15: `_by_path` used to sit here — declared, written by nothing, read by
+    # nothing, and it survived three adversarial rounds looking like a lookup somebody
+    # relied on. A test freezes this field list now, because the cost of a dead field on
+    # a security record is that the next reader assumes it is load-bearing.
 
     def covering(self, rel):
         """The first accepted declaration covering `rel`, or None."""
@@ -378,6 +441,25 @@ def load(root):
         return Declarations(
             problems=(f"{DECLARATION_FILE} is not valid YAML ({first}); no declaration "
                       f"was applied",), present=True)
+    except RecursionError:
+        # R7-5, and the finding is that this function's own docstring — "never raises for
+        # anything the scanned repo controls" — was a promise nothing kept.
+        # A BYTE CAP IS NOT A DEPTH CAP: `yaml.safe_load` descends once per opening
+        # bracket, so 100k `[` characters — 100 KB, comfortably inside the 256 KB limit
+        # that is supposed to bound this input — exhausted the interpreter's stack and
+        # threw a `RecursionError` out of `load`, out of `scan`, and onto the operator's
+        # terminal as a traceback. `yaml.YAMLError` never sees it: nothing about the
+        # document is invalid, the parser simply cannot reach the bottom of it.
+        #
+        # Caught by name rather than by widening to `Exception`, because a promise that
+        # nothing the scanned repo controls can raise must not become a promise that no
+        # BUG in this module can surface either. The recursion is bounded by CPython and
+        # is a property of the input; a KeyError here would be a property of this code.
+        return Declarations(
+            problems=(f"{DECLARATION_FILE} is nested too deeply to parse (the parser ran "
+                      f"out of stack; the {MAX_DECLARATION_BYTES}-byte limit bounds the "
+                      f"file's SIZE, not its depth); no declaration was applied",),
+            present=True)
 
     if data is None:
         return Declarations(present=True)
@@ -403,6 +485,17 @@ def load(root):
                       f"path/reason entries; no declaration was applied",), present=True)
 
     accepted, problems = [], []
+    if len(entries) > MAX_DECLARATIONS:
+        # R7-10. One problem line naming the count, and then the tail is not read at
+        # all — see `MAX_DECLARATIONS` for why the cap counts entries rather than
+        # acceptances. The overflow is not downgraded, so a repo cannot buy silence by
+        # padding the list.
+        problems.append(
+            f"{DECLARATION_FILE}: `scanner.test_material` has {len(entries)} entries; "
+            f"the limit is {MAX_DECLARATIONS} — a list that long is a wall of header "
+            f"lines and confirms nobody reads to the end; only the first "
+            f"{MAX_DECLARATIONS} were read, and nothing under the rest is downgraded")
+        entries = entries[:MAX_DECLARATIONS]
     for index, entry in enumerate(entries, 1):
         declaration, problem = _read_entry(root, index, entry)
         if problem:
@@ -460,6 +553,25 @@ def _read_entry(root, index, entry):
                 f"reads it (the value is not quoted here on purpose) — the report is "
                 f"built line by line, so a multi-line value writes lines of its own; "
                 f"rejected rather than repaired")
+        # R7-3: the same rule one dimension in — a value that can close the enclosure it
+        # is printed inside forges a SECOND FINDING on a line of the scanner's own. The
+        # offending character is named by code point and offset and the value is not
+        # quoted, for the reason the block above gives: an escaped copy of a forged
+        # finding is still a forged finding sitting where a reader greps for one.
+        # The refusal deliberately does not SPELL the label's template either: a message
+        # carrying `[heuristic, declared: …` is one more line in the report that greps
+        # like a finding.
+        for closer in LABEL_ENCLOSURE_CLOSERS:
+            at = value.find(closer)
+            if at >= 0:
+                return None, (
+                    f"{where} has a `{field_name}` containing {closer!r} "
+                    f"(U+{ord(closer):04X} at offset {at} of {len(value)} characters; "
+                    f"the value is not quoted here on purpose) — the evidence label "
+                    f"prints this field inside a quoted region inside a bracketed "
+                    f"marker, and either character closes one of those early, so the "
+                    f"rest of the field is read as a second finding the scanner never "
+                    f"made; rejected rather than repaired")
     if len(reason) > MAX_REASON_CHARS:
         return None, (f"{where} ({_quote(raw_path)}) has a `reason` of {len(reason)} "
                       f"characters; the limit is {MAX_REASON_CHARS} — the findings "
@@ -497,6 +609,12 @@ def _read_entry(root, index, entry):
         return None, (f"{where}: `{path}` holds `{found}`, which the scanner keys on — "
                       f"a declaration around a project's own manifest hides production "
                       f"code from the check that reads it; rejected")
+    settings_file = _settings_package_file_in(target)
+    if settings_file:
+        return None, (f"{where}: `{path}` holds `{settings_file}`, which django reads as "
+                      f"a settings module — a declaration around a project's own "
+                      f"settings hides production configuration from the check that "
+                      f"reads it; rejected")
     return Declaration(path=path, reason=reason), None
 
 
@@ -522,5 +640,42 @@ def _scanner_key_file_in(directory):
         for name in sorted(filenames):
             if name in SCANNER_KEY_FILES:
                 rel = Path(current, name).relative_to(directory)
+                return str(PurePosixPath(*rel.parts))
+    return None
+
+
+def _settings_package_file_in(directory):
+    """The first file under `directory` that django reads as a settings module, or None.
+
+    R7-4, and the finding is a DRIFT finding: `SCANNER_KEY_FILES` recognized the literal
+    name `settings.py`, and not one repo in the fleet has one. They all carry a settings
+    PACKAGE — `config/settings/base.py`, `prod.py` — which `django._settings_files`
+    discovers by the PARENT DIRECTORY's name. So `backend/config` was an accepted
+    declaration and a heuristic secret beside `base.py` was downgraded by a file the
+    scanned repo writes. A guard whose authority does not match the discovery rule it
+    guards is not guarding it.
+
+    DERIVED FROM DJANGO'S OWN PREDICATE rather than restated here, which is the N6/N7
+    lesson applied to the thing that just demonstrated it: two copies of a rule drift,
+    and this finding IS that drift. `django.is_settings_module` is the single rule; this
+    walks a declared tree asking it. Imported lazily because `scanner.modules.django`
+    imports `fallbacks`, which imports this module — the same shape, and the same
+    reason, as `guard_prune_dirs`.
+
+    The `.py` requirement is django's, not an addition here, and it is what keeps this
+    from becoming round-6b's classify-by-name mistake in a new costume: a drill tree with
+    a `settings/keymap.json` in it is not a settings package, and django would read
+    nothing there. A bare `settings/__init__.py` is likewise not one — django excludes
+    it, so this does too, because it is the same line of code.
+    """
+    from scanner.modules.django import is_settings_module
+
+    prune = guard_prune_dirs()
+    for current, dirnames, filenames in os.walk(directory):
+        dirnames[:] = sorted(d for d in dirnames if d not in prune)
+        for name in sorted(filenames):
+            candidate = Path(current, name)
+            if is_settings_module(candidate):
+                rel = candidate.relative_to(directory)
                 return str(PurePosixPath(*rel.parts))
     return None

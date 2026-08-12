@@ -54,6 +54,27 @@ def _iter_files(root, pattern):
             yield p
 
 
+def is_settings_module(path):
+    """True when django would read `path` as a settings module.
+
+    The rule was inline in `DjangoModule._settings_files` and is a module-level function
+    now because R7-4 needed a SECOND caller: `declarations._settings_package_file_in`,
+    the manifest guard that refuses a declaration wrapped around a project's own
+    settings. That guard used to key on the literal name `settings.py`, which no repo in
+    the fleet has — they all carry a settings PACKAGE — so `backend/config` was an
+    accepted declaration and secrets beside `base.py` were downgraded. Two copies of one
+    rule drift (N6, N7, and now this); one function cannot.
+
+    A settings package is recognized by the PARENT DIRECTORY's name, and `__init__.py` is
+    excluded because it is the package marker rather than a settings module — every part
+    of that is django's discovery rule, not the guard's opinion of it.
+    """
+    path = Path(path)
+    return (path.suffix == ".py"
+            and path.name != "__init__.py"
+            and (path.name == "settings.py" or path.parent.name == "settings"))
+
+
 def _read(path):
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -183,12 +204,7 @@ class DjangoScannerModule:
 
     # ── shared file discovery ───────────────────────────────────────────────
     def _settings_files(self, root):
-        found = []
-        for p in _iter_files(root, "*.py"):
-            if p.name == "settings.py" or p.parent.name == "settings":
-                if p.name != "__init__.py":
-                    found.append(p)
-        return found
+        return [p for p in _iter_files(root, "*.py") if is_settings_module(p)]
 
     def _prod_settings(self, root):
         return [p for p in self._settings_files(root) if p.stem not in _DEV_STEMS]

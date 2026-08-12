@@ -180,6 +180,31 @@ the answers table on every write, but that is hygiene — the digest is the secu
 property, and if the sweep is ever what stands between a stale `True` and a downgrade,
 the design has regressed.
 
+## The rest of the round-7 queue — verified against these records, moved none of them
+
+`docs/spec-r7-scanner-findings.md` (R7-2/3/4/5/6/7/9/10/12/15) landed on the same branch
+after the two corrections above. **No demo artifact moves**, and that claim is checked
+rather than assumed — all five were re-scanned with `cmp` against the recording above and
+all five are byte-identical. What each of the three findings that COULD have moved one
+was, and why it did not:
+
+- **R7-2** — a subtree the walk cannot open was skipped in silence, so a
+  permission-denied `prodcfg/` holding a real AWS key reported `tier: ok`, "No committed
+  secrets found", empty detail. The check now collects what it could not read and reports
+  at `warning` rather than `ok`, naming the paths. This is the one finding that ADDS
+  report lines, so the fleet was measured directly rather than inferred: all four fleet
+  trees and the in-repo fixture have **zero** unreadable paths, so no record gains a line.
+- **R7-3** — the evidence label is delimiter-injectable: a `reason` carrying `"` and `]`
+  renders a line that reads as a second finding. `"` and `]` are refused in both `reason`
+  and `path` now. SATURDAYS_site's reason — *red-team / QA drill scripts; deliberate fake
+  credentials* — contains neither, so its declaration is accepted exactly as before.
+- **R7-4** — the manifest guard recognized a literal `settings.py` and the whole fleet
+  uses a settings *package*, so a declaration wrapped around `backend/config` was
+  accepted. The guard now derives its rule from `django.is_settings_module` itself.
+  SATURDAYS_site declares `frontend/scripts/drill`, which holds no Python settings module,
+  so it stays accepted — the guard is stricter and this repo is unaffected, which is
+  exactly the shape a narrowing fix should have on a legitimate declaration.
+
 ## D-011r revisit data — the full arc, and its closure
 
 Counts are `core.secret-scan` evidence lines. The arc runs left to right: the first
