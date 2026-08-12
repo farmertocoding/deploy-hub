@@ -28,6 +28,39 @@ function Badge({ tier, n }) {
   );
 }
 
+// R8-1: the Materialize decision, as a named thing rather than an expression in JSX.
+//
+// Gated on `state.can_materialize`, which is `not preflight(site)` (wizard/views.py
+// ::_state) — the same function the POST itself runs, so client and server refuse for
+// identical reasons. It used to be gated on the parent's `report.blockers`, which an
+// acceptance never rewrites: the button stayed disabled after the very answer that
+// unblocked the deploy, under a tooltip telling the operator to re-scan — the one
+// operation pinned to change nothing. Pinned by tests/materialize-gate.test.ts.
+export function materializeGate(state) {
+  const blocking = state?.blocking || [];
+  const codes = blocking.map((p) => p.code);
+  if (state?.can_materialize)
+    return { disabled: false, label: "Materialize manifest", title: "" };
+  if (codes.includes("blockers_present"))
+    return {
+      disabled: true, label: "⛔ Blocked",
+      title: "Blockers must be fixed and rescanned first — materialization will refuse.",
+    };
+  if (codes.length && codes.every((c) => c === "answers_missing"))
+    return {
+      disabled: true, label: "Answer required",
+      // Not "fix and rescan": a declaration confirm is cleared by answering it here,
+      // and a re-scan of an unchanged tree produces the identical report forever.
+      title: "Some required questions are unanswered — including any declaration you " +
+        "must accept or refuse. Answering them here is what clears them; re-scanning " +
+        "will not.",
+    };
+  return {
+    disabled: true, label: "⛔ Blocked",
+    title: blocking.map((p) => p.detail).filter(Boolean).join(" · "),
+  };
+}
+
 function Stamp({ at }) {
   if (!at) return <span style={{ color: "#8b949e" }}>never scanned</span>;
   return <span style={{ color: "#8b949e" }}>data as of {new Date(at).toLocaleString()}</span>;
@@ -139,14 +172,13 @@ function ReadinessPanel({ projectId, project, onChanged }) {
         </section>
       ))}
       {project?.sites?.map((s) => (
-        <SiteWizard key={s.id} site={s} hasBlockers={!!report.blockers?.length}
-          onChanged={onChanged} />
+        <SiteWizard key={s.id} site={s} onChanged={onChanged} />
       ))}
     </div>
   );
 }
 
-function SiteWizard({ site, hasBlockers, onChanged }) {
+function SiteWizard({ site, onChanged }) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState(undefined);
   const [draft, setDraft] = useState({});
@@ -185,6 +217,7 @@ function SiteWizard({ site, hasBlockers, onChanged }) {
   if (state.error) return <p style={{ color: "#ff7b72" }}>{state.error}</p>;
 
   const unanswered = state.questions.filter((q) => !(q.id in (state.answered || {})));
+  const gate = materializeGate(state);
   return (
     <div style={{ ...box, marginTop: 8 }}>
       <h4 style={{ marginTop: 0 }}>{site.name} — configuration</h4>
@@ -219,9 +252,9 @@ function SiteWizard({ site, hasBlockers, onChanged }) {
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
         {" "}I have read the warnings above and accept them
       </label>{" "}
-      <button style={box} disabled={busy || hasBlockers} onClick={materialize}
-        title={hasBlockers ? "Blockers must be fixed and rescanned first — materialization will refuse." : ""}>
-        {hasBlockers ? "⛔ Blocked" : "Materialize manifest"}</button>
+      <button style={box} disabled={busy || gate.disabled} onClick={materialize}
+        title={gate.title}>
+        {gate.label}</button>
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
       {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}
