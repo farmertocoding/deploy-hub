@@ -21,7 +21,14 @@ import math
 import re
 from pathlib import Path
 
-from scanner import core, declarations
+from scanner import core
+
+# The name of the file the presence notice below looks for. A literal, deliberately:
+# `scanner.declarations` owns the parser and it is PARKED (D-012 out of Phase 1), so
+# importing it for one string would re-wire the module into a live path — the thing
+# `test_d012_no_live_code_imports_the_parked_declarations_module` exists to keep red.
+# The two constants agreeing is asserted by that module's own tests.
+DECLARATION_FILE = "deployhub.yaml"
 
 # Directories that are dependency/build/data output, never reviewed source.
 #
@@ -681,46 +688,28 @@ def _is_identifier_echo(name, value):
     return name.lower().strip("_") == value.lower().replace("-", "_").strip("_")
 
 
-def _check_secret_scan(root, texts, declared=None, skipped=()):
-    """Follow-up 2 (spec-declared-test-material.md): `declared` is what the scanned repo
-    said about itself in `deployhub.yaml`, and it reaches exactly ONE thing — the
-    heuristic axis's bucket. The N6 rule, restated: scope the axis, never the walk. The
-    `[proof]` axis and the `.env` handler below run at full tier inside a declared tree,
-    because a repo cannot declare its way out of a published credential format.
+def _check_secret_scan(root, texts, skipped=()):
+    """Two buckets, and no third one: what blocks, and what the SCANNER's own rules
+    classify as test material.
 
-    ROUND 7 (R7-1 veto, ruled by Joseph 2026-08-12): the bucket is unchanged and the
-    TIER NO LONGER DROPS FOR IT. A declaration is a request; a repo that could grant its
-    own request would be downgrading its own blockers with a file it writes, which is
-    what three reviewers found this check doing. So the three buckets and the header
-    stay — they are how the operator reads the claim — and declared findings count
-    toward blocking until the wizard says otherwise.
+    D-012 OUT OF PHASE 1 (2026-08-16, Joseph's cap decision). This check used to take a
+    `declared` argument — the scanned repo's `deployhub.yaml` claim — and route heuristic
+    findings under a declared path into a third bucket, with a header, a label carrying
+    the repo's own words, and an `acceptance` contract naming the confirms that would
+    clear it. Every one of those is gone. A repo's claim about itself now changes
+    nothing about what this check reports, which is the design intent stated at its
+    narrowest: nothing downgrades anything. The presence of the file is reported once,
+    honestly, by `_check_declaration_file` below.
 
-    THIS FUNCTION HAS NO ANSWERS AND MUST NOT PRETEND TO. It states what was claimed
-    and, in `acceptance`, exactly which confirms would clear it; `wizard.materialize`
-    owns the decision. That split is why the section header no longer says "not
-    blocking": the scanner was asserting an outcome only the answer store knows.
-
-    ROUND 7 (R7-2): `skipped` is what the walk could not open — see `_iter_files`. The
-    same rule as the sentence above, pointed at the scanner's own blind spots rather
-    than at the repo's claims: this check may not report `ok` about a subtree it never
-    read, so a skip alone is a `warning`, and where there are findings the skip list
-    rides the detail. It is the only core check that takes the list, for the reason the
-    declaration is the only thing `declared` reaches — scope the axis, not the walk.
+    ROUND 7 (R7-2), and this part stays: `skipped` is what the walk could not open — see
+    `_iter_files`. This check may not report `ok` about a subtree it never read, so a
+    skip alone is a `warning`, and where there are findings the skip list rides the
+    detail. It is the only core check that takes the list — scope the axis, not the walk.
     """
-    declared = declared or declarations.NONE
     findings, test_findings = [], []
-    # A third bucket, never merged into the second: one claim the scanner made about a
-    # path, one the repo made about itself, and a reader who cannot tell them apart
-    # cannot audit either.
-    declared_findings = []
-    declared_counts = {d.path: 0 for d in declared.accepted}
     for path, text in texts:
         rel = path.relative_to(root)
         bucket = test_findings if _is_test_path(rel) else findings
-        # Auto-detected test material wins when both apply: it is already non-blocking,
-        # and routing such a finding through the declaration would let a declaration
-        # claim credit for a downgrade it did not make.
-        covering = None if bucket is test_findings else declared.covering(rel)
         if _is_env_file(path.name):
             # N7 (TAKKO scan, 2026-08-11): this line used to read "committed .env file",
             # which the scanner has no way to know — it reads a TREE and cannot see git.
@@ -764,55 +753,36 @@ def _check_secret_scan(root, texts, declared=None, skipped=()):
                         and not _is_identifier_echo(name, value)
                         and not _looks_placeholder(value)
                         and _shannon_entropy(value) >= floor):
-                    if covering is not None:
-                        declared_counts[covering.path] += 1
-                        declared_findings.append(
-                            f"{rel}:{lineno}: [heuristic, {covering.label()}] "
-                            f"hardcoded {name.lower()} value")
-                        continue
                     bucket.append(
                         f"{rel}:{lineno}: [heuristic] hardcoded {name.lower()} value")
 
-    header = _declaration_header(declared, declared_counts)
     unread = _skipped_section(root, skipped)
-    if findings or declared_findings:
-        # `declared_only`: the check's whole blocking case is findings the repo asked to
-        # have downgraded, so accepting every one of those declarations leaves nothing
-        # blocking. With a `[proof]` line, a `.env` file or an undeclared heuristic line
-        # in `findings`, no answer clears this check and `acceptance` says so.
-        declared_only = not findings
+    if findings:
         detail = _join_sections(
-            header,
             "\n".join(findings),
             _test_material_section(test_findings),
-            _declared_section(declared_findings),
             unread,
         )
         return core.CheckResult(
             id="core.secret-scan", tier="blocker",
-            title=(_DECLARED_ONLY_TITLE if declared_only
-                   else "Committed secrets detected"),
+            title="Committed secrets detected",
             detail=detail,
-            fix_hint=_blocker_fix_hint(declared, declared_only),
-            acceptance=_acceptance(declared, declared_counts, declared_only),
+            fix_hint=_blocker_fix_hint(),
         )
-    if test_findings or declared.problems:
+    if test_findings:
         # Reported, not blocked. A fixture password is not a deployable credential, and
         # a blocker that fires on every test suite is a blocker people learn to route
         # around — but a real key does get committed to a test file sometimes, so the
-        # finding still has to appear in the report with its file and line. A declaration
-        # PROBLEM lands here too: nothing was downgraded, and a claim the scanner
-        # refused is exactly what a reader has to see.
+        # finding still has to appear in the report with its file and line.
         #
-        # ROUND 7: a DECLARED finding can no longer reach this tier — it blocks until
-        # accepted — so this branch is the scanner's own auto-detection plus the
-        # refusals, and the copy no longer describes a declared bucket that cannot
-        # appear in it. The auto-detected bucket is therefore never labelled here: on
-        # its own it is what the whole result is about, and the title says so.
-        detail = _join_sections(header, "\n".join(test_findings), unread)
+        # D-012 out of Phase 1: the branch that also landed here — a `deployhub.yaml`
+        # the parser refused — is gone with the parser, and so is the two-part title
+        # that named which of the two things had happened. This tier is the scanner's
+        # own auto-detection and nothing else, which is what the title says.
+        detail = _join_sections("\n".join(test_findings), unread)
         return core.CheckResult(
             id="core.secret-scan", tier="warning",
-            title=_warning_title(test_findings, declared),
+            title="Secret-shaped values in test material only",
             detail=detail,
             fix_hint="These are in test material, so they do not block a deploy. "
                      "Confirm each one is a fixture rather than a real credential that "
@@ -823,13 +793,13 @@ def _check_secret_scan(root, texts, declared=None, skipped=()):
         # R7-2, and this branch is the entire finding: without it the return below said
         # "No committed secrets found" about a tree the walk could not open. `ok` is a
         # claim, and this check has not earned it here — the honest answer is that it
-        # does not know. A separate result rather than a fourth branch of
-        # `_warning_title`, because "we could not look" is not a finding about the repo's
-        # test material and reads as noise filed under that title.
+        # does not know. A separate result rather than a third branch of the warning
+        # title, because "we could not look" is not a finding about the repo's test
+        # material and reads as noise filed under that title.
         return core.CheckResult(
             id="core.secret-scan", tier="warning",
             title="Secret scan incomplete — part of the tree could not be read",
-            detail=_join_sections(header, unread),
+            detail=unread,
             fix_hint="Nothing was found in what could be read, and that is not the same "
                      "as nothing being there. Give the scanner read access to the paths "
                      "above (or remove them from the tree you are deploying) and scan "
@@ -837,16 +807,7 @@ def _check_secret_scan(root, texts, declared=None, skipped=()):
                      "own account, since it is unusual in a repository.",
         )
     return core.CheckResult(id="core.secret-scan", tier="ok",
-                            title="No committed secrets found", detail=header)
-
-
-def _warning_title(test_findings, declared):
-    if declared.problems and not test_findings:
-        return f"{declarations.DECLARATION_FILE} declarations need attention"
-    if declared.problems:
-        return ("Secret-shaped values in test material only; "
-                f"{declarations.DECLARATION_FILE} declarations need attention")
-    return "Secret-shaped values in test material only"
+                            title="No committed secrets found")
 
 
 def _join_sections(*sections):
@@ -895,28 +856,9 @@ def _test_material_section(test_findings):
     return "Also in test material (not blocking):\n" + "\n".join(test_findings)
 
 
-def _declared_section(declared_findings):
-    """The third bucket's header.
-
-    It used to end `, not blocking):`, and round 7 is what that cost: the sentence was
-    a claim about the OPERATOR'S ANSWER, made by the component that holds none. It read
-    as settled fact on a report generated before anybody had been asked, and it was the
-    most visible half of the "a repo downgrades its own blockers" defect. What the
-    scanner can say honestly is what was requested and what would grant it.
-    """
-    if not declared_findings:
-        return ""
-    return ("Declared test material (downgrade requested by "
-            f"{declarations.DECLARATION_FILE} — these findings block until you accept "
-            "it in the wizard):\n"
-            + "\n".join(declared_findings))
-
-
-_DECLARED_ONLY_TITLE = "Secrets in a declared tree — your acceptance is required"
-
-# The `[proof]`/`[heuristic]` legend, unchanged and still the whole explanation for a
-# repo that declares nothing — which is why it is lifted to a constant rather than
-# reworded: every recorded demo artifact but SATURDAYS_site's must not move.
+# The `[proof]`/`[heuristic]` legend, unchanged and still the whole explanation of the
+# two labels — which is why it stays a constant rather than being reworded: every
+# recorded demo artifact reads it back.
 _CONFIDENCE_LEGEND = (
     "[proof] lines matched a published credential format — a GitHub "
     "token, a PEM block, an AWS key id — and are not guesses. "
@@ -924,103 +866,71 @@ _CONFIDENCE_LEGEND = (
     "high-entropy literal: real most of the time, and worth a look "
     "before you decide.")
 
-# R7-8. This legend existed only on the warning tier, and SATURDAYS_site — the repo the
-# whole feature was built for — has two `.env` files, so it reports at blocker tier and
-# always did. Its operator read `[heuristic, declared: …]` lines and a `Downgrades
-# claimed` header with nothing anywhere on the report saying what either meant.
-#
-# It also carries the sentence round 7 found to be false. "Refusing it is how you say
-# the declaration is wrong" was printed against a confirm whose answer was read by no
-# code; it is true now, and it is stated with the mechanism attached so the next reader
-# can check it rather than trust it.
-#
-# AND IT TAKES `declared_only`, because the second veto's copy note lands right here.
-# The unhedged sentence — "accepting clears exactly those lines" — reads as "accepting
-# lets this deploy", and on SATURDAYS_site, the repo the whole feature was built for,
-# that is false: it has two `.env` files, so `blocking_only_declared` is False and no
-# answer clears the check. The demo narrative was already honest about it; the report
-# the operator actually reads has to be too, or the copy is doing to them exactly what
-# the frozen manifest was doing to the audit trail.
-def _declared_legend(declared_only):
-    outcome = (
-        "Accepting clears exactly those lines and lets this check pass."
-        if declared_only else
-        "Accepting clears exactly those lines and no more: the other findings above are "
-        "covered by no declaration, so this check still blocks whatever you answer.")
-    return (
-        "The `Downgrades claimed` header above, and any `[heuristic, declared: …]` "
-        f"line, is this repo's own {declarations.DECLARATION_FILE} REQUESTING that "
-        "those findings stop blocking. Asking is not getting: they block until you "
-        f"accept that declaration in the wizard. {outcome} Your answer is recorded in "
-        "the frozen manifest against the exact wording you were shown — edit the path "
-        "or the reason and you will be asked again. Refusing leaves them blocking and "
-        "records the refusal, so refusing is how you say the declaration is wrong.")
 
+def _blocker_fix_hint():
+    """D-012 out of Phase 1: back to one lead sentence and the legend.
 
-def _blocker_fix_hint(declared, declared_only):
-    if declared_only:
-        lead = ("Every blocking line here is a heuristic finding inside a tree this "
-                f"repo's {declarations.DECLARATION_FILE} declares as test material, so "
-                "the deploy is refused for exactly one reason: nobody has accepted "
-                "that claim yet. Read the reason and read the lines, then answer the "
-                "wizard's confirm.")
-    else:
-        lead = ("Move secrets to the vault / environment injection. A .env file "
-                "in this tree ships with a deploy of it, and is a leak as well if "
-                "it is committed — check `git status`, add .env to .gitignore, and "
-                "rotate anything that was committed: it stays in git history until "
-                "you do.")
-    parts = [lead, _CONFIDENCE_LEGEND]
-    if declared.accepted:
-        parts.append(_declared_legend(declared_only))
-    return "\n\n".join(parts)
-
-
-def _acceptance(declared, counts, declared_only):
-    """The structured contract of R7-A §2, or None when there is nothing to accept.
-
-    `questions` names only declarations that actually downgraded something. A
-    declaration quieting nothing today is still printed in the header (D-012) but it is
-    not a key to this gate: requiring it would make an unrelated confirm hold a blocker
-    shut, and — the direction that matters — offering it would let a `True` on a
-    declaration that touched no finding clear findings it never touched.
-
-    `None` when nothing was downgraded, so `as_dict` omits the key entirely and a repo
-    that declares nothing serializes exactly as it did before this field existed.
+    The two branches this used to have — one for a check whose whole blocking case was
+    a declared tree, one for everything else — described an acceptance that no longer
+    exists, and the paragraph after them told the operator that answering a wizard
+    confirm would clear these lines. There is no such confirm this phase, and copy that
+    points at a control the product does not have is the defect round 7 spent itself on,
+    pointing the other way.
     """
-    questions, seen = [], set()
-    for declaration in declared.accepted:
-        # Keyed by path, FIRST DECLARATION WINS — the same rule `Declarations.covering`
-        # uses to pick which of two declarations over one path gets the credit for a
-        # finding. The second is still asked about and still recorded; it just is not a
-        # key to this gate, because it was credited with nothing.
-        if declaration.path in seen or counts.get(declaration.path, 0) < 1:
-            continue
-        seen.add(declaration.path)
-        questions.append(
-            declarations.confirm_question_id(declaration.path, declaration.reason))
-    if not questions:
+    lead = ("Move secrets to the vault / environment injection. A .env file "
+            "in this tree ships with a deploy of it, and is a leak as well if "
+            "it is committed — check `git status`, add .env to .gitignore, and "
+            "rotate anything that was committed: it stays in git history until "
+            "you do.")
+    return "\n\n".join([lead, _CONFIDENCE_LEGEND])
+
+
+def _check_declaration_file(root):
+    """`core.declaration-file`, or None when the repo carries no `deployhub.yaml`.
+
+    HONEST, NOT SILENT — the third of the cap decision's design intents, and the reason
+    unwiring D-012 is not simply deleting its reader. A repo in this fleet already
+    carries a `deployhub.yaml` whose entire purpose is to be a reviewable claim about
+    its own drill trees. Ignoring it without a word would leave that repo believing a
+    downgrade is in force while the scanner reports every line at full tier — the
+    design's own sin (a claim nobody checks) inverted into a check nobody knows about.
+    So the file's PRESENCE is reported, once, at warning tier, and its CONTENTS are not
+    read: nothing in this result can be derived from repo-controlled text, which is what
+    keeps the six adversarial rounds of `scanner/declarations.py` from being load-bearing
+    while that module is parked.
+
+    Warning rather than advice because it is actionable and the action is not obvious:
+    the operator's mental model of what blocks their deploy is wrong until they read it.
+
+    `Path.is_file()` and nothing else. A directory or a dangling symlink named
+    `deployhub.yaml` holds no claim anybody wrote, so it is simply absent for this
+    notice's purposes; R8-14's contract about what counts as present left with the
+    mechanism it guarded. The file is otherwise an ordinary file in the tree and is
+    scanned by every check here like any other — including the secret scan, which is
+    said out loud in the detail because a reader who has just been told the file is
+    "ignored" would reasonably assume otherwise.
+    """
+    if not (Path(root) / DECLARATION_FILE).is_file():
         return None
-    return {"questions": questions, "blocking_only_declared": bool(declared_only)}
-
-
-def _declaration_header(declared, counts):
-    """The claim, always visible when the repo made one.
-
-    Spec: the header is printed even when a declaration downgraded NOTHING (`0
-    findings`). A declaration that quiets nothing today is still a live assertion about
-    the tree, and one that has gone stale should be readable before the day it starts
-    hiding something — that is the whole reason the ruling put the claim in the report
-    rather than in a Hub-side waiver nobody sees.
-    """
-    lines = []
-    for declaration in declared.accepted:
-        lines.append(
-            f"Downgrades claimed by {declarations.DECLARATION_FILE}: "
-            f'{declaration.path} ("{declaration.reason}", '
-            f"{counts.get(declaration.path, 0)} findings)")
-    lines.extend(declared.problems)
-    return "\n".join(lines)
+    return core.CheckResult(
+        id="core.declaration-file", tier="warning",
+        title=f"{DECLARATION_FILE} is present but declarations are disabled",
+        detail=(
+            f"This repo carries a {DECLARATION_FILE}. The declared-test-material "
+            f"mechanism it belongs to is deferred to its own phase, so this scan did "
+            f"not parse the file and no claim in it changed anything: every finding "
+            f"under a declared path is reported at its full tier, exactly as it would "
+            f"be if the file were not here. The file is otherwise ignored — and it is "
+            f"scanned like any other file in the tree, so a credential written into it "
+            f"is a finding of its own."),
+        fix_hint=(
+            f"Nothing to do for the deploy: no result above was downgraded. Read this "
+            f"as a correction to what the repo expects — if a tree was declared in "
+            f"{DECLARATION_FILE} in the belief that its findings would stop blocking, "
+            f"they are blocking, and either the findings or that expectation needs "
+            f"attention. Leaving the file in place is fine; it will be honored again "
+            f"when the mechanism returns with the threat model it is waiting on."),
+    )
 
 
 def _has_pinned_requirements(directory):
@@ -1244,16 +1154,14 @@ def _check_exposure_auth(texts):
     )
 
 
-def common_checks(root, declared=None):
+def common_checks(root):
     """The common-core static check suite (id prefix `core.`), composed into every
     scan report by `scanner.core.scan` (D-010) and called directly by tests.
 
-    R7-13: `declared` is the ONE `deployhub.yaml` read of the scan, done by `scan` and
-    threaded in. It was loaded here as well, so the file was parsed twice per scan under
-    a comment that claimed otherwise — and it is a file the scanned repo owns, so the
-    two reads can disagree: the downgrade would then be authorized by a confirm raised
-    from a different version of the claim. Tests and any other direct caller may omit it
-    and get the load for free.
+    D-012 out of Phase 1: the `declared` parameter is gone. It carried the one
+    `deployhub.yaml` read of a scan (R7-13's one-read rule, which existed because two
+    reads of a repo-controlled file can disagree inside one scan); with no reads at all
+    the rule is moot and the signature says so.
     """
     root = Path(root)
     # R7-2: one list, filled by the one walk the suite makes, read by the one check that
@@ -1261,13 +1169,8 @@ def common_checks(root, declared=None):
     skipped = []
     texts = _text_files(root, skipped)
     paths = [path for path, _ in texts]
-    if declared is None:
-        declared = declarations.load(root)
-    return [
-        # Follow-up 2: the declaration reaches ONE check. No other check takes it as an
-        # argument, which is the scope rule written as a call signature rather than as
-        # a promise.
-        _check_secret_scan(root, texts, declared, skipped),
+    suite = [
+        _check_secret_scan(root, texts, skipped),
         _check_lockfile(root, paths),
         _check_gitignore(root, texts, paths),
         _check_tests_exist(root),
@@ -1275,6 +1178,14 @@ def common_checks(root, declared=None):
         _check_digest_pins(root, texts),
         _check_exposure_auth(texts),
     ]
+    # APPENDED, and only when the file is there. The seven above keep their positions so
+    # a report from a repo with no `deployhub.yaml` is byte-identical to the one it
+    # produced before this notice existed — the same None-omission property that let
+    # `acceptance` be added without moving a recorded artifact, applied to a whole check.
+    notice = _check_declaration_file(root)
+    if notice is not None:
+        suite.append(notice)
+    return suite
 
 
 # ── fallback module: dockerfile (§V4) ───────────────────────────────────────────

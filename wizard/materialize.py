@@ -25,12 +25,12 @@ from django.db import transaction
 
 from core.audit import audit
 from deploys.models import MANIFEST_SCHEMA_VERSION, Manifest
-from scanner import declarations
+from scanner import core as scanner_core
 from vault import service as vault_service
 from vault.models import Secret
 
 from .models import WizardAnswer
-from .questions import DECLARATION_PREFIX, missing_required, question_map
+from .questions import missing_required, question_map
 
 
 class MaterializeRefused(Exception):
@@ -85,38 +85,41 @@ def preflight(site):
         })
         return problems   # nothing else is knowable without a scan
 
-    known = question_map(project)
-    answers = _plain_answers(site)
+    # R8-2, and it runs BEFORE anything reads a check or an answer. A stored scan report
+    # is data written by whatever scanner ran at the time, read back by this one, and the
+    # fields it carries do not mean the same thing across a schema change: a v1 report
+    # carries an `acceptance` contract on `core.secret-scan` whose semantics — an answer
+    # clears this blocker — this phase removed. Reading such a row with today's rules is
+    # how a downgrade baked into an old report survives the change that removed it.
+    #
+    # `scan_required` rather than a new code: the operator's action is identical to the
+    # never-scanned case above (re-scan, and the current scanner writes the current
+    # schema), and inventing a second code for one instruction would ask the UI to learn
+    # a distinction it cannot act on differently.
+    if report.get("schema_version") != scanner_core.SCHEMA_VERSION:
+        problems.append({
+            "code": "scan_required",
+            "detail": "this project's scan predates the current report schema and must "
+                      "be re-run",
+            "items": [],
+        })
+        return problems   # the rest of this report is not safely readable
 
-    blockers = []
-    for check in report.get("checks", []):
-        if check.get("tier") != "blocker":
-            continue
-        pending = _pending_acceptance(check, answers)
-        if pending == []:
-            # Every declaration whose findings are the whole of this check's blocking
-            # case has been accepted. This is the ONLY route by which an answer clears a
-            # blocker, and it exists because D-012's downgrade has to be somebody's act.
-            continue
-        item = {"id": check["id"], "title": check["title"]}
-        if pending:
-            # §3: name what is being waited on. "Fix them and re-scan" is the wrong
-            # instruction for this one — there is nothing in the repo to fix and the
-            # re-scan produces the identical report forever.
-            item["awaiting_acceptance"] = [
-                {"id": qid, "prompt": known[qid].prompt if qid in known else qid}
-                for qid in pending]
-        blockers.append(item)
+    known = question_map(project)
+
+    # A blocker-tier check blocks, full stop. Round 7 gave this walk one exit — a
+    # declaration whose confirms were all answered `True` stopped counting — and D-012
+    # leaving Phase 1 takes it back out: there is no acceptance, so there is no answer
+    # that clears a blocker, and the detail no longer has to explain an exception it
+    # cannot produce.
+    blockers = [{"id": check["id"], "title": check["title"]}
+                for check in report.get("checks", [])
+                if check.get("tier") == "blocker"]
     if blockers:
-        detail = ("the readiness report has blockers; these must be fixed and the "
-                  "project re-scanned")
-        if any("awaiting_acceptance" in b for b in blockers):
-            detail += (" — except where a declaration is awaiting acceptance, which "
-                       "you clear by answering its confirm in this wizard, not by "
-                       "changing the repo")
         problems.append({
             "code": "blockers_present",
-            "detail": detail,
+            "detail": "the readiness report has blockers; these must be fixed and the "
+                      "project re-scanned",
             "items": blockers,
         })
 
@@ -151,46 +154,6 @@ def preflight(site):
     return problems
 
 
-def _plain_answers(site):
-    """{question_id: value} for the non-secret answers. A confirm is never a secret."""
-    return dict(WizardAnswer.objects.filter(site=site, is_secret=False)
-                .values_list("question_id", "value"))
-
-
-def _pending_acceptance(check, answers):
-    """Which confirms this blocker is waiting on, or None when no answer can clear it.
-
-    Round 7 (R7-1), §3. Three outcomes, and the difference between the last two is the
-    entire security property:
-
-        None    acceptance is not on the table — either the check published no
-                `acceptance` contract at all (every check but `core.secret-scan`, and
-                that one whenever no declaration downgraded anything), or it published
-                `blocking_only_declared: False`, meaning a real blocker — a `[proof]`
-                line, a `.env` file, an undeclared heuristic line — shares it. THE
-                BLOCKER STANDS HOWEVER THE OPERATOR ANSWERS. Without this arm, "accept
-                the declaration" would be a general-purpose bypass of the secret scan:
-                the repo picks the tree, the operator clicks yes once, and a published
-                credential format ships.
-        [ids]   the blocker stands, and these confirms are what would clear it.
-        []      every one of them is answered True; the check stops blocking.
-
-    `is not True` rather than a truthy test, deliberately: `coerce_answer` already
-    turned the wire value into a real bool for a `kind="bool"` question, so anything
-    else reaching here — a string, a 1, a None from a half-written row — is a value this
-    gate does not understand, and the safe reading of a value it does not understand is
-    "not accepted".
-    """
-    acceptance = check.get("acceptance") or {}
-    questions = acceptance.get("questions") or []
-    # An empty `questions` list with `blocking_only_declared: True` would mean "clears
-    # itself, ask nobody". The scanner never emits that shape; it is refused here too,
-    # because the failure mode is a blocker that disappears with no answer behind it.
-    if not questions or acceptance.get("blocking_only_declared") is not True:
-        return None
-    return [qid for qid in questions if answers.get(qid) is not True]
-
-
 def warnings_for(site):
     report = site.project.scan_report or {}
     return [c for c in report.get("checks", []) if c.get("tier") == "warning"]
@@ -204,13 +167,9 @@ def materialize(site, *, actor=None, confirm_warnings=False):
     # telling the operator what to re-enter would leave a site that won't start and
     # no visible reason (the exact failure the original test pinned). The refusal is
     # composed from what THIS call scrubbed, plus everything preflight still sees.
-    from .service import scrub_downgraded_answers, scrub_orphaned_declaration_answers
+    from .service import scrub_downgraded_answers
 
     scrubbed = scrub_downgraded_answers(site)
-    # Hygiene only, and it changes no outcome here: a confirm whose declaration changed
-    # has a different id, so the gate below has already stopped seeing it. See that
-    # function's docstring for why that ordering is the security property.
-    scrub_orphaned_declaration_answers(site)
     problems = []
     if scrubbed:
         known = question_map(site.project)
@@ -319,11 +278,6 @@ def _apply_answers(body, site, answers, known, *, actor=None):
             site.domain = answer.value
         elif qid == "site.exposure":
             body["exposure"] = answer.value
-        elif qid.startswith(DECLARATION_PREFIX):
-            # Recorded by `_record_declarations` below, against the path and reason it
-            # answers — not as a bare id -> bool under `module_answers`, which is the
-            # shape round 7 found nothing reads.
-            continue
         elif _env_name(qid):
             name = _env_name(qid)
             env_names.append(name)
@@ -334,59 +288,11 @@ def _apply_answers(body, site, answers, known, *, actor=None):
             # and silently discarding it is the failure mode this branch exists for.
             body.setdefault("module_answers", {})[qid] = answer.value
 
-    _record_declarations(body, {a.question_id: a.value for a in answers
-                                if not a.is_secret})
     body["env_names"] = sorted(set(env_names))
     body["site"] = {"id": site.pk, "name": site.name, "domain": site.domain}
     if site.domain:
         site.save(update_fields=["domain"])
     return env_values
-
-
-def _record_declarations(body, answers):
-    """Rebuild `declared_test_material` from the ANSWERS (round 7, R7-A §5).
-
-    The scan draft carries what the REPO ASKED FOR, and freezing it verbatim was the
-    audit half of the R7-1 veto: the manifest — the append-only artifact this system
-    offers as its record of what was approved — asserted an acceptance for every
-    declaration in the file, including ones the operator had refused and ones nobody
-    had been asked about. It was the most confident sentence in the system and it was
-    not derived from anything.
-
-    So the key is rebuilt here, where the answers are, and the refusals are rebuilt
-    beside it. Dropping a refusal would be the same defect pointing the other way: "this
-    tree was declared, put to the operator, and turned down" is exactly what the next
-    person reading the repo needs, and an audit trail that records only the yeses cannot
-    tell them apart from the questions that were never asked.
-
-    Unanswered cannot reach here — §4 makes every confirm required, so materialization
-    has already refused — but it is treated as not accepted anyway: this function must
-    be safe to read on its own, without the gate above holding it up.
-    """
-    draft = body.pop("declared_test_material", None)
-    if not draft:
-        return
-    accepted, refused = [], []
-    for entry in draft:
-        # Read with `.get`, not `[]`: this is a STORED report, and materialization
-        # refusing loudly is the contract while materialization raising KeyError on a
-        # report written by an older schema is a 500 on ordinary state.
-        path, reason = entry.get("path"), entry.get("reason", "")
-        if not path:
-            continue
-        # Same derivation as the question the operator answered and as the check's
-        # `acceptance.questions`; `scanner.declarations` owns it precisely so these
-        # three cannot drift (R7-14). The id covers the REASON as well as the path, so
-        # a `True` recorded here can only ever be against the sentence the operator was
-        # shown — the reason-swap attack that vetoed the first remedy.
-        qid = declarations.confirm_question_id(path, reason)
-        record = {"path": path, "reason": reason,
-                  "question_id": qid, "accepted": answers.get(qid) is True}
-        (accepted if record["accepted"] else refused).append(record)
-    if accepted:
-        body["declared_test_material"] = accepted
-    if refused:
-        body["declared_test_material_refused"] = refused
 
 
 def _env_name(question_id):

@@ -42,8 +42,16 @@ def set_answers(site, incoming: dict, *, actor=None):
     site = type(site).objects.select_for_update().get(pk=site.pk)
     # Round-1 F5: scrubbing moved out of GET/preflight into the write paths — a
     # write is where destroying stale plaintext belongs.
+    #
+    # D-012 out of Phase 1 (2026-08-16): `scrub_orphaned_declaration_answers` used to
+    # run beside this one, deleting answers under the `scanner.test_material.` prefix
+    # whose question the project no longer had. It is gone with the prefix. A row left
+    # over from before the change is now an answer to a question this project does not
+    # have, which is a state the wizard has always had to survive and does: unknown ids
+    # are rejected on the way in (`validate_answers`), read by nothing on the way out,
+    # and gate nothing — that sweep was documented as hygiene, never as a boundary, and
+    # deleting rows on a schedule was never what made a stale acceptance harmless.
     scrub_downgraded_answers(site)
-    scrub_orphaned_declaration_answers(site)
     cleaned = validate_answers(site.project, incoming)
     written = []
 
@@ -120,47 +128,6 @@ def scrub_downgraded_answers(site):
         audit("wizard_plaintext_answer_scrubbed", site, source="system",
               severity="security", question_ids=sorted(scrubbed))
     return sorted(scrubbed)
-
-
-def scrub_orphaned_declaration_answers(site):
-    """Delete declaration confirms whose question no longer exists in this project.
-
-    HYGIENE, AND ONLY HYGIENE — read the ordering here before touching either half.
-    What makes a stale acceptance harmless is that `scanner.declarations` keys the
-    confirm id on the declaration's CONTENT (path + reason digest), so an answer to a
-    claim that has since changed cannot match the id of the claim that replaced it. It
-    is inert, not dormant. This sweep only stops the dead rows accumulating.
-
-    The ordering matters because the second round-7 veto is exactly what happens when it
-    is inverted. Under the first remedy the id was `(index, slug(path))`, an orphan was
-    merely *not currently matching*, and removing a prepended declaration handed drill
-    back its old index — the orphaned `True` re-applied and the deploy cleared with no
-    re-confirmation. If this function is ever what stands between a stale answer and a
-    downgrade, the design has regressed to that state and the digest has stopped doing
-    its job.
-
-    NOT RUN WHEN THE PROJECT HAS NO SCAN REPORT. The question set is then the base set
-    alone and every declaration answer looks orphaned, but "I cannot see the questions"
-    is not "these questions are gone" — a project between scans would lose real work
-    the operator has to redo. Materialization refuses on `scan_required` in that state
-    anyway, so nothing is gated on the rows surviving.
-    """
-    from .questions import DECLARATION_PREFIX
-
-    if not (site.project.scan_report or {}):
-        return []
-    live = set(question_map(site.project))
-    orphans = sorted(
-        qid for qid in WizardAnswer.objects
-        .filter(site=site, question_id__startswith=DECLARATION_PREFIX)
-        .values_list("question_id", flat=True)
-        if qid not in live
-    )
-    if orphans:
-        WizardAnswer.objects.filter(site=site, question_id__in=orphans).delete()
-        audit("wizard_orphaned_declaration_answer_scrubbed", site, source="system",
-              severity="security", question_ids=orphans)
-    return orphans
 
 
 def answered_state(site):

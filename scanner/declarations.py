@@ -1,5 +1,27 @@
 """`deployhub.yaml` — what the scanned repo declares about itself.
 
+PARKED 2026-08-16, per Joseph's round-6 cap decision
+(`claude/decision-2026-08-16-round-6-cap.md`, Option A). This module is NOT WIRED INTO
+ANY LIVE PATH in Phase 1: `scanner.core.scan` does not load it, the fallback suite does
+not consult it, the wizard raises no confirm from it, and nothing downgrades anything.
+Phase 1 ships with no declared-test-material mechanism at all; a repo that carries the
+file is told so by the `core.declaration-file` presence notice and nothing else reads it.
+
+It stays on master rather than being deleted, and the distinction is the whole of the
+decision: the mechanism RETURNS as its own phase, with a threat model written FIRST, and
+the six attack axes documented below — forged report lines, unicode line separators,
+in-line label forgery, the settings-package guard, the parser's own resource limits, and
+the content-keyed confirm id — are that threat model's FLOOR, not its ceiling. They were
+found by three adversarial rounds against a real scanner; re-deriving them from scratch
+would be the expensive way to learn the same six things. `tests/test_scanner_declarations.py`
+keeps exercising the pure functions here so the parked code cannot rot, and
+`conformance/paths.yaml` keeps listing this file: a parked authority file is still an
+authority file, and the human-merge guard costs nothing while it sleeps.
+
+Everything below describes the mechanism AS IT WAS WIRED, and is preserved as the record
+of why each rule exists. Read it as a design document for the phase that re-introduces
+this, not as a description of what Phase 1 does.
+
 Follow-up 2 of the D-011r noise work, ruled by Joseph 2026-08-11 and specified in
 `docs/spec-declared-test-material.md`. The measurement behind it: 20 of
 SATURDAYS_site's 26 blocking heuristic lines are `frontend/scripts/drill/**` — red-team

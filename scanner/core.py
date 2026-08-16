@@ -26,7 +26,14 @@ silently missing `core.secret-scan`.
 """
 from dataclasses import dataclass, field
 
-SCHEMA_VERSION = 1
+# Bumped to 2 on 2026-08-16, when D-012 left Phase 1 (Joseph's cap decision,
+# `claude/decision-2026-08-16-round-6-cap.md`): a stored report's MEANING changed —
+# checks no longer carry an `acceptance` contract and the manifest draft no longer
+# carries `declared_test_material`. R8-2 is the finding that says a meaning change
+# without a version bump lets pre-change rows through the gate on the new code's
+# reading of the old fields, so the bump lands with the change that earned it and
+# `wizard.materialize.preflight` refuses anything that does not match.
+SCHEMA_VERSION = 2
 
 # Report tiers (§5.3). `pending_sandbox` marks an executing check honestly deferred.
 TIERS = ("blocker", "warning", "advice", "ok", "pending_sandbox")
@@ -40,30 +47,19 @@ class CheckResult:
     detail: str = ""
     fix_hint: str = ""      # §6.6 voice: what / why it matters / exact fix
     execution: str = "static"
-    # Round 7 (R7-1, spec-r7-enforce-declaration-acceptance.md §2). The smallest
-    # structured contract that lets the wizard gate on a check without parsing its
-    # prose: `{"questions": [confirm id, …], "blocking_only_declared": bool}`.
-    #
-    #   questions                 the confirm ids whose `True` accepts every
-    #                             declaration this check downgraded findings under
-    #   blocking_only_declared    True when accepting them all leaves NOTHING blocking;
-    #                             False when a real blocker (a [proof] line, a .env
-    #                             file, an undeclared heuristic line) is also present,
-    #                             and then no answer clears the check at all
-    #
-    # Deliberately the minimum: the §F2 per-finding array is a later, separate change.
-    # A check with nothing to accept leaves this None and `as_dict` OMITS the key —
-    # serializing `"acceptance": null` on every check of every repo would have moved
-    # all five recorded demo artifacts to say nothing had changed.
-    acceptance: dict = None
+    # D-012 out of Phase 1 (2026-08-16): the `acceptance` field is GONE, not left
+    # defaulting to None. It carried the confirm ids whose `True` cleared a blocker
+    # this check had downgraded on the scanned repo's own say-so, and there is no
+    # such downgrade and no such gate this phase. A dataclass field written by
+    # nothing and read by nothing is R7-15's finding — the next reader assumes a
+    # dead field on a security record is load-bearing — and here it would be worse
+    # than dead: `wizard.materialize` used to open a blocker for it, so leaving the
+    # field would leave the shape of a bypass lying in the report.
 
     def as_dict(self):
-        data = {"id": self.id, "tier": self.tier, "title": self.title,
+        return {"id": self.id, "tier": self.tier, "title": self.title,
                 "detail": self.detail, "fix_hint": self.fix_hint,
                 "execution": self.execution}
-        if self.acceptance is not None:
-            data["acceptance"] = self.acceptance
-        return data
 
 
 @dataclass
@@ -182,35 +178,18 @@ def scan(root):
     }
     core_suite = []
     if mods:
-        from . import declarations
         from .modules.fallbacks import common_checks
 
-        # Follow-up 2 (spec-declared-test-material.md §The report shows the claim): the
-        # DOWNGRADE is the repo's claim, made in its own `deployhub.yaml` and printed in
-        # the check detail; the ACCEPTANCE is the operator's, asked here and enforced by
-        # the wizard, per §F5 action-tier friction. A repo that declares nothing adds
-        # no question and no manifest key, so every report predating this feature is
-        # unchanged byte for byte.
-        #
-        # ONE READ, and R7-13 is why the previous comment here ("parsed once; two
-        # readers below") was worth fixing rather than deleting: it was false — the
-        # suite loaded the file again for the check. Two reads of a file the SCANNED
-        # REPO owns can disagree inside one scan (an edit landing between them, a
-        # symlink swapped), and the halves that disagree are the downgrade and the
-        # confirm that is supposed to authorize it.
-        declared = declarations.load(root)
-        core_suite = common_checks(root, declared)   # runs over the SCAN root, once
-        # R7-14: the prompt copy, the slug scheme and the `_env_name` defense behind it
-        # are rules about a declaration and live with the code that validated it. D-010
-        # made this module the composer; composing is what it does here.
-        questions.extend(declarations.confirm_questions(declared))
-        if declared.accepted:
-            # The DRAFT list — what the repo asked for, in declaration order. What gets
-            # frozen into the manifest is the answer-derived list built by
-            # `wizard.materialize` (R7-A §5); before round 7 this draft was frozen
-            # verbatim, so the audit artifact asserted an acceptance nobody had given.
-            manifest["declared_test_material"] = [
-                {"path": d.path, "reason": d.reason} for d in declared.accepted]
+        # D-012 out of Phase 1 (2026-08-16, Joseph's cap decision). `scan` used to load
+        # `deployhub.yaml` here, thread the parsed declarations into the suite, extend
+        # `questions` with a confirm per accepted declaration and draft a
+        # `declared_test_material` key into the manifest. All three are gone: the file
+        # is not parsed by any live path this phase, nothing downgrades anything, and
+        # the only trace of the file in a report is the `core.declaration-file` presence
+        # notice the suite emits so a repo carrying one is told it is not honored.
+        # `scanner/declarations.py` stays on master, parked and unit-tested, and returns
+        # as its own phase behind a written threat model.
+        core_suite = common_checks(root)             # runs over the SCAN root, once
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
     for m in mods:

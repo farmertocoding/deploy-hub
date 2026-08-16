@@ -10,6 +10,7 @@ from django.urls import reverse
 
 from core.models import Project, Site
 from deploys.models import Manifest
+from scanner import core as scanner_core
 from vault import service as vault_service
 from wizard import service
 from wizard.materialize import MaterializeRefused, materialize, preflight
@@ -22,13 +23,24 @@ SECRET_VALUE = "wizard-test-DB-PASSWORD-MARKER"
 
 
 def make_report(*, checks=(), questions=(), draft=None):
+    """A hand-built report, VERSIONED FROM THE SCANNER rather than from a literal.
+
+    D-012 out of Phase 1 gave `preflight` a schema-skew refusal (R8-2): a stored report
+    whose `schema_version` is not the current one is refused outright, because the fields
+    of an older report do not mean what this code reads them to mean. A literal `1` here
+    was fine while 1 was current and became "every wizard test materializes a refusal"
+    the moment it was not — which is the right failure, in the wrong place. Read the
+    version off `scanner.core` so these fixtures are always a CURRENT report; the skew
+    itself is tested where it belongs, in tests/test_d012_out_of_phase_1.py.
+    """
     return {
-        "schema_version": 1,
+        "schema_version": scanner_core.SCHEMA_VERSION,
         "modules": ["django"],
         "checks": list(checks),
         "sandbox_jobs": [],
         "wizard_questions": list(questions),
-        "manifest_draft": draft or {"schema_version": 1, "deploy_strategy": "blue_green"},
+        "manifest_draft": draft or {"schema_version": scanner_core.SCHEMA_VERSION,
+                                    "deploy_strategy": "blue_green"},
         "summary": {},
     }
 
