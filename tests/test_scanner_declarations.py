@@ -929,3 +929,99 @@ def test_issue_r7f_each_enclosure_closer_is_refused_on_its_own(tmp_path, reason,
 
     assert loaded.accepted == ()
     assert closer in _problems(loaded) or "U+" in _problems(loaded), loaded.problems
+
+
+# ── round 8: two assertions that asserted nothing ──────────────────────────────
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("escape,name", [
+    ("\\x9b", "U+009B CONTROL SEQUENCE INTRODUCER"),
+    ("\\x9c", "U+009C STRING TERMINATOR"),
+    ("\\x9d", "U+009D OPERATING SYSTEM COMMAND"),
+])
+def test_issue_r8_5_a_c1_control_reaches_a_value_as_a_yaml_escape_and_is_refused(
+        tmp_path, escape, name):
+    """R8-5: the `\\x80-\\x9f` arm of `_CONTROL_CHARS_RE` was asserted by nothing —
+    deleting it left the whole suite green.
+
+    The arm had two would-be carriers and neither carried it.
+    `test_deceptive_code_points_are_refused_in_both_fields` passes a LITERAL U+0091,
+    which PyYAML's reader refuses outright (`ReaderError`: "unacceptable character
+    #x0091"), so `load` returns "is not valid YAML" and the parametrized case is green
+    on a refusal this module never made — the value never reaches `_read_entry` at all.
+    NEL (U+0085) does reach it, but it is a line break to `str.splitlines`, so the belt
+    beneath the character class catches it and the arm is still unasserted.
+
+    The real carrier is a YAML ESCAPE. `\\x9b` inside a double-quoted scalar is a
+    PyYAML-admitted escape — `yaml.safe_load('reason: "a\\\\x9bb"')` yields
+    `{'reason': 'a\\x9bb'}` — and U+009B..U+009D are not line breaks to `splitlines`,
+    so the C1 arm is the only thing standing between a CSI byte and a report a reviewer
+    reads as evidence. Refusing them is not pedantry: CSI is the introducer of an ANSI
+    escape sequence, and a terminal printing the scanner's output will act on it.
+
+    Asserted at the parser, on both fields, because post-extraction there is no tier and
+    no report to assert against: the entry is refused with the control-character
+    problem, and nothing is accepted.
+    """
+    for field in ("reason", "path"):
+        if field == "reason":
+            body = ("scanner:\n"
+                    "  test_material:\n"
+                    "    - path: frontend/scripts/drill\n"
+                    f'      reason: "drill{escape}scripts"\n')
+        else:
+            body = ("scanner:\n"
+                    "  test_material:\n"
+                    f'    - path: "frontend/scripts/dr{escape}ill"\n'
+                    f"      reason: {DRILL_REASON}\n")
+        loaded = _declared(tmp_path, body, name=f"c1{abs(hash(escape + field))}")
+
+        problems = _problems(loaded)
+        assert loaded.accepted == (), f"{name} in {field} was accepted"
+        # The specific refusal, not merely "something went wrong": a `ReaderError` from
+        # PyYAML also empties `accepted`, and that is exactly how this arm stayed
+        # unasserted for six rounds.
+        assert "control character" in problems, f"{name} in {field}: {problems!r}"
+        assert f"`{field}`" in problems, problems
+        assert "not valid YAML" not in problems, (
+            "the escape did not reach the validator — PyYAML refused the document "
+            "instead, which is the false green R8-5 is about")
+        # The value is named by code point and offset and never quoted back, per the
+        # refusal's own rule.
+        assert f"U+{ord(chr(int(escape[2:], 16))):04X}" in problems, problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_issue_r8_12_a_refusal_quotes_back_a_bounded_amount_of_a_giant_value(tmp_path):
+    """R8-12: `_QUOTE_LIMIT` was asserted by nothing — raising it to 10**9 survived the
+    whole suite, because every test that trips a `_quote`-carrying refusal uses a short
+    value.
+
+    The carrier is the one refusal a huge value can reach cheaply. A `path` is refused
+    for a glob character BEFORE any `stat`, so a ~200 KB path — comfortably inside
+    `MAX_DECLARATION_BYTES` — costs the attacker one line of YAML and buys a 200 000
+    character problem line. That is `MAX_REASON_CHARS`' wall of text rebuilt out of the
+    refusal instead of out of the acceptance, and the same reader loses the same
+    findings count off the end of the same header.
+
+    Mirrors `test_a_reason_longer_than_the_cap_is_a_malformed_entry`: the refusal
+    happens, it does not paste the wall of text back in, and the bound is asserted with
+    a LITERAL rather than with `_QUOTE_LIMIT` — a bound derived from the constant under
+    test cannot fail when the constant moves.
+    """
+    giant = "d" * 200_000 + "*"
+    loaded = _declared(tmp_path, ("scanner:\n"
+                                  "  test_material:\n"
+                                  f'    - path: "{giant}"\n'
+                                  f"      reason: {DRILL_REASON}\n"), name="giant")
+
+    assert loaded.accepted == ()
+    problems = _problems(loaded)
+    assert "looks like a glob" in problems, problems
+    assert "(truncated)" in problems, problems
+    assert giant not in problems, "the refusal pasted the 200 KB path back in"
+    # One problem line, and it stays a line: entry coordinates, the truncated quote and
+    # the sentence, not the repo's own 200 KB.
+    assert len(problems) < 1000, (
+        f"the refusal for a 200 KB path was {len(problems)} characters long")
