@@ -318,6 +318,12 @@ def test_the_cache_watches_every_file_the_sandbox_can_read():
     assert "tests/conftest.py" in watched
     assert "pyproject.toml" in watched
 
+    # The dependency pins, which are NOT copied into the sandbox and are watched anyway:
+    # a mutant's verdict is a property of the installed dependency set, and these two
+    # files are what this repository says that set is.
+    for pins in mutation_scope.DEPENDENCY_PINS:
+        assert pins in watched, pins
+
 
 def test_the_cache_never_watches_a_file_that_a_gate_rewrites():
     """The other direction, and it is not cosmetic: a watch set containing anything the
@@ -467,3 +473,29 @@ def test_the_ignore_lookup_fails_toward_watching_too_much(tmp_path):
 
     assert mutation_scope._git_ignored(root, ["pkg/helper.py", "docs/notes.md"]) == set()
     assert "pkg/helper.py" in mutation_scope.sandbox_files(root)
+
+
+def test_a_dependency_pin_edit_discards_the_cache(tmp_path):
+    """`_fingerprint` already hashes the pinned mutmut version, because mutmut's
+    operator set defines what the gate asserts. The same argument reaches the rest of
+    the dependency set: `pytest`, `django` and `pyyaml` all sit between a mutant and its
+    verdict, and a pin moving can turn a kill into a survivor with not one byte of this
+    repository's own code changed.
+
+    Stated at the cache key over a fixture tree, like the other F2 tests. What it does
+    NOT claim is stated in `mutation_scope.DEPENDENCY_PINS`: a `pip install -U` behind
+    an unchanged `>=` floor moves the installed versions without moving these files, and
+    only hashing the resolved environment would catch that.
+    """
+    import mutation_gate
+
+    root = _fixture_repo(tmp_path / "repo")
+    (root / "requirements.txt").write_text("pyyaml>=6\n", encoding="utf-8")
+    (root / "requirements-dev.txt").write_text("-r requirements.txt\npytest==8.4.2\n",
+                                               encoding="utf-8")
+    before = mutation_gate._fingerprint(root)
+
+    (root / "requirements-dev.txt").write_text("-r requirements.txt\npytest==8.4.1\n",
+                                               encoding="utf-8")
+
+    assert mutation_gate._fingerprint(root) != before

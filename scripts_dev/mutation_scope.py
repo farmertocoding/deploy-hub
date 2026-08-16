@@ -54,6 +54,22 @@ REQUIRED_TEST_FILES = ("tests/test_scanner_declarations.py", "tests/test_wizard.
 # catches for everything derivable from the tree.
 MUTMUT_IMPLICIT_COPIES = ("tests", "pyproject.toml", "setup.cfg")
 
+# Not in the sandbox, and watched anyway. Closing the file-shaped half of the review's
+# note on branch 1: `_fingerprint` already hashes the PINNED mutmut version, because
+# mutmut's operator set is the gate's definition of "every way this code could be
+# wrong". The same argument reaches one step further — a mutant's verdict is a property
+# of the whole installed dependency set, and a `pytest`, `django` or `pyyaml` pin moving
+# can flip a kill into a survivor with not one byte of this repository changed. These
+# two files are what this repository SAYS that set is, so a pin edit now discards the
+# cached verdicts instead of silently inheriting the previous release's.
+#
+# THE ENVIRONMENT-SHAPED HALF IS STILL OPEN and this does not pretend otherwise: a
+# `pip install -U` behind an unchanged `>=` floor moves the installed versions without
+# moving these files, and only hashing the resolved environment (`pip freeze`) would
+# catch that. That is a cost-per-run decision of its own; what is closed here is the
+# case where the repo's own diff shows the change and the gate ignored it.
+DEPENDENCY_PINS = ("requirements.txt", "requirements-dev.txt")
+
 # Names never hashed: caches whose contents change on every run (so watching them would
 # discard the cache every time) and vendored trees that are not inputs to any test.
 NOT_AN_INPUT = {"__pycache__", "node_modules", ".git", ".pytest_cache", ".ruff_cache",
@@ -218,11 +234,16 @@ def sandbox_files(root=None):
     the F2 finding's own wording, because that phrasing is a judgement call and this is
     not: enumerating which non-mutated modules a chain runs through is the same guessing
     game that produced the missed list in the first place. The union is mechanical.
+
+    `DEPENDENCY_PINS` joins it although those files are not copied into the sandbox: the
+    tests inside it import the versions those files pin, so the pins are an input to
+    every verdict even though nothing there opens them. See that constant for what is
+    and is not closed by watching them.
     """
     root = pathlib.Path(root or REPO)
     config = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))["tool"]["mutmut"]
     roots = [*config["source_paths"], *config.get("also_copy", ()),
-             *MUTMUT_IMPLICIT_COPIES]
+             *MUTMUT_IMPLICIT_COPIES, *DEPENDENCY_PINS]
 
     found = set()
     for name in roots:
