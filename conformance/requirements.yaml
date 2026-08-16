@@ -229,14 +229,36 @@ requirements:
   # its own drill/QA trees and the scan says so out loud. The spec is the buildable
   # shape of that ruling; these two ids split it the way the spec does — what a
   # declaration DOES, and what it may not do.
+  #
+  # PARKED OUT OF PHASE 1, 2026-08-16 — Joseph's round-6 cap decision
+  # (`claude/decision-2026-08-16-round-6-cap.md`, Option A; spec
+  # `spec-d012-out-of-phase-1.md` §5). D-012 ships in no form this phase: nothing
+  # downgrades anything, no confirm is raised, no check carries an acceptance contract,
+  # and `scanner/declarations.py` is parked — on master, unimported by any live path,
+  # its pure functions still unit-tested. The mechanism returns as its own phase with a
+  # threat model written first.
+  #
+  # DEFERRED BY PHASE RATHER THAN `status: retired`, and the difference is not
+  # cosmetic. `retired` means the requirement is withdrawn: check.py then FAILS on any
+  # test still carrying the marker ("marker on retired req … update or delete"), which
+  # would strip the traceability from exactly the tests the decision says must keep
+  # running, and it would say in the registry that this text is no longer an obligation
+  # — when what was decided is that it is not an obligation YET. The phase number is the
+  # registry's only convention for deferred work, so it is the one used here.
+  #
+  # The `text:` of both ids is left as round 7 corrected it, because it is still the
+  # accurate statement of the mechanism that will return; the phase that re-introduces
+  # it re-schedules these and rewrites them alongside its threat model. Their marked
+  # tests are the parked module's unit tests in tests/test_scanner_declarations.py —
+  # what the parser accepts and what it refuses — and nothing in Phase 1 reads them.
   - id: SCAN-DECLARED-TEST-MATERIAL
-    phase: 1
+    phase: 2
     verify: test
     source: spec-declared-test-material.md §What a declaration does — and does not — change / spec-r7-enforce-declaration-acceptance.md §1
     text_hash: sha256:bcc41115c45d7795a069fb9c38e7cdf4a7bb948c553e95cd49e8dc5edd3ae036
     text: A repo declares drill/QA trees in deployhub.yaml (scanner.test_material, each entry a path plus a mandatory reason); only core.secret-scan's heuristic findings under a declared path move to a third bucket labelled with the path and the verbatim reason, never merged with auto-detected test material; those findings still block until the operator accepts that declaration in the wizard, and the report always shows the claim in a header line naming the declaration and its finding count — even when that count is zero.
   - id: SCAN-DECLARED-GUARDS
-    phase: 1
+    phase: 2
     verify: test
     source: spec-declared-test-material.md §The file
     text_hash: sha256:a31ff57851385b2f617bf9ef9d680784019118ea910e218097bc7f0a732d0ea1
