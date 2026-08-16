@@ -16,10 +16,79 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["*/migrations/*", ".venv-scaffold", "frontend"]
+# `mutants/` is the mutation gate's working copy of the tree — machine-generated
+# source with a trampoline per function, gitignored, and not code anyone edits.
+extend-exclude = ["*/migrations/*", ".venv-scaffold", "frontend", "mutants"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv-scaffold", "frontend"]
+
+# ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
+#
+# `make mutation` mutates the gate-bearing modules and fails if any mutant survives the
+# tests. THIS BLOCK IS THE ONE PLACE THE SCOPE LIVES (spec §3): the Makefile target
+# names no file, the CI step names no file, and `tests/test_mutation_gate.py` asserts
+# `source_paths` is still a superset of the three below — so a round that "improves" by
+# quietly dropping a module from the gate that judges it goes red instead (spec §6).
+#
+# TOOL: mutmut, pinned in requirements-dev.txt. Installed here is 3.7.0, whose config
+# surface differs from the spec's 2.x-era wording; the adaptations are named where they
+# occur below and in the commit message. The spec's REQUIREMENTS are unchanged: the
+# mutation set is derived by the tool from the code, mutant ids are deterministic and
+# nameable, the scope is these files, zero survivors, red on a survivor.
+[tool.mutmut]
+# ADAPTATION: spec §2 says `paths_to_mutate`; mutmut 3 renamed it to `source_paths` and
+# warns on the old spelling. Same meaning, and mutmut accepts individual FILES here, so
+# the gate-bearing set is spelled exactly — no directory glob that could pick up a
+# neighbour and no `only_mutate` second list to drift against it.
+source_paths = [
+    "wizard/materialize.py",
+    "wizard/questions.py",
+    # Mutated WHILE PARKED, deliberately, and it is the reason this scope is not
+    # "whatever Phase 1 wires". Its tests keep running so it cannot rot, and a parked
+    # security module whose tests pass under mutation is exactly that rot; R8-5 and
+    # R8-12 both lived here.
+    "scanner/declarations.py",
+]
+
+# Which tests run. mutmut narrows this PER MUTANT from the per-function coverage it
+# records in its stats run — that narrowing is the tool's, not a list anyone typed. This
+# is the outer bound it narrows from, and it is derived rather than authored:
+# `scripts_dev/mutation_scope.py::test_files_touching` walks the import closure of every
+# test file and keeps the ones that reach a mutated module, and
+# `tests/test_mutation_gate.py` asserts this list still equals that derivation (and
+# still contains the two files spec §3 names as its floor). Add a test file that reaches
+# these modules and the gate goes red until it is listed.
+pytest_add_cli_args_test_selection = [
+    "tests/acceptance/test_phase_1.py",
+    "tests/test_d012_out_of_phase_1.py",
+    "tests/test_scanner_declarations.py",
+    "tests/test_wizard.py",
+    "tests/test_wizard_round1.py",
+]
+
+# ADAPTATION: spec §3 asks for a 60s per-mutant timeout. mutmut 3 has no absolute
+# setting; its limit is `(estimated test time + timeout_constant) * timeout_multiplier`.
+# `1.0 * (est + 60)` is the honest spelling of "60 seconds more than this mutant's tests
+# should need", which is what the spec's number is for — an infinite-loop mutant must be
+# reported as a timeout rather than hang the gate.
+timeout_constant = 60.0
+timeout_multiplier = 1.0
+
+# mutmut 3 runs the tests inside a `mutants/` COPY of the tree (that is how the mutated
+# module shadows the real one), so everything the selected tests import has to be in
+# that copy. `tests/` and `pyproject.toml` are copied by default; these are the repo's
+# import roots. NOT a scope declaration and not a second copy of one — it is the
+# sandbox's contents, and `tests/test_mutation_gate.py` asserts it covers every package
+# the Makefile's $(PY_ROOTS) derivation finds, so a package that lands next week cannot
+# leave the sandbox half-built.
+also_copy = [
+    "catalog", "core", "deploys", "hub", "monitor", "providers", "provision",
+    "realtime", "reconcile", "scaling", "scanner", "vault", "wizard",
+    "conformance", "manage.py",
+    # the acceptance tier scans this fixture repo from disk
+    "sample-node-site",
+]

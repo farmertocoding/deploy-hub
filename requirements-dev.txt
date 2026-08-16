@@ -6,3 +6,9 @@ ruff>=0.6
 bandit[toml]>=1.7
 pip-audit>=2.7
 fakeredis[lua]>=2.25
+# The mutation gate (spec-mutation-gate.md §2). PINNED EXACTLY, not floored: mutmut's
+# mutation set is the gate's definition of "every way this code could be wrong", and a
+# minor release that adds or drops an operator silently changes what the gate asserts —
+# a range here would make the gate's strength a function of when CI last resolved it.
+# Moving the pin is its own reviewed edit, with the new run's survivor list in the diff.
+mutmut==3.7.0

@@ -11,3 +11,6 @@ conformance/run-report.json
 .pytest_cache/
 .ruff_cache/
 dump.rdb
+# the mutation gate's working copy of the tree (spec-mutation-gate.md); mutmut writes
+# the mutated sources and its per-mutant results here, and it is a cache, not evidence.
+mutants/

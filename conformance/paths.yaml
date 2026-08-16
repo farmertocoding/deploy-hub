@@ -29,3 +29,13 @@ sensitive:
   # process edit stays the reviewable one-line act it is; `scanner/core.py` composes the
   # suite and is arguably the next candidate, which is a decision for its own PR.
   - scanner/declarations.py
+  # spec-mutation-gate.md: the mutation gate's runner and its two derivations. §6's
+  # anti-gaming rule is that the loop never edits the gate's config, scope list or
+  # target in a round judged by it, and build-process.md §4 puts gate scripts on this
+  # list by definition — a gate the loop can rewrite is a gate that reports what the
+  # loop wants. The `[tool.mutmut]` scope itself lives in pyproject.toml, which is not
+  # here: it is guarded instead by tests/test_mutation_gate.py's superset assertion,
+  # because pyproject.toml also carries ruff/bandit/pytest settings that are ordinary
+  # edits, and making every one of them a human merge would spend the guard's meaning.
+  - scripts_dev/mutation_gate.py
+  - scripts_dev/mutation_scope.py

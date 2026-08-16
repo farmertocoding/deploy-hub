@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-frontend lint conformance review-round generate-client check-generated \
-	log-scrub py-roots
+	log-scrub py-roots mutation
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -118,6 +118,25 @@ lint:
 conformance:
 	python conformance/check.py --phase 1
 
+# ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
+#
+# Mutates the gate-bearing modules and fails if any mutant survives the tests. The
+# recurring "assertion-that-does-not-assert" class — 16 cited instances across rounds 4,
+# 7 and 8 — stops being a finding somebody has to notice by reading, and becomes this.
+#
+# NO SCOPE AND NO FLAGS HERE, and that is the same rule the CI workflows follow
+# (SPEC-gate-integrity.md §2): which modules are mutated, which tests run and how long a
+# mutant may take all live in `[tool.mutmut]` in pyproject.toml, once, where
+# tests/test_mutation_gate.py can assert they have not been narrowed. A scope spelled in
+# this recipe would be the second copy that drifts.
+#
+# The exit status is the script's, not mutmut's: `mutmut run` reports survivors and
+# still exits 0, so a bare `mutmut run` here would be a step CI reaches and does not
+# enforce. See scripts_dev/mutation_gate.py for what counts as a failure and why
+# "no tests" is one of them.
+mutation:
+	python scripts_dev/mutation_gate.py
+
 # Plaintext secrets must not sit in source. Command carried over verbatim from the
 # push-checks step this replaces; the only change to it is scope, which is now
 # $(PY_ROOTS) instead of the four packages that existed when it was written — it had
@@ -155,5 +174,8 @@ log-scrub:
 # R4-8 parity: a round must exercise every gate CI runs, in CI's order — otherwise the
 # copy that guards the branch is again the copy nobody exercises. `test` precedes
 # `conformance` because the run report conformance reads is written by the pytest run.
-review-round: lint log-scrub test test-frontend check-generated conformance
+# `mutation` sits after `test` and before `conformance` (spec-mutation-gate.md §4): a red
+# suite makes every mutant "survive" meaninglessly, so mutmut needs a green baseline in
+# front of it, and the conformance read is the last thing that happens either way.
+review-round: lint log-scrub test test-frontend mutation check-generated conformance
 	@echo "mechanical gates green — run the agent review sweep against REVIEW_CHECKLIST.md"

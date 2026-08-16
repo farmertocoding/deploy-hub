@@ -28,6 +28,11 @@ jobs:
         run: make log-scrub
       - name: T1 unit tests
         run: make test
+      # The mutation gate (spec-mutation-gate.md §4). Bare `make mutation`, same as the
+      # Makefile's review-round chain runs and in the same position — R4-8 parity is the
+      # whole reason this step carries no scope, no flags and no `if:`.
+      - name: mutation gate
+        run: make mutation
       - name: conformance gate
         run: make conformance
       - uses: actions/setup-node@v4
