@@ -17,8 +17,18 @@
 // REFUSAL STRING THE SERVER ALREADY SENDS. Both disabled rows take their tooltip from
 // `state.blocking`; only the label is the client's.
 //
-// Every `blocking` payload below is copied verbatim from a real `preflight` run — see
-// the commit message for the command that produced each one.
+// PROVENANCE, AND WHAT D-012 LEAVING PHASE 1 DID TO IT (2026-08-16). Every `blocking`
+// payload below was copied verbatim from a real `preflight` run at the time it was
+// written. Two of them — the ones carrying `awaiting_acceptance` — are now HISTORICAL:
+// no scanner emits an acceptance contract and no `preflight` emits that item this
+// phase, so those payloads record a shape the server produced before the cap decision
+// and will produce again when the mechanism returns with its threat model. The spec
+// keeps `materializeGate` unchanged on that basis, so its reading of them is kept
+// exercised rather than deleted and re-derived later.
+//
+// The payloads that are live today — `blockers_present` with no awaiting list,
+// `answers_missing`, `scan_required` — are what `preflight` sends now, and
+// frontend/src/sim.js carries the current ones spliced from a fresh run.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";

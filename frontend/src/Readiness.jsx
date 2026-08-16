@@ -4,11 +4,11 @@
 //
 // §F9 rules applied here: status is never color-only (every tier carries a symbol +
 // word); dark palette matches Phase 0; every data panel carries its staleness stamp.
-// §F8: the states (empty/loading/live/accepted/stale/error/degraded) are reachable
-// without a backend via ?sim=<state> — see sim.js, and the contract test that pins the
-// fixtures to the generated zod schemas. `accepted` is the declaration-accepted state
-// R8-1 was invisible in — the report still reports the blocker and the deploy may
-// proceed — and `stale` is the one that still refuses at the POST.
+// §F8: the states (empty/loading/live/stale/error/degraded) are reachable without a
+// backend via ?sim=<state> — see sim.js, and the contract test that pins the fixtures
+// to the generated zod schemas. `stale` is the one where the wizard says the deploy may
+// proceed and the POST still refuses, which is the only screen the 409 panel is
+// reachable from. (`accepted` left with D-012: no answer clears a blocker this phase.)
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
@@ -50,6 +50,15 @@ function Badge({ tier, n }) {
 //
 // `hard` is what no answer can clear: `blockers_present` items with no
 // `awaiting_acceptance` list. An item carrying one is waiting on this very wizard.
+//
+// D-012 out of Phase 1 (2026-08-16) leaves this function EXACTLY as it is, and that is
+// the spec's instruction rather than an oversight: it gates on `can_materialize` and
+// `blocking`, both of which stay server-truth, and no server this phase emits an
+// `awaiting_acceptance` list — so the "Answer required" arm is unreachable until the
+// mechanism returns, and reachable again the day it does. The alternative is deleting a
+// correct reading of a payload shape and re-deriving it later, which is how a client
+// ends up authoring its own idea of a refusal. See tests/materialize-gate.test.ts for
+// which of its payloads are live and which are held against that return.
 export function materializeGate(state) {
   const blocking = state?.blocking || [];
   if (state?.can_materialize)
@@ -62,18 +71,6 @@ export function materializeGate(state) {
   if (blockerProblems.length && !hard.length)
     return { disabled: true, label: "Answer required", title };
   return { disabled: true, label: "⛔ Blocked", title };
-}
-
-// Round-7 carried note 5: a blocker-tier check that an ANSWER clears has to say so on
-// its own card, or the screen reads as a red count next to an enabled button with
-// nothing connecting them. Text, not colour (§F5).
-function acceptanceHint(acceptance) {
-  const n = (acceptance.questions || []).length;
-  if (acceptance.blocking_only_declared === true)
-    return `Awaiting your acceptance — answer the declaration question${n === 1 ? "" : "s"}` +
-      " in the site configuration below to clear this. Re-scanning will not.";
-  return "This check also carries findings that are not declared, so accepting the " +
-    "declarations will not clear it.";
 }
 
 function Stamp({ at }) {
@@ -181,7 +178,6 @@ function ReadinessPanel({ projectId, project, onChanged }) {
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
               <summary>{c.title}</summary>
               {c.detail && <p>{c.detail}</p>}
-              {c.acceptance && <p>{acceptanceHint(c.acceptance)}</p>}
               {c.fix_hint && <p style={{ color: "#8b949e" }}>Fix: {c.fix_hint}</p>}
             </details>
           ))}
