@@ -459,7 +459,7 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".
 
 # ── file walking (static reads only) ────────────────────────────────────────────
 
-def _iter_files(root, skipped=None):
+def _iter_files(root, skipped=None, *, prune=None, max_depth=None):
     """Yield tracked-looking files under root, skipping dependency/build/cache dirs.
 
     Dotfiles (`.env`) and dot-directories (`.github/`) are both yielded — only the
@@ -480,11 +480,34 @@ def _iter_files(root, skipped=None):
     rewritten every caller (and every test that calls one) to carry a value they ignore;
     a raise would turn a dull unreadable directory into a failed scan. Callers that pass
     nothing behave exactly as they did.
+
+    R8-6 GAVE IT TWO MORE CALLERS AND TWO KEYWORDS, and the keywords are what let this
+    stay ONE walk instead of becoming three. `scanner/modules/django.py` had its own
+    discovery built on `Path.rglob`, which recurses once per directory in CPython 3.11:
+    a ~1000-deep tree raised an uncaught `RecursionError` inside `detect()` — before any
+    check, for EVERY project regardless of framework, so a plain static site with a deep
+    vendored tree exited 1 with no report at all. This walk has never had that problem
+    because its stack is a list; what it did not have is the two things django's callers
+    need, so they are here rather than in a second copy:
+
+      * `prune` — the directory-name set to skip, defaulting to this module's
+        `_SKIP_DIRS`. django keeps its own set (it skips `.hg`, `.venv-scaffold` and
+        `staticfiles`, which this one does not; this one skips `data/` and a row of
+        framework cache dirs, which django's does not). ONE walk, two scopes: making
+        django adopt this module's set would have silently changed which files its
+        settings discovery reads, and that is a security-check scope change, not a
+        crash fix.
+      * `max_depth` — the maximum number of path components a yielded file may have
+        RELATIVE to `root`, so `project_root`'s own `len(rel.parts) <= 4` rule becomes a
+        walk that stops rather than a filter applied after descending forever.
+
+    `None` for either means "as before", and every existing caller passes neither.
     """
-    stack = [Path(root)]
+    prune = _SKIP_DIRS if prune is None else prune
+    stack = [(Path(root), 0)]
     seen = set()
     while stack:
-        directory = stack.pop()
+        directory, depth = stack.pop()
         try:
             entries = sorted(directory.iterdir())
         except OSError:
@@ -499,7 +522,11 @@ def _iter_files(root, skipped=None):
             if path.is_symlink() and path.is_dir():
                 continue
             if path.is_dir():
-                if path.name in _SKIP_DIRS:
+                if path.name in prune:
+                    continue
+                # A directory at depth+1 can only hold files at depth+2 or deeper, so
+                # once depth+2 is past the cap there is nothing below worth opening.
+                if max_depth is not None and depth + 2 > max_depth:
                     continue
                 try:
                     key = path.resolve()
@@ -510,8 +537,10 @@ def _iter_files(root, skipped=None):
                 if key in seen:
                     continue
                 seen.add(key)
-                stack.append(path)
+                stack.append((path, depth + 1))
             elif path.is_file():
+                if max_depth is not None and depth + 1 > max_depth:
+                    continue
                 yield path
 
 

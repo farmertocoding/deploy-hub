@@ -1,4 +1,5 @@
 """Django scanner module: fleet-norm (uv+ASGI+sidecars), legacy blockers, pip/WSGI."""
+import os
 import pathlib
 import shutil
 
@@ -717,3 +718,185 @@ def test_n7_guard_the_tightened_rule_still_excuses_djangos_own_paths(tmp_path):
     blockers = [c.id for c in checks.values() if c.tier == "blocker"]
     assert blockers == [], f"the tightened rule blocked on Django's own paths: {blockers}"
     assert checks["django.secret-key-literal"].tier == "ok"
+
+
+# ── R8-6: the walk that ran before every check, for every project ──────────────
+
+# Above CPython 3.11's default recursion limit measured against this code path: 980
+# directories deep was fine and 1000 crashed, so the fixture is built past both. It is
+# GENERATED rather than committed for the obvious reason and one less obvious one — a
+# 1100-directory tree in git is unreviewable, and the depth is the whole point of the
+# case, so a reader has to be able to see the number.
+_CRASHING_DEPTH = 1100
+
+
+def _build_deep_tree(base, depth):
+    """`base/d/d/d/…` `depth` levels down, with a file at the bottom.
+
+    Built by chdir-and-mkdir rather than by one `mkdir(parents=True)`: the absolute path
+    of a 1100-deep tree is longer than Linux's 4096-byte PATH_MAX, so the single-call
+    form fails with ENAMETOOLONG before the case under test is even set up.
+    """
+    base.mkdir(parents=True, exist_ok=True)
+    here = os.getcwd()
+    try:
+        os.chdir(base)
+        for _ in range(depth):
+            os.mkdir("d")
+            os.chdir("d")
+        pathlib.Path("leaf.txt").write_text("x", encoding="utf-8")
+    finally:
+        os.chdir(here)
+
+
+def _remove_deep_tree(base, depth):
+    """Unwind it the same way, so pytest's own tmp_path cleanup never has to.
+
+    `shutil.rmtree` recurses per directory too — the fixture that proves this bug would
+    otherwise re-raise it in teardown, out of the test that was supposed to have caught
+    it.
+    """
+    here = os.getcwd()
+    try:
+        os.chdir(base)
+        for _ in range(depth):
+            os.chdir("d")
+        pathlib.Path("leaf.txt").unlink(missing_ok=True)
+        for _ in range(depth):
+            os.chdir("..")
+            os.rmdir("d")
+    finally:
+        os.chdir(here)
+
+
+@pytest.fixture
+def vendored_deep_tree(tmp_path):
+    """A plain static site with a ~1100-deep chain under `node_modules/`.
+
+    THE VENDORED SHAPE IS THE REALISTIC ONE and it is also what keeps this test cheap:
+    every walk in the scan prunes `node_modules`, so after the fix nothing descends it
+    and the scan is instant — while `Path.rglob`, which prunes nothing, descended it and
+    raised. Unpruned deep trees are covered by the next test, which stops at `detect`
+    because a full scan of one costs 30 seconds of walking that proves nothing further.
+    """
+    root = tmp_path / "site"
+    (root / "node_modules").mkdir(parents=True)
+    _build_deep_tree(root / "node_modules" / "pkg", _CRASHING_DEPTH)
+    (root / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    try:
+        yield root
+    finally:
+        _remove_deep_tree(root / "node_modules" / "pkg", _CRASHING_DEPTH)
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_issue_r8_6_a_deep_vendored_tree_does_not_crash_the_scan(vendored_deep_tree):
+    """`project_root` walked with `Path.rglob("manage.py")`, and CPython 3.11's rglob
+    recurses once per directory, so a tree about a thousand deep raised an uncaught
+    `RecursionError`. Measured on this tree: 980 deep was fine, 1000 crashed.
+
+    THE SHAPE OF THE BLAST RADIUS IS THE FINDING, not the crash. `detect()` is
+    `project_root(root) is not None`, and `core.detect_modules` calls every framework
+    module's `detect` before any check runs — so this fired for EVERY project of every
+    framework, including the plain static site here, which holds no Python at all. The
+    operator got a traceback and no report, with no partial result to fall back on
+    because nothing had been computed yet.
+
+    Verified before the fix, on this exact fixture:
+
+        django.detect RecursionError: maximum recursion depth exceeded while calling a
+                                      Python object
+        core.scan     RecursionError: maximum recursion depth exceeded while calling a
+                                      Python object
+
+    …and after it, `detect -> False` and a report whose module list is `['static']`,
+    which is the honest answer for an HTML file with a vendored tree beside it.
+    """
+    assert dj.module.detect(vendored_deep_tree) is False    # must not raise
+
+    report = core.scan(vendored_deep_tree)                  # must not raise
+    assert report["modules"] == ["static"], report["modules"]
+    assert report["checks"], "a scan that returned no checks is not a scan"
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_issue_r8_6_the_fix_is_the_walk_and_not_the_prune_set(tmp_path):
+    """The same depth under a directory name nothing prunes.
+
+    Stated separately because the vendored fixture above would pass on a "prune harder"
+    fix that left the recursion in place, and `node_modules` is not the only way a tree
+    gets deep — a generated fixture directory, an extracted archive, a symlink-free
+    build output under a name nobody put in a skip set. `detect` is the assertion
+    because `project_root` is depth-capped at 4 now, so it answers without descending
+    at all; a full scan of an unpruned 1100-deep tree costs half a minute of walking and
+    proves nothing this does not.
+    """
+    root = tmp_path / "site"
+    _build_deep_tree(root / "generated", _CRASHING_DEPTH)
+    try:
+        (root / "index.html").write_text("<html></html>\n", encoding="utf-8")
+
+        assert dj.module.project_root(root) is None         # must not raise
+        assert dj.module.detect(root) is False
+    finally:
+        _remove_deep_tree(root / "generated", _CRASHING_DEPTH)
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_issue_r8_6_a_django_project_beside_a_deep_tree_is_still_found(
+        vendored_deep_tree):
+    """The other half, and the one that keeps the fix from being "give up on deep
+    trees": a real project whose repo happens to contain a deep vendored directory must
+    still be detected, with the depth rule it always had."""
+    backend = vendored_deep_tree / "backend"
+    backend.mkdir()
+    (backend / "manage.py").write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    (backend / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["django>=5.0"]\n', encoding="utf-8")
+
+    assert dj.module.detect(vendored_deep_tree) is True
+    assert dj.module.project_root(vendored_deep_tree) == backend
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_issue_r8_6_a_manage_py_deeper_than_the_rule_is_still_not_the_project_root():
+    """`max_depth=4` is the walk's translation of `len(rel.parts) <= 4`, so the boundary
+    is asserted in both directions — a bound that moved by one would silently adopt a
+    vendored project as the root, which is the failure the depth rule exists for."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        at_limit = root / "a" / "b" / "c"
+        at_limit.mkdir(parents=True)
+        (at_limit / "manage.py").write_text("#\n", encoding="utf-8")
+        assert dj.module.project_root(root) == at_limit
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        too_deep = root / "a" / "b" / "c" / "d"
+        too_deep.mkdir(parents=True)
+        (too_deep / "manage.py").write_text("#\n", encoding="utf-8")
+        assert dj.module.project_root(root) is None
+
+
+@pytest.mark.req("SCAN-DJANGO-UV")
+def test_issue_r8_6_a_scan_root_under_a_pruned_directory_name_is_still_scanned(tmp_path):
+    """The behaviour change the fix carries, asserted rather than left to a comment.
+
+    `_iter_files` used to prune on `any(part in _SKIP_DIRS for part in p.parts)` over an
+    ABSOLUTE path, so a project checked out at `~/build/myapp` matched on its own prefix
+    and every Django check saw an empty tree — `ok`, "nothing found", for a project the
+    scanner never opened. Pruning during the walk can only skip directories BELOW the
+    root.
+    """
+    root = tmp_path / "build" / "myapp"
+    (root / "config").mkdir(parents=True)
+    (root / "manage.py").write_text("#\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["django>=5.0"]\n', encoding="utf-8")
+    (root / "config" / "settings.py").write_text("DEBUG = True\n", encoding="utf-8")
+
+    assert sorted(p.name for p in dj._iter_files(root, "*.py")) == ["manage.py",
+                                                                    "settings.py"]
+    assert dj.module.project_root(root) == root

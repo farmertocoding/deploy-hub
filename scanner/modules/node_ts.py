@@ -16,7 +16,7 @@ Check-id naming follows the fixture contract in `sample-node-site/MUTATIONS.md`
 import json
 import re
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -51,6 +51,67 @@ def _read(path):
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+# ── R8-3: a workspace pattern is repo-controlled text handed to a globber ───────
+#
+# `workspaces` in package.json and `packages:` in pnpm-workspace.yaml went straight into
+# `self.root.glob(pattern)`, and both are written by the scanned repo. Two demonstrated
+# defects came out of that, and they fail in opposite directions:
+#
+#   * `"/etc/*"` — pathlib refuses a pattern it considers non-relative and raises
+#     `NotImplementedError`. Nothing caught it, and `_Survey` is built inside `detect()`,
+#     so the sole production scan entry exited 1 with a traceback and no report. A repo
+#     could deny a scan of itself with eight characters of JSON.
+#   * `"../outside/*"` — pathlib does NOT refuse this one. It treats it as relative,
+#     `root/../outside` resolves out of the tree, the directory is accepted as a
+#     workspace package, and `_Survey` then READS ITS SOURCE FILES into `all_sources`,
+#     where the checks grep them and the report quotes them. A scan is supposed to read
+#     the tree it was pointed at.
+#
+# THE RULE IS REFUSE AND SAY SO, never skip silently, which is the same rule
+# `scanner/declarations.py` applies to the other repo-controlled config on this tree: a
+# pattern that is dropped without a word leaves the operator reading a report about a
+# monorepo whose packages were quietly not surveyed. The refusal names the pattern
+# through `_quote_pattern` — `repr`, bounded — so a pattern carrying a newline cannot
+# write a line of its own into a report that is built line by line.
+_PATTERN_QUOTE_LIMIT = 80
+
+
+def _quote_pattern(pattern):
+    """Repo-controlled text, safe to print in a refusal."""
+    if len(pattern) > _PATTERN_QUOTE_LIMIT:
+        return repr(pattern[:_PATTERN_QUOTE_LIMIT]) + " (truncated)"
+    return repr(pattern)
+
+
+def _workspace_pattern_problem(pattern):
+    r"""A sentence for the report if `pattern` may not be expanded, else None.
+
+    Checked on the POSIX form, because `PurePosixPath` is what `Path.glob` splits the
+    pattern on and a `\`-separated pattern is what a Windows-authored package.json
+    carries. Absolute and `..` are refused for the two separate reasons above; a pattern
+    that is empty or whitespace is refused because `glob("")` raises.
+    """
+    if not pattern.strip():
+        return ("an empty workspace pattern was declared; it names no package and was "
+                "ignored")
+    posix = PurePosixPath(pattern.replace("\\", "/"))
+    # `":" in parts[0]` is the drive-letter case, and it is here for the reason
+    # `declarations._read_entry` gives for the identical line: `C:/Windows/*` is not
+    # absolute to `PurePosixPath` and would glob nothing here, but it IS absolute on the
+    # machine whose package.json wrote it, and `Path.glob` raises on it there. A pattern
+    # that means "outside the tree" on any platform is refused on every platform, so the
+    # report a Windows author reads says the same thing as the one CI reads.
+    if posix.is_absolute() or pattern.startswith("/") or ":" in posix.parts[0]:
+        return (f"workspace pattern {_quote_pattern(pattern)} is an absolute path; "
+                f"workspace packages are relative to the scanned repository, and a scan "
+                f"reads only the tree it was pointed at — it was ignored")
+    if ".." in posix.parts:
+        return (f"workspace pattern {_quote_pattern(pattern)} escapes the scanned "
+                f"repository with `..`; the packages it names are outside the tree this "
+                f"scan is about, so their sources were not read — it was ignored")
+    return None
 
 
 def _load_json(path):
@@ -118,6 +179,12 @@ class _Survey:
     def __init__(self, root):
         self.root = Path(root)
         self.workspace_file = self.root / "pnpm-workspace.yaml"
+        # R8-3: one sentence per workspace pattern this survey REFUSED to expand. Filled
+        # by `_find_package_dirs`, reported by `_detection_recording`. It is a list
+        # rather than a raise for the same reason `declarations.Declarations.problems`
+        # is: a config file the scanner cannot honor must never take the scan down with
+        # it, and must never be read optimistically either.
+        self.workspace_problems = []
         self.package_dirs = self._find_package_dirs()
         self.packages = {d: _load_json(d / "package.json") for d in self.package_dirs}
         self.service_dir = self._pick_service_dir()
@@ -150,7 +217,24 @@ class _Survey:
         if isinstance(workspaces, list):
             patterns.extend(p for p in workspaces if isinstance(p, str))
         for pattern in patterns:
-            for candidate in sorted(self.root.glob(pattern)):
+            problem = _workspace_pattern_problem(pattern)
+            if problem:
+                self.workspace_problems.append(problem)
+                continue
+            try:
+                candidates = sorted(self.root.glob(pattern))
+            except (NotImplementedError, ValueError) as exc:
+                # The belt behind the validator above. `Path.glob` raises rather than
+                # returning nothing for inputs the validator does not know about yet —
+                # `NotImplementedError` for a pattern pathlib calls non-relative, and
+                # `ValueError` for an empty one — and this walk runs inside `detect()`,
+                # which every scan of every framework reaches. An uncaught raise here is
+                # not a bad workspace pattern, it is no report at all.
+                self.workspace_problems.append(
+                    f"{_quote_pattern(pattern)} could not be expanded "
+                    f"({exc.__class__.__name__}); it was ignored")
+                continue
+            for candidate in candidates:
                 if candidate.is_dir() and (candidate / "package.json").is_file():
                     dirs.append(candidate)
         return dirs
@@ -375,6 +459,17 @@ class NodeTsScannerModule:
     # ── §S3 detection recording — ok-tier informational results ─────────────
     def _detection_recording(self, s):
         out = []
+        if s.workspace_problems:
+            # R8-3. A warning rather than an `ok` line, because a refused pattern means
+            # the survey below it is INCOMPLETE — packages the repo declared were not
+            # read — and the operator has to know that before trusting a report that
+            # says a monorepo has three packages when its config named five.
+            out.append(CheckResult(
+                id="node-ts.workspace-patterns", tier="warning",
+                title="Workspace patterns were refused",
+                detail="; ".join(s.workspace_problems) + ".",
+                fix_hint="Workspace patterns name directories inside the repository: "
+                         "make each one relative and keep it within the tree."))
         if s.workspace_file.is_file():
             names = ", ".join(s.workspace_names()) or "(none found)"
             out.append(CheckResult(

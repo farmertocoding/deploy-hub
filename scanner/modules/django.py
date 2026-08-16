@@ -47,10 +47,39 @@ _ENV_DRIVEN_RE = re.compile(
 
 
 def _iter_files(root, pattern):
-    for p in sorted(Path(root).rglob(pattern)):
-        if any(part in _SKIP_DIRS for part in p.parts):
-            continue
-        if p.is_file():
+    """Files under `root` whose NAME matches `pattern`, vendored trees pruned.
+
+    R8-6: this was `Path(root).rglob(pattern)`, and CPython 3.11's rglob recurses once
+    per directory — `_RecursiveWildcardSelector._iterate_directories` calls itself — so a
+    tree about a thousand directories deep raised `RecursionError` out of here, out of
+    `detect()`, out of `scan()` and onto the operator's terminal as a traceback with no
+    report behind it. Measured on this tree: 980 deep is fine, 1000 crashes. It is not a
+    hypothetical shape either — a vendored `node_modules` chain or a symlink-free
+    generated tree gets there, and nothing about the repo has to be a Django project for
+    this to run: `detect()` is called for every scan.
+
+    So the walk is `fallbacks._iter_files`, whose stack is a list and which has been the
+    module-detection walk everywhere else since round 7. This module keeps its OWN prune
+    set — see that function's docstring for why adopting the other one would have been a
+    scope change to settings discovery rather than a crash fix.
+
+    `fnmatch` on the name is what `rglob` did for these patterns: every caller passes a
+    bare name glob (`*.py`, `Dockerfile*`, `asgi.py`, `urls*.py`, `package.json`), none
+    with a separator in it.
+
+    ONE BEHAVIOUR CHANGE, and it is a fix rather than a cost: the old filter read
+    `any(part in _SKIP_DIRS for part in p.parts)` on an ABSOLUTE path, so a scan root
+    that happened to live under a directory called `build`, `dist` or `venv` matched on
+    its own prefix and this yielded nothing at all — every Django check on that project
+    silently saw an empty tree. Pruning during the walk can only skip directories BELOW
+    the root.
+    """
+    from fnmatch import fnmatch
+
+    from scanner.modules.fallbacks import _iter_files as _walk
+
+    for p in sorted(_walk(root, prune=_SKIP_DIRS)):
+        if fnmatch(p.name, pattern):
             yield p
 
 
@@ -184,12 +213,29 @@ class DjangoScannerModule:
     def project_root(self, root):
         """The directory actually holding the Django project. Real repos nest it
         (backend/, app/backend/ — J7: all four inventoried projects do); search
-        manage.py / a Django dependency up to depth 3, skipping vendored trees."""
+        manage.py / a Django dependency up to depth 3, skipping vendored trees.
+
+        R8-6, and this is the call that made the crash universal: `detect()` is
+        `project_root(root) is not None`, so the `root.rglob("manage.py")` that used to
+        be here ran for EVERY project of every framework, before any check, and took the
+        whole scan down on a deep tree. The depth rule was already written — `len(rel.
+        parts) <= 4` — it was just applied as a filter AFTER descending the entire tree
+        rather than as a bound on the descent. It is a bound now: `max_depth=4` on the
+        shared iterative walk, which is both crash-proof and strictly less work.
+
+        The `rel.parts` filter stays even though `prune=skip` now makes it redundant. It
+        is the RULE — "a manage.py under a vendored directory is not this project's" —
+        and a reader should find it stated where the candidate is accepted, not inferred
+        from an argument two lines up.
+        """
         root = Path(root)
         skip = {"node_modules", ".venv", "venv", ".git", "dist", "build",
                 "reference_impl", "reference-code"}
         candidates = []
-        for p in sorted(root.rglob("manage.py")):
+        from scanner.modules.fallbacks import _iter_files as _walk
+
+        for p in sorted(q for q in _walk(root, prune=skip, max_depth=4)
+                        if q.name == "manage.py"):
             rel = p.relative_to(root)
             if len(rel.parts) <= 4 and not (set(rel.parts[:-1]) & skip):
                 candidates.append(p.parent)

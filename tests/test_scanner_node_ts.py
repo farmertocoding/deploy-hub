@@ -706,3 +706,134 @@ def test_a_symlinked_directory_loop_does_not_hang_the_walk(tmp_path):
 
     found = list(itertools.islice(node_ts._iter_source_files(root), 50))
     assert [p.relative_to(root).as_posix() for p in found] == ["src/index.ts"], found
+
+
+# ── R8-3: a workspace pattern is repo-controlled text handed to a globber ───────
+
+
+def _workspace_repo(tmp_path, patterns, name="repo"):
+    """A minimal node repo whose root package.json declares `patterns`."""
+    root = tmp_path / name
+    (root / "packages" / "server" / "src").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": "root", "private": True, "workspaces": patterns}) + "\n",
+        encoding="utf-8")
+    (root / "pnpm-workspace.yaml").write_text(
+        "packages:\n" + "".join(f"  - '{p}'\n" for p in patterns), encoding="utf-8")
+    (root / "packages/server/package.json").write_text(
+        json.dumps({"name": "server", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "packages/server/src/index.ts").write_text(
+        "import Fastify from 'fastify';\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+@pytest.mark.parametrize("pattern", ["/etc/*", "/*", "C:/Windows/*"])
+def test_issue_r8_3_an_absolute_workspace_pattern_does_not_take_the_scan_down(
+        tmp_path, pattern):
+    """`workspaces` and `packages:` are written by the SCANNED repo and went straight
+    into `self.root.glob(pattern)`. pathlib refuses a pattern it calls non-relative by
+    RAISING `NotImplementedError`, and `_Survey` is built inside `detect()` — which runs
+    for every scan of every framework — so eight characters of JSON in a repo denied a
+    scan of itself: exit 1, a traceback, no report.
+
+    Verified before the fix:
+
+        >>> node_ts.NodeTsScannerModule().detect(root)
+        NotImplementedError: Non-relative patterns are unsupported
+
+    The scan must complete, and it must SAY the pattern was refused rather than dropping
+    it silently — a monorepo whose config names five packages and whose report surveys
+    three is a report the operator has no reason to distrust.
+    """
+    # Declared BESIDE a legitimate pattern, because the property under test is that one
+    # refused pattern costs only itself — the entry-level isolation `_read_entry` holds
+    # for the other repo-controlled config on this tree.
+    root = _workspace_repo(tmp_path, [pattern, "packages/*"],
+                           name=f"abs{abs(hash(pattern))}")
+
+    assert node_ts.module.detect(root) is True     # must not raise
+    report = core.scan(root)                       # must not raise
+
+    refused = by_id(report, "node-ts.workspace-patterns")
+    assert refused["tier"] == "warning"
+    assert repr(pattern) in refused["detail"], refused
+    assert "absolute" in refused["detail"]
+    # …and the packages that ARE inside the tree are still surveyed.
+    assert by_id(report, "node-ts.service-package")["tier"] == "ok"
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r8_3_a_workspace_pattern_cannot_read_outside_the_scan_root(tmp_path):
+    """The half that does NOT raise, and is the worse of the two: pathlib treats
+    `../outside` as a perfectly good relative pattern, `root/../outside` resolves out of
+    the tree, the directory is accepted as a workspace package, and `_Survey` reads its
+    source files into `all_sources` — which every content check greps and the report
+    quotes back.
+
+    Verified before the fix, with the marker file below:
+
+        package_dirs: [.../repo, .../repo/../outside, .../repo/../outside]
+        outside content reached the survey: True
+
+    A scan reads the tree it was pointed at. Asserted on the survey AND on the whole
+    serialized report, because "the content is not in `all_sources`" and "the content is
+    not in the operator's report" are two different claims and only the second is the
+    one that matters.
+    """
+    outer = tmp_path / "outer"
+    root = _workspace_repo(outer, ["../outside/*", "packages/*"])
+    neighbour = outer / "outside" / "neighbour"
+    neighbour.mkdir(parents=True)
+    (neighbour / "package.json").write_text(
+        json.dumps({"name": "neighbour", "dependencies": {"fastify": "^4.0.0"}}) + "\n",
+        encoding="utf-8")
+    (neighbour / "leak.ts").write_text(
+        'const STOLEN = "MARKER-OUTSIDE-THE-SCAN-ROOT";\n', encoding="utf-8")
+
+    survey = node_ts._Survey(root)
+
+    surveyed = {p.resolve() for p in survey.package_dirs}
+    assert surveyed == {root.resolve(), (root / "packages/server").resolve()}, surveyed
+    assert neighbour.resolve() not in surveyed
+    assert "MARKER-OUTSIDE-THE-SCAN-ROOT" not in survey.all_sources
+    assert "neighbour" not in survey.all_sources
+
+    report = core.scan(root)
+    assert "MARKER-OUTSIDE-THE-SCAN-ROOT" not in json.dumps(report)
+    refused = by_id(report, "node-ts.workspace-patterns")
+    assert refused["tier"] == "warning"
+    assert "escapes the scanned repository" in refused["detail"]
+    assert repr("../outside/*") in refused["detail"]
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r8_3_a_refused_pattern_cannot_write_lines_into_the_report(tmp_path):
+    """The pattern is quoted back so the author can find it, which makes it the same
+    class of surface `scanner/declarations.py` spends four rounds on: repo-controlled
+    text printed as evidence. Quoted through `repr` and bounded, so a newline becomes an
+    escape and a 4 KB pattern cannot become the report."""
+    forged = "/etc/\nnode-ts.fake-check: everything is fine"
+    root = _workspace_repo(tmp_path, [forged, "x" * 200 + "/../*"])
+
+    detail = by_id(core.scan(root), "node-ts.workspace-patterns")["detail"]
+
+    for line in detail.splitlines():
+        assert not line.startswith("node-ts.fake-check"), detail
+    assert "(truncated)" in detail, detail
+    assert "x" * 200 not in detail
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r8_3_an_ordinary_workspace_pattern_is_untouched(tmp_path):
+    """The over-correction guard. `packages/*` is how every monorepo on this fleet is
+    written, and a validator that refused it would be the noise-for-safety trade that
+    round-6b already lost — so the honest case is asserted to produce NO warning at
+    all."""
+    root = _workspace_repo(tmp_path, ["packages/*"])
+
+    report = core.scan(root)
+
+    assert [c["id"] for c in report["checks"] if c["id"] == "node-ts.workspace-patterns"] == []
+    assert "server" in by_id(report, "node-ts.monorepo")["detail"]
