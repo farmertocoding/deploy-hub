@@ -57,7 +57,7 @@ FINGERPRINT = MUTANTS / ".gate-fingerprint"
 FAILING = ("survived", "no tests", "suspicious", "segfault")
 
 
-def _fingerprint():
+def _fingerprint(root=None):
     """A digest of everything that can change a mutant's verdict but is not a mutant.
 
     THE CACHE IS THE ONE PLACE THIS GATE COULD LIE, and it is worth spelling out because
@@ -69,16 +69,42 @@ def _fingerprint():
     the test that killed a mutant leaves it cached as killed (the gate goes green at a
     real regression). The second one is the dangerous direction.
 
-    So the cache is keyed here on the things mutmut does not watch: the mutated sources,
-    every test file in the configured selection, the shared conftest, the `[tool.mutmut]`
-    config block and the pinned mutmut version. Any of them moves and `mutants/` is
-    rebuilt from scratch. A round that changes nothing re-runs warm; a round that touches
-    the code or its tests pays for a cold run, which is exactly when a stale verdict
-    would have mattered.
+    So the cache is keyed here on the things mutmut does not watch, and F2 is what the
+    FIRST cut of that sentence cost. It read "the mutated sources, every test file in the
+    configured selection, the shared conftest" — a third hand-typed list, and wrong in
+    exactly the way R4-12 says a hand-typed list is wrong. It omitted every module that
+    no mutant touches but that a killing chain runs THROUGH: `wizard/service.py`
+    (`preflight` imports `downgraded_answers` from it, `materialize` imports
+    `scrub_downgraded_answers`), `wizard/views.py`, `vault/service.py`, and the
+    `sample-node-site/` fixture repo the phase-1 acceptance tier scans off disk. Appending
+    a comment to `wizard/service.py` ran warm from the cache while mutmut re-synced the
+    edit into `mutants/` in the same run, so the verdicts being reported had been computed
+    against a tree that no longer existed. A behavioural edit there does the same thing
+    silently, and in the direction that matters: a chain that stops killing a mutant keeps
+    reporting it killed.
+
+    So the watch set is DERIVED now, from mutmut's own sandbox construction:
+    `mutation_scope.sandbox_files()` is the union of `source_paths`, `also_copy` and
+    mutmut's implicit copies — that is, every file that can be read from inside
+    `mutants/` at all. Anything outside it cannot influence a verdict, because it is not
+    in the sandbox. Plus the `[tool.mutmut]` block itself and the pinned mutmut version,
+    which are inputs to the run rather than files in the tree.
+
+    Any of them moves and `mutants/` is rebuilt from scratch. A round that changes
+    nothing re-runs warm; a round that touches any of the code or the tests pays for a
+    cold run, which is exactly when a stale verdict would have mattered. Caches whose
+    contents change per run (`__pycache__`, `.pytest_cache`) are excluded by
+    `mutation_scope.NOT_AN_INPUT`, or the gate would discard its own cache every time.
     """
     import tomllib
 
-    config = tomllib.loads((REPO / "pyproject.toml").read_text("utf-8"))["tool"]["mutmut"]
+    # `root` is a parameter so the digest can be computed over a fixture tree in a test —
+    # a cache key nothing exercises is the same shape of defect as F2 itself.
+    root = pathlib.Path(root or REPO)
+    sys.path.insert(0, str(REPO / "scripts_dev"))
+    import mutation_scope
+
+    config = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))["tool"]["mutmut"]
     digest = hashlib.sha256()
     digest.update(repr(sorted(config.items())).encode("utf-8"))
     try:
@@ -87,10 +113,8 @@ def _fingerprint():
         digest.update(getattr(mutmut, "__version__", "unknown").encode("utf-8"))
     except ImportError:                                          # pragma: no cover
         digest.update(b"mutmut-not-importable")
-    watched = [*config["source_paths"], *config["pytest_add_cli_args_test_selection"],
-               "tests/conftest.py"]
-    for name in sorted(watched):
-        path = REPO / name
+    for name in mutation_scope.sandbox_files(root):
+        path = root / name
         digest.update(name.encode("utf-8"))
         digest.update(path.read_bytes() if path.exists() else b"<missing>")
     return digest.hexdigest()

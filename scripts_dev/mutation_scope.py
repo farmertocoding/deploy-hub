@@ -20,12 +20,20 @@ own, and both are the same hazard one level up:
     it narrows from, and being an honest superset of the tests that reach these modules
     is exactly what makes that narrowing safe.
 
+  * WHAT THE VERDICT CACHE WATCHES — `sandbox_files()` below, added by F2. The first cut
+    of the cache key was a THIRD hand-typed list (source_paths + the selected tests +
+    conftest), and it was wrong in the way a hand-typed list is always wrong: it missed
+    `wizard/service.py`, `wizard/views.py`, `vault/service.py` and `sample-node-site/` —
+    modules that no mutant touches but that every killing chain runs THROUGH. See
+    `scripts_dev/mutation_gate.py::_fingerprint` for what a miss costs.
+
 `conformance/` and `scripts_dev/` have no `__init__.py` on purpose (see the Makefile's
 $(PY_ROOTS) comment), so this module is not importable as a package. Its callers put
 its directory on the path, the same way `tests/conftest.py` does for `conformance/`.
 """
 import ast
 import pathlib
+import subprocess
 import sys
 import tomllib
 
@@ -36,6 +44,20 @@ TESTS = REPO / "tests"
 # assumed: a derivation that silently found nothing would otherwise be a green gate that
 # runs no tests at all, which is the failure mode this whole gate exists to catch.
 REQUIRED_TEST_FILES = ("tests/test_scanner_declarations.py", "tests/test_wizard.py")
+
+# Directories mutmut copies into `mutants/` without being told to (mutmut 3's
+# `_load_config` appends these to whatever `also_copy` says), plus the config file it
+# reads from inside the copy. Listed here because the cache key has to cover the WHOLE
+# sandbox and mutmut's defaults are part of it — restated from mutmut's source, and the
+# restatement is safe in the only direction that matters: if a future mutmut adds a
+# default we do not know about, this list is too SMALL, which the sandbox-coverage test
+# catches for everything derivable from the tree.
+MUTMUT_IMPLICIT_COPIES = ("tests", "pyproject.toml", "setup.cfg")
+
+# Names never hashed: caches whose contents change on every run (so watching them would
+# discard the cache every time) and vendored trees that are not inputs to any test.
+NOT_AN_INPUT = {"__pycache__", "node_modules", ".git", ".pytest_cache", ".ruff_cache",
+                "mutants"}
 
 
 def mutated_paths(root=None):
@@ -130,8 +152,100 @@ def test_files_touching(paths=None, root=None):
     return found
 
 
+def py_roots(root=None):
+    """The tree's Python packages, by the Makefile's own predicate.
+
+    A top-level directory with an `__init__.py`, minus the test suite. Restating the
+    predicate rather than shelling out to `make py-roots` keeps this importable from a
+    test, and `tests/test_mutation_gate.py` asserts the two agree — R4-12 is what a
+    second, drifting copy of a scan scope costs, and this gate is not allowed to grow
+    one.
+    """
+    root = pathlib.Path(root or REPO)
+    return sorted(p.name for p in root.iterdir()
+                  if p.is_dir() and (p / "__init__.py").exists() and p.name != "tests")
+
+
+def _git_ignored(root, relative_paths):
+    """The subset of `relative_paths` git ignores. Empty on any doubt.
+
+    WHY GIT AND NOT ANOTHER NAME LIST. Two files inside the sandbox are REWRITTEN by the
+    gates that run before this one in `review-round`: `make test` writes
+    `conformance/run-report.json` (the conftest plugin) and `make conformance` writes
+    `conformance/matrix.json`. Watching them means the cache is discarded on every
+    single round — measured: two consecutive `make mutation` runs with no edit between
+    them both ran cold — which does not make the gate WRONG, it makes the warm path
+    unreachable, and a gate that always costs three minutes is a gate people find a way
+    around.
+
+    "Generated artifact, not an input under review" is exactly what `.gitignore` already
+    says about both of them, and it says it in one place that a human maintains for
+    other reasons. Reading it is derivation; adding two more names to `NOT_AN_INPUT`
+    would be the third hand-typed list in a module written about the cost of the first
+    two. `conformance/gates.py` already shells out to git for `git_head` and
+    `tree_fingerprint`, so this is not a new dependency for gate machinery.
+
+    FAILING TOWARD MORE WORK, deliberately: any error, a missing git, a directory that
+    is not a repository — all of them return the empty set, so nothing is dropped from
+    the watch set and the gate runs cold. The dangerous direction is watching too
+    little, and this cannot get there.
+    """
+    paths = [p for p in relative_paths if "\n" not in p]
+    if not paths:
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--stdin", "-z"],
+            input="\0".join(paths), capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    # 0 = some paths are ignored, 1 = none are. Anything else (128: not a repository)
+    # is an answer this cannot trust.
+    if result.returncode not in (0, 1) or not isinstance(result.stdout, str):
+        return set()
+    return {p for p in result.stdout.split("\0") if p}
+
+
+def sandbox_files(root=None):
+    """Every file that ends up inside the gate's `mutants/` sandbox. Sorted, relative.
+
+    DERIVED FROM THE CONFIG, not from a list: mutmut builds the sandbox out of
+    `source_paths` + `also_copy` + its own implicit copies, so that union IS the answer
+    to "what can change a mutant's verdict without being a mutant". Anything a test can
+    read is in here; anything not in here is not in the sandbox at all.
+
+    This is deliberately wider than "the modules the killing chains traverse", which is
+    the F2 finding's own wording, because that phrasing is a judgement call and this is
+    not: enumerating which non-mutated modules a chain runs through is the same guessing
+    game that produced the missed list in the first place. The union is mechanical.
+    """
+    root = pathlib.Path(root or REPO)
+    config = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))["tool"]["mutmut"]
+    roots = [*config["source_paths"], *config.get("also_copy", ()),
+             *MUTMUT_IMPLICIT_COPIES]
+
+    found = set()
+    for name in roots:
+        start = root / name
+        if start.is_file():
+            found.add(name)
+            continue
+        if not start.is_dir():
+            continue
+        for path in start.rglob("*"):
+            rel = path.relative_to(root)
+            if NOT_AN_INPUT & set(rel.parts) or not path.is_file():
+                continue
+            if path.suffix in (".pyc", ".pyo"):
+                continue
+            found.add(rel.as_posix())
+    return sorted(found - _git_ignored(root, sorted(found)))
+
+
 if __name__ == "__main__":
     if "--mutated" in sys.argv:
         print("\n".join(mutated_paths()))
+    elif "--sandbox" in sys.argv:
+        print("\n".join(sandbox_files()))
     else:
         print("\n".join(test_files_touching()))

@@ -173,8 +173,13 @@ def test_a_surviving_mutant_is_a_non_zero_exit(tmp_path, monkeypatch):
         return lambda: {name: (status, "wizard/materialize.py")
                         for name, status in results.items()}
 
+    # A realistic CompletedProcess, because `mutation_gate.subprocess` IS the stdlib
+    # module — patching its `run` also patches the `git check-ignore` call inside
+    # `mutation_scope._git_ignored`, and a fake with no `stdout` would exercise that
+    # function's error path by accident rather than on purpose.
     monkeypatch.setattr(mutation_gate.subprocess, "run",
-                        lambda *a, **kw: subprocess.CompletedProcess(a, 0))
+                        lambda *a, **kw: subprocess.CompletedProcess(a, 0, stdout="",
+                                                                     stderr=""))
     # Pointed at a directory that does not exist, so this test cannot delete the real
     # `mutants/` cache out from under a run — which it did, once, and the symptom was a
     # different test failing three minutes later.
@@ -223,8 +228,13 @@ def test_a_waiver_only_silences_a_mutant_that_is_actually_surviving(tmp_path,
     """
     import mutation_gate
 
+    # A realistic CompletedProcess, because `mutation_gate.subprocess` IS the stdlib
+    # module — patching its `run` also patches the `git check-ignore` call inside
+    # `mutation_scope._git_ignored`, and a fake with no `stdout` would exercise that
+    # function's error path by accident rather than on purpose.
     monkeypatch.setattr(mutation_gate.subprocess, "run",
-                        lambda *a, **kw: subprocess.CompletedProcess(a, 0))
+                        lambda *a, **kw: subprocess.CompletedProcess(a, 0, stdout="",
+                                                                     stderr=""))
     monkeypatch.setattr(mutation_gate, "MUTANTS", tmp_path / "mutants")
     monkeypatch.setattr(mutation_gate, "FINGERPRINT", tmp_path / "mutants/.fingerprint")
     monkeypatch.setattr(mutation_gate, "_waived_mutants",
@@ -260,3 +270,200 @@ def test_every_mutation_waiver_names_a_mutant_id_the_gate_would_print():
         module = path[:-len(".py")].replace("/", ".")
         assert mutant_id.startswith(f"{module}.x"), fingerprint
         assert "__mutmut_" in mutant_id, fingerprint
+
+
+# ── F2: what the verdict cache watches ────────────────────────────────────────
+#
+# The review of the gate PR found the cache key was a THIRD hand-typed list — mutated
+# sources, the selected test files, conftest — and that it missed every module a killing
+# chain runs THROUGH without being mutated itself. Demonstrated with a comment appended
+# to `wizard/service.py`: the run went warm from the cache while mutmut re-synced that
+# same edit into `mutants/`, so the verdicts reported had been computed against a tree
+# that no longer existed. The tests below are the fix's teeth.
+
+
+def test_the_cache_watches_every_file_the_sandbox_can_read():
+    """`sandbox_files()` is derived from mutmut's own sandbox construction — the union of
+    `source_paths`, `also_copy` and mutmut's implicit copies — so "can this change a
+    verdict?" and "is this in the sandbox?" are the same question.
+
+    The four names F2 cited are asserted individually as well as through the derivation.
+    A derivation that is right today and a finding that names four files are two
+    different claims, and the second is the one that goes red if somebody narrows the
+    first.
+    """
+    watched = set(mutation_scope.sandbox_files(REPO))
+
+    for named in ("wizard/service.py", "wizard/views.py", "vault/service.py",
+                  "sample-node-site/package.json"):
+        assert named in watched, f"F2's own example {named} is outside the cache key"
+
+    # Every Python file in every package, by the tree's own definition of a package.
+    for root in mutation_scope.py_roots(REPO):
+        for path in sorted((REPO / root).rglob("*.py")):
+            rel = path.relative_to(REPO).as_posix()
+            if "__pycache__" in rel:
+                continue
+            assert rel in watched, rel
+
+    # The fixture repo the phase-1 acceptance tier scans off disk, which is not Python at
+    # all — the reason the watch set is "files in the sandbox" rather than "modules".
+    for path in sorted((REPO / "sample-node-site").rglob("*")):
+        if path.is_file():
+            assert path.relative_to(REPO).as_posix() in watched, path
+
+    # …and the things the first cut did get right, so the fix cannot lose them.
+    for selected in _mutmut_config()["pytest_add_cli_args_test_selection"]:
+        assert selected in watched, selected
+    assert "tests/conftest.py" in watched
+    assert "pyproject.toml" in watched
+
+
+def test_the_cache_never_watches_a_file_that_a_gate_rewrites():
+    """The other direction, and it is not cosmetic: a watch set containing anything the
+    run itself rewrites makes the fingerprint differ from itself, every round pays for a
+    cold run, and a gate that always costs three minutes is a gate people find a way
+    around.
+
+    Two of these are inside the sandbox and were watched by the first cut of the F2 fix:
+    `make test` writes `conformance/run-report.json` and `make conformance` writes
+    `conformance/matrix.json`, and both run before `make mutation` in the `review-round`
+    chain — so two consecutive runs with no edit between them both went cold. They are
+    excluded through `.gitignore`, which is where the tree already says "generated
+    artifact", rather than through two more typed names.
+    """
+    watched = mutation_scope.sandbox_files(REPO)
+
+    for rel in watched:
+        assert not (mutation_scope.NOT_AN_INPUT & set(rel.split("/"))), rel
+        assert not rel.endswith((".pyc", ".pyo")), rel
+    for generated in ("conformance/matrix.json", "conformance/run-report.json"):
+        assert generated not in watched, generated
+
+    assert mutation_scope.sandbox_files(REPO) == watched, "the watch set is not stable"
+
+
+def test_running_the_gates_before_it_does_not_move_the_cache_key():
+    """The property those exclusions exist for, asserted end to end rather than by
+    name: run the two gates that precede `mutation` in `review-round` and the cache key
+    must not have moved. This is what makes the warm path reachable in a real round —
+    if it goes red, `make mutation` is a cold run every time and the reason will not be
+    obvious from the timing alone.
+    """
+    import mutation_gate
+
+    before = mutation_gate._fingerprint(REPO)
+    subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/test_smoke.py"],
+                   cwd=REPO, capture_output=True, timeout=300)
+    subprocess.run([sys.executable, "conformance/check.py", "--phase", "1"],
+                   cwd=REPO, capture_output=True, timeout=300)
+
+    assert mutation_gate._fingerprint(REPO) == before
+
+
+def _fixture_repo(root):
+    """A miniature tree with mutmut's config in it, shaped like this repo's sandbox."""
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg/__init__.py").write_text("", encoding="utf-8")
+    (root / "pkg/mutated.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    # The F2 module: never mutated, but a killing chain runs through it.
+    (root / "pkg/helper.py").write_text("def used_by_f():\n    return 2\n",
+                                        encoding="utf-8")
+    (root / "fixture-repo").mkdir()
+    (root / "fixture-repo/package.json").write_text("{}\n", encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests/conftest.py").write_text("", encoding="utf-8")
+    (root / "tests/test_pkg.py").write_text("def test_f():\n    assert True\n",
+                                            encoding="utf-8")
+    (root / "docs").mkdir()
+    (root / "docs/notes.md").write_text("not an input to anything\n", encoding="utf-8")
+    # No `.git` here on purpose: `_git_ignored` must fail toward watching everything, so
+    # the fixture tests below exercise the degraded path as well as the happy one.
+    (root / "pyproject.toml").write_text(
+        '[tool.mutmut]\n'
+        'source_paths = ["pkg/mutated.py"]\n'
+        'pytest_add_cli_args_test_selection = ["tests/test_pkg.py"]\n'
+        'also_copy = ["pkg", "fixture-repo"]\n',
+        encoding="utf-8")
+    return root
+
+
+def test_editing_a_module_no_mutant_touches_discards_the_cache(tmp_path):
+    """F2's regression test, stated at the cache key.
+
+    `pkg/helper.py` is in the sandbox and is mutated by nothing — the shape of
+    `wizard/service.py`, whose `downgraded_answers` and `scrub_downgraded_answers` are
+    imported by `preflight` and `materialize` and are on the path of every mutant those
+    two functions produce. Under the old key, appending a comment to it left the
+    fingerprint unchanged, the run went warm, and mutmut copied the edit into the sandbox
+    anyway: cached verdicts describing one tree, reported over another.
+    """
+    import mutation_gate
+
+    root = _fixture_repo(tmp_path / "repo")
+    before = mutation_gate._fingerprint(root)
+
+    (root / "pkg/helper.py").write_text(
+        "def used_by_f():\n    return 2\n# a comment, and nothing more\n",
+        encoding="utf-8")
+
+    assert mutation_gate._fingerprint(root) != before, (
+        "a change to a non-mutated module in the sandbox left the cache key unmoved")
+
+
+def test_editing_a_non_python_fixture_the_scan_reads_discards_the_cache(tmp_path):
+    """The same finding's second half, and the reason the watch set is files rather than
+    modules: `sample-node-site/` is a fixture REPO the phase-1 acceptance tier scans off
+    disk, so its `package.json` decides what that scan reports and therefore which
+    mutants it kills. No import graph would ever find it."""
+    import mutation_gate
+
+    root = _fixture_repo(tmp_path / "repo")
+    before = mutation_gate._fingerprint(root)
+
+    (root / "fixture-repo/package.json").write_text('{"name": "changed"}\n',
+                                                    encoding="utf-8")
+
+    assert mutation_gate._fingerprint(root) != before
+
+
+def test_a_file_outside_the_sandbox_does_not_discard_the_cache(tmp_path):
+    """Over-invalidation is the other failure, and it has to be excluded deliberately: a
+    key that moves for every edit anywhere makes the warm path unreachable. `docs/` is
+    not copied into `mutants/`, so nothing inside it can be read by a test there."""
+    import mutation_gate
+
+    root = _fixture_repo(tmp_path / "repo")
+    before = mutation_gate._fingerprint(root)
+
+    (root / "docs/notes.md").write_text("still not an input\n", encoding="utf-8")
+
+    assert mutation_gate._fingerprint(root) == before
+
+
+def test_the_gates_package_derivation_is_the_makefiles():
+    """`mutation_scope.py_roots()` restates the Makefile's $(PY_ROOTS) predicate so a
+    test can import it, and R4-12 is precisely what a second copy of a scan scope costs.
+    So the two are asserted equal, the same way
+    test_issue_r4_12_scan_scope_is_derived_from_the_package_roots asserts it for bandit
+    and the log scrubber."""
+    import shutil as _shutil
+
+    make = _shutil.which("make")
+    assert make, "make is not installed — the Makefile gates cannot run at all"
+    result = subprocess.run([make, "-s", "py-roots"], cwd=REPO, capture_output=True,
+                            text=True, timeout=60)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.split() == mutation_scope.py_roots(REPO)
+    assert {"wizard", "scanner", "vault"} <= set(mutation_scope.py_roots(REPO))
+
+
+def test_the_ignore_lookup_fails_toward_watching_too_much(tmp_path):
+    """`_git_ignored` drops files from the cache key, so every way it can fail has to
+    fail by dropping NOTHING. A directory that is not a git repository is the case a
+    test fixture hits every time, and it is the same shape as git being absent."""
+    root = _fixture_repo(tmp_path / "repo")
+
+    assert mutation_scope._git_ignored(root, ["pkg/helper.py", "docs/notes.md"]) == set()
+    assert "pkg/helper.py" in mutation_scope.sandbox_files(root)
