@@ -114,6 +114,74 @@ def _workspace_pattern_problem(pattern):
     return None
 
 
+# ── F3: and the pattern is only half of what the repo controls ─────────────────
+#
+# The R8-3 rules above validate the PATTERN, which is what the repo writes into its
+# package.json. They cannot see what the pattern EXPANDS to, and git stores symlinks —
+# so `workspaces: ["packages/*"]`, an ordinary pattern that passes every rule above,
+# expands to whatever `packages/` contains, and one committed symlink
+#
+#     packages/evil -> ../../victim
+#
+# makes `../../victim` a workspace package. `_iter_source_files` refuses to FOLLOW a
+# symlinked directory it finds during its walk, but it never questions the directory it
+# is handed as a base, so the victim tree's sources go into `all_sources` whole.
+#
+# It is not a silent read either — it steers the report. Demonstrated with one line that
+# exists only outside the scanned repo:
+#
+#     const threads = process.env.WORKER_THREADS ?? 7;
+#
+# …which moved the scanned repo's `node-ts.worker-threads` wizard default from 2 to 7.
+# Every regex in this module reads `all_sources`, so any of them can be driven the same
+# way: a `worker_threads` mention that turns the worker check from "not detected" to
+# "detected", a broker env name that arms the financial-signals path, a `ready:` field
+# that satisfies the readiness pattern for a service that has none.
+#
+# ALL SYMLINKED BASES ARE REFUSED, including one that points INSIDE the root, and that
+# is a deliberate choice of the stricter reading. Containment alone would admit
+# `packages/alias -> ../lib`, which is harmless today and is a second name for a
+# directory the survey already has — it re-reads the same sources, double-counts them in
+# `workspace_names()`, and makes the refusal rule depend on where a link happens to land
+# rather than on what it is. `sample-node-site` contains no symlink at all, and no repo
+# in the fleet declares a workspace through one, so the strict rule costs nothing today
+# and the loose one would need a threat model for the case it admits. If a real
+# in-root use turns up, the problem line below is what a reader will find, and relaxing
+# it is a reviewed edit with that repo in the diff.
+#
+# RESOLVE-CONTAINMENT STAYS BESIDE IT rather than being replaced by the symlink rule,
+# because they catch different things: `is_symlink()` is false for `packages/link/pkg`
+# when `link` is the symlink and `pkg` is a real directory inside it, and that is what a
+# `packages/*/*` pattern expands to.
+
+
+def _workspace_candidate_problem(root, candidate):
+    """A sentence if `candidate` may not be surveyed as a package, else None.
+
+    `root` is the scan root as given; both sides are resolved here, because the scan
+    root itself is frequently reached through a symlink (`/tmp` on macOS, a checkout
+    under a linked home) and comparing an unresolved root against a resolved candidate
+    would refuse every package in such a tree.
+    """
+    try:
+        rel = _quote_pattern(str(candidate.relative_to(root)))
+    except ValueError:                                            # pragma: no cover
+        rel = _quote_pattern(str(candidate))
+    if candidate.is_symlink():
+        return (f"workspace package {rel} is a symlink; a workspace package is a "
+                f"directory in the repository, and a link is a name for a tree the "
+                f"scan was not pointed at — it was not surveyed")
+    try:
+        resolved, root_resolved = candidate.resolve(), Path(root).resolve()
+    except OSError as exc:
+        return (f"workspace package {rel} could not be resolved "
+                f"({exc.__class__.__name__}); it was not surveyed")
+    if resolved != root_resolved and root_resolved not in resolved.parents:
+        return (f"workspace package {rel} resolves outside the scanned repository; a "
+                f"scan reads only the tree it was pointed at — it was not surveyed")
+    return None
+
+
 def _load_json(path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -202,9 +270,10 @@ class _Survey:
 
     # ── workspace / packages ────────────────────────────────────────────────
     def _find_package_dirs(self):
-        dirs = []
+        dirs, seen = [], set()
         if (self.root / "package.json").is_file():
             dirs.append(self.root)
+            seen.add(self.root.resolve())
         patterns = []
         if self.workspace_file.is_file():
             try:
@@ -235,8 +304,25 @@ class _Survey:
                     f"({exc.__class__.__name__}); it was ignored")
                 continue
             for candidate in candidates:
-                if candidate.is_dir() and (candidate / "package.json").is_file():
-                    dirs.append(candidate)
+                if not (candidate.is_dir() and (candidate / "package.json").is_file()):
+                    continue
+                problem = _workspace_candidate_problem(self.root, candidate)
+                if problem:
+                    if problem not in self.workspace_problems:
+                        self.workspace_problems.append(problem)
+                    continue
+                # F3 follow-up: de-duplicated by RESOLVED path. Two patterns naming the
+                # same directory — `packages/*` in package.json and the identical line
+                # in pnpm-workspace.yaml is the common way — appended it twice, so
+                # `workspace_names()` reported `['server', 'server']`, every source file
+                # under it was read and concatenated into `all_sources` twice, and the
+                # duplicate-sensitive checks counted it twice. It is one package however
+                # many times the repo names it.
+                key = candidate.resolve()
+                if key in seen:
+                    continue
+                seen.add(key)
+                dirs.append(candidate)
         return dirs
 
     def workspace_names(self):

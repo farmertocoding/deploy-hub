@@ -2,6 +2,7 @@
 contract — positive pass over sample-node-site plus the MUTATIONS.md negative
 matrix (one edit per mutation; exactly the named check flips tier)."""
 import json
+import os
 import pathlib
 import shutil
 from typing import NamedTuple
@@ -837,3 +838,161 @@ def test_issue_r8_3_an_ordinary_workspace_pattern_is_untouched(tmp_path):
 
     assert [c["id"] for c in report["checks"] if c["id"] == "node-ts.workspace-patterns"] == []
     assert "server" in by_id(report, "node-ts.monorepo")["detail"]
+
+
+# ── F3: the pattern is only half of what the scanned repo controls ─────────────
+
+
+def _victim_tree(base, marker="VICTIM-TREE-MARKER"):
+    """A neighbouring repository, beside the one the operator asked to scan.
+
+    Its one source file carries a `WORKER_THREADS ?? 7` line, which is the reviewer's
+    probe: the number is READ BACK OUT of the report as a wizard default, so the test
+    can assert that a file outside the scan root steered the answer rather than merely
+    that its bytes were opened.
+    """
+    victim = base / "victim"
+    (victim / "src").mkdir(parents=True)
+    (victim / "package.json").write_text(json.dumps({"name": "victim"}) + "\n",
+                                         encoding="utf-8")
+    (victim / "src" / "engine.ts").write_text(
+        "const threads = process.env.WORKER_THREADS ?? 7;\n"
+        f'const CREDENTIAL = "{marker}";\n', encoding="utf-8")
+    return victim
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_f3_a_symlinked_workspace_package_cannot_steer_the_report(tmp_path):
+    """The reviewer's probe, verbatim: an ORDINARY pattern plus one committed symlink.
+
+    R8-3 validates the pattern the repo writes; it cannot see what the pattern EXPANDS
+    to. `workspaces: ["packages/*"]` passes every one of those rules and then expands to
+    whatever `packages/` contains — and git stores symlinks, so `packages/evil ->
+    ../../victim` is a committable way to make a neighbouring tree a workspace package.
+    `_iter_source_files` refuses to FOLLOW a symlinked directory during its walk, but it
+    never questioned the directory handed to it as a base.
+
+    The report is steered, not just read. Before the fix:
+
+        package_dirs: ['repo', 'evil', 'server', 'evil', 'server']
+        workspace_names: ['evil', 'server', 'evil', 'server']
+        victim marker in all_sources: True
+        worker_threads_default: 7 (honest answer: 2)
+        wizard node-ts.worker-threads default: 7
+
+    Every regex in this module reads `all_sources`, so the worker default is one of
+    many: a `worker_threads` mention flips the worker check from "not detected" to
+    "detected", a broker env name arms the financial-signals path, a `ready:` field
+    satisfies the readiness pattern for a service that has none.
+    """
+    _victim_tree(tmp_path)
+    root = _workspace_repo(tmp_path, ["packages/*"])
+    os.symlink("../../victim", root / "packages" / "evil")
+
+    survey = node_ts._Survey(root)
+
+    assert [p.name for p in survey.package_dirs] == ["repo", "server"], \
+        survey.package_dirs
+    assert survey.workspace_names() == ["server"]
+    assert "VICTIM-TREE-MARKER" not in survey.all_sources
+    # The number is the assertion that matters: 2 is this module's own default, 7 exists
+    # only in the neighbouring tree.
+    assert survey.worker_threads_default() == 2
+
+    report = core.scan(root)
+    questions = {q["id"]: q for q in report["wizard_questions"]}
+    assert questions["node-ts.worker-threads"]["default"] == 2
+    assert "VICTIM-TREE-MARKER" not in json.dumps(report)
+
+    refused = by_id(report, "node-ts.workspace-patterns")
+    assert refused["tier"] == "warning"
+    assert "is a symlink" in refused["detail"], refused
+    assert repr("packages/evil") in refused["detail"], refused
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_f3_a_symlink_pointing_inside_the_root_is_refused_too(tmp_path):
+    """The design question, and the stricter reading is the one taken.
+
+    Containment alone would admit `packages/alias -> ../packages/server`, which escapes
+    nothing — and is a second name for a directory the survey already has, so it re-reads
+    the same sources and double-counts the package. Refusing by WHAT IT IS rather than by
+    where it lands also keeps the rule from depending on a link's target, which the repo
+    controls and can change between scans.
+
+    `sample-node-site` contains no symlink at all and no repo in the fleet declares a
+    workspace through one, so this costs nothing today; the problem line says plainly
+    that it was refused for being a link, so a real in-root use produces a report a
+    human can act on rather than a silent omission.
+    """
+    root = _workspace_repo(tmp_path, ["packages/*"])
+    os.symlink("server", root / "packages" / "alias")
+
+    survey = node_ts._Survey(root)
+
+    assert [p.name for p in survey.package_dirs] == ["repo", "server"]
+    assert any("is a symlink" in problem for problem in survey.workspace_problems), \
+        survey.workspace_problems
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_f3_a_real_directory_reached_through_a_symlinked_parent_is_refused(
+        tmp_path):
+    """Why resolve-containment stays beside the symlink rule instead of being replaced
+    by it: `candidate.is_symlink()` is FALSE for `packages/link/pkg` when `link` is the
+    symlink and `pkg` is an ordinary directory inside it — and `packages/*/*` is a
+    pattern people write."""
+    outside = tmp_path / "outside" / "pkg"
+    (outside / "src").mkdir(parents=True)
+    (outside / "package.json").write_text(json.dumps({"name": "pkg"}) + "\n",
+                                          encoding="utf-8")
+    (outside / "src" / "x.ts").write_text('const M = "NESTED-VICTIM-MARKER";\n',
+                                          encoding="utf-8")
+    root = _workspace_repo(tmp_path, ["packages/*/*", "packages/*"])
+    os.symlink("../../outside", root / "packages" / "link")
+
+    survey = node_ts._Survey(root)
+
+    assert "NESTED-VICTIM-MARKER" not in survey.all_sources
+    assert any("resolves outside" in problem for problem in survey.workspace_problems), \
+        survey.workspace_problems
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_f3_a_package_named_by_two_patterns_is_surveyed_once(tmp_path):
+    """The duplicate-append half, paired with F3 because it lives in the same three
+    lines and is the same class of defect — the survey believing the repo about how many
+    packages it has.
+
+    `packages/*` in package.json's `workspaces` and the identical line in
+    pnpm-workspace.yaml is the ordinary way a pnpm monorepo is written; both files are
+    read and `_find_package_dirs` concatenates their patterns, so the directory was
+    appended twice. `workspace_names()` reported `['server', 'server']` — the operator
+    is told the monorepo has two packages of the same name — and the package's sources
+    were concatenated into `all_sources` an extra time, which doubles the weight of one
+    package in every regex that scores across the tree.
+
+    Asserted as an EQUIVALENCE against a repo that names the package once, rather than
+    against a source-occurrence count: the root package.json makes the scan root itself
+    a package dir whose walk already covers its children, so `all_sources` legitimately
+    contains each file more than once. That overlap is pre-existing and is a separate
+    question; what this pins is that naming a package twice changes nothing.
+    """
+    twice = _workspace_repo(tmp_path, ["packages/*"], name="twice")
+    assert "packages/*" in (twice / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    assert "packages/*" in (twice / "package.json").read_text(encoding="utf-8")
+
+    once = _workspace_repo(tmp_path, ["packages/*"], name="once")
+    once_pkg = json.loads((once / "package.json").read_text(encoding="utf-8"))
+    del once_pkg["workspaces"]
+    (once / "package.json").write_text(json.dumps(once_pkg) + "\n", encoding="utf-8")
+
+    twice_survey, once_survey = node_ts._Survey(twice), node_ts._Survey(once)
+
+    assert [p.name for p in twice_survey.package_dirs] == ["twice", "server"]
+    assert twice_survey.workspace_names() == once_survey.workspace_names() == ["server"]
+    assert twice_survey.all_sources == once_survey.all_sources
+    assert twice_survey.workspace_problems == []
+
+    mono = by_id(core.scan(twice), "node-ts.monorepo")
+    assert mono["detail"].count("server") == 1, mono["detail"]
