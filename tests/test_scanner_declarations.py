@@ -1025,3 +1025,320 @@ def test_issue_r8_12_a_refusal_quotes_back_a_bounded_amount_of_a_giant_value(tmp
     # the sentence, not the repo's own 200 KB.
     assert len(problems) < 1000, (
         f"the refusal for a 200 KB path was {len(problems)} characters long")
+
+
+# ── the mutation gate's pins (spec-mutation-gate.md) ──────────────────────────
+#
+# `make mutation` found each of these: a mutation of `scanner/declarations.py` the suite
+# could not tell from the real code. R8-5 and R8-12 above are two of the same class,
+# found by hand in round 8; the gate found the rest of the family in one run.
+#
+# The theme is the one the parked module's own docstring warns about — this is a parser
+# whose OUTPUT is evidence a reviewer reads, so "was it refused" is only half of any
+# assertion here, and half is what almost all of these lines had.
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("body,why", [
+    ("", "an empty file"),
+    ("scanner:\n", "no `scanner` mapping"),
+    ("scanner: a string\n", "`scanner` of the wrong type"),
+    ("scanner:\n  test_material:\n", "no `test_material` list"),
+    ("scanner:\n  test_material: {}\n", "`test_material` of the wrong type"),
+    ("- a\n- b\n", "a top-level sequence"),
+    ("scanner: [this is not a mapping\n", "unparseable YAML"),
+    ("scanner:\n  test_material: " + "[" * 100_000, "a file too deep to parse"),
+    ("#" * (declarations.MAX_DECLARATION_BYTES + 1), "a file over the byte cap"),
+    ("scanner:\n  test_material:\n    - path: frontend/scripts/drill\n"
+     "      reason: ok\n", "a well-formed file"),
+])
+def test_the_declaration_file_is_reported_as_present_however_it_parses(tmp_path, body,
+                                                                       why):
+    """`present` says "this repo carries a `deployhub.yaml`", and it is the field the
+    report's presence notice is built from — the ONE thing Phase 1 still says about a
+    declaration file (`core.declaration-file`). Every early return sets it, and every
+    one of those could be flipped to `False` or dropped: eighteen mutants lived on this
+    field alone, because the tests around each malformed shape assert `accepted == ()`
+    and `problems`, and never that the file was noticed at all.
+
+    A `present=False` on a malformed file is not a cosmetic loss: it is the scanner
+    telling the operator there is no declaration file in a repo that has one, which is
+    the same lie as parsing it optimistically.
+    """
+    loaded = _declared(tmp_path, body, name=f"p{abs(hash(body))}")
+
+    assert loaded.present is True, f"{why} reported no declaration file"
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_declaration_file_that_is_not_utf8_is_a_problem_not_a_crash(tmp_path):
+    """`load` promises it never raises for anything the scanned repo controls, and the
+    `UnicodeDecodeError` arm of that promise was exercised by nothing — its whole
+    `problems` tuple could be replaced with `None`, which is `Declarations.problems`
+    holding a non-tuple that every consumer iterates."""
+    root = _tree(tmp_path, _drill_files(), name="notutf8")
+    (root / declarations.DECLARATION_FILE).write_bytes(b"scanner:\n  test_material: \xff\xfe\n")
+
+    loaded = declarations.load(root)   # must not raise
+
+    assert loaded.accepted == ()
+    assert loaded.present is True
+    assert any("could not be read" in p for p in loaded.problems), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_declaration_file_that_cannot_be_stat_ed_is_a_problem_not_a_crash(tmp_path,
+                                                                           monkeypatch):
+    """The other unreadable arm, and the one no filesystem this suite can build reaches:
+    `path.stat()` failing after `is_file()` said yes. Patched at `Path.stat` rather than
+    faked with a fixture tree, because the point is the handler, not the cause."""
+    root = _tree(tmp_path, dict(_drill_files(), **{"deployhub.yaml": "scanner:\n"}),
+                 name="nostat")
+    real_stat = pathlib.Path.stat
+    seen = []
+
+    def refusing_stat(self, *args, **kwargs):
+        # `is_file()` stats too, so the first call has to succeed — the arm under test
+        # is the one where the file exists and then cannot be measured.
+        if self.name == declarations.DECLARATION_FILE and seen:
+            raise OSError(5, "Input/output error")
+        if self.name == declarations.DECLARATION_FILE:
+            seen.append(self)
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", refusing_stat)
+
+    loaded = declarations.load(root)   # must not raise
+
+    assert loaded.accepted == ()
+    assert loaded.present is True
+    assert any("could not be read" in p for p in loaded.problems), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_file_exactly_at_the_byte_cap_is_still_parsed(tmp_path):
+    """The byte cap's boundary, in the direction the existing test does not look: it
+    feeds a file far over the limit, so `>` could become `>=` and the only casualty
+    would be the one repo whose declaration file is exactly 256 KB."""
+    entry = _declaration("frontend/scripts/drill")
+    padding = "#" + "p" * (declarations.MAX_DECLARATION_BYTES - len(entry) - 2) + "\n"
+    body = entry + padding
+    assert len(body.encode("utf-8")) == declarations.MAX_DECLARATION_BYTES
+
+    loaded = _declared(tmp_path, body, name="atcap")
+
+    assert len(loaded.accepted) == 1, loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_file_with_exactly_the_maximum_number_of_entries_is_read_whole(tmp_path):
+    """`MAX_DECLARATIONS`' boundary, same argument as the byte cap's: the R7-10 test
+    uses 120 entries, so the comparison could move by one and take a legitimate 50th
+    declaration with it."""
+    entries = "".join(f"    - path: d{i}\n      reason: drill {i}\n"
+                      for i in range(declarations.MAX_DECLARATIONS))
+    files = {"src/app.py": "print('hello')\n",
+             "deployhub.yaml": "scanner:\n  test_material:\n" + entries}
+    for i in range(declarations.MAX_DECLARATIONS):
+        files[f"d{i}/qa.mjs"] = f'const staff_password = "{FAKE_HIGH_ENTROPY}";\n'
+
+    loaded = _load(tmp_path, files, name="atmax")
+
+    assert len(loaded.accepted) == declarations.MAX_DECLARATIONS
+    assert loaded.problems == (), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_the_refusal_quoter_truncates_and_escapes_and_quotes_the_value_itself():
+    """`_quote` is four lines and carried five mutants: `repr` could be handed `None` on
+    any of its three branches and the truncation marker could be rewritten, because
+    every test that reaches it asserts on the SENTENCE around the quote and never on the
+    quote. R8-12 pinned the bound; this pins that what is inside the bound is the
+    repo's own text.
+
+    Asserted with literals rather than against `_QUOTE_LIMIT`, for the reason
+    `test_issue_r7f_the_confirm_digest_is_sixteen_hex_characters` gives: a bound derived
+    from the constant under test cannot fail when the constant moves.
+    """
+    assert declarations._quote("drill") == "'drill'"
+    assert declarations._quote("a\nb") == "'a\\nb'"          # never a real newline
+    assert declarations._quote("x" * 80) == "'" + "x" * 80 + "'"
+    assert declarations._quote("y" * 81) == "'" + "y" * 80 + "' (truncated)"
+    assert declarations._quote(17) == "17"                   # the non-string arm
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("path,reason", [
+    ("frontend/scripts/drill", "''"),                    # no reason
+    ("frontend/scripts/drill", "x" * 201),               # reason over the cap
+    (".//", DRILL_REASON),                               # the scan root
+    ("/etc/secrets", DRILL_REASON),                      # absolute
+    ("../outside", DRILL_REASON),                        # escapes the root
+])
+def test_every_refusal_that_quotes_a_path_quotes_the_real_one(tmp_path, path, reason):
+    """Five refusals print the offending path through `_quote` so the repo's author can
+    find the entry, and the argument could be replaced by `None` in every one of them
+    with the suite green — leaving a refusal that says `(None)` and names nothing.
+
+    Each is asserted on the `repr` form the quoter produces, which is also what keeps a
+    newline in a path from forging a line in the message that rejects it.
+    """
+    body = ("scanner:\n"
+            "  test_material:\n"
+            f'    - path: "{path}"\n'
+            f"      reason: {reason}\n")
+    loaded = _declared(tmp_path, body, name=f"q{abs(hash(path + reason))}")
+
+    assert loaded.accepted == ()
+    assert repr(path) in _problems(loaded), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_an_enclosure_closer_at_the_very_start_of_a_value_is_refused(tmp_path):
+    """`if at >= 0` — weakened to `> 0` or `>= 1`, a value that OPENS with `]` or `"`
+    walks straight through the guard, and opening with the closer is the easiest forgery
+    of the lot. Every existing case puts the character in the middle."""
+    for closer in declarations.LABEL_ENCLOSURE_CLOSERS:
+        body = ("scanner:\n"
+                "  test_material:\n"
+                "    - path: frontend/scripts/drill\n"
+                f"      reason: {closer + ' fake creds'!r}\n")
+        loaded = _declared(tmp_path, body, name=f"lead{ord(closer)}")
+
+        assert loaded.accepted == (), f"a leading {closer!r} was accepted"
+        assert "at offset 0" in _problems(loaded), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_the_refusal_reports_the_first_closer_not_the_last(tmp_path):
+    """`value.find(closer)` could become `rfind` and the coordinates the refusal gives —
+    the only thing it gives, since it deliberately quotes nothing — would point at a
+    different character than the one that closes the enclosure first."""
+    body = ("scanner:\n"
+            "  test_material:\n"
+            "    - path: frontend/scripts/drill\n"
+            '      reason: \'a"b"c\'\n')
+    loaded = _declared(tmp_path, body, name="firstcloser")
+
+    assert loaded.accepted == ()
+    assert "at offset 1" in _problems(loaded), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+@pytest.mark.parametrize("path,phrase", [
+    (".//", "declares the scan root"),
+    ("/etc/secrets", "is an absolute path"),
+    ("C:/windows/system32", "is an absolute path"),
+    ("../outside", "escapes the scan root"),
+    ("frontend/scripts/*", "looks like a glob"),
+])
+def test_each_path_refusal_says_which_rule_refused_it(tmp_path, path, phrase):
+    """The existing test for this family asserts only that SOMETHING was refused, and
+    every one of these paths is refused by a later rule too — a nonexistent directory is
+    "rejected as stale" — so five separate guards could be deleted and the suite stayed
+    green while the report told the operator the wrong thing to fix.
+
+    `.//` is the one worth naming: `rstrip("/")` is what turns it into `.`, and with
+    that call weakened (to `lstrip`, to `strip(None)`, or to a different character set)
+    a path that means the repository root stops being recognized as one. The `or` chain
+    in front of it hides the same way — flipped to `and`, the root check only fires when
+    both spellings match.
+    """
+    loaded = _declared(tmp_path, _declaration(f'"{path}"'),
+                       name=f"rule{abs(hash(path))}")
+
+    assert loaded.accepted == ()
+    assert phrase in _problems(loaded), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_a_trailing_slash_is_normalized_away_rather_than_refused(tmp_path):
+    """The other side of `rstrip("/")`: a declaration written with a trailing slash is
+    how people write directories, and it must be the SAME declaration."""
+    loaded = _declared(tmp_path, _declaration("frontend/scripts/drill/"))
+
+    assert [d.path for d in loaded.accepted] == ["frontend/scripts/drill"]
+
+    # …and ONLY the slash: `rstrip` takes a character SET, so a widened one silently
+    # eats the last characters of a legitimate directory name and declares its parent.
+    files = dict(_drill_files())
+    files["frontend/scripts/drillX/qa.mjs"] = "const a = 1;\n"
+    named_x = _declared(tmp_path, _declaration("frontend/scripts/drillX"),
+                        name="trailingx", files=files)
+    assert [d.path for d in named_x.accepted] == ["frontend/scripts/drillX"], (
+        named_x.problems)
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_an_unparseable_file_reports_the_parsers_own_first_line(tmp_path):
+    """The YAML refusal quotes `str(exc).splitlines()[0]` — the parser's one-line
+    summary — and it could become `None`, or line 1 instead of line 0, with nothing
+    noticing: the existing test asserts only that a problem exists. Line 1 of a PyYAML
+    error is the `in "<unicode string>", line N, column M:` frame, which tells the
+    author nothing and drags a quoted copy of their own file into the report."""
+    loaded = _declared(tmp_path, "scanner: [unclosed\n", name="badyaml")
+
+    problems = _problems(loaded)
+    assert "not valid YAML" in problems
+    assert "while parsing a flow sequence" in problems, problems
+    assert "<unicode string>" not in problems, problems
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_a_settings_package_refusal_names_the_file_django_would_read(tmp_path):
+    """R7-4's guard reports WHICH file made it fire, and `str(PurePosixPath(*rel.parts))`
+    could be handed `None` — the refusal then names a directory holding `None`. The
+    existing R7-4 test asserts the entry was refused and not which file did it."""
+    files = dict(_drill_files())
+    files["backend/config/settings/base.py"] = "SECRET = 1\n"   # log-scrub: allow
+    loaded = _declared(tmp_path, _declaration("backend/config"), name="settingspkg",
+                       files=files)
+
+    assert loaded.accepted == ()
+    assert "settings/base.py" in _problems(loaded), loaded.problems
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_the_confirm_slug_is_lowercased_alphanumerics_with_the_edges_trimmed():
+    """Three mutations lived in one line of `confirm_question_id`: the character class
+    could lose its uppercase range, and the `strip("-")` could strip whitespace or the
+    wrong character set. Every other test in this file derives the expected id from the
+    function itself — deliberately, so the CONTENT-keying stays single — which leaves
+    the slug's own shape asserted by nothing.
+
+    The slug matters beyond tidiness: `_env_name` turns any question id containing
+    `.env.` into an environment variable name, and the slug is what guarantees a
+    repo-controlled path cannot put a dot there.
+    """
+    import re as _re
+
+    qid = declarations.confirm_question_id("X_Drill_", DRILL_REASON)
+
+    # Matched WHOLE, not split on `--`: a slug that kept its trailing separator makes
+    # the id `x-drill---<digest>`, and splitting on the first `--` hands back `x-drill`
+    # either way. The separator is part of what is being asserted.
+    assert _re.fullmatch(
+        _re.escape(declarations.CONFIRM_ID_PREFIX) + r"x-drill--[0-9a-f]{16}", qid), qid
+
+
+@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
+def test_a_repeated_claim_is_skipped_without_dropping_the_ones_after_it(tmp_path):
+    """`continue` in the de-duplication loop could become `break`, and every claim after
+    a repeat would go unasked — an operator confirming the questions they were shown
+    while an unasked declaration sits in the file. The existing de-duplication test has
+    nothing after the duplicate."""
+    files = dict(_drill_files())
+    files["frontend/scripts/qa"] = None
+    files.pop("frontend/scripts/qa")
+    files["frontend/scripts/qa/x.mjs"] = "const a = 1;\n"
+    body = ("scanner:\n"
+            "  test_material:\n"
+            f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n"
+            f"    - path: frontend/scripts/drill\n      reason: {DRILL_REASON}\n"
+            f"    - path: frontend/scripts/qa\n      reason: {DRILL_REASON}\n")
+    loaded = _declared(tmp_path, body, name="dupthenmore", files=files)
+
+    ids = [q.id for q in declarations.confirm_questions(loaded)]
+    assert len(loaded.accepted) == 3, loaded.problems
+    assert ids == [_drill_confirm_id(),
+                   _drill_confirm_id(path="frontend/scripts/qa")]

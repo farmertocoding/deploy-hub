@@ -12,6 +12,8 @@ from core.models import Project, Site
 from deploys.models import Manifest
 from scanner import core as scanner_core
 from vault import service as vault_service
+from vault.models import Secret
+from wizard import questions as wizard_questions
 from wizard import service
 from wizard.materialize import MaterializeRefused, materialize, preflight
 from wizard.models import WizardAnswer
@@ -539,3 +541,419 @@ def test_project_list_reports_tier_counts_and_manifest_currency(auth_client):
     row = next(p for p in auth_client.get("/api/v1/projects/").json()
                if p["slug"] == "listme")
     assert row["sites"][0]["manifest_current"] is False
+
+
+# ── the mutation gate's pins (spec-mutation-gate.md) ──────────────────────────
+#
+# Everything below was written because `make mutation` said so: each test names a
+# mutation of `wizard/questions.py` or `wizard/materialize.py` that the suite could not
+# tell from the real code. They are ordinary regression tests — the gate is only the
+# thing that FOUND them, the same way a reviewer finds a hollow assertion by hand, and
+# the reason there are so many at once is that this is the first honest run.
+#
+# The recurring shape they close is worth naming, because it is not "we forgot a test":
+# almost every one of these lines WAS executed by an existing test, and the assertion
+# next to it looked only at whether an exception was raised or whether a list was
+# non-empty. The code was covered and the BEHAVIOUR was not.
+
+
+def _question(kind, **kw):
+    return scanner_core.WizardQuestion(id="q", kind=kind, prompt="p", **kw)
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+@pytest.mark.parametrize("question,value,message,code", [
+    (_question("text"), None, "an answer is required", "required"),
+    (_question("secret"), 7, "a secret value must be a non-empty string", "invalid"),
+    (_question("secret"), "", "a secret value must be a non-empty string", "invalid"),
+    (_question("domain"), 7, "expected a domain name", "invalid"),
+    (_question("text"), 7, "expected text", "invalid"),
+    (_question("text"), "   ", "an answer is required", "required"),
+    (_question("text"), "x" * 2049, "answer is too long", "too_long"),
+    (_question("choice", choices=["a", "b"]), "c",
+     "'c' is not one of: a, b", "invalid_choice"),
+    (_question("bool"), "yes", "expected true or false", "invalid"),
+    (_question("number"), True, "expected a number", "invalid"),
+    (_question("number"), "seven", "expected a number", "invalid"),
+    (_question("number"), 1.5, "expected a number", "invalid"),
+    (_question("wat"), "x", "unsupported question kind 'wat'", "invalid"),
+])
+def test_every_answer_refusal_carries_its_own_message_and_code(question, value,
+                                                               message, code):
+    """One row per `raise` in `coerce_answer`, asserting BOTH halves of the refusal.
+
+    The whole module exists for error-proofing (its docstring: "Error-proofing is the
+    whole job of this module"), and the refusal's two halves have two different readers:
+    the `code` is what the client branches on and the message is what the operator
+    reads. Every existing test here asserted at most one of them — several asserted only
+    that *something* was raised — so the message text, the `code=` keyword, and in four
+    places the message argument itself could all be removed and the suite stayed green.
+
+    Asserting the exact sentence is not copy-freezing in this codebase: these strings ARE
+    the product surface the wizard shows, the same way the scanner's refusals are, and
+    `tests/test_scanner_declarations.py` has pinned refusal phrases since round 1.
+    """
+    with pytest.raises(ValidationError) as caught:
+        wizard_questions.coerce_answer(question, value)
+
+    assert caught.value.messages == [message]
+    assert caught.value.code == code
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+@pytest.mark.parametrize("question,value,expected", [
+    (_question("secret"), "s3cret", "s3cret"),
+    (_question("text"), "  padded  ", "padded"),
+    (_question("text"), "x" * 2048, "x" * 2048),
+    (_question("choice", choices=["a", "b"]), "b", "b"),
+    (_question("bool"), True, True),
+    (_question("bool"), "TRUE", True),
+    (_question("bool"), "False", False),
+    (_question("number"), 7, 7),
+    (_question("number"), " 8 ", 8),
+])
+def test_every_accepted_answer_is_coerced_to_its_declared_type(question, value,
+                                                               expected):
+    """The other side of the same table, and it is what pins the BOUNDARIES.
+
+    `len(value) > 2048` could become `>= 2048` and nothing noticed, because the only
+    long-text test used a value far over the line — the classic off-by-one the scanner
+    module's own cap tests already guard against in both directions.
+    """
+    coerced = wizard_questions.coerce_answer(question, value)
+    assert coerced == expected
+    assert type(coerced) is type(expected)
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_a_module_question_is_carried_across_field_by_field(project):
+    """`question_set` copies four fields out of the scan report, and three of them
+    could be replaced by `None` — or read from the wrong key — without a test noticing:
+    every existing assertion here looks at `q.id` alone."""
+    question = {q.id: q for q in question_set(project)}["django.db"]
+
+    assert question.prompt == "Database"
+    assert question.kind == "choice"
+    assert question.default == "postgres"
+    assert question.choices == ["postgres", "sqlite"]
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_a_module_question_missing_prompt_and_kind_falls_back_to_id_and_text(project):
+    """The two `.get(key, fallback)` defaults, which are the reason a half-written
+    module question renders as something rather than as a blank row."""
+    project.scan_report = make_report(questions=[{"id": "mod.thing"}])
+    project.save()
+
+    question = {q.id: q for q in question_set(project)}["mod.thing"]
+    assert question.prompt == "mod.thing"
+    assert question.kind == "text"
+    assert question.default is None
+    assert question.choices == []
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_same_module_question_asked_twice_is_one_question(project):
+    """De-duplication is by the id that was SEEN, and `seen.add(qid)` could become
+    `seen.add(None)` with the suite green — the alias test above only exercises the
+    base-question half of `seen`, which is built by a different line."""
+    project.scan_report = make_report(questions=[
+        {"id": "mod.thing", "prompt": "first"},
+        {"id": "mod.thing", "prompt": "second"},
+    ])
+    project.save()
+
+    ids = [q.id for q in question_set(project)]
+    assert ids.count("mod.thing") == 1
+    assert {q.id: q for q in question_set(project)}["mod.thing"].prompt == "first"
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_every_bad_field_in_one_patch_is_reported_by_its_own_message(site):
+    """All-or-nothing rejection reports the MESSAGE for each field, not the code, and
+    it reports every field rather than stopping at the first.
+
+    Two mutations lived here: the per-field `continue` becoming `break` (only the first
+    unknown id would ever be reported) and `[v[0]]` becoming `[v[1]]` (the operator gets
+    the machine code `unknown_question` where the sentence should be). Both survived
+    because the existing all-or-nothing test asserts on `WizardAnswer.objects.count()`
+    and never opens the error.
+    """
+    with pytest.raises(ValidationError) as caught:
+        service.set_answers(site, {"nope.one": "x", "nope.two": "y",
+                                   "django.workers": "seven"})
+
+    errors = caught.value.message_dict
+    assert set(errors) == {"nope.one", "nope.two", "django.workers"}
+    assert errors["nope.one"] == ["no such question for this project"]
+    assert errors["django.workers"] == ["expected a number"]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_a_refusal_carries_its_message_through_every_surface_it_has(site):
+    """`MaterializeRefused` publishes the same refusal four ways — `str()`, `.message`,
+    `.problems[0]` and `.as_dict()` — and only the first of them was asserted anywhere,
+    so `super().__init__(message)` could pass `None` and every key of both dicts could
+    be renamed with the suite green. `as_dict()` is the 409 body: its keys are the API
+    contract."""
+    refused = MaterializeRefused("some_code", "some detail", [{"id": "x"}])
+
+    assert str(refused) == "some detail"
+    assert refused.problems == [
+        {"code": "some_code", "detail": "some detail", "items": [{"id": "x"}]}]
+    assert refused.as_dict() == {
+        "code": "some_code", "detail": "some detail", "items": [{"id": "x"}],
+        "problems": refused.problems}
+
+    explicit = MaterializeRefused("a", "b", problems=[{"code": "z"}])
+    assert explicit.problems == [{"code": "z"}]
+    assert explicit.items == []
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_scan_report_hash_is_canonical_and_key_order_independent():
+    """`scan_report_hash` is the manifest's claim about WHICH scan it was built from, so
+    two spellings of the same report must hash alike and the encoding must be pinned.
+    `sort_keys=True` and `separators=(",", ":")` could both be dropped and nothing
+    moved — the only existing assertion is `assert manifest.scan_report_hash`, which is
+    true of any string at all."""
+    import hashlib as _hashlib
+
+    from wizard.materialize import report_hash
+
+    assert report_hash({"a": 1, "b": 2}) == report_hash({"b": 2, "a": 1})
+    assert report_hash({"a": 1, "b": 2}) == _hashlib.sha256(
+        b'{"a":1,"b":2}').hexdigest()
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+@pytest.mark.parametrize("code,detail", [
+    ("scan_required", "this project has not been scanned yet"),
+    ("scan_required",
+     "this project's scan predates the current report schema and must be re-run"),
+    ("blockers_present",
+     "the readiness report has blockers; these must be fixed and the project re-scanned"),
+    ("answers_missing", "required questions are unanswered"),
+    ("answers_need_reentry",
+     "these values are now handled as secrets and must be entered again; the previously "
+     "stored plaintext has been deleted and should be rotated at the source"),
+])
+def test_every_preflight_problem_states_its_own_cause(site, code, detail, monkeypatch):
+    """One row per problem `preflight` can append, asserting the sentence the operator
+    reads and the `code` the UI branches on.
+
+    WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE is the requirement these details ARE — "show the
+    causal step, not the failed one" — and every existing test asserts the `code` alone,
+    so all five sentences could be replaced with any other text. The dict keys go with
+    them: `"detail"` could be renamed and only this asserts otherwise.
+    """
+    project = site.project
+    if code == "scan_required" and "scanned yet" in detail:
+        project.scan_report = {}
+    elif code == "scan_required":
+        project.scan_report = dict(project.scan_report, schema_version=-1)
+    elif code == "blockers_present":
+        project.scan_report = make_report(
+            checks=[{"id": "core.secret-scan", "title": "Secrets", "tier": "blocker"}])
+    elif code == "answers_need_reentry":
+        monkeypatch.setattr("wizard.service.downgraded_answers",
+                            lambda _site: ["django.env.DATABASE_PASSWORD"])
+    project.save()
+
+    problems = {p["code"]: p for p in preflight(site)}
+    assert code in problems, problems
+    assert problems[code]["detail"] == detail
+    assert set(problems[code]) == {"code", "detail", "items"}
+    if code == "answers_need_reentry":
+        # The scrubbed answers are listed the same way the missing ones are — by their
+        # question's own words — and this is the second copy of that item shape, so it
+        # needs its own assertion: `{id, prompt}` could be renamed here alone, and the
+        # `qid in known` condition could be inverted here alone.
+        assert problems[code]["items"] == [
+            {"id": "django.env.DATABASE_PASSWORD",
+             "prompt": "Value for DATABASE_PASSWORD"}]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_an_unanswered_question_is_listed_by_its_prompt_not_by_its_id(site):
+    """`known[qid].prompt if qid in known else qid` — the condition could be inverted
+    and every operator would see `site.domain` where the question's own words belong.
+    The `items` payload is what the UI renders; nothing looked inside it."""
+    problems = {p["code"]: p for p in preflight(site)}
+
+    assert problems["answers_missing"]["items"] == [
+        {"id": "site.domain",
+         "prompt": "Public domain for this site (e.g. app.example.com)"}]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_a_listed_blocker_carries_its_id_and_title(project, site):
+    """The blocker items are `{id, title}` copied out of the report; both keys could be
+    renamed with the suite green because the only assertion was on the LENGTH of the
+    list."""
+    project.scan_report = make_report(
+        checks=[{"id": "core.secret-scan", "title": "Secrets", "tier": "blocker"}])
+    project.save()
+
+    problems = {p["code"]: p for p in preflight(site)}
+    assert problems["blockers_present"]["items"] == [
+        {"id": "core.secret-scan", "title": "Secrets"}]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_a_report_with_no_checks_key_is_read_without_crashing(project, site):
+    """`report.get("checks", [])` in `preflight` and in `warnings_for` — the `[]`
+    fallback could be dropped or turned into `None` and no test noticed, because every
+    fixture report in this suite carries a `checks` key. A stored report written by an
+    older scanner need not, and `for check in None` is a 500 on an ordinary GET."""
+    from wizard.materialize import warnings_for
+
+    report = make_report()
+    del report["checks"]
+    project.scan_report = report
+    project.save()
+
+    assert [p["code"] for p in preflight(site)] == ["answers_missing"]
+    assert warnings_for(site) == []
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_frozen_body_records_the_site_it_was_built_for(answered_site):
+    """`body["site"]` is the manifest's copy of the site identity; the whole assignment
+    could become `None` and each of its three keys could be renamed, with nothing
+    asserting otherwise."""
+    manifest = materialize(answered_site)
+
+    assert manifest.body["site"] == {"id": answered_site.pk, "name": "demo-prod",
+                                     "domain": "demo.example.com"}
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_an_exposure_answer_reaches_the_frozen_body(answered_site):
+    """`site.exposure` is the one answer whose whole effect is one line of
+    `_apply_answers`, and no test read it back out of the manifest."""
+    service.set_answers(answered_site, {"site.exposure": "mesh_only"})
+
+    assert materialize(answered_site).body["exposure"] == "mesh_only"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_domain_answer_is_written_back_to_the_site_row(answered_site):
+    """`site.domain = answer.value` and the `save(update_fields=["domain"])` behind it:
+    the manifest tests all read the BODY, so the row update was asserted nowhere."""
+    materialize(answered_site)
+    answered_site.refresh_from_db()
+
+    assert answered_site.domain == "demo.example.com"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_site_write_back_touches_the_domain_column_and_nothing_else(answered_site):
+    """`save(update_fields=["domain"])` is scoped on purpose: `_apply_answers` is handed
+    a site OBJECT, and a full save would write back every attribute that object is
+    carrying — including any a caller had already changed in memory for its own reasons.
+    Nothing asserted the scope, so the argument could be dropped and the only symptom
+    would be a column quietly clobbered from stale memory.
+
+    Called at `_apply_answers` so the in-memory divergence can be staged; through
+    `materialize` there is nothing to diverge from."""
+    from wizard.materialize import _apply_answers
+
+    answers = list(WizardAnswer.objects.filter(site=answered_site))
+    answered_site.name = "clobbered-in-memory"
+
+    _apply_answers({}, answered_site, answers,
+                   wizard_questions.question_map(answered_site.project))
+
+    answered_site.refresh_from_db()
+    assert answered_site.domain == "demo.example.com"
+    assert answered_site.name == "demo-prod"
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_the_env_bundle_round_trips_the_secret_answer_it_was_built_from(answered_site):
+    """The bundle is the only place a secret value legitimately exists after
+    materialization, and the existing tests assert it is NOT in the body — nothing
+    asserted it IS in the bundle, so the decrypt-and-decode line could break outright."""
+    import json as _json
+
+    from vault.models import Secret
+
+    manifest = materialize(answered_site)
+    bundle = Secret.objects.get(pk=manifest.body["env_bundle_ref"])
+    values = _json.loads(vault_service.get(bundle, reason="test"))
+
+    assert values == {"DATABASE_PASSWORD": SECRET_VALUE}
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_the_materializing_operator_is_named_on_the_vault_read(answered_site,
+                                                               django_user_model):
+    """Round-2 R2-1 fixed exactly this — `actor` was omitted on the vault read, so the
+    "every use is recorded" audit row had nobody attributed to it — and the fix was
+    pinned by nothing: `actor=` and `reason=` could both be dropped again."""
+    from core.models import AuditEvent
+
+    actor = django_user_model.objects.create_user(username="op", password="x")   # nosec B106
+    materialize(answered_site, actor=actor)
+
+    used = AuditEvent.objects.filter(action="vault-secret-used").first()
+    assert used is not None
+    assert used.actor_id == actor.pk
+    assert used.detail["reason"] == f"materialize {answered_site.pk}"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_a_secret_answer_does_not_stop_the_answers_after_it(answered_site):
+    """`continue` in the secret branch could become `break`, dropping every answer that
+    comes after the first secret one.
+
+    Called at `_apply_answers` with the list built HERE, secret first, because that is
+    the only way to state the case: the walk reads an unordered queryset, so a test that
+    goes through `materialize` is asserting whatever order the database happened to
+    return — which is exactly the kind of accidental green this gate exists to remove.
+    """
+    from wizard.materialize import _apply_answers
+
+    service.set_answers(answered_site, {"site.exposure": "mesh_only"})
+    by_id = {a.question_id: a
+             for a in WizardAnswer.objects.filter(site=answered_site)}
+    ordered = [by_id["django.env.DATABASE_PASSWORD"], by_id["site.domain"],
+               by_id["site.exposure"], by_id["django.db"]]
+
+    body = {}
+    env_values = _apply_answers(body, answered_site, ordered,
+                                wizard_questions.question_map(answered_site.project))
+
+    assert body["env_names"] == ["DATABASE_PASSWORD"]
+    assert env_values == {"DATABASE_PASSWORD": SECRET_VALUE}
+    assert body["domain"] == "demo.example.com"
+    assert body["exposure"] == "mesh_only"
+    assert body["module_answers"]["django.db"] == "postgres"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_a_secret_answer_outside_the_env_namespace_contributes_no_env_name(site):
+    """`if name and answer.secret_ref is not None` — with `and` weakened to `or`, a
+    secret answer whose question id carries no `.env.` marker appends `None` to
+    `env_names`. The guard's two halves were tested together and never apart."""
+    service.set_answers(site, {"site.domain": "demo.example.com"})
+    secret = vault_service.put(kind=Secret.Kind.API_TOKEN, owner_type="site",
+                               owner_id=str(site.pk), plaintext=b"x")
+    WizardAnswer.objects.create(site=site, question_id="django.token", value=None,
+                                is_secret=True, secret_ref=secret)
+
+    assert materialize(site).body["env_names"] == []
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_the_env_marker_splits_on_the_first_occurrence_only():
+    """`question_id.split(".env.", 1)[1]` — `rsplit`, a dropped maxsplit and a maxsplit
+    of 2 all produce a different environment variable NAME, which is the string the
+    deployed process reads. A question id can carry the marker twice; nothing said which
+    side of it the name is on."""
+    from wizard.materialize import _env_name
+
+    assert _env_name("django.env.A.env.B") == "A.env.B"
+    assert _env_name("django.env.DATABASE_URL") == "DATABASE_URL"
+    assert _env_name("django.database_url") is None
