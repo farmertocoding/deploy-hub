@@ -335,6 +335,17 @@ def test_d012_no_live_code_imports_the_parked_declarations_module():
     throw that away — but nothing outside its own tests may import it while it is
     parked. `conformance/paths.yaml` still lists it: a parked authority file is still an
     authority file.
+
+    F1 (review of this branch): the first cut of this grep listed only the ABSOLUTE
+    import forms — `from scanner import declarations`, `from scanner.declarations
+    import …`, `import scanner.declarations`. The wiring it was written to catch was
+    none of those. `scanner/core.py` is inside the `scanner` package and imported its
+    sibling RELATIVELY, `from . import declarations`, so re-adding the exact historical
+    line kept this test green. A pin that misses the one line it was written about is
+    worse than no pin, because the next author reads its name and stops looking.
+
+    So the pattern covers the relative forms too, and it is no longer the only guard —
+    see the runtime test below, which does not depend on anyone predicting a spelling.
     """
     import pathlib
     import re
@@ -343,9 +354,13 @@ def test_d012_no_live_code_imports_the_parked_declarations_module():
     allowed = {"scanner/declarations.py",
                "tests/test_scanner_declarations.py",
                "tests/test_d012_out_of_phase_1.py"}
+    # Absolute and relative, and `from . import x, declarations` as well as the bare
+    # form: an import list is one line and `\b` finds the name anywhere in it.
     pattern = re.compile(r"^\s*(from\s+scanner\s+import\s+.*\bdeclarations\b"
                          r"|from\s+scanner\.declarations\s+import\b"
-                         r"|import\s+scanner\.declarations\b)", re.MULTILINE)
+                         r"|import\s+scanner\.declarations\b"
+                         r"|from\s+\.+\s*import\s+.*\bdeclarations\b"
+                         r"|from\s+\.+declarations\s+import\b)", re.MULTILINE)
 
     offenders = []
     for path in sorted(repo.rglob("*.py")):
@@ -357,3 +372,72 @@ def test_d012_no_live_code_imports_the_parked_declarations_module():
     assert offenders == [], (
         f"{offenders} import the parked declaration module; it is unwired in Phase 1 "
         f"and returns as its own phase with a threat model written first")
+
+
+def test_d012_a_live_run_never_loads_the_parked_module():
+    """The same rule asserted by RUNNING the product instead of by reading it.
+
+    F1's lesson is that a grep pins the spellings somebody thought of. This pins the
+    fact: after Django is set up, every live entry point is imported, and a real scan is
+    run over a tree that CARRIES a `deployhub.yaml` — the input that would take any
+    surviving code path into the parser — `scanner.declarations` is still absent from
+    `sys.modules`. No import spelling evades that, and neither does a lazy import inside
+    a function body, which is the shape `scan()` used and the shape a re-wiring would
+    most naturally take again.
+
+    IN A SUBPROCESS, and that is not incidental: this test session has already imported
+    the module through `tests/test_scanner_declarations.py`, which keeps the parked
+    parser's unit tests running, so an in-process `sys.modules` check would be green
+    forever regardless of what the product does. The child interpreter imports only what
+    the product imports.
+    """
+    import pathlib
+    import subprocess
+    import sys
+    import textwrap
+
+    probe = textwrap.dedent(
+        '''
+        import json, os, sys, tempfile, pathlib
+
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
+        import django
+        django.setup()
+
+        # Every live entry point that could reach the scanner or the wizard.
+        import hub.__main__            # the CLI
+        import scanner.core
+        import scanner.modules
+        import wizard.materialize
+        import wizard.questions
+        import wizard.service
+        import wizard.views
+
+        root = pathlib.Path(tempfile.mkdtemp())
+        (root / "Dockerfile").write_text(
+            'FROM python:3.12\\nUSER app\\nEXPOSE 8000\\nCMD ["app"]\\n')
+        (root / "frontend/scripts/drill").mkdir(parents=True)
+        (root / "frontend/scripts/drill/qa.mjs").write_text(
+            'const staff_password = "hT4pQz8LmVx2Nb9RkS6wYc3JdF7gA5eUq1XoZi0P";\\n')
+        (root / "deployhub.yaml").write_text(
+            "scanner:\\n  test_material:\\n    - path: frontend/scripts/drill\\n"
+            "      reason: red-team drill scripts\\n")
+        report = scanner.core.scan(root)
+
+        print(json.dumps({
+            "loaded": "scanner.declarations" in sys.modules,
+            "checks": [c["id"] for c in report["checks"]],
+        }))
+        '''
+    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                            text=True, cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+                            timeout=120)
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout.strip().splitlines()[-1])
+    # The tree really is the one that would trip a surviving reader …
+    assert "core.declaration-file" in outcome["checks"], outcome
+    # … and nothing loaded the parser to look at it.
+    assert outcome["loaded"] is False, (
+        "a live scan imported scanner.declarations — the module is parked in Phase 1, "
+        "and something is reading the scanned repo's own claim again")
