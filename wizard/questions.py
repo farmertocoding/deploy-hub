@@ -141,6 +141,22 @@ def validate_answers(project, incoming: dict):
 
     All-or-nothing: one bad field rejects the whole PATCH, so the client never ends up
     with half its answers persisted and no clear signal about which half.
+
+    ROUND 9, and the mutation gate is what named it: `errors[qid]` used to be a two-slot
+    list, `[message, code]`, and the raise below took `v[0]` — so the second slot was
+    written on both branches and read on neither. Two mutants proved it (waived as
+    equivalent in the gate's first run, `wizard.questions.x_validate_answers__mutmut_10`
+    and `_11`, both rewriting the string `"unknown_question"` with the suite green,
+    because nothing could observe it). That is R7-15's dead-field finding one level in:
+    a dead SLOT rather than a dead dataclass field, and it costs the same thing — the
+    next reader sees a code beside a message and assumes a client branches on it.
+
+    The choice was to surface the code or to delete it, and deleting is right for this
+    phase: `wizard/views.py` renders `exc.message_dict`, which is `{field: [messages]}`
+    by Django's own contract and has no room for a per-field code; giving it one would
+    be an API change with a client change behind it, not a cleanup. The `code` on each
+    individual `ValidationError` from `coerce_answer` is untouched and still asserted —
+    it is only this aggregate that never carried it.
     """
     known = question_map(project)
     errors, cleaned = {}, {}
@@ -148,19 +164,19 @@ def validate_answers(project, incoming: dict):
     for qid, value in incoming.items():
         question = known.get(qid)
         if question is None:
-            errors[qid] = ["no such question for this project", "unknown_question"]
+            errors[qid] = "no such question for this project"
             continue
         try:
             cleaned[qid] = (question, coerce_answer(question, value))
         except ValidationError as exc:
-            errors[qid] = [exc.message, exc.code]
+            errors[qid] = exc.message
 
     if errors:
-        raise ValidationError({k: [v[0]] for k, v in errors.items()})
+        raise ValidationError({k: [v] for k, v in errors.items()})
     return cleaned
 
 
-def missing_required(project, answered_ids):
+def missing_required(answered_ids):
     """Required questions still unanswered — `REQUIRED_IDS`, and nothing else.
 
     Module questions are advisory in v1 because a module cannot know which of its env
@@ -172,5 +188,13 @@ def missing_required(project, answered_ids):
     declaration confirms this phase — nothing raises one — so the widening and the
     second literal copy of the `scanner.test_material.` prefix that carried it (R8-13)
     both go, and this reverts to the static set it was before.
+
+    ROUND 9: and so does the `project` parameter, which is what the widening had needed
+    and which nothing has read since it left. The mutation gate found it —
+    `wizard.materialize.x_preflight__mutmut_103` replaces the argument with `None` and
+    no test can tell, because no test CAN tell: an argument nobody reads has no
+    observable behaviour to assert. A signature that still asks for a project tells the
+    next caller this answer depends on one, and the next widening will be written as
+    though it does.
     """
     return sorted(REQUIRED_IDS - set(answered_ids))

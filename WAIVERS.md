@@ -42,13 +42,21 @@ WAIVED: conformance/demos/phase-1+unchecked-by-any-requirement — no phase-1 re
 # say it. The gate fails if any of these mutants stops surviving, so a waiver cannot
 # outlive the code it excuses.
 #
-# THREE OF THEM ARE ALSO FINDINGS ABOUT THE CODE, recorded here rather than fixed
-# because deleting production code is not this PR's business (it is a gate PR, judged by
-# the gate it adds): `missing_required`'s first parameter is unused, the `code` half of
-# `validate_answers`' unknown-question entry is written and never read (R7-15's class,
-# one level in), and `_read_entry`'s `normalized.startswith("/")` arm cannot fire on a
+# THREE OF THEM WERE ALSO FINDINGS ABOUT THE CODE, recorded rather than fixed by the
+# gate PR itself (deleting production code inside the PR that adds the gate judging it
+# is what §6 forbids). TWO ARE NOW RETIRED, in round 9, and their lines are gone with
+# them: `missing_required`'s unread first parameter and the unread `code` half of
+# `validate_answers`' error entries are both deleted, so
+# `wizard.materialize.x_preflight__mutmut_103`,
+# `wizard.questions.x_validate_answers__mutmut_10` and `_11` no longer exist as mutants
+# at all — which is the shape a retirement should take, since the gate FAILS on a waiver
+# whose mutant stopped surviving.
+#
+# The third stands: `_read_entry`'s `normalized.startswith("/")` arm cannot fire on a
 # platform where `os.sep == "/"` because `PurePosixPath.is_absolute()` already covers
-# it. Each is worth a round-9 finding of its own.
+# it. It is left because the arm is defensive on a platform this fleet does not deploy
+# to, and deleting a guard for a case nobody here can test is a wider decision than a
+# waiver retirement.
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x__read_entry__mutmut_56 — equivalent mutant: `is_absolute() and startswith("/")` collapses to `is_absolute()` wherever `os.sep == "/"`, because `posix` is built from `normalized.replace(os.sep, "/")` and `PurePosixPath(s).is_absolute()` holds exactly when `s` starts with `/`. The `or ":" in parts[0]` arm is untouched and is pinned by test_each_path_refusal_says_which_rule_refused_it. Retire it by deleting the redundant arm (a round-9 finding, not a gate PR's edit), which removes the mutant with it (2026-08-16)
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x__read_entry__mutmut_58 — equivalent mutant, same proof as mutmut_56: `startswith("XX/XX")` is never true, and the arm it disables is already subsumed by `posix.is_absolute()` on every platform this runs on. `/etc/secrets` is still refused as absolute, by the first arm, and that refusal is asserted (2026-08-16)
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x_confirm_question_id__mutmut_19 — equivalent mutant: `"utf-8"` -> `"UTF-8"`. Python's codec lookup is case-insensitive and normalizes both to the same codec, so the digest bytes are identical. No test can tell them apart because there is nothing to tell apart (2026-08-16)
@@ -57,6 +65,3 @@ WAIVED: mutation+wizard/materialize.py+wizard.materialize.x__apply_answers__mutm
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x_load__mutmut_19 — equivalent mutant in every environment this gate runs in: `read_text(encoding="utf-8")` -> `encoding=None` falls back to the locale encoding, which is UTF-8 on the dev image and on the `ubuntu-latest` runner, so the bytes decode identically. A test cannot change the interpreter's locale after start, so the difference is unobservable from inside the suite. It is NOT equivalent in principle — on a C-locale host the two differ, and there the mutant is killed by test_an_ordinary_non_ascii_reason_is_accepted rather than waived (2026-08-16)
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x_load__mutmut_32 — equivalent mutant: the guard `if str(exc)` becomes `if str(None)`, and `"None"` is truthy, so the branch is taken exactly as before. It can only differ for a `yaml.YAMLError` whose `str()` is empty, and `yaml.safe_load` raises no such error — every MarkedYAMLError it constructs carries a problem string. The `else` arm it guards is unreachable defensive code (2026-08-16)
 WAIVED: mutation+scanner/declarations.py+scanner.declarations.x_confirm_questions__mutmut_16 — equivalent mutant: dropping `default=None` from the `WizardQuestion(...)` call leaves the dataclass field's own default, which is `None` (scanner/core.py). R7-11's point — that an unanswered claim is not an accepted one — is unaffected, and the test that pins it stays green because the value is unchanged. Retire it by making the field have no default, which is a scanner/core.py decision, not this gate's (2026-08-16)
-WAIVED: mutation+wizard/materialize.py+wizard.materialize.x_preflight__mutmut_103 — equivalent mutant: `missing_required(project, answered)` -> `missing_required(None, answered)`. `wizard/questions.py::missing_required` does not read its first parameter — round 7's widening used it and D-012 removed the widening, leaving the parameter behind. The mutant is a finding about the SIGNATURE, not about a missing test: no assertion can distinguish an argument nobody reads. Retire it with the round-9 fix that drops the parameter (2026-08-16)
-WAIVED: mutation+wizard/questions.py+wizard.questions.x_validate_answers__mutmut_10 — equivalent mutant: the `"unknown_question"` code in `errors[qid] = [message, code]` is never read. `validate_answers` raises `ValidationError({k: [v[0]] ...})` — element 0 only — so element 1 is written and dropped. This is R7-15's dead-field class one level in (a dead list SLOT rather than a dead dataclass field), and the next reader will assume the code reaches a client. Retire it with the round-9 fix that either surfaces the code or removes it (2026-08-16)
-WAIVED: mutation+wizard/questions.py+wizard.questions.x_validate_answers__mutmut_11 — equivalent mutant, same proof as mutmut_10: `"UNKNOWN_QUESTION"` is a different spelling of a value nothing reads (2026-08-16)

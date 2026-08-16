@@ -137,7 +137,7 @@ def test_d012_the_wizard_asks_no_declaration_confirm(tmp_path):
     assert not [q for q in question_set(site.project)
                 if q.id.startswith("scanner.test_material.")]
     # And nothing new is required of the operator: `site.domain` and nothing else.
-    assert missing_required(site.project, set()) == ["site.domain"]
+    assert missing_required(set()) == ["site.domain"]
 
 
 # ── §6.2 presence notice ──────────────────────────────────────────────────────

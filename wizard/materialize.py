@@ -142,7 +142,7 @@ def preflight(site):
     answered = set(
         WizardAnswer.objects.filter(site=site).values_list("question_id", flat=True)
     )
-    missing = missing_required(project, answered)
+    missing = missing_required(answered)
     if missing:
         problems.append({
             "code": "answers_missing",
