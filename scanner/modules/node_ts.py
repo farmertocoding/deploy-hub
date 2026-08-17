@@ -16,6 +16,7 @@ Check-id naming follows the fixture contract in `sample-node-site/MUTATIONS.md`
 import json
 import re
 import tomllib
+from collections import deque
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -698,18 +699,42 @@ class _Survey:
     # its remedy, on a tree with no loop in it at all.
     #
     # So the order is pinned rather than incidental: at each level, NON-SYMLINK entries
-    # are visited before symlinked ones, so a real directory always claims its resolved
-    # key before any alias of it can. The alias is then a directory already walked, which
-    # is what it is. `sorted()` still orders within each of the two groups, so the walk
-    # stays deterministic; the only behaviour this adds beyond de-duplication is that when
-    # a file, too, is reachable by both names, the real path is the one reported.
+    # are listed before symlinked ones, so a real directory always claims its resolved key
+    # before any alias of it can. The alias is then a directory already walked, which is
+    # what it is. `sorted()` still orders within each of the two groups, so the walk stays
+    # deterministic.
+    #
+    # R12-S1 — AND THAT FIX WAS WRITTEN AGAINST A STACK, WHICH REVERSES IT. `sorted()`
+    # decides the order entries are LISTED in; `stack.pop()` decides the order directories
+    # are VISITED in, and LIFO makes the second the reverse of the first. Sorting symlinks
+    # last therefore visited them FIRST, and on a tree with a real `data/` beside a link to
+    # a different directory — nothing de-duplicated, both walked, both contributing — the
+    # link took `data_files[0]` every time:
+    #
+    #     6b3d7bb   aa-link 'data'      mm-link 'mm-link'   zzz-link 'zzz-link'
+    #     f5e6f4b   aa-link 'aa-link'   mm-link 'mm-link'   zzz-link 'zzz-link'
+    #
+    # Base was arbitrary — reverse-alphabetical siblings, so whether the link won depended
+    # on what the operator called it — and the remedy made it uniform in the wrong
+    # direction. `data_dir()` reads `data_files[0].parts[0]`, so the manifest named the
+    # volume and the `directory_sync` backup unit after the LINK, leaving the repository's
+    # real data directory outside the volume under the `recreate` strategy that a
+    # local-state finding sets.
+    #
+    # A QUEUE, not a reversed push, and the difference is a sentence rather than a trick:
+    # `collections.deque` + `popleft()` makes "the report lists what the walk read, in the
+    # order it read it" true, so the listing order above is the visiting order and there is
+    # no second rule to keep in your head. It also makes the walk breadth-first, which is
+    # the property `data_dir()` actually wants — the volume is named after the SHALLOWEST
+    # directory carrying data, not after whichever branch a stack descended into first.
     #
     # NOT COVERED, and named because it is the same question one level up: an alias at a
     # SHALLOWER level still claims the key before the real directory deeper down
-    # (`top-link -> a/b` beside `a/`, walked from the root). Ordering within a level
-    # cannot see that, and the fix that would is a breadth-first walk that prefers the
-    # shortest real path — a different walk, whose output ordering is a manifest-visible
-    # change and therefore §N1/§N6's commit, not this one's.
+    # (`top-link -> a/b` beside `a/`, walked from the root). That is a property of when the
+    # key is CLAIMED — at expansion of the parent — and no visiting order fixes it; a walk
+    # that preferred the shortest real path would have to defer claiming, which changes
+    # what `data_files` contains rather than what order it is in, and that is §N1/§N6's
+    # commit rather than this one's.
     #
     # A COSMETIC ASYMMETRY, noted for the same reader: a LIVE symlink candidate that is
     # not a package at all is still refused loudly by `_workspace_candidate_problem` as
@@ -718,7 +743,7 @@ class _Survey:
     # it would mean deciding, from a link, whether it "would have been" a package.
     def _find_data_files(self):
         found = []
-        stack = [self.root]
+        queue = deque([self.root])
         # The root goes in first, so `src/up -> ..` is a directory already walked rather
         # than a new one. `resolve()` is the key for `_iter_source_files`'s reason: a
         # loop can be spelled with `..` and with a link, and only the resolved path is
@@ -727,13 +752,15 @@ class _Survey:
             seen = {self.root.resolve()}
         except (OSError, RuntimeError):                          # pragma: no cover
             return found
-        while stack:
-            directory = stack.pop()
+        while queue:
+            directory = queue.popleft()
             try:
                 # F-1: real entries first, aliases second, each group by name. `sorted`
                 # alone let `aa-link -> data` claim `data`'s resolved key and take the
                 # directory's place in the report; `is_symlink()` is the whole of the
-                # difference between a name and the thing it names.
+                # difference between a name and the thing it names. R12-S1: and this
+                # order only holds if the walk VISITS in it, which is what `popleft`
+                # above is for.
                 entries = sorted(directory.iterdir(),
                                  key=lambda p: (p.is_symlink(), p.name))
             except OSError:
@@ -753,7 +780,7 @@ class _Survey:
                     if key in seen:
                         continue
                     seen.add(key)
-                    stack.append(path)
+                    queue.append(path)
                 elif path.is_file():
                     if path.suffix in _DATA_SUFFIXES or path.name.endswith("-wal"):
                         found.append(path.relative_to(self.root))

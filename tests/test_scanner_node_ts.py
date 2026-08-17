@@ -1534,3 +1534,79 @@ def test_issue_r11_dos_a_link_out_of_the_tree_still_contributes_its_data_files(t
 
     survey = node_ts._Survey(root)
     assert [p.as_posix() for p in survey.data_files] == ["outside/warehouse.parquet"]
+
+
+# ── R12-S1: the sort key fixed WHICH name claims a directory, not WHEN it is walked ──
+
+@pytest.mark.parametrize("alias", ["aa-link", "mm-link", "zzz-link"])
+def test_issue_r12_s1_a_link_to_another_tree_does_not_claim_the_first_data_file(
+        tmp_path, alias):
+    """TWO SOURCES, one of them a link, and the link named the volume every time.
+
+    R11-DOS's `seen` set is about one directory reachable by two names. This is the other
+    tree: a real `data/` and a committed link to a DIFFERENT directory outside the repo.
+    Nothing is de-duplicated — both are walked, both contribute — so the only question is
+    ORDER, and `data_files[0].parts[0]` is what `data_dir()` returns and what lands in the
+    manifest as the volume name and the `directory_sync` backup unit.
+
+    F-1 sorted symlinks last so a real directory would claim its resolved key first. The
+    stack is LIFO, so sorting last means popped FIRST: the fix inverted the visit order it
+    was reasoning about. Measured across three alias names:
+
+        6b3d7bb   aa-link  'data'      mm-link  'mm-link'   zzz-link  'zzz-link'
+        f5e6f4b   aa-link  'aa-link'   mm-link  'mm-link'   zzz-link  'zzz-link'
+
+    Base was arbitrary — LIFO over a sorted list visits siblings in REVERSE alphabetical
+    order, so whether the link won depended on what the operator called it. The remedy
+    made it uniform in the wrong direction: a committed link to any non-de-duplicated
+    directory now ALWAYS claims `data_files[0]`, so the manifest names the volume after
+    the link and the real data directory sits outside it — under `deploy_strategy:
+    recreate`, which is what a local-state finding sets.
+
+    All three parameters assert the same answer, because the answer must not depend on
+    what the link is called.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    (neighbour / "x.sqlite3").write_bytes(b"")
+    root = tmp_path / "svc"
+    (root / "data").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": "two-source", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "data" / "app.sqlite3").write_bytes(b"")
+    (root / alias).symlink_to("../neighbour", target_is_directory=True)
+
+    survey = node_ts._Survey(root)
+
+    assert [p.as_posix() for p in survey.data_files] == [
+        "data/app.sqlite3", f"{alias}/x.sqlite3"]
+    assert survey.data_dir() == "data"
+
+
+def test_issue_r12_s1_the_walk_reports_in_the_order_it_reads(tmp_path):
+    """…and the order it reads in is the order it LISTS in: real before alias within a
+    directory, shallow before deep across them.
+
+    The pin is on `data_dir()`'s input rather than on a traversal strategy for its own
+    sake — `data_files[0]` is a manifest value, so "which file is first" is a product
+    decision this walk makes on every scan and had been making by accident of a stack.
+    A queue makes the sentence "the report lists what the walk read, in the order it read
+    it" true instead of nearly true.
+    """
+    root = tmp_path / "svc"
+    (root / "aaa").mkdir(parents=True)
+    (root / "zzz" / "nested").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": "nested", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "aaa" / "shallow.sqlite3").write_bytes(b"")
+    (root / "zzz" / "nested" / "deep.sqlite3").write_bytes(b"")
+
+    survey = node_ts._Survey(root)
+
+    assert [p.as_posix() for p in survey.data_files] == [
+        "aaa/shallow.sqlite3", "zzz/nested/deep.sqlite3"]
+    assert survey.data_dir() == "aaa", (
+        "the volume is named after the shallowest directory carrying data, not after "
+        "whichever branch a stack happened to descend into first")
