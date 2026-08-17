@@ -25,6 +25,7 @@ emitting the same id; absence is impossible, so a Django report can no longer be
 silently missing `core.secret-scan`.
 """
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Bumped to 2 on 2026-08-16, when D-012 left Phase 1 (Joseph's cap decision,
 # `claude/decision-2026-08-16-round-6-cap.md`): a stored report's MEANING changed —
@@ -131,9 +132,92 @@ def module_refused_paths(module, root):
     the FILE rather than on the check, which is why it is not spelled as supersession:
     `core.symlinked-files` fires for every module's escapes and for reads no module
     makes, so replacing it whole would delete refusals nothing else reports.
+
+    ── THE CONTRACT (R11-A2), which used to be stated nowhere ──────────────────
+
+    Both halves are enforced by `_refused_paths_problem` below, at scan time, and both
+    were fail-open before it existed.
+
+    1. THE SPELLING IS THE WALKED ONE: a path under the SCAN ROOT, joined from it, the
+       way `node_ts._iter_sources` yields it — `root / "packages/server/src/metrics.ts"`.
+       NOT `path.resolve()`. The subtraction downstream is `Path` set membership against
+       what the core walk found, and the core walk found the walked spelling; a resolved
+       one matches nothing, subtracts nothing, and the file is reported twice — by core
+       and by the module — which is precisely the defect R10-A3 was filed to fix,
+       reopened by a one-word edit and visible in no test. Measured: `core.symlinked-
+       files` and the module's own line both naming `.env`, warning count 4 on a tree
+       with three things wrong with it.
+
+    2. THE MODULE MUST HAVE SAID SO: the path's repo-relative POSIX spelling appears in
+       the `detail` of at least one check that same module emits from this scan. The
+       hook's entire justification is "I have already told the operator, in my own
+       words"; a module that returns a path and mentions it nowhere deletes core's
+       refusal line for that file and leaves NO trace — no check names it, no count
+       moves, and the operator's model of what the scan read is wrong with nothing on
+       screen to correct it. Measured on a synthetic module: `core.symlinked-files` gone
+       from the report entirely, and no line anywhere in its place.
+
+    WHY THIS SHAPE AND NOT SUPERSESSION'S. `supersedes` is a declaration a module makes
+    ONCE, in its class body, and the diff shows it. A refusal list is per-scan data, so
+    the equivalent is a per-scan check — the module's own report is the declaration, and
+    the guard is that the report actually contains it.
+
+    DESIGNED SO AN HONEST MODULE CANNOT TRIP IT, which is the property that decides
+    whether a gate like this is worth having:
+
+      * the spelling rule is the one a walk produces by construction. A module would
+        have to go out of its way — call `resolve()` — to break it, and that call is
+        exactly the mistake being caught;
+      * the naming rule tolerates BOUNDED text. Repo-controlled strings in a report are
+        truncated (`node_ts._quote_pattern` cuts at 80 characters and appends
+        `(truncated)`), so a deeply nested file is named by a prefix of its own path. A
+        guard demanding the whole string would accuse the module that behaves most
+        carefully. A prefix of `_REFUSAL_NAMED_PREFIX` characters counts, and that floor
+        is well below any truncation limit a readable report could use.
+
+    It is still not proof that the module's sentence is a GOOD one — nothing mechanical
+    can be — but "the file appears in this module's own report" is the claim the
+    subtraction rests on, and it is now checked rather than assumed.
     """
     hook = getattr(module, "refused_paths", None)
     return list(hook(root)) if hook is not None else []
+
+
+# How much of a refused path's repo-relative spelling has to appear in the module's own
+# detail. Full string first; this is the floor for the truncated case. Below any
+# truncation limit a report could reasonably use (node-ts's is 80) and long enough that
+# two different files sharing it would have to be siblings under a deep path.
+_REFUSAL_NAMED_PREFIX = 60
+
+
+def _refused_paths_problem(module, root, refused, emitted):
+    """The R11-A2 contract, as a sentence to raise or None. See `module_refused_paths`."""
+    root = Path(root)
+    details = "\n".join(c.detail or "" for c in emitted)
+    for raw in refused:
+        path = Path(raw)
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            return (
+                f"module {module.name!r} declares a refusal of {str(path)!r}, which is "
+                f"outside the scan root {str(root)!r}. `refused_paths` returns the "
+                f"WALKED spelling — the scan root joined with the repo-relative path, "
+                f"which is what the core walk found and what the subtraction matches "
+                f"against. A resolved path matches nothing, so the file is reported "
+                f"twice: once by `core.symlinked-files` and once by this module")
+        named = rel in details or (
+            len(rel) > _REFUSAL_NAMED_PREFIX
+            and rel[:_REFUSAL_NAMED_PREFIX] in details)
+        if not named:
+            return (
+                f"module {module.name!r} declares a refusal of {rel!r} and names it in "
+                f"no check it emits. Declaring a refusal drops that file from "
+                f"`core.symlinked-files`, on the module's word that it has already told "
+                f"the operator about it — so a file nothing then mentions is a refusal "
+                f"the operator is told about by nobody. Either report it in a check's "
+                f"`detail`, or leave it in the core suite's list")
+    return None
 
 
 def register(module, fallback=False):
@@ -178,6 +262,9 @@ def scan(root):
 
     mods = detect_modules(root)
     checks, questions, sandbox = [], [], []
+    # Per-module, and in `mods` order: `scan` narrows the core suite on what these say,
+    # then checks each module's word against its own checks (R11-A2).
+    refused_by_module = []
     manifest = {
         "schema_version": SCHEMA_VERSION,
         # §V5 component list — ONE Site: one service + optional static route +
@@ -215,13 +302,24 @@ def scan(root):
         # the loop below because the core suite is built first — and it is built first
         # so that supersession can replace an entry in place, which is the property the
         # report's stable check ordering rests on.
-        refused_elsewhere = [p for m in mods for p in module_refused_paths(m, root)]
+        refused_by_module = [module_refused_paths(m, root) for m in mods]
+        refused_elsewhere = [p for paths in refused_by_module for p in paths]
         core_suite = common_checks(root, refused_elsewhere)   # over the SCAN root, once
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
-    for m in mods:
+    # `strict=True`: the two lists are built from `mods` a dozen lines apart, and a
+    # length that stops matching would silently pair a module with another module's
+    # refusals — which is the fail-open this whole guard is about, one level up.
+    for m, refused in zip(mods, refused_by_module, strict=True):
         allowed = module_supersedes(m)
-        for c in m.checks(root):
+        # R11-A2: the module's checks are taken once and checked against what it said
+        # it refused, BEFORE any of them reach the report. The core suite above was
+        # already narrowed on this module's word; this is where the word is checked.
+        emitted = list(m.checks(root))
+        problem = _refused_paths_problem(m, root, refused, emitted)
+        if problem is not None:
+            raise ValueError(problem)
+        for c in emitted:
             if c.id in core_pos:
                 if c.id not in allowed:
                     raise ValueError(
