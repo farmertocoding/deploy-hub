@@ -114,6 +114,49 @@ export function materializeOutcome(status, data) {
            reloadWizard: false, refreshProject: false };
 }
 
+// R9-1: a check's `detail` and `fix_hint` are MULTI-LINE server text, and HTML does not
+// believe in newlines. `core.secret-scan` sends fifteen `file:line` findings joined with
+// \n, then a blank line and two paragraphs of hint; rendered into a bare <p> the whole
+// thing arrived as one run-on paragraph with the filenames run together — the check whose
+// entire job is telling an operator WHICH files to go and look at.
+//
+// `pre-line` rather than `pre`: it honours the newlines the server put there and still
+// wraps long lines to the panel, where `pre` would give a paragraph of prose a horizontal
+// scrollbar. The blank line between sections survives it, which is how the fix hint's own
+// two paragraphs stay two paragraphs.
+const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0" };
+
+export function CheckBody({ check }) {
+  return (
+    <>
+      {check.detail && <p style={PRE_LINE}>{check.detail}</p>}
+      {check.fix_hint &&
+        <p style={{ ...PRE_LINE, color: "#8b949e" }}>Fix: {check.fix_hint}</p>}
+    </>
+  );
+}
+
+// R9-5: the three things an empty section list can mean, told apart.
+//
+// "No findings" was rendered whenever every tier was empty — including for a project
+// whose `scan_report` is `{}`, where nothing has been LOOKED at. A green check and "this
+// project is ready to configure" on a repository no scanner has read is the strongest
+// false reassurance this screen can give, and the wizard directly below it refuses that
+// same project with `scan_required`: two panels, one screen, opposite claims.
+//
+// `scanned_at` is the discriminator because it is the one field that says a scan
+// happened, and it comes from the project row rather than from the report's contents —
+// an empty report and an absent one are indistinguishable by their check lists.
+export function reportSummary(report) {
+  const r = report || {};
+  const sections = [
+    ["blocker", r.blockers], ["warning", r.warnings],
+    ["advice", r.advice], ["pending_sandbox", r.pending_sandbox || []],
+  ];
+  if (sections.some(([, checks]) => checks?.length)) return { kind: "findings", sections };
+  return { kind: r.scanned_at ? "clean" : "never-scanned", sections };
+}
+
 function Stamp({ at }) {
   if (!at) return <span style={{ color: "#8b949e" }}>never scanned</span>;
   return <span style={{ color: "#8b949e" }}>data as of {new Date(at).toLocaleString()}</span>;
@@ -220,24 +263,29 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
   if (error) return <p style={{ color: "#ff7b72" }}>{error}</p>;
   if (report === undefined) return <p>Loading report…</p>;
 
-  const sections = [
-    ["blocker", report.blockers], ["warning", report.warnings],
-    ["advice", report.advice], ["pending_sandbox", report.pending_sandbox || []],
-  ];
+  const { kind, sections } = reportSummary(report);
   return (
     <div style={{ flex: 1 }}>
       <h3 style={{ marginTop: 0 }}>Readiness — {project?.name}
         {" "}<small><Stamp at={report.scanned_at} /></small></h3>
-      {sections.every(([, checks]) => !checks?.length) &&
+      {kind === "clean" &&
         <p style={{ color: "#3fb950" }}>✓ No findings. This project is ready to configure.</p>}
+      {kind === "never-scanned" && (
+        <div style={{ color: "#8b949e" }}>
+          <p style={{ color: "#e6e6e6" }}>⏳ Not scanned yet — this project has no
+            readiness report, which is not the same as having nothing to report.</p>
+          <p>Run <code>python -m hub scan &lt;path&gt;</code> (or the scan endpoint) and
+            this panel fills in. Until then the wizard below cannot materialize a
+            manifest, and says so in the server's own words.</p>
+        </div>
+      )}
       {sections.map(([tier, checks]) => !!checks?.length && (
         <section key={tier} style={{ marginBottom: 12 }}>
           <h4><Badge tier={tier} n={checks.length} /></h4>
           {checks.map((c) => (
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
               <summary>{c.title}</summary>
-              {c.detail && <p>{c.detail}</p>}
-              {c.fix_hint && <p style={{ color: "#8b949e" }}>Fix: {c.fix_hint}</p>}
+              <CheckBody check={c} />
             </details>
           ))}
         </section>
