@@ -182,6 +182,68 @@ def _workspace_candidate_problem(root, candidate):
     return None
 
 
+# ── round-9 item 1: and the base is only half of what the repo controls ────────
+#
+# F3 refused the symlinked workspace BASE. The FILES inside a perfectly ordinary tree
+# were still read through whatever they pointed at, and that needs no workspace, no
+# pattern and no `..` in anything the repo commits:
+#
+#     src/evil.ts -> ../../victim/engine.ts
+#
+# A `..` inside a SYMLINK TARGET is not a path the R8-3 pattern rules ever see. The
+# victim file's `const threads = process.env.WORKER_THREADS ?? 7;` landed in
+# `all_sources` and moved the scanned repo's `node-ts.worker-threads` wizard default
+# from 2 to 7; the same route through a symlinked `package.json` puts an outside
+# manifest's `dependencies` into `all_deps`, where a single `ccxt` ARMS three ingestion
+# checks that would otherwise never run.
+#
+# CONTAINMENT, NOT REFUSE-ALL-LINKS, and that is where this parts company with F3's rule
+# for directories three lines up. A symlinked workspace BASE is refused outright because
+# it is a second NAME for a package — accepting one double-counts a package the survey
+# already has, whatever it points at. A file link is not that: `src/config.ts ->
+# ../shared/config.ts`, and a `package.json` linked out of a shared config directory,
+# are ordinary committed layouts whose content is inside the tree the operator pointed
+# at either way. Refusing them would drop real source out of the report for nothing.
+# So a file symlink is judged by WHERE IT LANDS, and only a target outside the root is
+# refused.
+#
+# WHY `fallbacks` STILL READS THEM ALL, and it is not an inconsistency to tidy up later:
+# `fallbacks._iter_files` is the walk behind the SECRET suite, and a committed symlinked
+# `.env` is precisely the thing that suite exists to find — refusing to read it there
+# would hide the finding it was pointed at. Nothing in `fallbacks` lets file CONTENT
+# choose a default the operator is then offered. Here it does, in every check in this
+# module. Same mechanism, opposite consequence; `fallbacks.py` is deliberately not
+# touched by this.
+#
+# BOTH SIDES RESOLVED, for F3's reason: a scan root is frequently reached THROUGH a
+# symlink (`/tmp` on macOS, a checkout under a linked home), so comparing an unresolved
+# root against a resolved file would refuse every source file in such a tree.
+
+
+def _symlink_escape_problem(root, path, kind):
+    """A sentence if the symlinked file `path` leaves `root`, else None.
+
+    Only symlinks are examined — an ordinary file found by a walk that already prunes
+    symlinked directories is inside the tree by construction, and `resolve()` on every
+    file of every scan would be paid for nothing.
+    """
+    if not path.is_symlink():
+        return None
+    try:
+        rel = _quote_pattern(str(path.relative_to(root)))
+    except ValueError:                                            # pragma: no cover
+        rel = _quote_pattern(str(path))
+    try:
+        resolved, root_resolved = path.resolve(), Path(root).resolve()
+    except OSError as exc:
+        return (f"symlinked {kind} {rel} could not be resolved "
+                f"({exc.__class__.__name__}); not read")
+    if root_resolved not in resolved.parents:
+        return (f"symlinked {kind} {rel} resolves outside the scan root; a scan reads "
+                f"only the tree it was pointed at — not read")
+    return None
+
+
 def _load_json(path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -200,22 +262,39 @@ def _load_tsconfig(path):
         return {}
 
 
-def _iter_source_files(base):
-    """Yield the module's source files under `base`.
+def _iter_source_files(base, root=None, problems=None):
+    """Yield the module's source files under `base`, which must stay inside `root`.
+
+    `root` is the scan root; it defaults to `base`, which is the honest default for a
+    caller that has only one directory in hand. `problems` is the survey's refusal
+    channel — a list, appended to and de-duplicated by the caller's own contents, because
+    this walk runs once per package directory and a link inside the service package is
+    seen twice.
 
     OUT OF ROUND-7 SCOPE, fixed on the round-7 branch: this followed symlinked
     directories, so a repo containing one link back at an ancestor was an infinite walk
     — and it runs during MODULE DETECTION, before any check, so the operator's scan never
     returned at all. Found by the SRE reviewer while testing loops.
 
-    `fallbacks._iter_files` already had the treatment and this is that treatment rather
-    than a second one: a symlinked DIRECTORY is not followed (a link out of the tree is
-    not the project's source and a link back into it is a loop), and `resolve()` into a
-    `seen` set catches the loops that a hard link or a `..`-shaped path can still make.
-    Symlinked FILES are still read, which is the same distinction `fallbacks` draws for
-    the same reason: a committed symlinked config file is real source.
+    THE SYMLINK RULE, as of round-9 item 1: a symlinked DIRECTORY is not followed (a link
+    out of the tree is not the project's source and a link back into it is a loop), and
+    `resolve()` into a `seen` set catches the loops that a hard link or a `..`-shaped
+    path can still make. A symlinked FILE is read only if it RESOLVES INSIDE `root` — an
+    in-root link is a legitimate committed layout, one that leaves the root is refused
+    out loud through `problems`.
+
+    That last clause is what changed. The round-7 comment here said "symlinked FILES are
+    still read" and credited `fallbacks._iter_files` with the same distinction, which it
+    still draws — and correctly, THERE: that walk feeds the secret suite, where a
+    committed symlinked `.env` is exactly the thing being hunted, and refusing to read it
+    would hide the finding. Nothing in `fallbacks` lets the content it reads pick a
+    default the operator is then offered. In this module every check greps `all_sources`
+    and the wizard hands the result back as an answer, so content out of a neighbouring
+    tree does not get read, it STEERS. See `_symlink_escape_problem` above.
     """
-    stack = [Path(base)]
+    base = Path(base)
+    root = base if root is None else Path(root)
+    stack = [base]
     seen = set()
     while stack:
         directory = stack.pop()
@@ -238,6 +317,11 @@ def _iter_source_files(base):
                 seen.add(key)
                 stack.append(path)
             elif path.is_file() and path.suffix in _SOURCE_SUFFIXES:
+                problem = _symlink_escape_problem(root, path, "source file")
+                if problem:
+                    if problems is not None and problem not in problems:
+                        problems.append(problem)
+                    continue
                 yield path
 
 
@@ -253,20 +337,51 @@ class _Survey:
         # is: a config file the scanner cannot honor must never take the scan down with
         # it, and must never be read optimistically either.
         self.workspace_problems = []
+        # Round-9 item 1: one sentence per FILE this survey refused to read, and a
+        # separate list from `workspace_problems` because it is a separate claim. "A
+        # package the config declared was not surveyed" and "a file inside a surveyed
+        # package was not read" are different things to tell an operator, and a single
+        # channel would have to be titled for one of them and lie about the other.
+        self.symlink_problems = []
         self.package_dirs = self._find_package_dirs()
-        self.packages = {d: _load_json(d / "package.json") for d in self.package_dirs}
+        self.packages = {d: self._read_package_json(d) for d in self.package_dirs}
         self.service_dir = self._pick_service_dir()
         self.service_pkg = self.packages.get(self.service_dir, {})
         base = self.service_dir if self.service_dir else self.root
-        self.service_sources = {p: _read(p) for p in _iter_source_files(base)}
+        self.service_sources = {p: _read(p) for p in
+                                self._iter_sources(base)}
         self.all_sources = ("\n".join(_read(p) for d in self.package_dirs
-                                      for p in _iter_source_files(d))
+                                      for p in self._iter_sources(d))
                             if self.package_dirs else
                             "\n".join(self.service_sources.values()))
         self.all_deps = self._collect_deps()
         self.data_files = self._find_data_files()
         self.offline_deps = self._offline_deps()
         self.env_example = _read(self.root / ".env.example")
+
+    # ── reads that the scanned repo can point somewhere else ────────────────
+    def _iter_sources(self, base):
+        """`_iter_source_files` bound to this survey's root and refusal channel."""
+        return _iter_source_files(base, self.root, self.symlink_problems)
+
+    def _read_package_json(self, directory):
+        """The manifest of `directory`, or `{}` if it is a link out of the tree.
+
+        Round-9 item 1: a symlinked `package.json` decides more of the report than a
+        symlinked source file does — `dependencies` land in `all_deps` (one `ccxt` arms
+        three ingestion checks), and `main`, `engines` and `scripts.start` are read back
+        out as the compiled-JS, engines-pin and start-script verdicts for a package whose
+        real manifest says something else. `{}` rather than a raise, and a problem line
+        rather than silence: the package is still a package, the survey just has nothing
+        honest to say about it.
+        """
+        path = directory / "package.json"
+        problem = _symlink_escape_problem(self.root, path, "package.json")
+        if problem:
+            if problem not in self.symlink_problems:
+                self.symlink_problems.append(problem)
+            return {}
+        return _load_json(path)
 
     # ── workspace / packages ────────────────────────────────────────────────
     def _find_package_dirs(self):
@@ -281,7 +396,7 @@ class _Survey:
             except yaml.YAMLError:
                 data = {}
             patterns.extend(p for p in (data.get("packages") or []) if isinstance(p, str))
-        root_pkg = _load_json(self.root / "package.json")
+        root_pkg = self._read_package_json(self.root)
         workspaces = root_pkg.get("workspaces")
         if isinstance(workspaces, list):
             patterns.extend(p for p in workspaces if isinstance(p, str))
@@ -556,6 +671,20 @@ class NodeTsScannerModule:
                 detail="; ".join(s.workspace_problems) + ".",
                 fix_hint="Workspace patterns name directories inside the repository: "
                          "make each one relative and keep it within the tree."))
+        if s.symlink_problems:
+            # Round-9 item 1. Its own id, not folded into the line above: that one says
+            # a declared package was not surveyed, this one says a file inside a package
+            # that WAS surveyed did not contribute, and an operator reading either has a
+            # different thing to go look at. Warning for the same reason — the survey
+            # below it is incomplete, and the report must say so before it is trusted.
+            out.append(CheckResult(
+                id="node-ts.symlinked-files", tier="warning",
+                title="Symlinked files outside the scan root were not read",
+                detail="; ".join(s.symlink_problems) + ".",
+                fix_hint="A scan reads only the tree it was pointed at. Keep committed "
+                         "symlinks inside the repository, or vendor the file itself — "
+                         "content from a neighbouring tree would otherwise decide this "
+                         "report's findings and the defaults the wizard offers."))
         if s.workspace_file.is_file():
             names = ", ".join(s.workspace_names()) or "(none found)"
             out.append(CheckResult(
@@ -664,8 +793,11 @@ class NodeTsScannerModule:
                      "and set start to `node dist/index.js`.")
 
     def _check_engines_pin(self, s):
+        # The root manifest comes out of the survey rather than off disk a second time:
+        # `_Survey.packages` is where the round-9 containment rule is applied, and a
+        # direct `_load_json` here would have re-opened a link the survey refused.
         pkg = s.service_pkg if s.service_dir is not None else \
-            _load_json(s.root / "package.json")
+            s.packages.get(s.root, {})
         engines = (pkg.get("engines") or {})
         node_range = engines.get("node") if isinstance(engines, dict) else None
         if isinstance(node_range, str):

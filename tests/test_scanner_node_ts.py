@@ -996,3 +996,149 @@ def test_issue_f3_a_package_named_by_two_patterns_is_surveyed_once(tmp_path):
 
     mono = by_id(core.scan(twice), "node-ts.monorepo")
     assert mono["detail"].count("server") == 1, mono["detail"]
+
+
+# ── round-9 queue item 1: the pattern was half of it, the FILE is the other half ─
+
+
+def _single_package_repo(tmp_path, name="repo"):
+    """A minimal single-package node repo — no workspaces, nothing exotic.
+
+    Deliberately NOT `_workspace_repo`: the file-level escape needs no monorepo, no
+    workspace pattern and no `..` anywhere in the repo's own configuration. An ordinary
+    repo plus one committed symlink is the whole setup.
+    """
+    root = tmp_path / name
+    (root / "src").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": name, "main": "dist/index.js",
+                    "engines": {"node": "22.x"},
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "src" / "index.ts").write_text(
+        "import Fastify from 'fastify';\n"
+        "const threads = process.env.WORKER_THREADS ?? 2;\n", encoding="utf-8")
+    return root
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_a_symlinked_source_file_cannot_steer_the_report(tmp_path):
+    """F3 refused the symlinked workspace BASE; the files inside the tree were still
+    read through whatever they pointed at.
+
+    `_iter_source_files` has refused to FOLLOW a symlinked directory since round 7, and
+    the round-7 comment says symlinked FILES are still read — a rationale borrowed from
+    `fallbacks`, where a committed symlinked `.env` is exactly what the secret suite is
+    hunting. In node-ts the content does not get looked at, it STEERS: every regex in
+    the module reads `all_sources`, so one committed link is enough.
+
+        src/evil.ts -> ../../victim/engine.ts
+
+    No workspace, no pattern, no `..` in any file the repo commits — a `..` inside a
+    symlink target is not a path the R8-3 rules ever see.
+    """
+    _victim_tree(tmp_path)
+    root = _single_package_repo(tmp_path)
+    os.symlink("../../victim/src/engine.ts", root / "src" / "evil.ts")
+
+    survey = node_ts._Survey(root)
+
+    assert "VICTIM-TREE-MARKER" not in survey.all_sources
+    assert "VICTIM-TREE-MARKER" not in survey.service_text()
+    # 2 is the repo's own line; 7 exists only in the neighbouring tree.
+    assert survey.worker_threads_default() == 2
+
+    report = core.scan(root)
+    assert "VICTIM-TREE-MARKER" not in json.dumps(report)
+    questions = {q["id"]: q for q in report["wizard_questions"]}
+    assert questions["node-ts.worker-threads"]["default"] == 2
+
+    refused = by_id(report, "node-ts.symlinked-files")
+    assert refused["tier"] == "warning"
+    assert "resolves outside the scan root" in refused["detail"], refused
+    assert repr("src/evil.ts") in refused["detail"], refused
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_a_symlinked_package_json_cannot_steer_the_report(tmp_path):
+    """The same route through the manifest reads rather than the source walk.
+
+    A package.json outside the tree decides more of the report than a source file does:
+    its `dependencies` land in `all_deps`, where `ccxt` ARMS three ingestion checks that
+    would otherwise not run at all, and its `engines`/`main` are read back out as the
+    engines pin and the compiled-JS verdict for a package whose real manifest says
+    something else.
+    """
+    outside = tmp_path / "victim"
+    outside.mkdir()
+    (outside / "package.json").write_text(
+        json.dumps({"name": "LEAKED-PACKAGE-NAME", "main": "src/index.ts",
+                    "engines": {"node": "18.x"},
+                    "dependencies": {"ccxt": "^4.0.0"}}) + "\n", encoding="utf-8")
+
+    root = _workspace_repo(tmp_path, ["packages/*"])
+    (root / "packages/server/package.json").unlink()
+    os.symlink("../../../victim/package.json", root / "packages/server/package.json")
+
+    survey = node_ts._Survey(root)
+
+    assert survey.packages[root / "packages" / "server"] == {}
+    assert "ccxt" not in survey.all_deps
+    assert not survey.ingestion_armed()
+
+    report = core.scan(root)
+    assert "LEAKED-PACKAGE-NAME" not in json.dumps(report)
+    assert [c["id"] for c in report["checks"] if c["id"].startswith("node-ts.ingest")] == []
+
+    refused = by_id(report, "node-ts.symlinked-files")
+    assert "resolves outside the scan root" in refused["detail"], refused
+    assert repr("packages/server/package.json") in refused["detail"], refused
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_a_scan_root_reached_through_a_symlink_is_read_normally(tmp_path):
+    """The false positive the containment rule exists to avoid, at file level.
+
+    F3's directory rule resolves BOTH sides for this reason and the file rule inherits
+    it: a scan root is frequently reached THROUGH a symlink (`/tmp` on macOS, a checkout
+    under a linked home), so every source file in such a tree resolves to a path that
+    does not start with the root as spelled. Compare unresolved root against resolved
+    file and the scanner refuses to read a single line of an entirely ordinary repo.
+    """
+    real = _single_package_repo(tmp_path / "real")
+    linked_root = tmp_path / "linked-repo"
+    os.symlink(real, linked_root, target_is_directory=True)
+
+    survey = node_ts._Survey(linked_root)
+
+    assert "import Fastify" in survey.all_sources
+    assert survey.symlink_problems == []
+    assert survey.packages[linked_root].get("name") == "repo"
+    assert [c["id"] for c in core.scan(linked_root)["checks"]
+            if c["id"] == "node-ts.symlinked-files"] == []
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_an_in_root_symlinked_file_is_still_read(tmp_path):
+    """And the case the rule deliberately does NOT refuse — which is where node-ts parts
+    company with F3's directory rule, not by accident.
+
+    F3 refuses a symlinked workspace BASE even when it points inside the root, because a
+    second NAME for a package the survey already has double-counts it. A file link is
+    not that: `src/config.ts -> ../shared/config.ts` and a `package.json` linked from a
+    shared config directory are ordinary committed layouts, the content is inside the
+    tree the operator pointed at either way, and refusing them would drop real source
+    out of the report to no end. Containment is the whole test — refuse where it lands,
+    not what it is.
+    """
+    root = _single_package_repo(tmp_path)
+    (root / "shared").mkdir()
+    (root / "shared" / "config.ts").write_text(
+        'export const IN_ROOT_MARKER = "IN-ROOT-MARKER";\n', encoding="utf-8")
+    os.symlink("../shared/config.ts", root / "src" / "config.ts")
+
+    survey = node_ts._Survey(root)
+
+    assert "IN-ROOT-MARKER" in survey.all_sources
+    assert survey.symlink_problems == []
+    assert [c["id"] for c in core.scan(root)["checks"]
+            if c["id"] == "node-ts.symlinked-files"] == []
