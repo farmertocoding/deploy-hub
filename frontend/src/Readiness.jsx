@@ -200,6 +200,54 @@ function Stamp({ at }) {
   return <span style={{ color: "#8b949e" }}>data as of {new Date(at).toLocaleString()}</span>;
 }
 
+// R10-UX-F1: the left column's row, and the same distinction R9-5 drew in the panel.
+//
+// It used to be written inline inside ReadinessScreen's `.map`, which is why it had no
+// render pin: nothing in this file was reachable from a test without mounting a
+// component that fetches. Extracted for the same reason `Badge`, `CheckBody` and
+// `MaterializeControl` are — the only way to assert markup is to render it.
+//
+// THE DEFECT: `Object.values(p.tiers).every((n) => n === 0)` is true for a project
+// whose `scan_report` is `{}`, so a repository no scanner has read rendered
+//
+//     orders-api  ✓ clean  never scanned
+//
+// one column away from a panel reading "⏳ Not scanned yet — this project has no
+// readiness report, which is not the same as having nothing to report." R9-5 fixed
+// exactly this sentence in the panel and did not reach the list, so the screen went on
+// making both claims at once — and the row is the half the operator reads FIRST, while
+// deciding which project to open.
+//
+// `scanned_at` is the discriminator, for R9-5's reason: it is the one field that says a
+// scan happened, and a tier count of zero cannot tell "nothing found" from "nothing
+// looked at". The never-scanned arm says so in the words the panel already uses, so the
+// two halves of the screen agree rather than merely not contradicting each other.
+export function ProjectRow({ project: p }) {
+  const scanned = !!p.scanned_at;
+  const nothingFound = Object.values(p.tiers).every((n) => n === 0);
+  return (
+    <>
+      <strong>{p.name}</strong>
+      <div>{Object.entries(p.tiers).map(([t, n]) => n > 0 && <Badge key={t} tier={t} n={n} />)}
+        {nothingFound && (scanned
+          ? <span style={{ color: "#3fb950" }}>✓ clean</span>
+          : <span style={{ color: "#8b949e" }}>⏳ not scanned</span>)}
+      </div>
+      <div><Stamp at={p.scanned_at} /></div>
+      {p.sites.map((s) => (
+        <div key={s.id} style={{ marginTop: 4, fontSize: "0.9em" }}>
+          {s.name}{s.domain ? ` — ${s.domain}` : ""} ·{" "}
+          {s.latest_manifest_version == null
+            ? <span style={{ color: "#8b949e" }}>no manifest yet</span>
+            : s.manifest_current
+              ? <span style={{ color: "#3fb950" }}>✓ manifest v{s.latest_manifest_version} matches current scan</span>
+              : <span style={{ color: "#e3b341" }}>⚠ manifest v{s.latest_manifest_version} predates current scan</span>}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function ReadinessScreen() {
   const [projects, setProjects] = useState(undefined); // undefined = loading
   const [error, setError] = useState("");
@@ -254,21 +302,7 @@ export default function ReadinessScreen() {
             role="button" tabIndex={0}
             onClick={() => setSelected(p.id)}
             onKeyDown={(e) => e.key === "Enter" && setSelected(p.id)}>
-            <strong>{p.name}</strong>
-            <div>{Object.entries(p.tiers).map(([t, n]) => n > 0 && <Badge key={t} tier={t} n={n} />)}
-              {Object.values(p.tiers).every((n) => n === 0) && <span style={{ color: "#3fb950" }}>✓ clean</span>}
-            </div>
-            <div><Stamp at={p.scanned_at} /></div>
-            {p.sites.map((s) => (
-              <div key={s.id} style={{ marginTop: 4, fontSize: "0.9em" }}>
-                {s.name}{s.domain ? ` — ${s.domain}` : ""} ·{" "}
-                {s.latest_manifest_version == null
-                  ? <span style={{ color: "#8b949e" }}>no manifest yet</span>
-                  : s.manifest_current
-                    ? <span style={{ color: "#3fb950" }}>✓ manifest v{s.latest_manifest_version} matches current scan</span>
-                    : <span style={{ color: "#e3b341" }}>⚠ manifest v{s.latest_manifest_version} predates current scan</span>}
-              </div>
-            ))}
+            <ProjectRow project={p} />
           </div>
         ))}
       </div>

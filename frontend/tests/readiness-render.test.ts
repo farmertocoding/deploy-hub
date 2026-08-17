@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Badge, CheckBody, MaterializeControl, reportSummary } from "../src/Readiness.jsx";
+import { Badge, CheckBody, MaterializeControl, ProjectRow, reportSummary } from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -130,5 +130,70 @@ test("r9-8: the aria-label is what the badge says", () => {
       assert.equal(label, visibleText(markup).trim().replace(/^\S+\s/, ""),
         `${tier} n=${n}: the label and the text disagree`);
     }
+  }
+});
+
+// ── R10-UX-F1: "✓ clean" for a project nobody has scanned ────────────────────
+//
+// The project LIST row had no render pin at all — this file covered the panel and the
+// badges and stopped at the left column. And the left column carries the same defect
+// R9-5 fixed in the panel: `Object.values(p.tiers).every((n) => n === 0)` is true for a
+// project whose `scan_report` is `{}`, so `orders-api` rendered
+//
+//     orders-api  ✓ clean  never scanned
+//
+// one column away from a panel reading "⏳ Not scanned yet — this project has no
+// readiness report, which is not the same as having nothing to report." Two panels, one
+// screen, opposite claims — R9-5's own sentence, in the half of the screen it did not
+// reach.
+//
+// `scanned_at` is the discriminator here for R9-5's reason: it is the one field that
+// says a scan happened, and zero tiers cannot tell "nothing found" from "nothing
+// looked".
+
+test("r10-ux-f1: an unscanned project's row does not read as clean", async () => {
+  const { data: projects } = await (SIM_FIXTURES.degraded as any)("v1/projects/");
+  const orders = projects.find((p: any) => p.name === "orders-api");
+  assert.equal(orders.scanned_at, null);
+  assert.ok(Object.values(orders.tiers).every((n) => n === 0));
+
+  const text = visibleText(render(ProjectRow, { project: orders }));
+
+  assert.ok(!text.includes("clean"),
+    `a project no scanner has read is not clean: ${text}`);
+  assert.ok(text.includes("not scanned"), text);
+});
+
+test("r10-ux-f1: a scanned project with nothing to report still reads as clean", async () => {
+  const { data: projects } = await (SIM_FIXTURES.live as any)("v1/projects/");
+  const takko = projects.find((p: any) => p.name === "takko");
+  assert.ok(takko.scanned_at);
+
+  const text = visibleText(render(ProjectRow, { project: takko }));
+
+  assert.ok(text.includes("✓ clean"), text);
+});
+
+test("r10-ux-f1: a project with findings shows its badges and no clean tick", async () => {
+  const { data: projects } = await (SIM_FIXTURES.live as any)("v1/projects/");
+  const legacy = projects.find((p: any) => p.name === "legacy-shop");
+
+  const text = visibleText(render(ProjectRow, { project: legacy }));
+
+  assert.ok(!text.includes("clean"), text);
+  assert.match(text, /⛔ \d+ Blocker/, text);
+});
+
+test("r10-ux-f1: the row renders each site's manifest currency", async () => {
+  const { data: projects } = await (SIM_FIXTURES.live as any)("v1/projects/");
+  const takko = projects.find((p: any) => p.name === "takko");
+
+  const text = visibleText(render(ProjectRow, { project: takko }));
+
+  for (const site of takko.sites) {
+    assert.ok(text.includes(site.name), site.name);
+    assert.ok(site.latest_manifest_version == null
+      ? text.includes("no manifest yet")
+      : text.includes(`manifest v${site.latest_manifest_version}`), text);
   }
 });
