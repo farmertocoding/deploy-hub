@@ -17,9 +17,9 @@ from vault import service as vault_service
 from vault.models import Secret
 from wizard import questions as wizard_questions
 from wizard import service
-from wizard.materialize import MaterializeRefused, materialize, preflight
+from wizard.materialize import MaterializeRefused, _apply_answers, materialize, preflight
 from wizard.models import WizardAnswer
-from wizard.questions import question_set
+from wizard.questions import question_map, question_set
 
 pytestmark = pytest.mark.django_db
 
@@ -343,6 +343,65 @@ def test_issue_r9_sec_1_an_unknown_env_qid_cannot_write_a_name_into_the_bundle(
 
     assert manifest.body["env_names"] == ["DATABASE_PASSWORD"]
     assert "EVIL_TOKEN" not in json.dumps(manifest.body)
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r9_sec_1_a_skipped_row_does_not_end_the_overlay(site, project):
+    """The mutation gate's answer to the guard above: `continue` -> `break` survived 776
+    tests, because in every one of them the unknown row happened to be the LAST answer
+    the queryset returned and the two spellings did the same thing.
+
+    That is the assertion-that-does-not-assert class this repo has cited sixteen times,
+    on a security guard three days old. `_apply_answers` is called directly with an
+    explicit list rather than through the queryset, because "the row before the known one"
+    is the whole point and `WizardAnswer` declares no ordering — a test that relies on
+    insertion order is pinning the database's mood, not the loop's contract.
+    """
+    known = question_map(project)
+    answers = [
+        WizardAnswer(site=site, question_id="scanner.test_material.deadbeefcafe",
+                     value="true", is_secret=False),
+        WizardAnswer(site=site, question_id="django.db", value="postgres",
+                     is_secret=False),
+    ]
+
+    body = {}
+    _apply_answers(body, site, answers, known)
+
+    assert body["module_answers"] == {"django.db": "postgres"}
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r9_sec_1_a_secret_answer_with_no_env_name_writes_no_env_row(
+        answered_site, project):
+    """The other mutant the qid filter left alive, and it is the filter's own fault.
+
+    `if name and answer.secret_ref is not None` -> `or` was killed before this round by
+    some path that reached the secret branch with one of the two operands false. The only
+    rows that did so were rows the filter now drops one line earlier, so the guard lost
+    its coverage the moment it gained a gate — a mutation-shaped version of exactly what
+    the fix was about.
+
+    So the case is stated on its own terms: a secret question the project DOES have,
+    whose id carries no `.env.` name. Under `and` it contributes nothing (there is no
+    variable to inject); under `or` it appends `None` to `env_names`, and the frozen
+    manifest's environment list is not a place a `None` may appear.
+    """
+    stored = WizardAnswer.objects.get(site=answered_site,
+                                      question_id="django.env.DATABASE_PASSWORD")
+    known = dict(question_map(project))
+    known["django.token"] = scanner_core.WizardQuestion(
+        id="django.token", prompt="A token", kind="secret")
+    answers = [
+        stored,
+        WizardAnswer(site=answered_site, question_id="django.token",
+                     is_secret=True, secret_ref=stored.secret_ref),
+    ]
+
+    body = {}
+    _apply_answers(body, answered_site, answers, known)
+
+    assert body["env_names"] == ["DATABASE_PASSWORD"]
 
 
 @pytest.mark.req("WIZ-V5-ONE-MANIFEST")
