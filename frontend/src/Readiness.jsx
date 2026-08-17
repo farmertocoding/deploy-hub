@@ -234,7 +234,23 @@ export function materializeOutcome(status, data) {
 // wraps long lines to the panel, where `pre` would give a paragraph of prose a horizontal
 // scrollbar. The blank line between sections survives it, which is how the fix hint's own
 // two paragraphs stay two paragraphs.
-const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0" };
+//
+// R13-F13-1: …and `overflowWrap: "anywhere"`, because the text inside is the REPOSITORY'S.
+//
+// `pre-line` honours the server's newlines and wraps at spaces. A path has no spaces.
+// `core.secret-scan` sends `file:line` tokens, `core.symlinked-files` sends paths, and a
+// deep monorepo path is one unbreakable token wider than this panel — so the line ran out
+// of the details box horizontally, taking the reader with it. The server bounds what it
+// prints (80 characters through `_quote_pattern`), which narrows the problem and does not
+// close it: 80 characters is already wider than the panel at any zoom level a person
+// might actually need, and `refused_paths` — rendered below — is unbounded BY DESIGN,
+// because truncating the machine-readable list was the whole point of not having one.
+//
+// `anywhere` rather than `break-word`: it lets the wrap happen mid-token AND counts the
+// long word when the browser computes the box's minimum width, which is the half that
+// stops a flex sibling being squeezed instead. `break-all` (App.jsx's choice for a URL)
+// would break ordinary prose mid-word too, and these paragraphs are mostly prose.
+const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0", overflowWrap: "anywhere" };
 
 // R12-ARCH-1: the fact the scanner's guard accepts as an announcement, rendered.
 //
@@ -286,7 +302,8 @@ export function CheckBody({ check }) {
       {!!refused.length && (
         <div style={{ margin: "6px 0", color: "#e3b341" }}>
           Did not read:
-          <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em" }}>
+          <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em",
+              overflowWrap: "anywhere" }}>
             {refused.map((path) => <li key={path}>{path}</li>)}
           </ul>
         </div>
@@ -344,11 +361,15 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
   // would point every button at the first one's reason.
   const reasonId = `${id}-reason`;
   const shown = gate.disabled && !!gate.title;
-  const off = busy || gate.disabled;
+  // R13-F13-2: two reasons to be dead, two treatments. A gate refusal is hard `disabled`
+  // — the server said no, nothing is in flight, and it belongs out of the tab order. A
+  // request in flight keeps the focus it was given and says `aria-disabled` instead.
+  const waiting = !!busy && !gate.disabled;
   return (
     <>
-      <button style={disabledBox(off)} disabled={off} onClick={onClick}
-        aria-busy={busy} title={gate.title}
+      <button style={disabledBox(waiting || gate.disabled)} disabled={gate.disabled}
+        aria-disabled={waiting || undefined} aria-busy={!!busy}
+        onClick={busyClickGuard(waiting, onClick)} title={gate.title}
         aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
       {shown &&
@@ -374,9 +395,15 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
 // extracted under: the only way to assert markup is to render it, and everything else in
 // `SiteWizard` fetches.
 export function SaveButton({ busy, disabled, onClick }) {
+  // R13-F13-2, same split as `MaterializeControl`: `disabled` here means "there is
+  // nothing to save" — no draft, nothing pressed, out of the tab order — while `busy`
+  // means the operator just pressed this and is waiting, which is precisely when taking
+  // their focus away is worst.
+  const waiting = !!busy && !disabled;
   return (
-    <button style={disabledBox(disabled)} disabled={disabled} aria-busy={!!busy}
-      onClick={onClick}>Save answers</button>
+    <button style={disabledBox(waiting || disabled)} disabled={disabled}
+      aria-disabled={waiting || undefined} aria-busy={!!busy}
+      onClick={busyClickGuard(waiting, onClick)}>Save answers</button>
   );
 }
 
@@ -524,6 +551,35 @@ export function ProjectRow({ project: p }) {
 // reparent invalid nesting, so the honest options were "flatten the row into spans" or
 // "keep role=button and honour the whole contract". The second is smaller and touches no
 // markup a reviewer has already read.
+// R13-F13-2: a button that disables itself under the operator's finger.
+//
+// Pressing Save or Materialize sets `disabled` on the button that has focus. A disabled
+// element cannot hold focus, so browsers drop it to `<body>` — the press evicts the
+// keyboard from the control that was pressed, nothing restores it when the request
+// finishes, and `aria-busy` (F12-3) is announced to a reader whose focus has just been
+// moved off the element carrying it. It is F12-1's class one interaction over: the
+// element that had focus stops existing, or stops being able to hold it.
+//
+// THE ARIA-DISABLED PATTERN, and it applies to ONE of the two reasons these buttons go
+// dead. While a request is in flight the control is still the operator's place on the
+// screen, so it stays focusable and says `aria-disabled` instead — which announces
+// "unavailable" without taking focus — and this guard is what makes the claim true,
+// because an `aria-disabled` button is still clickable. A GATE refusal is the other
+// reason and keeps hard `disabled`: nothing was pressed, no focus is being held, and a
+// server-refused action should be out of the tab order entirely.
+//
+// Exported and named because `renderToStaticMarkup` produces no events: the markup is
+// asserted by rendering, and the guard by calling it.
+export function busyClickGuard(waiting, onClick) {
+  return (event) => {
+    if (waiting) {
+      event?.preventDefault?.();
+      return;
+    }
+    onClick?.(event);
+  };
+}
+
 export function rowActivates(event) {
   // " " is the modern spelling; "Spacebar" is IE/Edge-legacy and costs one comparison.
   return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
@@ -862,7 +918,7 @@ function SiteWizard({ site, refreshKey, onChanged }) {
           prior={state.answered?.[q.id]} drafted={draft[q.id]}
           onChange={(value) => setDraft({ ...draft, [q.id]: value })} />
       ))}
-      <SaveButton busy={busy} disabled={busy || !Object.keys(draft).length}
+      <SaveButton busy={busy} disabled={!Object.keys(draft).length}
         onClick={save} />{" "}
       <WarningsAck warnings={state.warnings} checked={ack}
         onChange={(e) => setAck(e.target.checked)} />{" "}

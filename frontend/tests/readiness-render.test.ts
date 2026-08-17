@@ -18,7 +18,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
   ProjectRowSelector, QuestionField, ReportScope, SaveButton, WarningsAck,
-  questionFieldId, reportSummary, rowKeyHandler } from "../src/Readiness.jsx";
+  busyClickGuard, questionFieldId, reportSummary, rowKeyHandler }
+  from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -606,4 +607,102 @@ test("arch-a: refusals render from any tier, which is wider than the vouching ru
     }));
     assert.ok(text.includes("src/unread.ts"), `${tier}: ${text}`);
   }
+});
+
+// ── R13-F13-1: repo-controlled text that cannot be broken ────────────────────
+
+test("f13-1: a check body wraps the repository's own unbreakable tokens", () => {
+  // The panel renders three kinds of repo-controlled text with no spaces in them: a
+  // detail's `file:line` findings, a fix hint quoting a path, and the `refused_paths`
+  // list — which is unbounded by design, because a machine-readable list that truncated
+  // would be the prose it exists to replace. One deep monorepo path is one token wider
+  // than the box.
+  const deep = "packages/a-rather-long-package-name/src/features/telemetry/collectors/"
+    + "runtime/metrics.ts";
+  assert.ok(deep.length > 80, deep.length);
+
+  const markup = render(CheckBody, {
+    check: { detail: `${deep}:14: hardcoded secret`, fix_hint: `edit ${deep}`,
+             refused_paths: [deep] },
+  });
+
+  // Every element that can contain one of those tokens says how to break it.
+  assert.equal((markup.match(/overflow-wrap:anywhere/g) || []).length, 3,
+    "detail, fix hint and the refusal list each carry repo-controlled text");
+  assert.ok(visibleText(markup).includes(deep));
+});
+
+test("f13-1: the wrap rule travels with PRE_LINE, so both paragraphs have it", () => {
+  const markup = render(CheckBody, { check: { detail: "d", fix_hint: "f" } });
+  assert.equal((markup.match(/white-space:pre-line/g) || []).length, 2);
+  assert.equal((markup.match(/overflow-wrap:anywhere/g) || []).length, 2,
+    "a paragraph that honours the server's newlines must also break its long tokens");
+});
+
+// ── R13-F13-2: a button that disables itself under the operator's finger ─────
+
+test("f13-2: while busy the control stays focusable and says aria-disabled", () => {
+  const ready = { disabled: false, label: "Materialize manifest", title: "" };
+  const markup = render(MaterializeControl, { gate: ready, busy: true,
+                                              onClick: () => {} });
+
+  assert.ok(!markup.includes("disabled=\"\""),
+    "a disabled element cannot hold focus, so the press evicts the keyboard from the " +
+    "button that was pressed and nothing puts it back");
+  assert.match(markup, /aria-disabled="true"/);
+  assert.match(markup, /aria-busy="true"/,
+    "…and the busy state is announced on an element the reader is still on");
+});
+
+test("f13-2: a gate refusal is still hard-disabled", () => {
+  // The other reason to be dead, and it keeps the old treatment: nothing was pressed, no
+  // focus is being held, and an action the server refuses belongs out of the tab order.
+  const blocked = { disabled: true, label: "⛔ Blocked", title: "the report has blockers" };
+  const markup = render(MaterializeControl, { gate: blocked, busy: false,
+                                              onClick: () => {} });
+
+  assert.match(markup, /disabled=""/);
+  assert.ok(!markup.includes("aria-disabled"),
+    "aria-disabled beside a real disabled attribute is two spellings of one fact");
+});
+
+test("f13-2: Save splits the same two reasons the same way", () => {
+  const busy = render(SaveButton, { busy: true, disabled: false, onClick: () => {} });
+  assert.ok(!busy.includes("disabled=\"\""), busy);
+  assert.match(busy, /aria-disabled="true"/);
+
+  // Nothing typed yet: there is nothing to save and nobody pressed anything.
+  const empty = render(SaveButton, { busy: false, disabled: true, onClick: () => {} });
+  assert.match(empty, /disabled=""/);
+  assert.ok(!empty.includes("aria-disabled"), empty);
+});
+
+test("f13-2: an aria-disabled button is still clickable, so the click is guarded", () => {
+  // That is the whole cost of the pattern: the browser stops enforcing the refusal, so
+  // the component has to. A second press mid-request would send a second POST — and the
+  // simulation's own answer to that is "[sim] NOT COVERED: a second materialize".
+  const pressed: string[] = [];
+  let prevented = 0;
+  const event = { preventDefault: () => { prevented += 1; } } as any;
+
+  busyClickGuard(true, () => pressed.push("sent"))(event);
+  assert.deepEqual(pressed, [], "the request in flight was joined by a second one");
+  assert.equal(prevented, 1);
+
+  busyClickGuard(false, () => pressed.push("sent"))(event);
+  assert.deepEqual(pressed, ["sent"], "…and an idle button still works");
+  assert.equal(prevented, 1);
+});
+
+test("f13-2: the busy styling is unchanged by the swap", () => {
+  // R11-UX-F5's pin, re-asserted through the new arrangement: whichever attribute carries
+  // the refusal, a control that cannot be used must not look pressable.
+  const ready = { disabled: false, label: "Materialize manifest", title: "" };
+  const style = (markup: string) => markup.match(/style="([^"]*)"/)![1];
+
+  assert.equal(
+    style(render(MaterializeControl, { gate: ready, busy: true, onClick: () => {} })),
+    style(render(MaterializeControl, {
+      gate: { disabled: true, label: "⛔ Blocked", title: "t" }, busy: false,
+      onClick: () => {} })));
 });
