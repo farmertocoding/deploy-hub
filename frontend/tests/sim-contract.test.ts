@@ -327,3 +327,143 @@ test("r9: every readiness/wizard pair a reviewer can reach parses against its sc
       `${state}/s${siteId}: ${JSON.stringify((parsedWizard as any).error?.issues)}`);
   }
 });
+
+// ── R11-Q2: the payloads a TRANSITION produces were parsed by nothing ─────────
+//
+// Every walk above reads the fixtures the way a screen looks at them ON ARRIVAL: GET the
+// list, GET a report, GET a wizard. Four payloads in sim.js are only reachable after the
+// operator does something — STAGING_WIZARD_ANSWERED (after the PATCH),
+// STAGING_MANIFEST/CLEAN_PROJECT_ANSWERED (after that site's POST), CLEAN_PROJECT_AFTER
+// and EDGE_PROJECT_AFTER (the list re-read a 201 triggers) — and no test in this file
+// had ever asked a fixture for them. `"kind": 42` in the answered wizard's question list,
+// or a project row with its `scanned_at` deleted, went through all 76 tests green.
+//
+// So the r8-4 walk is DRIVEN as well as read: perform each transition through the
+// fixtures the way SiteWizard performs it, and re-parse everything the client re-reads
+// afterwards. `parseEveryRead` is the whole surface in one place, so a state that starts
+// answering a path differently after a POST is covered without a new list here.
+//
+// THE 409 BODIES ARE NOT PARSED HERE, and that is a gap with a reason rather than an
+// oversight: `MaterializeRefused.as_dict()` has no serializer and therefore no generated
+// schema, so there is nothing to parse them against. What holds them honest is the
+// d012 walk above (every refusal item names a check the report reports) and the
+// structural assertions in wizard-flow.test.ts. A schema for the refusal shape is a
+// backend change — the serializer is the source of truth — not something to hand-write
+// here, which is the §4b rule this whole file exists under.
+
+const READS: Array<[string, "ProjectSummary" | "Readiness" | "WizardState"]> = [
+  ["v1/projects/", "ProjectSummary"],
+  ["v1/projects/1/readiness/", "Readiness"],
+  ["v1/projects/2/readiness/", "Readiness"],
+  ["v1/projects/3/readiness/", "Readiness"],
+  ["v1/projects/4/readiness/", "Readiness"],
+  ["v1/sites/1/wizard/", "WizardState"],
+  ["v1/sites/2/wizard/", "WizardState"],
+  ["v1/sites/3/wizard/", "WizardState"],
+  ["v1/sites/4/wizard/", "WizardState"],
+  ["v1/sites/5/wizard/", "WizardState"],
+];
+
+async function parseEveryRead(state: string, when: string) {
+  for (const [path, schema] of READS) {
+    const { status, data } = await (SIM_FIXTURES[state] as any)(path);
+    // A state that declines to answer a route says so with a status, and a refusal is
+    // not a payload — `degraded`'s 503 is the sim refusing, not the server's shape.
+    if (status !== 200) continue;
+    const rows = path === "v1/projects/" ? data : [data];
+    for (const row of rows) {
+      const parsed = (schemas as any)[schema].safeParse(row);
+      assert.ok(parsed.success,
+        `${state} ${when}: ${path} drifted from ${schema} — ` +
+        JSON.stringify((parsed as any).error?.issues));
+    }
+  }
+}
+
+test("r11-q2: live — every payload each transition produces parses against its schema",
+  async () => {
+    const live = SIM_FIXTURES.live as any;
+    live.reset();
+    await parseEveryRead("live", "before any transition");
+
+    // The PATCH. §4.5: a PATCH answers with the full wizard state, same serializer as
+    // the GET — so the response itself is a payload, not only the re-read behind it.
+    const patched = await live("v1/sites/4/wizard/",
+                               { "site.domain": "staging.takko.market" }, "PATCH");
+    assert.equal(patched.status, 200);
+    let parsed = schemas.WizardState.safeParse(patched.data);
+    assert.ok(parsed.success,
+      `the PATCH response drifted: ${JSON.stringify((parsed as any).error?.issues)}`);
+    await parseEveryRead("live", "after the PATCH");
+
+    // The three POSTs that can succeed, each followed by the re-reads a 201 triggers
+    // (`materializeOutcome`: reloadWizard + refreshProject).
+    // ORDER IS LOAD-BEARING: takko's row is captured at three points in one linear
+    // generator session — none materialized, prod materialized, then prod AND staging —
+    // so prod's 201 before staging's is what makes CLEAN_PROJECT_AFTER the row the list
+    // serves at all. The other way round it is skipped, and the payload this walk exists
+    // to reach is never asked for.
+    const posts: Array<[number, any]> = [
+      [1, {}], [4, {}], [3, { confirm_warnings: true }],
+    ];
+    for (const [site, body] of posts) {
+      const created = await live(`v1/sites/${site}/manifest/`, body);
+      assert.equal(created.status, 201, `site ${site} did not materialize`);
+      parsed = schemas.Manifest.safeParse(created.data);
+      assert.ok(parsed.success,
+        `site ${site}'s manifest drifted: ` +
+        JSON.stringify((parsed as any).error?.issues));
+      await parseEveryRead("live", `after site ${site}'s 201`);
+    }
+  });
+
+test("r11-q2: stale — the payloads the 409 converges on parse too", async () => {
+  const stale = SIM_FIXTURES.stale as any;
+  stale.reset();
+  await parseEveryRead("stale", "before the refusal");
+
+  const refused = await stale("v1/sites/1/manifest/", {});
+  assert.equal(refused.status, 409);
+  // Every GET moves to the re-scanned truth after this, which is the whole state — and
+  // until now the LIST it moves to (RESCANNED_PROJECT) was parsed by nothing.
+  await parseEveryRead("stale", "after the refusal");
+});
+
+test("r11-q2: the walk covers every constant a transition can produce", async () => {
+  // The scope, asserted rather than trusted — the R10-A2 lesson one file over. A payload
+  // reachable only after a transition, and not produced by any transition driven above,
+  // is a payload this walk cannot see; naming them here means the next one is either
+  // covered or is a failing test.
+  const source = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../src/sim.js", import.meta.url), "utf-8"));
+  const declared = [...source.matchAll(/^const ([A-Z0-9_]+) = \{/gm)].map((m) => m[1]);
+  const postTransition = declared.filter((name) =>
+    /_AFTER$|_ANSWERED$|^STAGING_MANIFEST$|^STAGING_WIZARD_ANSWERED$/.test(name));
+
+  assert.deepEqual(postTransition.sort(), [
+    "CLEAN_PROJECT_AFTER", "CLEAN_PROJECT_ANSWERED", "EDGE_PROJECT_AFTER",
+    "STAGING_MANIFEST", "STAGING_WIZARD_ANSWERED",
+  ], "a post-transition payload was added — drive it in the walk above");
+
+  // …and each one really is served by the driven sequence, rather than merely declared.
+  const live = SIM_FIXTURES.live as any;
+  live.reset();
+  const seen = new Set<string>();
+  const record = (label: string, data: any) => seen.add(label + JSON.stringify(data));
+
+  record("list", (await live("v1/projects/")).data);          // CLEAN_PROJECT + EDGE
+  await live("v1/sites/4/wizard/", { "site.domain": "staging.takko.market" }, "PATCH");
+  record("wizard4", (await live("v1/sites/4/wizard/")).data);  // STAGING_WIZARD_ANSWERED
+  await live("v1/sites/1/manifest/", {});
+  record("list", (await live("v1/projects/")).data);           // CLEAN_PROJECT_AFTER
+  record("manifest4", (await live("v1/sites/4/manifest/", {})).data);  // STAGING_MANIFEST
+  record("list", (await live("v1/projects/")).data);           // CLEAN_PROJECT_ANSWERED
+  await live("v1/sites/3/manifest/", { confirm_warnings: true });
+  record("list", (await live("v1/projects/")).data);           // EDGE_PROJECT_AFTER
+
+  // FOUR distinct list payloads, one per row capture the generator recorded. A `live`
+  // that stopped remembering a 201 would collapse them into one, which is the R10-UX-F2
+  // defect and the reason the AFTER rows exist.
+  assert.equal([...seen].filter((s) => s.startsWith("list")).length, 4,
+    "the list stopped moving after a 201 — the AFTER rows are unreachable again");
+});
