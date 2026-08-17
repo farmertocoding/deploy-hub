@@ -72,7 +72,46 @@ export function materializeGate(state) {
     .filter((item) => !(item.awaiting_acceptance || []).length);
   if (blockerProblems.length && !hard.length)
     return { disabled: true, label: "Answer required", title };
+  // Round-9 item 3. A refusal made ENTIRELY of things the operator types into this form
+  // is not a blocked deploy, and the ⛔ glyph — which everywhere else on this screen means
+  // a blocker-tier finding in the report — said it was. Every clean project met that
+  // label before anyone typed the domain: a repository with nothing wrong with it,
+  // announced as blocked. Both codes here refuse for the same reason and clear the same
+  // way, in this form, with no re-scan and no change to the tree.
+  //
+  // Named codes rather than "no blockers_present": `scan_required` also arrives without
+  // one and is NOT answerable here, so a fallback arm would mislabel it. A code this
+  // list has not met keeps the conservative label, which is the safe direction.
+  if (blocking.length && blocking.every((p) => ANSWERABLE_REFUSALS.has(p.code)))
+    return { disabled: true, label: "Answers needed", title };
   return { disabled: true, label: "⛔ Blocked", title };
+}
+
+const ANSWERABLE_REFUSALS = new Set(["answers_missing", "answers_need_reentry"]);
+
+// R9-4: what the client does with the response, as a named thing rather than three
+// branches inside an async handler — the same argument `materializeGate` was extracted
+// under, and the same test file looks at both.
+//
+// THE 409 BRANCH USED TO RE-READ NOTHING. It set a message; `onChanged` fired only on
+// 201. So a refusal that exists precisely BECAUSE the server's state is not what this
+// screen is showing left the screen showing it: in ?sim=stale, a refusal naming a
+// committed Stripe key under a panel reading "✓ No findings", with the button still
+// enabled. A 409 here is the server telling the client its copy is stale, and the only
+// correct response to that is to go and read the current one.
+//
+// A 500 or a dead socket re-reads nothing on purpose: the server said nothing about this
+// site's state, so there is nothing to converge ON, and a refetch would either loop or
+// paper over the error with a spinner.
+export function materializeOutcome(status, data) {
+  if (status === 201)
+    return { msg: { ok: true, text: `Manifest v${data.version} created.` },
+             reloadWizard: true, refreshProject: true };
+  if (status === 409)
+    return { msg: { problems: data.problems || [data] },
+             reloadWizard: true, refreshProject: true };
+  return { msg: { ok: false, text: data.detail || `HTTP ${status}` },
+           reloadWizard: false, refreshProject: false };
 }
 
 function Stamp({ at }) {
@@ -84,22 +123,33 @@ export default function ReadinessScreen() {
   const [projects, setProjects] = useState(undefined); // undefined = loading
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
+  // R9-4: bumped when a write (or a refusal) means the panel's report is out of date.
+  // A prop rather than a call, because the panel owns its own fetch.
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const load = () => {
+  // `quiet` re-reads WITHOUT emptying the screen first. The loud version is right on
+  // first paint and on Retry — there is nothing to show, so show the spinner — and wrong
+  // after a materialize: it unmounts the wizard, and with it the refusal the operator is
+  // reading and the answers they have typed. The refusal that triggers the re-read would
+  // be the first thing destroyed by it.
+  const load = ({ quiet = false } = {}) => {
     setError("");
-    setProjects(undefined);
+    if (!quiet) setProjects(undefined);
     api("v1/projects/").then(({ status, data }) => {
       if (status === 200) setProjects(data);
       else setError(data.detail || `Could not load projects (HTTP ${status})`);
     });
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
+
+  // What a site's wizard calls when the server's answer means this screen is stale.
+  const refresh = () => { load({ quiet: true }); setRefreshKey((k) => k + 1); };
 
   if (error)
     return (
       <div style={{ padding: 16 }}>
         <p style={{ color: "#ff7b72" }}>{error}</p>
-        <button style={box} onClick={load}>Retry</button>
+        <button style={box} onClick={() => load()}>Retry</button>
       </div>
     );
   if (projects === undefined) return <p style={{ padding: 16 }}>Loading projects…</p>;
@@ -142,23 +192,30 @@ export default function ReadinessScreen() {
         ))}
       </div>
       {selected != null && <ReadinessPanel projectId={selected}
-        project={projects.find((p) => p.id === selected)} onChanged={load} />}
+        project={projects.find((p) => p.id === selected)}
+        refreshKey={refreshKey} onChanged={refresh} />}
     </div>
   );
 }
 
-function ReadinessPanel({ projectId, project, onChanged }) {
+function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
   const [report, setReport] = useState(undefined);
   const [error, setError] = useState("");
 
+  // Selecting a different project empties the panel; a refresh of the SAME project does
+  // not (R9-4). Two effects because they are two events: the first is "this is a
+  // different thing now, show nothing until it arrives", the second is "read it again",
+  // and a refresh that cleared the report would take the wizard and its refusal with it.
+  useEffect(() => { setReport(undefined); setError(""); }, [projectId]);
   useEffect(() => {
-    setReport(undefined);
-    setError("");
+    let current = true;
     api(`v1/projects/${projectId}/readiness/`).then(({ status, data }) => {
-      if (status === 200) setReport(data);
+      if (!current) return;   // a slow response for a project the operator left
+      if (status === 200) { setReport(data); setError(""); }
       else setError(data.detail || `Could not load report (HTTP ${status})`);
     });
-  }, [projectId]);
+    return () => { current = false; };
+  }, [projectId, refreshKey]);
 
   if (error) return <p style={{ color: "#ff7b72" }}>{error}</p>;
   if (report === undefined) return <p>Loading report…</p>;
@@ -219,9 +276,12 @@ function SiteWizard({ site, onChanged }) {
     const { status, data } = await api(`v1/sites/${site.id}/manifest/`,
       { confirm_warnings: ack });
     setBusy(false);
-    if (status === 201) { setMsg({ ok: true, text: `Manifest v${data.version} created.` }); onChanged(); }
-    else if (status === 409) setMsg({ problems: data.problems || [data] });
-    else setMsg({ ok: false, text: data.detail || `HTTP ${status}` });
+    const outcome = materializeOutcome(status, data);
+    setMsg(outcome.msg);
+    // Both re-reads are quiet: the message above stays put while the screen underneath
+    // it catches up with the server (R9-4).
+    if (outcome.reloadWizard) load();
+    if (outcome.refreshProject) onChanged();
   }
 
   if (!open)
@@ -282,6 +342,10 @@ function SiteWizard({ site, onChanged }) {
                 <li key={j}>{it.prompt || it.title || it.id}</li>)}</ul>}
             </li>))}
           </ul>
+          {/* Said once, here, because the panel above visibly changes under the
+              operator when this happens and an unexplained change is its own defect. */}
+          <p style={{ color: "#8b949e" }}>The report and this form were re-read from the
+            server after this answer, so what you see above is its current state.</p>
         </div>
       )}
     </div>

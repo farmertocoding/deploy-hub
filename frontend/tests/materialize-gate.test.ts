@@ -34,7 +34,12 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { materializeGate } from "../src/Readiness.jsx";
+import { materializeGate, materializeOutcome } from "../src/Readiness.jsx";
+import { SIM_FIXTURES } from "../src/sim.js";
+
+// window shim: sim.js is a browser module, and two tests below drive the real §F8
+// fixtures through the same two functions the screen calls.
+(globalThis as any).window = { location: { search: "" } };
 
 const CONFIRM = "scanner.test_material.frontend-scripts-drill--a38574e34e643d90";
 const CONFIRM_PROMPT =
@@ -185,4 +190,143 @@ test("r8-1: no client module authors a refusal string the server already sends",
       `${name} spells out a refusal the server sends — take the tooltip from state.blocking`);
     assert.ok(!/readiness report has blockers/.test(src), `${name}: same`);
   }
+});
+
+// ── round-9 item 3: the arm between "go" and "⛔ Blocked" ──────────────────────
+//
+// `preflight` refuses a fresh site for one reason: nobody has typed the domain. That is
+// EVERY clean project's first screen, and the gate called it "⛔ Blocked" — the glyph
+// this UI reserves for a blocker-tier finding, on a project whose report has none. The
+// operator is told the repository is in trouble when the form is simply empty.
+//
+// `answers_need_reentry` joins it: preflight emits that when a stored plaintext answer
+// has been reclassified as a secret and scrubbed, and the operator's action is the same
+// one — type it here. Neither refusal is about the code, and neither survives a re-scan.
+const REENTRY_DETAIL =
+  "these values are now handled as secrets and must be entered again; the previously " +
+  "stored plaintext has been deleted and should be rotated at the source";
+
+test("r9-3: an unanswered question is not a blocker, and does not wear the glyph", () => {
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [{ code: "answers_missing", detail: MISSING_DETAIL,
+                 items: [{ id: "site.domain", prompt: "Public domain for this site" }] }],
+  });
+  assert.equal(gate.disabled, true);
+  assert.equal(gate.label, "Answers needed");
+  assert.ok(!gate.label.includes("⛔"),
+    "the blocker glyph on a project with no blocker is the finding");
+  assert.equal(gate.title, MISSING_DETAIL);
+});
+
+test("r9-3: a scrubbed answer is the same kind of refusal", () => {
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [
+      { code: "answers_need_reentry", detail: REENTRY_DETAIL,
+        items: [{ id: "django.env.DB_PASSWORD", prompt: "Value for DB_PASSWORD" }] },
+      { code: "answers_missing", detail: MISSING_DETAIL,
+        items: [{ id: "site.domain", prompt: "Public domain for this site" }] },
+    ],
+  });
+  assert.equal(gate.label, "Answers needed");
+  assert.equal(gate.title, `${REENTRY_DETAIL} · ${MISSING_DETAIL}`);
+});
+
+test("r9-3: one blocker beside the missing answer and it is Blocked again", () => {
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [
+      { code: "blockers_present", detail: PLAIN_DETAIL, items: HARD_ITEMS },
+      { code: "answers_missing", detail: MISSING_DETAIL,
+        items: [{ id: "site.domain", prompt: "Public domain for this site" }] },
+    ],
+  });
+  assert.equal(gate.label, "⛔ Blocked");
+});
+
+test("r9-3: an unknown refusal code is still Blocked — the arm is not a fallback", () => {
+  // `scan_required` is not something the operator answers in this form, and neither is
+  // whatever the next code turns out to be. The new arm names its two codes; anything
+  // else keeps the conservative label.
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [{ code: "scan_required", detail: "not scanned", items: [] }],
+  });
+  assert.equal(gate.label, "⛔ Blocked");
+});
+
+test("r9-3: the real fixture for that screen renders the new arm", async () => {
+  // takko/staging out of ?sim=live: a real `_state()` run on a clean project's fresh
+  // site (scripts_dev/sim_fixture_payloads.py), not a payload written to suit this test.
+  const { data } = await (SIM_FIXTURES.live as any)("v1/sites/4/wizard/");
+  assert.deepEqual(data.blocking.map((p: any) => p.code), ["answers_missing"]);
+  assert.equal(materializeGate(data).label, "Answers needed");
+});
+
+// ── round-9 item 4: what the client does with a 409 ───────────────────────────
+//
+// The 409 branch set a message and re-read nothing. In ?sim=stale that left the operator
+// under a refusal naming a committed Stripe key, above a panel reading "✓ No findings"
+// and a Materialize button still enabled — the screen contradicting itself, with the
+// server's answer already in hand. `onChanged` fired only on 201, so neither the report
+// nor the project list nor the wizard state was re-read.
+//
+// The decision is a pure function for the same reason `materializeGate` is: what the
+// client does with a response is reviewable if you can call it.
+
+test("r9-4: a 409 sends the client back to the server, not just to a message", () => {
+  const body = {
+    code: "blockers_present", detail: PLAIN_DETAIL, items: HARD_ITEMS,
+    problems: [{ code: "blockers_present", detail: PLAIN_DETAIL, items: HARD_ITEMS }],
+  };
+  const outcome = materializeOutcome(409, body);
+  assert.deepEqual(outcome.msg.problems, body.problems);
+  assert.equal(outcome.reloadWizard, true, "the wizard state that said go is stale");
+  assert.equal(outcome.refreshProject, true, "…and so is the report above it");
+});
+
+test("r9-4: a 409 with no problems list still shows the one reason it carries", () => {
+  const outcome = materializeOutcome(409, { code: "scan_required", detail: "no scan" });
+  assert.deepEqual(outcome.msg.problems, [{ code: "scan_required", detail: "no scan" }]);
+  assert.equal(outcome.reloadWizard, true);
+});
+
+test("r9-4: a 201 re-reads too — the site now has a manifest it did not have", () => {
+  const outcome = materializeOutcome(201, { version: 4 });
+  assert.equal(outcome.msg.ok, true);
+  assert.match(outcome.msg.text, /v4/);
+  assert.equal(outcome.reloadWizard, true);
+  assert.equal(outcome.refreshProject, true);
+});
+
+test("r9-4: a 500 or a dead socket re-reads NOTHING", () => {
+  // The server said nothing about this site's state, so there is nothing to converge on
+  // and a refetch loop is the only thing a retry here could add.
+  for (const [status, data] of [[500, { detail: "boom" }], [0, { detail: "offline" }]]) {
+    const outcome = materializeOutcome(status as number, data as any);
+    assert.equal(outcome.msg.ok, false);
+    assert.equal(outcome.reloadWizard, false);
+    assert.equal(outcome.refreshProject, false);
+  }
+});
+
+test("r9-4: driving ?sim=stale through both functions converges the screen", async () => {
+  // The whole finding in six lines: the gate says go, the POST refuses, the client
+  // re-reads because the outcome says to, and the gate that said go now says Blocked in
+  // the server's own words.
+  const stale = SIM_FIXTURES.stale as any;
+  stale.reset();
+  const before = await stale("v1/sites/1/wizard/");
+  assert.equal(materializeGate(before.data).disabled, false);
+
+  const { status, data } = await stale("v1/sites/1/manifest/", { confirm_warnings: false });
+  const outcome = materializeOutcome(status, data);
+  assert.equal(outcome.reloadWizard, true);
+
+  const after = await stale("v1/sites/1/wizard/");   // what reloadWizard makes the UI do
+  const gate = materializeGate(after.data);
+  assert.equal(gate.disabled, true);
+  assert.equal(gate.label, "⛔ Blocked");
+  assert.equal(gate.title, data.problems[0].detail);
 });
