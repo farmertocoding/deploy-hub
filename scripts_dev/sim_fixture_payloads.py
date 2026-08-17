@@ -29,7 +29,10 @@ produces (projects 1-4, sites 1-5) are the ids sim.js routes on.
 import datetime
 import json
 import os
+import pathlib
 import sys
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
 
 import django
 
