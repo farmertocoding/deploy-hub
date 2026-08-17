@@ -551,3 +551,125 @@ def test_the_dependency_pins_are_the_repos_pin_files_not_a_typed_list():
     # derivation — a derivation that is right today and a finding that names two files
     # are two different claims.
     assert {"requirements.txt", "requirements-dev.txt"} <= set(expected)
+
+
+# ── R9-B: the verdict was a denylist, so an unknown status scored green ────────
+
+@pytest.fixture
+def gate(tmp_path, monkeypatch):
+    """`mutation_gate.main` with the run, the cache and the waivers stubbed out.
+
+    Same stubs as the two verdict tests above, hoisted so the R9-B cases can drive the
+    verdict directly: a realistic `CompletedProcess` (`mutation_gate.subprocess` IS the
+    stdlib module, and `mutation_scope._git_ignored` calls `run` too), a `mutants/`
+    pointed at a directory that does not exist so no test can delete the real cache, and
+    no waivers unless a case sets some.
+    """
+    import mutation_gate
+
+    monkeypatch.setattr(mutation_gate.subprocess, "run",
+                        lambda *a, **kw: subprocess.CompletedProcess(a, 0, stdout="",
+                                                                    stderr=""))
+    monkeypatch.setattr(mutation_gate, "MUTANTS", tmp_path / "mutants")
+    monkeypatch.setattr(mutation_gate, "FINGERPRINT", tmp_path / "mutants/.fingerprint")
+    monkeypatch.setattr(mutation_gate, "_waived_mutants", lambda: (set(), []))
+
+    def results(mapping):
+        monkeypatch.setattr(
+            mutation_gate, "_results",
+            lambda: {k: (v, "wizard/materialize.py") for k, v in mapping.items()})
+
+    mutation_gate.results = results
+    return mutation_gate
+
+
+@pytest.mark.parametrize("status", [
+    # mutmut 3.7.0's own `status_by_exit_code` table, minus the two that pass. The three
+    # in the middle are the finding: none of them was in the old FAILING tuple, so each
+    # scored green.
+    "survived", "no tests", "suspicious", "segfault",
+    "not checked", "check was interrupted by user", "skipped",
+    "caught by type check",
+    # …and one that is in no table at all. THIS is the property the fix is about: the
+    # gate must fail on a status it has never heard of, because the alternative is a
+    # mutmut upgrade adding a name and this gate scoring it green in silence.
+    "invented by a future mutmut",
+])
+def test_issue_r9_b_every_status_that_is_not_killed_or_timeout_fails(gate, status):
+    """R9-B. `FAILING = ("survived", "no tests", "suspicious", "segfault")` was a
+    DENYLIST: a mutant whose status was not one of those four passed, and mutmut 3.7.0
+    has four more — `not checked`, `check was interrupted by user`, `skipped` and
+    `caught by type check` — every one of which means the tests did not demonstrate
+    anything about that mutant.
+
+    A denylist of statuses is the same defect as a hand-typed scope list (R4-12) one
+    layer down: it is right until the tool it mirrors changes, and it fails open.
+    """
+    gate.results({"m1": "killed", "m2": status})
+    assert gate.main([]) == 1, status
+
+
+def test_issue_r9_b_only_killed_and_timeout_pass(gate):
+    """The other side of the allowlist, so the fix cannot be "fail on everything".
+
+    `timeout` stays green for the reason the module docstring has always given: the
+    per-mutant clock in `[tool.mutmut]` exists so a mutant that makes the code loop
+    forever does not hang the gate, and being killed by that clock is the clock working.
+    """
+    gate.results({"m1": "killed", "m2": "timeout"})
+    assert gate.main([]) == 0
+
+
+def test_issue_r9_b_a_filtered_run_cannot_report_green(gate, capsys):
+    """The reviewer's demonstration, as a unit. Verbatim:
+
+        $ python scripts_dev/mutation_gate.py <the 8 waived mutant ids>
+        mutation gate: 710 mutants — not checked=702, survived=8, waived=8
+        mutation gate: no surviving mutants
+        $ echo $?
+        0
+
+    `main` passed its argv straight to `mutmut run`, so naming a handful of mutants ran
+    only those and left every other mutant `not checked` — a status the old denylist did
+    not fail on. Exit 0, on a run that tested 8 of 710 mutants and eight of them were the
+    waived ones.
+
+    Two independent things now stop it, because either alone would leave the other
+    half open: the gate refuses argv at all (there is no supported way to scope this
+    run — that rule is already in the Makefile recipe's comment, it just was not
+    enforced anywhere), and `not checked` fails on its own account, which covers a
+    partial run that arrives by any other route.
+    """
+    gate.results({"m1": "killed"})   # a result set that would otherwise score green
+    assert gate.main(["wizard.materialize.x__apply_answers__mutmut_17"]) == 2
+    assert "refus" in capsys.readouterr().err.lower()
+
+
+def test_issue_r9_b_a_waiver_excuses_a_survivor_and_nothing_else(gate, monkeypatch):
+    """The hole the demonstration went through, closed at the waiver end too.
+
+    A waiver's claim is "this mutant SURVIVES and is provably equivalent" — that is what
+    every line in WAIVERS.md says and what the gate's docstring describes. So a waiver
+    excuses exactly `survived`. With the allowlist alone, a waived mutant that came back
+    `not checked` would have been skipped by `name not in waived` and never reached the
+    failure list: the eight ids in the demonstration are waived ones, which is not a
+    coincidence.
+    """
+    monkeypatch.setattr(gate, "_waived_mutants", lambda: ({"m2"}, []))
+
+    gate.results({"m1": "killed", "m2": "survived"})
+    assert gate.main([]) == 0
+
+    gate.results({"m1": "killed", "m2": "not checked"})
+    assert gate.main([]) == 1, "a waiver excused a mutant that was never tested"
+
+    gate.results({"m1": "killed", "m2": "killed"})
+    assert gate.main([]) == 1, "a spent waiver passed"
+
+
+def test_issue_r9_b_the_passing_set_is_the_whole_verdict(gate):
+    """There is no second list. Spelled as an assertion because the fix's entire content
+    is that the gate's judgement is stated once, positively, and read from `PASSING`."""
+    assert gate.PASSING == ("killed", "timeout")
+    assert not hasattr(gate, "FAILING"), \
+        "the denylist is back; two lists of statuses is the R9-B defect"

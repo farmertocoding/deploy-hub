@@ -7,18 +7,40 @@ Makefile's own self-defense preamble was written against. So the verdict is comp
 here, from mutmut's own per-mutant result file, and this process's exit status IS the
 gate's.
 
-WHAT COUNTS AS A FAILURE, and it is deliberately more than "survived" (spec §4's
+WHAT COUNTS AS A PASS — and it is an ALLOWLIST, which is the whole of R9-B (spec §4's
 zero-survivor policy, read for its intent rather than its one word):
 
-  * `survived`  — the mutation the tests could not see. The finding this gate exists for.
-  * `no tests`  — no test in the derived selection executes that function at all. A
-                  mutant nobody ran is not a mutant that passed, and counting it as
-                  anything but a failure is how a gate quietly stops covering a module.
-  * `suspicious`/`segfault` — an exit status mutmut cannot classify. Unknown is not green.
+  * `killed`   — a test saw the mutation. The only outcome that demonstrates anything.
+  * `timeout`  — the mutant makes the code loop forever and the per-mutant clock in
+                 `[tool.mutmut]` killed it, which is that clock working. Printed in the
+                 summary so a rising count stays visible.
 
-`timeout` is NOT a failure: a mutant that makes the code loop forever is killed by the
-clock, and the per-mutant timeout in `[tool.mutmut]` exists precisely so it does not hang
-the gate. It is printed in the summary so a rising count is visible.
+EVERYTHING ELSE FAILS, including a status this file has never heard of. That sentence
+used to read the other way round — a `FAILING` tuple of `survived`, `no tests`,
+`suspicious`, `segfault`, and anything outside it passed — and mutmut 3.7.0's own
+`status_by_exit_code` table carries four more names than that tuple knew about:
+`not checked`, `check was interrupted by user`, `skipped`, `caught by type check`. Every
+one of them means the tests demonstrated nothing about that mutant, and every one of
+them scored green.
+
+A denylist of statuses is R4-12's hand-typed list one layer down: correct until the tool
+it mirrors changes, and wrong in the direction that reports a gate as passing. The
+allowlist is wrong in the other direction — a future mutmut status that IS a kill would
+fail this gate until someone adds it, loudly, in a diff.
+
+NO FILTERED RUNS. `main` refuses argv outright. `mutmut run` takes mutant-name arguments
+and tests only those, leaving every other mutant `not checked`, and with the old denylist
+that was a one-command green:
+
+    $ python scripts_dev/mutation_gate.py <the eight waived mutant ids>
+    mutation gate: 710 mutants — not checked=702, survived=8, waived=8
+    mutation gate: no surviving mutants        # exit 0
+
+The Makefile recipe already says the gate takes "NO SCOPE AND NO FLAGS", for the reason
+that a scope spelled at the call site is the second copy that drifts; that was a comment
+and is now the behaviour. The `not checked` failure above is the independent half: a
+partial run that arrives by some other route — an interrupted run, a crash mid-sweep —
+cannot report green either.
 
 OUTPUT (spec §5): every failing mutant is one line — id, file, and the exact
 `mutmut show <id>` command that prints its diff — so a survivor entering a round becomes
@@ -53,8 +75,16 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 MUTANTS = REPO / "mutants"
 FINGERPRINT = MUTANTS / ".gate-fingerprint"
 
-# Statuses that fail the gate, and the one that does not. See the module docstring.
-FAILING = ("survived", "no tests", "suspicious", "segfault")
+# The gate's entire verdict, stated once and positively. Anything not in here fails —
+# see the module docstring for why this direction and not the other.
+PASSING = ("killed", "timeout")
+
+# The one status a WAIVER may excuse. A waiver's claim is "this mutant survives and is
+# provably equivalent"; it is not a claim about a mutant that was never tested. Without
+# this the allowlist still had the demonstration's hole in it — the eight ids named on
+# that command line were the waived ones, and `name not in waived` would have skipped
+# them whatever `not checked` meant.
+WAIVABLE = ("survived",)
 
 
 def _fingerprint(root=None):
@@ -161,6 +191,21 @@ def _waived_mutants():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv:
+        # R9-B. `mutmut run <mutant name> …` tests only the named mutants and leaves the
+        # rest `not checked`, which the old denylist scored green — eight arguments and
+        # this gate reported a clean sweep of 710 mutants it had not run. There is no
+        # supported way to scope this gate (the recipe's own comment says so), so there
+        # is nothing to pass through, and a refusal is the only reading of an argument
+        # that cannot be wrong. Exit 2, distinct from the 1 a real survivor earns: this
+        # is the gate declining to run, not a verdict.
+        print(f"mutation gate: refusing to run with arguments {argv} — `mutmut run` "
+              f"takes mutant names and tests ONLY those, leaving every other mutant "
+              f"unchecked, which is a partial run wearing a full run's exit status. "
+              f"Scope, test selection and per-mutant timeout live in [tool.mutmut] in "
+              f"pyproject.toml, once. Run `make mutation` with no arguments.",
+              file=sys.stderr)
+        return 2
     env = dict(os.environ)
     # The conformance plugin in tests/conftest.py writes a run report next to the tests
     # it ran. Inside the `mutants/` copy that is a report of a mutated run, and nothing
@@ -198,7 +243,8 @@ def main(argv=None):
 
     failures = sorted((name, status, path)
                       for name, (status, path) in results.items()
-                      if status in FAILING and name not in waived)
+                      if status not in PASSING
+                      and not (name in waived and status in WAIVABLE))
 
     # A waiver for a mutant that is not surviving is a judgement nobody re-made.
     for name in sorted(waived):
@@ -206,7 +252,7 @@ def main(argv=None):
             waiver_problems.append(
                 f"WAIVERS.md waives {name}, which is not a mutant of the configured "
                 f"scope any more — the waiver outlived the code it excused")
-        elif results[name][0] not in FAILING:
+        elif results[name][0] in PASSING:
             waiver_problems.append(
                 f"WAIVERS.md waives {name}, which is now '{results[name][0]}' — the "
                 f"waiver is spent; delete the line")
@@ -228,10 +274,13 @@ def main(argv=None):
         return 1
 
     if run.returncode != 0:
-        print(f"mutation gate: no surviving mutants, but `mutmut run` exited "
-              f"{run.returncode}", file=sys.stderr)
+        print(f"mutation gate: every mutant killed or timed out, but `mutmut run` "
+              f"exited {run.returncode}", file=sys.stderr)
         return run.returncode
-    print("mutation gate: no surviving mutants")
+    # Not "no surviving mutants" any more, and the wording is part of the fix: that
+    # sentence is what the filtered run printed over 702 mutants it never tested. What
+    # the gate can now claim is what it checked.
+    print("mutation gate: every mutant was killed or timed out")
     return 0
 
 
