@@ -1144,3 +1144,133 @@ def test_issue_r10_a5_the_payload_keys_are_the_endpoints_own(project):
     assert READINESS_KEYS == ("blockers", "warnings", "advice", "pending_sandbox")
     for key in READINESS_KEYS:
         assert body[key], f"{key} is not a key of the payload this endpoint returns"
+
+
+# ── R11-A1: the project row, spelled once ─────────────────────────────────────
+#
+# R10-A5 extracted `readiness_body` because the fixture harness re-implemented the
+# readiness endpoint. The row endpoint next to it was the same arrangement one screen
+# over: `ProjectListView.get` composes the project row inline, and
+# `scripts_dev/sim_fixture_payloads.py::build.project_row` composes it again — the file
+# whose whole job is proving that `frontend/src/sim.js` is what these endpoints return.
+#
+# And this pair had ALREADY DIVERGED, which is what makes it a finding rather than a
+# tidiness note. The harness pinned `.order_by("pk")` on the sites; the view iterated
+# `project.sites.all()`, and `Site` declares no `Meta.ordering` — so the order of the
+# sites under a project row was whatever the database felt like returning, in a UI list
+# an operator picks a site out of. The tier tuple was restated too, four strings that
+# `READINESS_TIERS` already spells.
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r11_a1_the_project_row_wire_output_is_unchanged(auth_client):
+    """The pin the refactor had to survive: the exact row, key for key, for a project
+    with one check of every tier and two sites, one of which has materialized.
+
+    Written against the endpoint rather than against the extracted function on purpose —
+    this is the wire, and it is what a fixture regenerated through the harness is going
+    to be compared with.
+    """
+    from wizard.views import READINESS_TIERS
+
+    project = Project.objects.create(
+        name="rowpin", slug="rowpin", git_url="https://github.com/o/r.git",
+        scan_report=make_report(checks=[
+            {"id": "b", "tier": "blocker", "title": "B"},
+            {"id": "w", "tier": "warning", "title": "W"},
+            {"id": "a", "tier": "advice", "title": "A"},
+            {"id": "s", "tier": "pending_sandbox", "title": "S"},
+            {"id": "o", "tier": "ok", "title": "O"},
+        ]))
+    first = Site.objects.create(project=project, name="prod", domain="p.example.com")
+    Site.objects.create(project=project, name="staging")
+
+    row = next(p for p in auth_client.get("/api/v1/projects/").json()
+               if p["slug"] == "rowpin")
+
+    assert sorted(row) == ["id", "name", "scanned_at", "sites", "slug", "tiers"]
+    assert tuple(row["tiers"]) == READINESS_TIERS, (
+        "the row's tier counts are the tier tuple the readiness payload groups by, in "
+        "its order — a second spelling here is four strings that can disagree")
+    assert row["tiers"] == {"blocker": 1, "warning": 1, "advice": 1,
+                            "pending_sandbox": 1}
+    assert row["sites"] == [
+        {"id": first.pk, "name": "prod", "domain": "p.example.com",
+         "latest_manifest_version": None, "manifest_current": None},
+        {"id": first.pk + 1, "name": "staging", "domain": "",
+         "latest_manifest_version": None, "manifest_current": None},
+    ]
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r11_a1_the_view_returns_the_shared_row_body(auth_client, monkeypatch):
+    """…and it returns it by CALLING the shared function, which is the claim a second
+    copy in the view would silently break. The same patch-the-seam pin R10-A5 put on
+    `readiness_body`: an equivalence test passes while there are two implementations
+    that happen to agree, and this one does not."""
+    from wizard import views
+
+    Project.objects.create(name="callme", slug="callme",
+                           git_url="https://github.com/o/r.git", scan_report={})
+    monkeypatch.setattr(views, "project_row_body", lambda project: {"sentinel": True})
+
+    assert auth_client.get("/api/v1/projects/").json() == [{"sentinel": True}]
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r11_a1_sites_are_listed_in_a_pinned_order(auth_client):
+    """THE DIVERGENCE, made reproducible.
+
+    `Site` has no `Meta.ordering`, so `project.sites.all()` carries no ORDER BY and the
+    row's site list was the database's choice — stable on SQLite today, and not a
+    promise anywhere. The harness had `.order_by("pk")`; the view had nothing; the two
+    agreed only because nothing had made them disagree yet.
+
+    A prefetch carrying the opposite order is how a caller can hand the body its sites
+    in another sequence WITHOUT changing the database — which is exactly what a future
+    `Meta.ordering`, a different backend, or a `prefetch_related(Prefetch(...))` added
+    for an unrelated reason would do. The row must come out in pk order regardless.
+    """
+    from django.db.models import Prefetch
+
+    from wizard.views import project_row_body
+
+    project = Project.objects.create(name="ordered", slug="ordered",
+                                     git_url="https://github.com/o/r.git",
+                                     scan_report={})
+    ids = [Site.objects.create(project=project, name=f"s{i}").pk for i in range(4)]
+
+    reversed_prefetch = (Project.objects
+                         .prefetch_related(Prefetch("sites",
+                                                    queryset=Site.objects.order_by("-pk")))
+                         .get(pk=project.pk))
+    assert [s.pk for s in reversed_prefetch.sites.all()] == sorted(ids, reverse=True)
+
+    assert [s["id"] for s in project_row_body(reversed_prefetch)["sites"]] == ids
+    row = next(p for p in auth_client.get("/api/v1/projects/").json()
+               if p["slug"] == "ordered")
+    assert [s["id"] for s in row["sites"]] == ids
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r11_a1_the_row_body_reads_the_current_report(auth_client):
+    """`manifest_current` is the one derived field in the row, and the extraction moved
+    the `report_hash` call with it. A frozen manifest is current until the scan moves."""
+    from wizard.views import project_row_body
+
+    report = make_report(checks=[{"id": "w1", "tier": "warning", "title": "w"}])
+    project = Project.objects.create(name="fresh", slug="fresh",
+                                     git_url="https://github.com/o/r.git",
+                                     scan_report=report)
+    site = Site.objects.create(project=project, name="prod")
+    service.set_answers(site, {"site.domain": "f.example.com"})
+    materialize(site, confirm_warnings=True)
+
+    assert project_row_body(project)["sites"][0]["manifest_current"] is True
+
+    moved = make_report(checks=[{"id": "w1", "tier": "warning", "title": "w"},
+                                {"id": "a1", "tier": "advice", "title": "a"}])
+    project.scan_report = moved
+    project.save()
+    project.refresh_from_db()
+
+    assert project_row_body(project)["sites"][0]["manifest_current"] is False

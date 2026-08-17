@@ -410,3 +410,106 @@ def test_issue_r10_a2_the_scan_stamp_is_spelled_once(tmp_path):
     for name, payload in sorted(live.items()):
         shown = json.loads(_sim_object_literal(SIM_JS.read_text(encoding="utf-8"), name))
         assert payload["scanned_at"] == shown["scanned_at"], name
+
+
+# ── R11-A3: the tree inventory, and the two programs that wrote it ────────────
+#
+# `sim_fixture_repos.__main__` had its own directory→dict mapping and wrote five trees
+# from it; `sim_fixture_payloads.build_trees` wrote the same five from its own table. Two
+# programs, one inventory, agreeing by inspection. And `build()` — the DB half that
+# produces every non-readiness payload in sim.js — wrote NOTHING: it derived
+# `/tmp/cleanrepo` and scanned whatever happened to be there.
+
+def test_issue_r11_a3_the_repo_builder_and_the_harness_write_the_same_trees(tmp_path):
+    """One inventory, and `write_all` is what both entry points call.
+
+    `sim_fixture_repos.TREES` is the spelling; `build_trees` translates its directory
+    names into sim.js constant names and adds nothing else.
+    """
+    harness = _harness()
+    from sim_fixture_repos import SUPPORT_TREES, TREES, write_all
+
+    by_directory = write_all(tmp_path / "direct")
+    assert set(by_directory) == set(TREES)
+
+    by_constant = harness.build_trees(tmp_path / "harness")
+    assert set(by_constant) == set(harness.SIM_REPORT_TREES)
+    for key, tree in harness.SIM_REPORT_TREES.items():
+        assert by_constant[key].name == tree.directory
+
+    # The same bytes on both paths — a second writer that dropped the symlinks, or the
+    # support tree, would be a fixture that differs from the one the operator builds.
+    for directory in TREES:
+        direct = (tmp_path / "direct" / directory)
+        if directory not in {t.directory for t in harness.SIM_REPORT_TREES.values()}:
+            assert directory in SUPPORT_TREES
+            continue
+        mirror = tmp_path / "harness" / directory
+        assert sorted(p.relative_to(direct).as_posix() for p in direct.rglob("*")) == \
+            sorted(p.relative_to(mirror).as_posix() for p in mirror.rglob("*"))
+
+
+def test_issue_r11_a3_every_written_tree_is_a_payload_tree_or_a_support_tree():
+    """The hole R10-BE-1 disclosed and left open, closed.
+
+    A new dict added to `sim_fixture_repos` and wired into `TREES` used to fire nothing
+    at all — nothing scanned that module for trees — so a fixture tree could exist,
+    be written on every run, and be compared against no payload by any gate. It is now
+    one of two named things: a tree some sim.js payload comes from, or a support tree
+    that carries no payload and says so.
+    """
+    harness = _harness()
+    from sim_fixture_repos import SUPPORT_TREES, TREES
+
+    payload_trees = {t.directory for t in harness.SIM_REPORT_TREES.values()}
+    assert payload_trees <= set(TREES), sorted(payload_trees - set(TREES))
+    assert set(SUPPORT_TREES) <= set(TREES), sorted(set(SUPPORT_TREES) - set(TREES))
+    assert set(TREES) == payload_trees | set(SUPPORT_TREES), (
+        "a tree is written on every run and named by neither inventory: "
+        f"{sorted(set(TREES) - payload_trees - set(SUPPORT_TREES))}")
+
+
+def test_issue_r11_a3_the_support_tree_is_written_before_the_tree_that_links_into_it(
+        tmp_path):
+    """`edgerepo`'s committed symlink resolves INTO `edge-neighbour`. Written the other
+    way round, the link points at nothing at the moment the scan reads it — and a broken
+    link is a DIFFERENT refusal, with different wording, from an escaping one. The
+    ordering used to be a property of two loops in `build_trees`; it is now a property of
+    `write_all`, which is what both entry points call.
+    """
+    from sim_fixture_repos import SUPPORT_TREES, write_all
+
+    roots = write_all(tmp_path)
+    link = roots["edgerepo"] / "packages/server/src/metrics.ts"
+
+    assert "edge-neighbour" in SUPPORT_TREES
+    assert link.is_symlink()
+    assert link.resolve().is_file(), (
+        "the link is dangling — the neighbour tree was written after the tree that "
+        "points at it")
+
+
+def test_issue_r11_a3_the_db_harness_scans_the_trees_it_writes(monkeypatch, tmp_path):
+    """`build()` derived `/tmp/cleanrepo` and scanned whatever was on disk there.
+
+    Asserted through the seam rather than by running the whole capture, which needs a
+    test database: `build` now calls `build_trees(base)` and reads the roots it returns,
+    so a stale `/tmp` cannot decide what sim.js's payloads say. If the call goes away,
+    the sentinel below is never asked for and this fails.
+    """
+    harness = _harness()
+    asked = []
+
+    def fake_build_trees(base):
+        asked.append(pathlib.Path(base))
+        raise _StopBuild
+
+    monkeypatch.setattr(harness, "build_trees", fake_build_trees)
+    with pytest.raises(_StopBuild):
+        harness.build(tmp_path)
+
+    assert asked == [tmp_path], "build() did not write the trees it is about to scan"
+
+
+class _StopBuild(Exception):
+    """Ends `build()` at the seam under test — everything after it needs a database."""

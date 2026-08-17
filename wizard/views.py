@@ -189,6 +189,63 @@ class ProjectSummarySerializer(serializers.Serializer):
     sites = SiteSummarySerializer(many=True)
 
 
+def project_row_body(project):
+    """`GET /api/v1/projects/`'s row for one project — tiers, sites, manifest currency.
+
+    R11-A1: THE ONE SPELLING of the row, on `readiness_body`'s precedent one screen
+    over. It was written twice — here, inline in `ProjectListView.get`, and in
+    `scripts_dev/sim_fixture_payloads.py`, the harness whose entire job is proving that
+    `frontend/src/sim.js` is what these endpoints return. A harness that re-implements
+    the endpoint proves sim.js matches a second implementation of it.
+
+    And the two had already drifted, in the field an operator uses: the harness ordered
+    the sites by pk and this did not.
+
+    Takes the PROJECT row rather than a report dict, unlike `readiness_body` — the
+    difference is real rather than an inconsistency. That function exists partly for the
+    DB-free half of the harness, which has a fresh `scanner.core.scan` result and no row
+    to hang it on; this one reads `project.sites` and each site's manifests, so a
+    database is not optional and pretending otherwise would mean passing in the very
+    lists that are the thing being derived.
+
+    WHERE THE SITE ORDERING LIVES, since the finding is that it lived in one caller and
+    not the other: here, applied to the MATERIALIZED list rather than to the queryset.
+    `Site` declares no `Meta.ordering`, so `project.sites.all()` carries no ORDER BY at
+    all and the sequence was the database's choice. The alternatives both leak:
+    `.order_by("pk")` on the related manager discards the caller's prefetch and pays a
+    query per project, and a `Prefetch` in the view below leaves every OTHER caller —
+    the fixture harness among them — silently unordered again, which is the shape of the
+    defect this is closing. Sorting the list the caller already has costs a sort of a
+    handful of rows, uses the prefetch cache, and holds for every caller. pk order is
+    creation order, which is the order the operator added the sites in.
+    """
+    from .materialize import report_hash
+
+    report = project.scan_report or {}
+    checks = report.get("checks", [])
+    current_hash = report_hash(report) if report else None
+    sites = []
+    for site in sorted(project.sites.all(), key=lambda s: s.pk):
+        latest = site.manifests.order_by("-version").first()
+        sites.append({
+            "id": site.pk, "name": site.name, "domain": site.domain,
+            "latest_manifest_version": latest.version if latest else None,
+            "manifest_current": (
+                None if latest is None or current_hash is None
+                else latest.scan_report_hash == current_hash),
+        })
+    return ProjectSummarySerializer({
+        "id": project.pk, "name": project.name, "slug": project.slug,
+        "scanned_at": project.scanned_at,
+        # READINESS_TIERS, not four strings restated. The same tuple the readiness
+        # payload groups by, in the same order, so a tier added there is counted here
+        # rather than silently missing from the list the operator reads first.
+        "tiers": {t: sum(1 for c in checks if c.get("tier") == t)
+                  for t in READINESS_TIERS},
+        "sites": sites,
+    }).data
+
+
 class ProjectListView(APIView):
     """What the readiness screen renders its left column from (F7-lite).
 
@@ -201,31 +258,10 @@ class ProjectListView(APIView):
 
     @extend_schema(responses={200: ProjectSummarySerializer(many=True)})
     def get(self, request):
-        from .materialize import report_hash
-
-        rows = []
-        for project in Project.objects.order_by("name").prefetch_related("sites"):
-            report = project.scan_report or {}
-            checks = report.get("checks", [])
-            current_hash = report_hash(report) if report else None
-            sites = []
-            for site in project.sites.all():
-                latest = site.manifests.order_by("-version").first()
-                sites.append({
-                    "id": site.pk, "name": site.name, "domain": site.domain,
-                    "latest_manifest_version": latest.version if latest else None,
-                    "manifest_current": (
-                        None if latest is None or current_hash is None
-                        else latest.scan_report_hash == current_hash),
-                })
-            rows.append({
-                "id": project.pk, "name": project.name, "slug": project.slug,
-                "scanned_at": project.scanned_at,
-                "tiers": {t: sum(1 for c in checks if c.get("tier") == t)
-                          for t in ("blocker", "warning", "advice", "pending_sandbox")},
-                "sites": sites,
-            })
-        return Response(ProjectSummarySerializer(rows, many=True).data)
+        return Response([
+            project_row_body(project)
+            for project in Project.objects.order_by("name").prefetch_related("sites")
+        ])
 
 
 class ReadinessView(APIView):

@@ -378,11 +378,46 @@ EDGE_LINKS = {
     "packages/server/src/metrics.ts": "../../../../edge-neighbour/shared-lib/src/metrics.ts",
 }
 
+# ── the tree inventory, spelled once (R11-A3) ─────────────────────────────────
+#
+# Which trees exist, what is in each, and which of them carry committed symlinks. It
+# lives HERE, in the module that owns the file contents, rather than in
+# `sim_fixture_payloads.SIM_REPORT_TREES`, which owns what that module owns: which sim.js
+# constant comes out of which tree and what stamp it was scanned at. Two tables, one fact
+# each, and the seam between them is the directory name.
+#
+# R11-A3 is what the other arrangement cost. The `__main__` below wrote five trees from
+# its own directory→dict mapping — a second copy of the inventory, in the file people run
+# by hand — while `build_trees` in the payload harness wrote the same five from
+# `SIM_REPORT_TREES`. The two agreed by inspection, which is the state every drift in
+# this repo has started from.
+TREES = {
+    "cleanrepo": (CLEAN, None),
+    "messyrepo": (MESSY, None),
+    "cleanrepo-rescanned": (CLEAN_RESCANNED, None),
+    "edge-neighbour": (NEIGHBOUR, None),
+    "edgerepo": (EDGE, EDGE_LINKS),
+}
+
+# Trees that carry no sim.js payload of their own, and that the trees which link INTO
+# them need to exist first: written second, `edgerepo`'s committed symlink would point at
+# nothing at the moment the scan reads it, and a broken link is a different refusal from
+# an escaping one.
+SUPPORT_TREES = ("edge-neighbour",)
+
+
+def write_all(base="/tmp"):
+    """Write every tree in `TREES` under `base`. -> `{directory name: root path}`.
+
+    `base` is a parameter so a test can build them under `tmp_path` instead of `/tmp`:
+    two runs racing on one hard-coded path is a flake, and `write` starts by `rmtree`-ing
+    its target.
+    """
+    base = pathlib.Path(base)
+    order = list(SUPPORT_TREES) + [n for n in TREES if n not in SUPPORT_TREES]
+    return {name: write(base / name, *TREES[name]) for name in order}
+
+
 if __name__ == "__main__":
-    write("/tmp/cleanrepo", CLEAN)
-    write("/tmp/messyrepo", MESSY)
-    write("/tmp/cleanrepo-rescanned", CLEAN_RESCANNED)
-    write("/tmp/edge-neighbour", NEIGHBOUR)
-    write("/tmp/edgerepo", EDGE, EDGE_LINKS)
-    print("built /tmp/cleanrepo, /tmp/messyrepo, /tmp/cleanrepo-rescanned, "
-          "/tmp/edge-neighbour and /tmp/edgerepo")
+    built = write_all()
+    print("built " + ", ".join(str(root) for root in sorted(built.values())))

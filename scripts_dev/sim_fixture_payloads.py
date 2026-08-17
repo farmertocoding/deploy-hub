@@ -8,8 +8,14 @@ against a fiction. Until this file existed the trees were reproducible and the h
 over them lived in a commit message, which is one copy-and-paste away from not being
 reproducible at all.
 
-    python scripts_dev/sim_fixture_repos.py
     python scripts_dev/sim_fixture_payloads.py > /tmp/fixtures.json
+
+R11-A3: that is the whole command. This module writes the trees it scans — through
+`sim_fixture_repos.write_all`, the same function `python scripts_dev/sim_fixture_repos.py`
+runs — so a regeneration cannot read a tree somebody edited, a tree from another branch,
+or a tree that is not there at all (which scans as an empty repository and produces a
+payload full of nothing). Running the repo builder first is still useful for looking at a
+tree by hand; it is no longer a step this depends on somebody having taken.
 
 The keys of that object are the constant names in `frontend/src/sim.js`; each value is
 spliced in as JSON (`json.dumps(indent=2)`) rather than retyped. To check the committed
@@ -59,38 +65,40 @@ RESCAN_AT = datetime.datetime(2026, 8, 12, 7, 20, tzinfo=UTC)
 
 
 class _Tree(NamedTuple):
-    """How one report-carrying sim.js payload's tree is built, and when it was scanned.
+    """Which `sim_fixture_repos` tree one report-carrying sim.js payload comes from, and
+    when it was scanned.
 
-    `files` and `links` are the dicts in `sim_fixture_repos`, REFERENCED rather than
-    named by string, and it is worth being exact about what that buys — an earlier
-    version of this docstring claimed a guard it does not have.
+    R11-A3: `directory` is the KEY INTO `sim_fixture_repos.TREES`, and the file contents
+    are no longer restated here. That module owns what is in each tree; this one owns
+    which payload comes out of it and what stamp it carries. The seam between the two
+    tables is this string, and it is worth being exact about what each mechanism catches
+    — an earlier version of this docstring claimed a guard it did not have.
 
-    WHAT ACTUALLY FIRES, both of them:
+    WHAT ACTUALLY FIRES, all three:
 
-      * a referenced dict RENAMED OR REMOVED in `sim_fixture_repos` is an
-        `AttributeError` while this module is being imported, which takes the harness
-        and the drift gate down together. Named by string it would have been a fixture
-        tree that quietly resolved to nothing.
+      * a directory RENAMED OR REMOVED in `sim_fixture_repos.TREES` is a `KeyError` out
+        of `build_trees` below, which takes the harness and the drift gate down
+        together. It used to be an `AttributeError` at import time, from referencing the
+        dicts directly; one step later, equally loud, and no longer at the cost of a
+        second copy of the contents.
       * a payload added to `frontend/src/sim.js` with no entry HERE is caught on the
         sim.js side, by
         `tests/test_simulation.py::test_issue_r10_a2_the_gate_covers_every_report_payload_sim_js_carries`
         — every `*_REPORT` constant the file declares must appear in the inventory, with
         `UNSCANNED_REPORT` the one exemption and exempted by name.
-
-    WHAT DOES NOT, stated so the next reader does not take the reference for a
-    completeness check: a NEW, unreferenced dict added to `sim_fixture_repos` and not
-    added here fires nothing at all. Nothing scans that module for trees, and a tree with
-    no sim.js payload has nothing to compare against — it becomes a finding the moment
-    someone gives it a payload, via the second mechanism above.
+      * a NEW tree added to `sim_fixture_repos.TREES` and named by neither this
+        inventory nor `SUPPORT_TREES` is caught by
+        `tests/test_simulation.py::test_issue_r11_a3_every_written_tree_is_a_payload_tree_or_a_support_tree`.
+        That is the hole R10-BE-1 disclosed and left open: under the old arrangement a
+        new unreferenced dict fired nothing at all, because nothing scanned that module
+        for trees. Now something does, and the answer is one of two named lists.
     """
 
     directory: str
-    files: dict
-    links: dict
     scanned_at: datetime.datetime
 
 
-# ── the tree inventory, spelled once (R10-A2) ─────────────────────────────────
+# ── which payload comes from which tree (R10-A2) ──────────────────────────────
 #
 # KEYED BY THE sim.js CONSTANT, like everything else this file emits. It used to be
 # keyed `project-1` / `project-2` in a table that listed exactly those two, so the
@@ -103,28 +111,15 @@ class _Tree(NamedTuple):
 # definitions, and `DateTimeField.to_representation` renders the datetime to exactly
 # that string anyway — so the copy bought nothing and could disagree.
 SIM_REPORT_TREES = {
-    "CLEAN_REPORT": _Tree("cleanrepo", fixture_repos.CLEAN, None, CLEAN_AT),
-    "MESSY_REPORT": _Tree("messyrepo", fixture_repos.MESSY, None, MESSY_AT),
-    "EDGE_REPORT": _Tree("edgerepo", fixture_repos.EDGE, fixture_repos.EDGE_LINKS,
-                         EDGE_AT),
-    "RESCANNED_REPORT": _Tree("cleanrepo-rescanned", fixture_repos.CLEAN_RESCANNED,
-                              None, RESCAN_AT),
+    "CLEAN_REPORT": _Tree("cleanrepo", CLEAN_AT),
+    "MESSY_REPORT": _Tree("messyrepo", MESSY_AT),
+    "EDGE_REPORT": _Tree("edgerepo", EDGE_AT),
+    "RESCANNED_REPORT": _Tree("cleanrepo-rescanned", RESCAN_AT),
 }
-
-# Written beside them and carrying no payload of its own: what the edge tree's committed
-# symlink points AT. Without it that link is BROKEN rather than ESCAPING, which is a
-# different refusal with different wording, so the containment finding under test would
-# quietly stop being the one the fixture claims.
-SIM_SUPPORT_TREES = {"edge-neighbour": fixture_repos.NEIGHBOUR}
 
 # UNSCANNED_REPORT is deliberately absent: `orders-api` has never been scanned, its
 # payload carries no checks and no tree exists to scan. A drift gate entry for it would
 # compare {} with {} forever.
-
-
-def tree_path(key, base="/tmp"):
-    """Where `key`'s tree lives — one derivation, so no caller types `/tmp/cleanrepo`."""
-    return str(pathlib.Path(base) / SIM_REPORT_TREES[key].directory)
 
 
 def as_json(data):
@@ -132,16 +127,25 @@ def as_json(data):
     return json.loads(json.dumps(data))
 
 
-def build():
+def build(base="/tmp"):
+    """Every sim.js payload, from a run over trees this function WRITES first.
+
+    R11-A3: `build_trees` is called here rather than assumed. It used to derive the
+    paths (`/tmp/cleanrepo`, …) and scan whatever was on disk at them, so the DB capture
+    ran off whatever the last invocation of `sim_fixture_repos` had left there — a tree
+    edited since, a tree from another branch, or no tree at all, which scans as an empty
+    repository and produces a payload full of nothing. The two halves of this file now
+    write the same trees the same way before reading them.
+    """
     from core.models import Project, Site
     from scanner import core as scanner_core
     from wizard import service as wizard_service
-    from wizard.materialize import MaterializeRefused, materialize, report_hash
+    from wizard.materialize import MaterializeRefused, materialize
     from wizard.views import (
         ManifestSerializer,
-        ProjectSummarySerializer,
         WizardStateSerializer,
         _state,
+        project_row_body,
         readiness_body,
     )
 
@@ -158,26 +162,15 @@ def build():
         return as_json(WizardStateSerializer(_state(site)).data)
 
     def project_row(project):
-        """ProjectListView.get's row for one project — tiers, sites, manifest currency."""
-        report = project.scan_report or {}
-        checks = report.get("checks", [])
-        current_hash = report_hash(report) if report else None
-        sites = []
-        for site in project.sites.all().order_by("pk"):
-            latest = site.manifests.order_by("-version").first()
-            sites.append({
-                "id": site.pk, "name": site.name, "domain": site.domain,
-                "latest_manifest_version": latest.version if latest else None,
-                "manifest_current": (None if latest is None or current_hash is None
-                                     else latest.scan_report_hash == current_hash),
-            })
-        return as_json(ProjectSummarySerializer({
-            "id": project.pk, "name": project.name, "slug": project.slug,
-            "scanned_at": project.scanned_at,
-            "tiers": {t: sum(1 for c in checks if c.get("tier") == t)
-                      for t in ("blocker", "warning", "advice", "pending_sandbox")},
-            "sites": sites,
-        }).data)
+        """`ProjectListView.get`'s row, against a project row rather than a request.
+
+        R11-A1: `project_row_body` IS the view's row. This used to re-implement it —
+        the tier tuple restated as four strings, the site loop written again — and the
+        two had already drifted where it shows: this half ordered the sites by pk and
+        the view did not, so the payload sim.js was reviewed against was ordered by a
+        rule the endpoint did not have.
+        """
+        return as_json(project_row_body(project))
 
     def post_manifest(site, *, confirm_warnings=False):
         """ManifestView.post: the 201 body or the 409 body, whichever really happens."""
@@ -194,11 +187,14 @@ def build():
             scan_report=scanner_core.scan(path) if scanned_at else {},
             scanned_at=scanned_at)
 
+    # The trees, written now, and the roots every scan below reads from.
+    roots = build_trees(base)
+
     out = {}
 
-    takko = project("takko", "takko", tree_path("CLEAN_REPORT"), CLEAN_AT)
-    legacy = project("legacy-shop", "legacy-shop", tree_path("MESSY_REPORT"), MESSY_AT)
-    edge = project("atlas-edge", "atlas-edge", tree_path("EDGE_REPORT"), EDGE_AT)
+    takko = project("takko", "takko", str(roots["CLEAN_REPORT"]), CLEAN_AT)
+    legacy = project("legacy-shop", "legacy-shop", str(roots["MESSY_REPORT"]), MESSY_AT)
+    edge = project("atlas-edge", "atlas-edge", str(roots["EDGE_REPORT"]), EDGE_AT)
     # Added and never scanned: the state `?sim=degraded` shows and `preflight` refuses
     # with `scan_required` before it reads anything else.
     orders = project("orders-api", "orders-api", "/tmp/not-scanned-yet", None)
@@ -260,7 +256,7 @@ def build():
     # correct row is v3 (the three materializes above, and no fourth) with
     # `manifest_current: false`, because the report under it moved.
     clean_report, clean_at = takko.scan_report, takko.scanned_at
-    takko.scan_report = scanner_core.scan(tree_path("RESCANNED_REPORT"))
+    takko.scan_report = scanner_core.scan(str(roots["RESCANNED_REPORT"]))
     takko.scanned_at = RESCAN_AT
     takko.save(update_fields=["scan_report", "scanned_at"])
 
@@ -353,8 +349,13 @@ def main(argv=None):
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# The `if __name__ == "__main__"` guard is at the BOTTOM of this file rather than here,
+# and R11-A3 is why: `build()` now calls `build_trees()`, which is defined in the section
+# below, and a guard that runs `main()` before the module has finished executing raises
+# `NameError: name 'build_trees' is not defined` — as a script, and only as a script,
+# with every test still green because a test imports the module whole. Found by running
+# the generator, which is the only thing that would have found it.
+
 
 # ── DB-free drift-gate entry points (merged from r9-backend-remedy) ─────────────
 #
@@ -418,20 +419,18 @@ def readiness_payload(root, scanned_at):
 def build_trees(base="/tmp"):
     """Write every fixture repo and return `{sim.js constant: root}`.
 
-    `base` is a parameter so a test can build them under `tmp_path` instead of `/tmp`:
-    two runs racing on one hard-coded path is a flake, and `sim_fixture_repos.write`
-    starts by `rmtree`-ing its target.
+    R11-A3: the writing is `sim_fixture_repos.write_all`, which is also what running
+    that module by hand does. It used to be a loop here over this module's own copy of
+    the contents, and a THIRD copy of the directory list sat in that module's
+    `__main__` — so `python scripts_dev/sim_fixture_repos.py` and this function were two
+    programs that wrote the same five trees and agreed by inspection.
 
-    The support trees go first. They carry no payload, and the edge tree's committed
-    symlink resolves INTO one of them — written second, the link would still point at
-    nothing at the moment the scan reads it, and a broken link is a different refusal
-    from an escaping one.
+    What is left here is the translation this module owns: directory name → sim.js
+    constant. A directory this inventory names and `TREES` does not is the `KeyError`
+    the `_Tree` docstring above promises.
     """
-    base = pathlib.Path(base)
-    for directory, files in SIM_SUPPORT_TREES.items():
-        fixture_repos.write(base / directory, files)
-    return {key: fixture_repos.write(base / tree.directory, tree.files, tree.links)
-            for key, tree in SIM_REPORT_TREES.items()}
+    roots = fixture_repos.write_all(base)
+    return {key: roots[tree.directory] for key, tree in SIM_REPORT_TREES.items()}
 
 
 def payloads(base="/tmp", keys=None):
@@ -455,3 +454,7 @@ def check_tiers(payload):
     return {check["id"]: check["tier"]
             for key in PAYLOAD_KEYS for check in payload.get(key, [])}
 
+
+
+if __name__ == "__main__":
+    sys.exit(main())
