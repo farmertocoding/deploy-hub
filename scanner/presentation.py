@@ -100,8 +100,32 @@ _BEYOND_C0 = (
     "\\u2060-\\u2064"    # word joiner + invisible operators
     "\\ufeff"            # BOM / zero-width no-break space
 )
-CONTROL_CLASS = _C0 + _BEYOND_C0
-TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0
+
+# R15-SEC-2: and the code points that are not characters at all.
+#
+# A POSIX filename is BYTES. `os.listdir` decodes them with `surrogateescape`, so any byte
+# that is not valid UTF-8 comes back as a lone surrogate in U+DC80-DCFF — 0x9b becomes
+# U+DC9B — and none of the ranges above describe them, because none of them describe a
+# character: they describe a byte that could not be decoded. The scanner carries them
+# faithfully, which is right. A terminal is where they have to stop.
+#
+# What they cost, end to end, through `python -m hub scan` over a repository carrying a
+# symlink named `csi\x9bmark.ts`:
+#
+#   * with a STRICT stdout (the default when the locale says UTF-8):
+#     `UnicodeEncodeError: 'utf-8' codec can't encode character '\udc9b'` — the scan
+#     completes and the CLI dies printing it. A repository that can add one file can stop
+#     the operator reading any report about itself, in text mode AND in `--json`;
+#   * with `PYTHONIOENCODING=utf-8:surrogateescape`: the byte goes back out as itself, and
+#     0x9b IS the 8-bit CSI — the C1 control the `\x80-\x9f` range above exists to escape,
+#     arriving by the one route that range cannot see.
+#
+# The same class, one range wider. `_escaped` prints U+DC9B as `\udc9b`, which is the
+# decoded spelling and maps back to the byte by subtracting 0xDC00 — so the operator can
+# still name the file, which is the whole rule: refusal, not repair.
+_SURROGATE_ESCAPES = "\\udc80-\\udcff"
+CONTROL_CLASS = _C0 + _BEYOND_C0 + _SURROGATE_ESCAPES
+TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0 + _SURROGATE_ESCAPES
 
 _CONTROL_RE = re.compile(f"[{CONTROL_CLASS}]")
 _TEXT_CONTROL_RE = re.compile(f"[{TEXT_CONTROL_CLASS}]")
@@ -141,6 +165,27 @@ def safe_text(value):
     through the detail line and through the refusal list both.
     """
     return _TEXT_CONTROL_RE.sub(_escaped, value)
+
+
+_SURROGATE_RE = re.compile(f"[{_SURROGATE_ESCAPES}]")
+
+
+def escape_surrogates(value):
+    r"""Undecodable bytes, as the `\uXXXX` escape both JSON and a person can read.
+
+    R15-SEC-2's other half. `json.dumps(..., ensure_ascii=False)` is the CLI's choice so a
+    Chinese path stays readable in `--json` output, and it emits a lone surrogate as
+    itself — which no UTF-8 stream can encode and which is not valid JSON text either (a
+    lone surrogate is not a Unicode scalar value). So `--json` died on the same filename
+    the text renderer died on, with the same `UnicodeEncodeError`.
+
+    This escapes ONLY the surrogate range, which is exactly what `ensure_ascii=True` would
+    have done for those code points and nothing else — every other character stays as
+    itself. `json.loads` reads `\udc9b` back to the same lone surrogate, so a consumer
+    receives what the scanner found; what changed is that the bytes on the wire are now
+    valid JSON, and encodable.
+    """
+    return _SURROGATE_RE.sub(_escaped, value)
 
 
 def text_block(value, indent=TEXT_INDENT):

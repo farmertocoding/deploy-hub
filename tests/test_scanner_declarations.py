@@ -1342,3 +1342,47 @@ def test_a_repeated_claim_is_skipped_without_dropping_the_ones_after_it(tmp_path
     assert len(loaded.accepted) == 3, loaded.problems
     assert ids == [_drill_confirm_id(),
                    _drill_confirm_id(path="frontend/scripts/qa")]
+
+
+# ── R15-SEC-2: the class widened, and this rule's set did not shrink ──────────
+
+def test_issue_r15_sec_2_the_refusal_set_only_grew():
+    """`_CONTROL_CHARS_RE` is compiled from `scanner.presentation.CONTROL_CLASS` (R15-SEC-1
+    put the set in one place). R15-SEC-2 widened that class by the `surrogateescape` range
+    for the CLI's sake — and a shared constant is exactly where a security rule gets
+    narrowed by somebody solving a different problem.
+
+    So: every code point this module refused before still is refused, the addition is
+    precisely U+DC80-DCFF, and nothing else moved. Computed over the whole code space
+    rather than sampled, because "which characters does this regex match" is a question
+    with an exact answer and a sample is how a range goes missing from the middle.
+    """
+    historical = declarations.re.compile(
+        "["
+        "\\x00-\\x1f\\x7f\\x80-\\x9f"
+        "\\u2028\\u2029\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069"
+        "\\u061c\\u2060-\\u2064\\ufeff"
+        "]")
+    every = "".join(map(chr, range(0x110000)))
+
+    before = set(historical.findall(every))
+    now = set(declarations._CONTROL_CHARS_RE.findall(every))
+
+    assert before < now, "the refusal set shrank"
+    assert now - before == {chr(cp) for cp in range(0xDC80, 0xDD00)}, (
+        "the class grew by something other than the surrogateescape range")
+
+
+def test_issue_r15_sec_2_a_declaration_carrying_an_undecodable_byte_is_still_refused():
+    """…and the widening is not only set arithmetic: `deployhub.yaml` is repo-controlled
+    text too, and a `reason` carrying an undecodable byte now meets the same refusal every
+    other control code point meets — the coordinates, and not one character of the value.
+    """
+    entry = {"path": "frontend/drill", "reason": "drill scripts \udc9b here"}
+
+    parsed, problem = declarations._read_entry(pathlib.Path("/nonexistent"), 0, entry)
+
+    assert parsed is None
+    assert "control character in its `reason`" in problem
+    assert "U+DC9B" in problem
+    assert "\udc9b" not in problem, "the refusal quoted the value it refused"

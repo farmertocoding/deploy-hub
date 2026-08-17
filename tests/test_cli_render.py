@@ -7,6 +7,9 @@ screen.
 """
 import json
 import os
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -14,6 +17,7 @@ from hub.__main__ import render_text
 from scanner import core, presentation
 from scanner.modules.fallbacks import _MAX_SKIPPED_REPORTED
 
+REPO = pathlib.Path(__file__).resolve().parent.parent
 LINK_COUNT = _MAX_SKIPPED_REPORTED + 4
 
 
@@ -322,3 +326,112 @@ def test_issue_r15_sec_1_the_escape_form_switches_at_the_byte_boundary():
     assert escaped("Ā") == "\\u0100"      # the first that is not
     assert escaped("​") == "\\u200b"
     assert escaped("﻿") == "\\ufeff"
+
+
+# ── R15-SEC-2: bytes that are not characters ─────────────────────────────────
+
+CSI_BYTE_NAME = b"csi\x9bmark.ts"          # a bare 0x9b: 8-bit CSI, invalid UTF-8
+
+
+def _undecodable_name_tree(tmp_path):
+    """A repo whose committed symlink is named with a byte no UTF-8 decoder accepts.
+
+    Built through `os.fsencode`, because the point is that a POSIX filename is BYTES and
+    this one is not text. Python reads it back as U+DC9B — `surrogateescape`'s spelling
+    for "byte 0x9b, undecodable" — and that is what the scan report carries.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    target = neighbour / "target.ts"
+    target.write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text(
+        'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
+    link = os.path.join(os.fsencode(str(root / "src")), CSI_BYTE_NAME)
+    os.symlink(os.path.relpath(os.fsencode(str(target)),
+                               os.fsencode(str(root / "src"))), link)
+    assert any("\udc9b" in name for name in os.listdir(root / "src"))
+    return root
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.parametrize("errors", ["strict", "surrogateescape"])
+@pytest.mark.parametrize("flag", [[], ["--json"]])
+def test_issue_r15_sec_2_an_undecodable_filename_cannot_take_the_cli_down(
+        tmp_path, errors, flag):
+    """R15-SEC-2, end to end through the entry point an operator actually runs.
+
+    `CONTROL_CLASS` covered every code point that IS a control character and none of the
+    code points that are not characters at all. A filename is bytes; `os.listdir` decodes
+    the undecodable ones with `surrogateescape` into U+DC80-DCFF, which no range in the
+    class described. Measured before the fix, on this tree:
+
+        strict  text  : UnicodeEncodeError: 'utf-8' codec can't encode character '\\udc9b'
+        strict  --json: UnicodeEncodeError: … (the same, by a different route)
+        surrogateescape text/--json: 2 lines carrying the raw 0x9b byte
+
+    Both halves are the finding. The first is a repository stopping an operator from
+    reading any report about it — the scan succeeds and the CLI dies printing it. The
+    second is 0x9b arriving intact, and 0x9b IS the 8-bit CSI: the C1 control the
+    `\\x80-\\x9f` range is escaped for, reaching the terminal by the one route that range
+    cannot see.
+
+    Run as a SUBPROCESS with `PYTHONIOENCODING` set, because the crash is in the encoder
+    on the way to the device and an in-process assertion about a string cannot see it.
+    """
+    root = _undecodable_name_tree(tmp_path)
+    env = {**os.environ, "PYTHONIOENCODING": f"utf-8:{errors}"}
+
+    result = subprocess.run([sys.executable, "-m", "hub", "scan", str(root), *flag],
+                            capture_output=True, cwd=str(REPO), env=env, timeout=180)
+
+    assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+    assert b"UnicodeEncodeError" not in result.stderr
+    assert b"\x9b" not in result.stdout, "the byte reached the terminal as itself"
+    assert b"\\udc9b" in result.stdout, (
+        "the file is named nowhere in a form the operator can act on")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r15_sec_2_the_json_body_is_still_what_the_scanner_found(tmp_path):
+    """…and `--json`'s consumer receives the same report, not a sanitized one.
+
+    `escape_surrogates` spells those code points the way `ensure_ascii=True` would have
+    and touches nothing else, so the bytes on the wire are valid JSON and `json.loads`
+    reads the lone surrogate back. A scanner that quietly repaired the name would be
+    lying about what it found.
+    """
+    root = _undecodable_name_tree(tmp_path)
+
+    result = subprocess.run([sys.executable, "-m", "hub", "scan", str(root), "--json"],
+                            capture_output=True, cwd=str(REPO), timeout=180)
+    report = json.loads(result.stdout.decode("utf-8"))
+
+    refused = [p for c in report["checks"] for p in (c.get("refused_paths") or [])]
+    assert any("\udc9b" in p for p in refused), refused
+    assert os.fsencode(refused[0]).endswith(CSI_BYTE_NAME), (
+        "the round trip does not name the file on disk")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r15_sec_2_the_json_escaper_touches_only_the_undecodable_bytes():
+    """`escape_surrogates` in process, and this test exists because of how the gate found
+    it missing.
+
+    The end-to-end cases above drive it through a SUBPROCESS — they have to, because the
+    failure they pin is an encoder crash on the way to a device. `make mutation` reported
+    all four mutants of this function as `no tests`: mutmut narrows per mutant using the
+    coverage it records in THIS process, and a subprocess is invisible to it. An
+    end-to-end test can prove the behaviour and still leave the function unmutated, which
+    is a gap in the gate rather than in the code — so the unit is asserted here as well.
+    """
+    assert presentation.escape_surrogates("plain") == "plain"
+    assert presentation.escape_surrogates("csi\udc9bmark.ts") == "csi\\udc9bmark.ts"
+    assert presentation.escape_surrogates("\udc80\udcff") == "\\udc80\\udcff"
+    # Everything else is left exactly as it is: the flag this repairs was chosen so a
+    # Chinese path stays readable in `--json`, and repairing more would undo that.
+    assert presentation.escape_surrogates("正體中文 · a\x1bb") == "正體中文 · a\x1bb"
+    assert json.loads(presentation.escape_surrogates(
+        json.dumps({"p": "csi\udc9bmark.ts"}, ensure_ascii=False))) == {
+            "p": "csi\udc9bmark.ts"}, "the consumer no longer receives what was found"

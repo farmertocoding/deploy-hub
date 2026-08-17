@@ -94,7 +94,14 @@ def main(argv=None):
         from scanner.core import scan
 
         report = scan(args.path)
-        print(json.dumps(report, indent=2, ensure_ascii=False) if args.json
+        # R15-SEC-2: `ensure_ascii=False` keeps a Chinese path readable in `--json`, and
+        # it also emits an undecodable byte's lone surrogate as itself — which no UTF-8
+        # stream can encode and which is not valid JSON text. `escape_surrogates` spells
+        # exactly those code points the way `ensure_ascii` would have, and leaves every
+        # other character alone; the text renderer sanitizes its own output on the way
+        # out. Neither path can be taken down by a filename any more.
+        print(presentation.escape_surrogates(
+                  json.dumps(report, indent=2, ensure_ascii=False)) if args.json
               else render_text(report))
         # Exit 1 on blockers — usable as a CI gate immediately.
         return 1 if report["summary"].get("blocker") else 0
