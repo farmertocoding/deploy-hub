@@ -212,6 +212,33 @@ export function MaterializeControl({ gate, busy, onClick }) {
   );
 }
 
+// R10-UX-F6: consent to a list, not to nothing.
+//
+// The checkbox rendered unconditionally. On takko/prod — a clean project with an empty
+// `state.warnings` — the operator was shown "I have read the warnings above and accept
+// them" with no warnings anywhere on the screen, and ticking it sent
+// `confirm_warnings: true` to a server that had asked for no such thing. A consent
+// control for an empty set is not a small cosmetic problem: it trains the operator to
+// tick it, which is the exact habit the one screen that DOES gate on it needs them not
+// to have.
+//
+// AND IT NAMES WHAT IS BEING ACCEPTED. "The warnings above" pointed at a report panel
+// that lists every tier; `state.warnings` is the server's own narrower list — the checks
+// `materialize` will refuse over — and those two are not the same set. The titles come
+// from the payload, so this composes no copy of its own (§4b).
+export function WarningsAck({ warnings, checked, onChange }) {
+  const items = warnings || [];
+  if (!items.length) return null;
+  return (
+    <label>
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      {" "}I have read {items.length === 1 ? "this warning" : `these ${items.length} warnings`}
+      {" "}and accept {items.length === 1 ? "it" : "them"}:{" "}
+      <span style={{ color: "#e3b341" }}>{items.map((w) => w.title).join("; ")}</span>
+    </label>
+  );
+}
+
 function Stamp({ at }) {
   if (!at) return <span style={{ color: "#8b949e" }}>never scanned</span>;
   return <span style={{ color: "#8b949e" }}>data as of {new Date(at).toLocaleString()}</span>;
@@ -410,8 +437,12 @@ function SiteWizard({ site, onChanged }) {
 
   async function materialize() {
     setBusy(true); setMsg(null);
+    // R10-UX-F6: no warnings, no consent — whatever `ack` happens to hold. The checkbox
+    // is not rendered in that case, so this can only differ after the server's warnings
+    // go away under an operator who already ticked it, and sending `true` there is
+    // confirming a set that no longer exists.
     const { status, data } = await api(`v1/sites/${site.id}/manifest/`,
-      { confirm_warnings: ack });
+      { confirm_warnings: !!state.warnings?.length && ack });
     setBusy(false);
     const outcome = materializeOutcome(status, data);
     setMsg(outcome.msg);
@@ -459,10 +490,8 @@ function SiteWizard({ site, onChanged }) {
       })}
       <button style={box} disabled={busy || !Object.keys(draft).length} onClick={save}>
         {busy ? "…" : "Save answers"}</button>{" "}
-      <label>
-        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-        {" "}I have read the warnings above and accept them
-      </label>{" "}
+      <WarningsAck warnings={state.warnings} checked={ack}
+        onChange={(e) => setAck(e.target.checked)} />{" "}
       <MaterializeControl gate={gate} busy={busy} onClick={materialize} />
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}

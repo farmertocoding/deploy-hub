@@ -15,7 +15,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Badge, CheckBody, MaterializeControl, ProjectRow, reportSummary } from "../src/Readiness.jsx";
+import { Badge, CheckBody, MaterializeControl, ProjectRow, WarningsAck, reportSummary }
+  from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -196,4 +197,42 @@ test("r10-ux-f1: the row renders each site's manifest currency", async () => {
       ? text.includes("no manifest yet")
       : text.includes(`manifest v${site.latest_manifest_version}`), text);
   }
+});
+
+// ── R10-UX-F6: consent to an empty set ───────────────────────────────────────
+//
+// The ack checkbox rendered whatever `state.warnings` held. On a clean project it read
+// "I have read the warnings above and accept them" with no warnings anywhere on screen,
+// and ticking it sent `confirm_warnings: true` to a server that had asked for nothing —
+// training the operator to tick it, which is precisely the habit the one screen that
+// DOES gate on it needs them not to have.
+
+test("r10-ux-f6: no warnings, no checkbox", async () => {
+  const { data: wizard } = await (SIM_FIXTURES.live as any)("v1/sites/1/wizard/");
+  assert.deepEqual(wizard.warnings, []);
+
+  assert.equal(render(WarningsAck, { warnings: wizard.warnings, checked: false }), "");
+});
+
+test("r10-ux-f6: with warnings, the checkbox names them", async () => {
+  // atlas-edge/prod: the only §F8 site that clears preflight and still carries
+  // warnings, which is the whole reason this control exists.
+  const { data: wizard } = await (SIM_FIXTURES.live as any)("v1/sites/3/wizard/");
+  assert.ok(wizard.warnings.length >= 1, JSON.stringify(wizard.warnings));
+
+  const text = visibleText(render(WarningsAck,
+    { warnings: wizard.warnings, checked: false }));
+
+  for (const w of wizard.warnings) {
+    assert.ok(text.includes(w.title), `${w.title} is not named beside the consent`);
+  }
+  assert.ok(text.includes("accept"), text);
+});
+
+test("r10-ux-f6: one warning is not addressed as several", () => {
+  const text = visibleText(render(WarningsAck, {
+    warnings: [{ id: "node-ts.symlinked-files", title: "Symlinked files were not read" }],
+    checked: false,
+  }));
+  assert.ok(text.includes("this warning") && text.includes("accept it"), text);
 });
