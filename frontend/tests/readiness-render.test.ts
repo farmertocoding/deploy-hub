@@ -21,6 +21,7 @@ import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
   busyClickGuard, questionFieldId, reportSummary, rowKeyHandler }
   from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
+import { CHECK_FIELDS, TIER_GATES } from "../src/api/presentation.js";
 
 (globalThis as any).window = { location: { search: "" } };
 
@@ -675,6 +676,19 @@ test("f13-2: Save splits the same two reasons the same way", () => {
   const empty = render(SaveButton, { busy: false, disabled: true, onClick: () => {} });
   assert.match(empty, /disabled=""/);
   assert.ok(!empty.includes("aria-disabled"), empty);
+
+  // QUALITY F-2: BOTH at once, which is the combination the rule is about and the one
+  // no test covered. `isWaiting(busy, refused)` is `!!busy && !refused` — with the second
+  // half dropped, a hard-disabled button would also claim `aria-disabled`, which is two
+  // spellings of one fact on an element that already cannot be focused. The `!!busy`
+  // mutant survives every other assertion in this file.
+  const both = render(SaveButton, { busy: true, disabled: true, onClick: () => {} });
+  assert.match(both, /disabled=""/);
+  assert.ok(!both.includes("aria-disabled"),
+    "aria-disabled beside a real disabled attribute says the same thing twice");
+  assert.match(both, /aria-busy="true"/,
+    "…and the request in flight is still announced, on the element that is dead for the "
+    + "other reason");
 });
 
 test("f13-2: an aria-disabled button is still clickable, so the click is guarded", () => {
@@ -705,4 +719,43 @@ test("f13-2: the busy styling is unchanged by the swap", () => {
     style(render(MaterializeControl, {
       gate: { disabled: true, label: "⛔ Blocked", title: "t" }, busy: false,
       onClick: () => {} })));
+});
+
+// ── R15-ARCH-1: the panel renders the shared model ──────────────────────────
+
+test("arch-1r: CheckBody is driven by the generated model, in its order", () => {
+  // The CLI reads `scanner/presentation.py`; this reads the file generated from it, and
+  // `make check-generated` fails on a stale copy. So the two renderers cannot disagree
+  // about which fields a check has, in what order, under what label — which is what four
+  // filings in three rounds were.
+  const markup = render(CheckBody, {
+    check: { tier: "warning", detail: "DETAIL", fix_hint: "HINT",
+             refused_paths: ["src/a.ts"] },
+  });
+  const text = visibleText(markup);
+
+  assert.deepEqual(CHECK_FIELDS.map((f: any) => f.key),
+                   ["detail", "refused_paths", "fix_hint"]);
+  const positions = ["DETAIL", "Did not read:", "src/a.ts", "Fix: HINT"]
+    .map((needle) => text.indexOf(needle));
+  assert.ok(positions.every((at) => at >= 0), text);
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions,
+    `the fields render out of the model's order: ${text}`);
+
+  // The labels are the model's, not this component's.
+  for (const field of CHECK_FIELDS as any[])
+    if (field.label) assert.ok(text.includes(field.label), field.label);
+});
+
+test("arch-1r: a tier gate added to the model is honoured here too", () => {
+  // `TIER_GATES` is empty today and that is a decision (fix hints render at every tier,
+  // in both media). The mechanism is live regardless, so the day a gate is declared it
+  // applies to both renderers rather than to whichever one somebody remembered.
+  assert.deepEqual(TIER_GATES, {}, "a gate landed — the CLI test says which and why");
+
+  const gated = { ...TIER_GATES, fix_hint: ["ok"] };
+  const shown = CHECK_FIELDS.filter((f: any) => !(gated[f.key] || []).includes("ok"))
+    .map((f: any) => f.key);
+  assert.deepEqual(shown, ["detail", "refused_paths"],
+    "the component reads the gate the same way this expression does");
 });

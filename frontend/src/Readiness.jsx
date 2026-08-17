@@ -13,6 +13,7 @@
 // D-012: no answer clears a blocker this phase.)
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
+import { CHECK_FIELDS, TIER_GATES } from "./api/presentation.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -295,21 +296,34 @@ const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0", overflowWrap: "anywh
 // match the guard would mean the screen hiding something the report contains, which is
 // the opposite direction from every finding this field exists because of.
 export function CheckBody({ check }) {
-  const refused = check.refused_paths || [];
+  // R15-ARCH-1: WHICH fields, in WHAT order, under WHICH label and hidden at WHICH tiers
+  // come from the generated model — the same declarations `hub/__main__.py` renders from,
+  // so this component and the CLI cannot disagree about what a check says without
+  // `make check-generated` going red. What stays here is how a BROWSER says it: the
+  // paragraph, the list, the colours, the wrap rule.
   return (
     <>
-      {check.detail && <p style={PRE_LINE}>{check.detail}</p>}
-      {!!refused.length && (
-        <div style={{ margin: "6px 0", color: "#e3b341" }}>
-          Did not read:
-          <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em",
-              overflowWrap: "anywhere" }}>
-            {refused.map((path) => <li key={path}>{path}</li>)}
-          </ul>
-        </div>
-      )}
-      {check.fix_hint &&
-        <p style={{ ...PRE_LINE, color: "#8b949e" }}>Fix: {check.fix_hint}</p>}
+      {CHECK_FIELDS.map((field) => {
+        if ((TIER_GATES[field.key] || []).includes(check.tier)) return null;
+        const value = check[field.key];
+        if (!value || (Array.isArray(value) && !value.length)) return null;
+        if (field.kind === "paths") {
+          return (
+            <div key={field.key} style={{ margin: "6px 0", color: "#e3b341" }}>
+              {field.label}
+              <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em",
+                  overflowWrap: "anywhere" }}>
+                {value.map((path) => <li key={path}>{path}</li>)}
+              </ul>
+            </div>
+          );
+        }
+        return (
+          <p key={field.key}
+            style={field.key === "fix_hint" ? { ...PRE_LINE, color: "#8b949e" } : PRE_LINE}>
+            {field.label ? `${field.label} ` : ""}{value}</p>
+        );
+      })}
     </>
   );
 }

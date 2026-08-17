@@ -19,6 +19,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 
 import gates
 import yaml
@@ -614,3 +615,58 @@ def test_issue_r7_9_the_declaration_module_is_a_sensitive_path():
     assert any(target.full_match(p) if hasattr(target, "full_match")
                else target.match(p) for p in patterns), (
         f"scanner/declarations.py is matched by no sensitive-path glob in {patterns}")
+
+
+# ── R15-ARCH-1: the presentation mirror, and the gate that keeps it current ───
+
+def test_issue_r15_arch_1_the_generated_presentation_mirror_is_current():
+    """`frontend/src/api/presentation.js` IS what the generator writes today.
+
+    The presentation model is declared once, in `scanner/presentation.py`, because that
+    is where `CheckResult` lives and where the CLI renderer reads it. The browser's copy
+    is generated into `frontend/src/api/`, which `make check-generated` already rewrites
+    and diffs — the mechanism the zod mirror has used since §4.5, so a stale copy is red
+    in CI with no new gate and no new rule to remember. This is the same check, in the
+    suite, so a stale mirror fails where a person is already looking.
+
+    THROUGH A SUBPROCESS, not an import, and the reason is a real one rather than style:
+    a test that imports the generator imports `scanner.presentation` with it, which puts
+    this file in the mutation gate's DERIVED test selection — and then the mutation
+    sandbox, which copies the Python packages and not `frontend/` or `scripts_dev/`,
+    fails on a test that has nothing to do with any mutant. Found by running the gate:
+    every mutant came back `not checked` because the selected tests could not import
+    `generate_presentation`.
+    """
+    committed = (REPO / "frontend" / "src" / "api" / "presentation.js").read_text("utf-8")
+    probe = ("import sys; sys.path.insert(0, 'scripts_dev'); "
+             "import generate_presentation; "
+             "sys.stdout.write(generate_presentation.render())")
+
+    result = subprocess.run([sys.executable, "-c", probe], cwd=str(REPO),
+                            capture_output=True, text=True, timeout=120)
+
+    assert result.returncode == 0, result.stderr
+    assert committed == result.stdout, (
+        "the generated presentation mirror is stale — run `make generate-client`")
+
+
+def test_issue_r15_arch_1_the_presentation_generator_refuses_arguments():
+    """The `mutation_gate.py` / `sim_fixture_payloads.py` precedent: a generator that
+    writes one whole file takes none, and an argument it silently ignored would be
+    somebody believing they had scoped it. Exit 2 — declining to run, not a verdict."""
+    result = subprocess.run(
+        [sys.executable, "scripts_dev/generate_presentation.py", "--only-labels"],
+        cwd=str(REPO), capture_output=True, text=True, timeout=120)
+
+    assert result.returncode == 2, result.stdout
+    assert "takes none" in result.stderr
+
+
+def test_issue_r15_arch_1_the_makefile_generates_the_mirror_with_the_client():
+    """…and the generation is wired to the target whose staleness gate covers that
+    directory. A generator nothing runs is a mirror that is stale from the next edit."""
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("generate-client:")[1].split("\ncheck-generated:")[0]
+
+    assert "scripts_dev/generate_presentation.py" in recipe
+    assert "git diff --exit-code frontend/src/api/" in makefile

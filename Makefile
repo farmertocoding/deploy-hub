@@ -93,6 +93,10 @@ PR_ONLY_GATES :=
 # Regenerate after any serializer change; check-generated asserts the mirror is not stale.
 generate-client:
 	python manage.py spectacular --file frontend/src/api/openapi.yaml --settings=hub.settings.dev
+	# R15-ARCH-1: the check presentation model, from scanner/presentation.py. Same
+	# directory and therefore the same staleness gate as the zod mirror below — a
+	# presentation decision made twice is what four filings in three rounds were.
+	python scripts_dev/generate_presentation.py
 	cd frontend && npx openapi-typescript src/api/openapi.yaml -o src/api/types.ts
 	cd frontend && npx openapi-zod-client src/api/openapi.yaml -o src/api/zod.ts \
 		-t node_modules/openapi-zod-client/src/templates/schemas-only.hbs --export-schemas

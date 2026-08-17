@@ -52,6 +52,13 @@ source_paths = [
     # security module whose tests pass under mutation is exactly that rot; R8-5 and
     # R8-12 both lived here.
     "scanner/declarations.py",
+    # R15-SEC-1. The presentation boundary: the control-character class and the two
+    # sanitizers that stand between a repo-controlled filename and a terminal that
+    # interprets what it is given. The class USED to live in `scanner/declarations.py`
+    # and was mutated as part of it; moving it to one spelling would have quietly taken a
+    # security-relevant transform out of this gate, so the module comes with it. That is
+    # a deliberate widening of the gate-bearing set, which is what this list is for.
+    "scanner/presentation.py",
 ]
 
 # Which tests run. mutmut narrows this PER MUTANT from the per-function coverage it
@@ -64,6 +71,7 @@ source_paths = [
 # these modules and the gate goes red until it is listed.
 pytest_add_cli_args_test_selection = [
     "tests/acceptance/test_phase_1.py",
+    "tests/test_cli_render.py",
     "tests/test_d012_out_of_phase_1.py",
     "tests/test_scanner_declarations.py",
     "tests/test_wizard.py",

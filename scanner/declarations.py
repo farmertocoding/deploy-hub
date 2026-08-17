@@ -65,6 +65,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from scanner import presentation
 from scanner.core import WizardQuestion
 
 DECLARATION_FILE = "deployhub.yaml"
@@ -115,20 +116,13 @@ DECLARATION_FILE = "deployhub.yaml"
 # in a new costume. What is refused is the set that rewrites LINES (the report is built
 # line by line) or reorders them (bidi), because those forge the scanner's own output;
 # a blank-looking letter in a reason is only a badly written reason.
-_CONTROL_CHARS_RE = re.compile(
-    "["
-    "\\x00-\\x1f"        # C0
-    "\\x7f"              # DEL
-    "\\x80-\\x9f"        # C1, incl. U+0085 NEL - the one PyYAML lets through
-    "\\u2028\\u2029"      # LINE / PARAGRAPH SEPARATOR
-    "\\u200b-\\u200f"     # zero-width space/joiners + LRM/RLM
-    "\\u202a-\\u202e"     # bidi embeddings and overrides
-    "\\u2066-\\u2069"     # bidi ISOLATES - the Trojan-Source family (CVE-2021-42574)
-    "\\u061c"            # ARABIC LETTER MARK
-    "\\u2060-\\u2064"     # word joiner + invisible operators
-    "\\ufeff"            # BOM / zero-width no-break space
-    "]"
-)
+#
+# R15-SEC-1 moved the SET to `scanner/presentation.py`, and left this comment where it
+# was written. The same class that refuses repo-controlled text here is the class a
+# presentation layer must escape before handing repo-controlled text to a terminal — one
+# set, two policies — and the ranges above are the documentation for both. What lives
+# there is the data; what lives here is this rule and the reasons for it.
+_CONTROL_CHARS_RE = re.compile(f"[{presentation.CONTROL_CLASS}]")
 # ── ROUND 7 (R7-3): the forgery class, a third way in ──────────────────────────
 #
 # Rounds 1 and 2 closed the structure BETWEEN lines — a `reason` that writes lines of

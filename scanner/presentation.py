@@ -1,0 +1,148 @@
+"""How a `CheckResult` is presented — declared once, for every medium that renders one.
+
+R15-ARCH-1. `hub/__main__.py::render_text` and `frontend/src/Readiness.jsx::CheckBody`
+are two renderers of one object, and they were maintained by hand against each other.
+Four filings in three rounds came out of the gap between them: the refusal list rendered
+in one and not the other (R12-ARCH-1), then rendered in one and truncated in the other
+(R14-ARCH-A), the fix hint gated to two tiers on one side and no tiers on the other, and
+the refusal label typed separately in each. Every one of them is the same defect — a
+presentation decision made twice — and the answer to a fact spelled twice is one spelling.
+
+WHAT THIS MODULE DECLARES, and it is deliberately the MODEL rather than the pixels:
+
+  * `CHECK_FIELDS` — which fields of a check are rendered, in what order, under what
+    label, and what kind of value each is (prose that may contain the server's own
+    newlines, or a list of repo-controlled paths);
+  * `TIER_GATES` — which of those fields are hidden at which tiers. It is empty, and that
+    emptiness is a decision this module records rather than an absence (see below);
+  * `TEXT_INDENT` — the continuation indent the text medium owes a multi-line value;
+  * the control-character class and the two sanitizers over it, because repo-controlled
+    text reaching a terminal is a security boundary and not a formatting question.
+
+HOW a paragraph wraps, what colour a label is, whether a list is `<li>` or an indented
+line — those stay with each renderer. The line is: if the two media could DISAGREE ABOUT
+WHAT THE REPORT SAYS, it belongs here; if they merely look different, it does not.
+
+WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
+— `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
+file. It imports nothing but `re`, so the CLI stays Django-free (that module's own
+docstring promises it), and nothing in the live scan path imports it: a report is data,
+and a medium is a medium.
+
+THE FRONTEND DOES NOT RETYPE THIS. `scripts_dev/generate_presentation.py` writes
+`frontend/src/api/presentation.js` from the declarations below, `make generate-client`
+runs it, and `make check-generated` fails on a stale copy — the same mechanism, the same
+gate and the same directory as the zod mirror. A hand-typed second copy is the disease
+this module is the treatment for.
+"""
+import re
+
+# ── the declared model ────────────────────────────────────────────────────────
+#
+# `title` is not here: both media render it as the check's own heading (a `<summary>`, a
+# line beginning with the tier's icon), which is a container decision rather than a field
+# in a body. `id`, `tier` and `execution` likewise.
+CHECK_FIELDS = (
+    {"key": "detail", "label": "", "kind": "prose"},
+    {"key": "refused_paths", "label": "Did not read:", "kind": "paths"},
+    {"key": "fix_hint", "label": "Fix:", "kind": "prose"},
+)
+
+# Fields hidden at some tiers. EMPTY, and R15-ARCH-1 decided it rather than found it:
+# `render_text` used to print `fix_hint` only for `blocker` and `warning` while
+# `CheckBody` printed it at every tier, so the CLI and the panel disagreed about what a
+# check says. Both now render it everywhere, and the direction is the UI's because the
+# gate was costing information nobody had decided to withhold:
+#
+#   * no `ok` check in this tree carries a `fix_hint` at all (measured: ten of ten on the
+#     clean fixture), so the "noise on the happy path" the gate might have been for does
+#     not exist;
+#   * every `pending_sandbox` check carries one, and it is the WHY of a deferred job
+#     ("lifecycle scripts are the §6.8 supply-chain surface", "builds execute project
+#     code") — the CLI operator was the one person who could not read it;
+#   * `advice` hints are remediation for findings the report chose not to block on, which
+#     is exactly where a hint is the whole value.
+#
+# A future gate goes here, in one place, and applies to both media at once.
+TIER_GATES = {}
+
+# What the text medium owes a value containing the server's own newlines: every line
+# after the first is indented to the first one's column, so a multi-line detail reads as
+# one block under its check instead of falling back to column zero and looking like a new
+# check. The DOM's equivalent is `white-space: pre-line` inside the check's own box, which
+# is why this is a text-medium constant and not a shared one.
+TEXT_INDENT = " " * 6
+
+# ── the control-character class (R15-SEC-1) ───────────────────────────────────
+#
+# ONE SPELLING, and this is its home. `scanner/declarations.py` compiled this class to
+# REFUSE repo-controlled text outright; the same class is what a presentation layer has to
+# escape before handing repo-controlled text to a terminal. Same set, two policies, and
+# the set is the thing that must not be written twice — the ranges and the reasoning for
+# each of them are in `declarations.py` beside the refusal that first needed them
+# (bidi overrides reorder rendered text, zero-width code points render as nothing, C0/C1
+# rewrite lines), and that comment is the documentation for this constant too.
+#
+# `_TEXT` is the same class minus U+000A. A newline in a PATH forges a line of the
+# report; a newline in a `detail` is the server's own paragraph break, which the text
+# renderer indents and the DOM honours. That is the entire difference between the two
+# sanitizers below.
+_C0 = "\\x00-\\x1f"
+_C0_EXCEPT_NEWLINE = "\\x00-\\x09\\x0b-\\x1f"
+_BEYOND_C0 = (
+    "\\x7f"              # DEL
+    "\\x80-\\x9f"        # C1, incl. U+0085 NEL
+    "\\u2028\\u2029"     # LINE / PARAGRAPH SEPARATOR
+    "\\u200b-\\u200f"    # zero-width space/joiners + LRM/RLM
+    "\\u202a-\\u202e"    # bidi embeddings and overrides
+    "\\u2066-\\u2069"    # bidi ISOLATES — the Trojan-Source family (CVE-2021-42574)
+    "\\u061c"            # ARABIC LETTER MARK
+    "\\u2060-\\u2064"    # word joiner + invisible operators
+    "\\ufeff"            # BOM / zero-width no-break space
+)
+CONTROL_CLASS = _C0 + _BEYOND_C0
+TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0
+
+_CONTROL_RE = re.compile(f"[{CONTROL_CLASS}]")
+_TEXT_CONTROL_RE = re.compile(f"[{TEXT_CONTROL_CLASS}]")
+
+
+def _escaped(match):
+    """One offending code point, as the escape a person can read and retype.
+
+    REFUSAL, NOT REPAIR, and the distinction matters here because the text IS the
+    finding's name: a path called `\\x1b[2J.ts` is a real file with a real name, and an
+    operator who has to go and delete it needs to be told what it is called. Stripping
+    the byte would name a file that does not exist; passing it through would let the
+    repository paint the terminal. So it is NAMED and never acted on — the same choice
+    `declarations` made when it quoted a refused value's coordinates instead of the value,
+    one step less severe because a check detail is not a section header.
+    """
+    code = ord(match.group())
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+
+def safe_path(value):
+    r"""A repo-controlled PATH, safe to print on a line of its own.
+
+    Every control code point is escaped, newline included: the refusal list is one path
+    per line, so a newline in a filename would forge an entry.
+    """
+    return _CONTROL_RE.sub(_escaped, value)
+
+
+def safe_text(value):
+    r"""Repo-controlled PROSE, safe to print, keeping the server's own line breaks.
+
+    `detail` and `fix_hint` are composed by the scanner and legitimately multi-line —
+    `core.secret-scan` sends fifteen `file:line` findings and two paragraphs of hint — but
+    the file names inside them come from the repository, which is how R15-SEC-1's escape
+    sequence arrived: a committed symlink named `\x1b]0;…\x07` reached the terminal raw,
+    through the detail line and through the refusal list both.
+    """
+    return _TEXT_CONTROL_RE.sub(_escaped, value)
+
+
+def text_block(value, indent=TEXT_INDENT):
+    """`value` sanitized for a terminal and indented onto its continuation lines."""
+    return safe_text(value).replace("\n", "\n" + indent)
