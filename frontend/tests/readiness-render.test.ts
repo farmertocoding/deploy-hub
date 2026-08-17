@@ -15,8 +15,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Badge, CheckBody, MaterializeControl, ProjectRow, WarningsAck, reportSummary }
-  from "../src/Readiness.jsx";
+import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow, WarningsAck,
+  reportSummary } from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -120,16 +120,21 @@ test("r9-8: singulars are unchanged", () => {
                                "⏳ 1 Deferred to sandbox"]);
 });
 
-test("r9-8: the aria-label is what the badge says", () => {
-  // It used to be the singular for every count — a screen reader heard "3 Blocker"
-  // while the screen read "3 Blockers", which is §F9's rule broken in the one direction
-  // that rule exists to prevent.
+test("r10-ux-f7: the badge has no aria-label — the text IS the label", () => {
+  // R9-8's version of this test asserted the aria-label EQUALLED the visible text,
+  // because it used to be the singular at every count ("3 Blocker" heard, "3 Blockers"
+  // read). Deriving one from the other stopped them disagreeing and left the real
+  // problem: on a plain <span> whose text already reads correctly, an aria-label is not
+  // a clarification, it REPLACES the text for the reader that uses it. Two spellings of
+  // one fact, which is §F9's rule broken in a quieter way; the fix for two spellings is
+  // one spelling.
   for (const tier of ["blocker", "warning", "advice", "pending_sandbox"]) {
     for (const n of [1, 2, 3]) {
       const markup = render(Badge, { tier, n });
-      const label = markup.match(/aria-label="([^"]*)"/)?.[1];
-      assert.equal(label, visibleText(markup).trim().replace(/^\S+\s/, ""),
-        `${tier} n=${n}: the label and the text disagree`);
+      assert.ok(!/aria-label/.test(markup), `${tier} n=${n}: ${markup}`);
+      // …and what remains still carries the count and the correctly-formed word, which
+      // is the property R9-8 was defending.
+      assert.match(visibleText(markup).trim(), new RegExp(`^\\S+ ${n} \\S`));
     }
   }
 });
@@ -235,4 +240,72 @@ test("r10-ux-f6: one warning is not addressed as several", () => {
     checked: false,
   }));
   assert.ok(text.includes("this warning") && text.includes("accept it"), text);
+});
+
+// ── R10-UX-F7 / F8: a refusal nobody is told about, worded for the wrong cause ─
+
+test("r10-ux-f7: the disabled button points at its own visible reason", () => {
+  const detail = "this project has not been scanned yet";
+  const markup = render(MaterializeControl, {
+    gate: { disabled: true, label: "Scan required", title: detail },
+    busy: false, onClick: () => {}, id: "site-5-materialize",
+  });
+
+  const describedBy = markup.match(/aria-describedby="([^"]*)"/)?.[1];
+  assert.ok(describedBy, "the reason is a paragraph after a button and nothing says so");
+  assert.ok(markup.includes(`id="${describedBy}"`),
+    "aria-describedby names an element that is not on the page");
+  // …and the reason it points AT is the server's sentence, still rendered visibly.
+  assert.ok(visibleText(markup).includes(detail));
+});
+
+test("r10-ux-f7: an enabled control describes nothing", () => {
+  const markup = render(MaterializeControl, {
+    gate: { disabled: false, label: "Materialize manifest", title: "" },
+    busy: false, onClick: () => {}, id: "site-1-materialize",
+  });
+  assert.ok(!/aria-describedby/.test(markup), markup);
+});
+
+test("r10-ux-f7: two sites' controls do not point at one reason", () => {
+  const gate = { disabled: true, label: "⛔ Blocked", title: "blockers present" };
+  const ids = ["site-1-materialize", "site-2-materialize"].map((id) =>
+    render(MaterializeControl, { gate, busy: false, onClick: () => {}, id })
+      .match(/aria-describedby="([^"]*)"/)?.[1]);
+
+  assert.equal(new Set(ids).size, 2,
+    "one id for every site's control points every button at the first one's reason");
+});
+
+test("r10-ux-f7: the outcome region is a live region that is always present", () => {
+  // Always present, not mounted with its message: screen readers announce CHANGES to an
+  // existing live region, so a region that appears carrying its text announces nothing.
+  const empty = render(OutcomeRegion, { msg: null });
+  assert.match(empty, /role="status"/);
+  assert.match(empty, /aria-live="polite"/);
+  assert.equal(visibleText(empty), "");
+
+  for (const msg of [{ ok: true, text: "Saved." },
+                     { ok: false, text: "site.domain: not a domain" },
+                     { problems: [{ code: "warnings_unconfirmed", detail: "d" }] }]) {
+    const markup = render(OutcomeRegion, { msg });
+    assert.match(markup, /role="status"/, JSON.stringify(msg));
+    assert.ok(visibleText(markup).length > 0, JSON.stringify(msg));
+  }
+});
+
+test("r10-ux-f8: the re-read sentence does not claim an answer was given", async () => {
+  // atlas-edge's real `warnings_unconfirmed` refusal: the operator pressed Materialize
+  // and answered nothing, and the panel told them the form had been re-read "after this
+  // answer".
+  const { status, data } = await (SIM_FIXTURES.live as any)("v1/sites/3/manifest/", {});
+  assert.equal(status, 409);
+  assert.equal(data.code, "warnings_unconfirmed");
+
+  const text = visibleText(render(OutcomeRegion,
+    { msg: { problems: data.problems || [data] } }));
+
+  assert.ok(text.includes("re-read from the server"), text);
+  assert.ok(!text.includes("after this answer"),
+    "this refusal is reachable with no answer given at all");
 });

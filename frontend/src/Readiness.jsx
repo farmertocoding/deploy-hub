@@ -34,13 +34,21 @@ export function Badge({ tier, n }) {
   const b = TIER_BADGE[tier];
   // Symbol + word + count: readable colorblind, greyscale, or by screen reader.
   //
-  // The aria-label is DERIVED from what is on screen rather than composed a second time.
-  // It used to be `${n} ${word}` — the singular at every count — so a screen reader heard
-  // "3 Blocker" while the screen read "3 Blockers": two renderings of one fact, which is
-  // the arrangement §F9 exists to forbid and the arrangement that lets them drift.
+  // R10-UX-F7 — NO aria-label, and the reason is the finding R9-8 half-fixed. That label
+  // used to be `${n} ${word}` — the singular at every count — so a screen reader heard
+  // "3 Blocker" while the screen read "3 Blockers". R9-8 derived the label from the
+  // visible text so the two could not disagree, which is right and does not go far
+  // enough: on a plain <span> whose text already reads "⛔ 3 Blockers", an aria-label is
+  // not a clarification, it is a SECOND rendering that REPLACES the first for the reader
+  // that uses it. Two spellings of one fact is the arrangement §F9 exists to forbid, and
+  // the fix for two spellings is one spelling.
+  //
+  // What is lost is the glyph's name, and it was never in the label anyway — the label
+  // began at the count. The word beside it ("Blockers") is the accessible name of the
+  // tier, in the text, for everyone.
   const text = `${n} ${n === 1 ? b.one : b.many}`;
   return (
-    <span style={{ color: b.color, marginRight: 10 }} aria-label={text}>
+    <span style={{ color: b.color, marginRight: 10 }}>
       {b.sym} {text}
     </span>
   );
@@ -200,14 +208,27 @@ export function reportSummary(report) {
 // The text is `gate.title`, which materializeGate takes verbatim from `state.blocking`,
 // so the §4b pin still holds — this renders the server's sentence in a second place, it
 // does not compose a new one. The `title=` stays for the pointer.
-export function MaterializeControl({ gate, busy, onClick }) {
+export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) {
+  // R10-UX-F7: the visible reason is WIRED to the button, not merely near it.
+  //
+  // R9-7 put the refusal on screen because `title=` on a disabled button reaches a
+  // hovering pointer and nobody else. That fixed the sighted keyboard user and left the
+  // screen-reader one: a paragraph after a button is a paragraph after a button, and
+  // nothing said the two were about each other. `aria-describedby` says it — the button
+  // announces its label and then its reason, which is the order a reader needs them in.
+  //
+  // The `title=` stays for the pointer. `id` is a prop rather than a constant because
+  // this control renders once per site on a project with several, and duplicate ids
+  // would point every button at the first one's reason.
+  const reasonId = `${id}-reason`;
+  const shown = gate.disabled && !!gate.title;
   return (
     <>
       <button style={box} disabled={busy || gate.disabled} onClick={onClick}
-        title={gate.title}>
+        title={gate.title} aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
-      {gate.disabled && !!gate.title &&
-        <p style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
+      {shown &&
+        <p id={reasonId} style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
     </>
   );
 }
@@ -236,6 +257,54 @@ export function WarningsAck({ warnings, checked, onChange }) {
       {" "}and accept {items.length === 1 ? "it" : "them"}:{" "}
       <span style={{ color: "#e3b341" }}>{items.map((w) => w.title).join("; ")}</span>
     </label>
+  );
+}
+
+// R10-UX-F7 / F8: what the server said back, in one announced region.
+//
+// EVERY outcome of pressing a button in this form lands here — "Saved.", a validation
+// error, and the 409 refusal panel — and all three are text that appears where the
+// operator is not looking, because they are looking at the button they pressed.
+// `role="status"` + `aria-live="polite"` is what makes a change here ANNOUNCED rather
+// than merely present; without it the only feedback for any of the three is visual.
+// Polite rather than assertive: it may wait for a pause in speech, and none of these
+// interrupt a task in progress.
+//
+// The region is always in the DOM, with its contents swapped inside it. A live region
+// that MOUNTS carrying its message is one most screen readers announce nothing for —
+// they watch an existing region for changes — so an outer <div> that comes and goes
+// with the message would be the markup for a feature that does not work.
+//
+// Extracted rather than left inline for readiness-render.test.ts's reason: the only way
+// to assert markup is to render it, and everything else in `SiteWizard` fetches.
+export function OutcomeRegion({ msg }) {
+  return (
+    <div role="status" aria-live="polite">
+      {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}
+      {msg?.ok === false && <p style={{ color: "#ff7b72" }}>{msg.text}</p>}
+      {msg?.problems && (
+        <div style={{ color: "#e3b341" }}>
+          <p>Materialization refused — every reason, not just the first:</p>
+          <ul>{msg.problems.map((p, i) => (
+            <li key={i}><strong>{p.code}</strong>: {p.detail}
+              {!!p.items?.length && <ul>{p.items.map((it, j) =>
+                <li key={j}>{it.prompt || it.title || it.id}</li>)}</ul>}
+            </li>))}
+          </ul>
+          {/* Said once, here, because the panel above visibly changes under the operator
+              when this happens and an unexplained change is its own defect.
+              R10-UX-F8: it used to read "…re-read from the server AFTER THIS ANSWER",
+              and the refusal it is most often read under is `warnings_unconfirmed` —
+              which arrives when the operator pressed Materialize having answered
+              nothing. The sentence told them an answer they did not give had been taken
+              into account. The re-read is the fact being explained, it happens on every
+              409 regardless, and the clause naming a cause this component cannot know
+              is gone. */}
+          <p style={{ color: "#8b949e" }}>The report and this form were re-read from the
+            server, so what you see above is its current state.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -492,26 +561,11 @@ function SiteWizard({ site, onChanged }) {
         {busy ? "…" : "Save answers"}</button>{" "}
       <WarningsAck warnings={state.warnings} checked={ack}
         onChange={(e) => setAck(e.target.checked)} />{" "}
-      <MaterializeControl gate={gate} busy={busy} onClick={materialize} />
+      <MaterializeControl gate={gate} busy={busy} onClick={materialize}
+        id={`site-${site.id}-materialize`} />
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
-      {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}
-      {msg?.ok === false && <p style={{ color: "#ff7b72" }}>{msg.text}</p>}
-      {msg?.problems && (
-        <div style={{ color: "#e3b341" }}>
-          <p>Materialization refused — every reason, not just the first:</p>
-          <ul>{msg.problems.map((p, i) => (
-            <li key={i}><strong>{p.code}</strong>: {p.detail}
-              {!!p.items?.length && <ul>{p.items.map((it, j) =>
-                <li key={j}>{it.prompt || it.title || it.id}</li>)}</ul>}
-            </li>))}
-          </ul>
-          {/* Said once, here, because the panel above visibly changes under the
-              operator when this happens and an unexplained change is its own defect. */}
-          <p style={{ color: "#8b949e" }}>The report and this form were re-read from the
-            server after this answer, so what you see above is its current state.</p>
-        </div>
-      )}
+      <OutcomeRegion msg={msg} />
     </div>
   );
 }
