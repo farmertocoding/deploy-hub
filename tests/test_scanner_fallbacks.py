@@ -1098,3 +1098,36 @@ def test_issue_r10_a4_escapes_root_is_the_symlink_gate_plus_the_comparison(monke
 
     monkeypatch.setattr(fallbacks, "_resolves_outside", lambda root, path: False)
     assert fallbacks.escapes_root(repo, repo / "link.txt") is False
+
+
+# ── R10-A8: "1 symlinked file resolve outside the scanned repository" ──────────
+
+def test_issue_r10_a8_the_refusal_line_conjugates_for_one_file(tmp_path):
+    """R10-A8. The plural was formed on the NOUN and the verb was left in the plural,
+    so the singular case read "1 symlinked file resolve outside" — the same defect the
+    frontend fixed the other way round in R9-8 ("3 Deferred to sandboxs"), and the same
+    remedy: conjugate both, rather than appending an `s` to one of them.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / "config.py").write_text("PORT = 1\n")
+    (repo / "config.py").symlink_to("../victim/config.py")
+    (repo / "index.html").write_text("<h1>hi</h1>\n")
+
+    detail = by_id(fallbacks.common_checks(repo), "core.symlinked-files").detail
+
+    assert detail.splitlines()[0] == (
+        "1 symlinked file resolves outside the scanned repository:")
+
+
+def test_issue_r10_a8_and_still_agrees_with_itself_for_two(tmp_path):
+    """The other side of the same line, so the fix cannot be "always singular"."""
+    victim, repo = _victim_and_repo(tmp_path)
+    for name in ("config.py", "settings.py"):
+        (victim / name).write_text("PORT = 1\n")
+        (repo / name).symlink_to(f"../victim/{name}")
+    (repo / "index.html").write_text("<h1>hi</h1>\n")
+
+    detail = by_id(fallbacks.common_checks(repo), "core.symlinked-files").detail
+
+    assert detail.splitlines()[0] == (
+        "2 symlinked files resolve outside the scanned repository:")

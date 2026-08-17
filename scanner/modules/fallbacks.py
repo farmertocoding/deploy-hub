@@ -583,7 +583,7 @@ def escapes_root(root, path):
         return True
 
 
-def read_contained(root, path, skipped=None, escaping=None):
+def read_contained(root, path):
     """`_read_text` for a fixed-name read, refusing content that escapes `root`.
 
     Returns None for a refused file — which is what `_read_text` already yields for an
@@ -593,13 +593,29 @@ def read_contained(root, path, skipped=None, escaping=None):
     ONE OF THE TWO ENTRY POINTS. Every read this module and `django` make of a
     repo-controlled path goes through this or through `_iter_files`; a third way in is
     the finding, not a convenience.
+
+    R10-A8 — THE TWO REPORTING CHANNELS THIS DOES NOT HAVE, and why it should not. It
+    carried `skipped` and `escaping` parameters, threaded to `_read_text` and to a
+    caller's refusal list; in three rounds no caller ever passed either, so both were
+    the shape of a mechanism with nothing behind it, which is R7-15's finding about
+    fields nothing writes.
+
+    Filling them in would have been the wrong repair. All three callers here read a
+    fixed name at the SCAN ROOT — `requirements*.txt`, `.gitignore`, `Dockerfile` — and
+    the core walk yields and refuses those same files on its own, so recording a refusal
+    here as well would put one file on `core.symlinked-files` twice. That is R10-A3's
+    defect, one module in, and it is the reason `_check_symlinked_files` reads ONE list
+    filled by ONE walk.
+
+    The gap that leaves is named where it bites (see the R10-Q1 tests): a link the
+    filesystem cannot resolve at all is neither `is_file()` nor `is_dir()`, so no walk
+    yields it and this refusal is reported by nothing. That is a hole in the WALK's
+    reach, and a second recorder at the read site is not what closes it.
     """
     path = Path(path)
     if escapes_root(root, path):
-        if escaping is not None:
-            escaping.append(path)
         return None
-    return _read_text(path, skipped)
+    return _read_text(path)
 
 
 def _iter_files(root, skipped=None, *, prune=None, max_depth=None, escaping=None):
@@ -1456,8 +1472,14 @@ def _check_symlinked_files(root, escaped, refused_elsewhere=()):
         return None
     shown = [_report_path(root, path) for path, _ in escaped[:_MAX_SKIPPED_REPORTED]]
     rest = len(escaped) - len(shown)
-    lines = [f"{len(escaped)} symlinked file{'' if len(escaped) == 1 else 's'} "
-             f"resolve outside the scanned repository:"]
+    # R10-A8: the noun and the VERB, both. Pluralizing only the noun left the singular
+    # reading "1 symlinked file resolve outside the scanned repository" — the frontend's
+    # R9-8 defect ("3 Deferred to sandboxs") in the mirror, and the same remedy: spell
+    # both forms rather than appending an `s` to whichever word is nearest.
+    count = len(escaped)
+    lines = [f"{count} symlinked file{'' if count == 1 else 's'} "
+             f"{'resolves' if count == 1 else 'resolve'} outside the scanned "
+             f"repository:"]
     lines.extend(shown)
     if rest > 0:
         lines.append(f"… and {rest} more")
