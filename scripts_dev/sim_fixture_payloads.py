@@ -34,7 +34,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-import django
+import django  # noqa: E402 — sys.path/settings bootstrap precedes framework imports
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
