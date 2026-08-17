@@ -4,11 +4,13 @@
 //
 // §F9 rules applied here: status is never color-only (every tier carries a symbol +
 // word); dark palette matches Phase 0; every data panel carries its staleness stamp.
-// §F8: the states (empty/loading/live/stale/error/degraded) are reachable without a
-// backend via ?sim=<state> — see sim.js, and the contract test that pins the fixtures
-// to the generated zod schemas. `stale` is the one where the wizard says the deploy may
-// proceed and the POST still refuses, which is the only screen the 409 panel is
-// reachable from. (`accepted` left with D-012: no answer clears a blocker this phase.)
+// §F8: the states (empty / loading + loading-report + loading-wizard / live / stale /
+// error / degraded) are reachable without a backend via ?sim=<state> — see sim.js, and
+// the contract test that pins the fixtures to the generated zod schemas. TWO states
+// reach the 409 panel with the button ENABLED, and they are different refusals: `stale`
+// is a report that moved between the GET and the POST, and `live` on atlas-edge is the
+// warnings gate, which the ack checkbox below actually clears. (`accepted` left with
+// D-012: no answer clears a blocker this phase.)
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
