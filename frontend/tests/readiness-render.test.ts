@@ -591,3 +591,19 @@ test("arch-1: the edge fixture's refusal renders the path the scanner guarded", 
   for (const path of check.refused_paths)
     assert.ok(markup.includes(`<li>${path}</li>`), path);
 });
+
+test("arch-a: refusals render from any tier, which is wider than the vouching rule", () => {
+  // `scanner.core.ANNOUNCEMENT_TIERS` lets only a blocker or a warning VOUCH for a
+  // refusal, because vouching deletes another check's line. Rendering deletes nothing, so
+  // it is deliberately permissive: a stored report from another version — or a check
+  // family that grows the field later — shows its refusals here whatever tier it chose.
+  // A screen that dropped the list because the tier was not one of two would be hiding
+  // something the report contains.
+  for (const tier of ["ok", "advice", "pending_sandbox"]) {
+    const text = visibleText(render(CheckBody, {
+      check: { tier, detail: "everything looks fine",
+               refused_paths: ["src/unread.ts"] },
+    }));
+    assert.ok(text.includes("src/unread.ts"), `${tier}: ${text}`);
+  }
+});

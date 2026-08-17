@@ -39,6 +39,26 @@ SCHEMA_VERSION = 2
 # Report tiers (§5.3). `pending_sandbox` marks an executing check honestly deferred.
 TIERS = ("blocker", "warning", "advice", "ok", "pending_sandbox")
 
+# The tiers an operator reads a REFUSAL from, and therefore the only tiers a check may
+# vouch from when a module takes a file out of `core.symlinked-files` (R12-ARCH-1's rule,
+# R13-ARCH-A's home for it).
+#
+# HERE, BESIDE `TIERS`, because it is a property OF the taxonomy and not a detail of the
+# guard that consumes it. As a bare tuple two hundred lines down it read like a filter
+# somebody happened to need: nothing said it was a subset of `TIERS`, nothing would have
+# noticed if a tier were renamed underneath it, and the next reader met the fact in the
+# middle of an error message. The subset property is asserted in
+# tests/test_scanner_core.py, which is a sentence a tuple in a function's neighbourhood
+# cannot say.
+#
+# WHY THESE TWO. Every refusal this repo emits is a warning — `core.symlinked-files`,
+# `node-ts.symlinked-files` — for a stated reason: the survey below it is INCOMPLETE, and
+# the operator has to know that before trusting the report. `blocker` is included because
+# a future refusal that blocks is louder, not quieter. `advice` and `ok` are excluded
+# because a file listed there is a fact nobody is being told, and `pending_sandbox` is
+# excluded because it is a check that has not run yet — it cannot have refused anything.
+ANNOUNCEMENT_TIERS = ("blocker", "warning")
+
 
 @dataclass
 class CheckResult:
@@ -267,18 +287,11 @@ def module_refused_paths(module, root):
     return list(hook(root)) if hook is not None else []
 
 
-# The tiers a check may vouch from. R12-ARCH-1, and it is F-2's reasoning carried into
-# the mechanism that replaced F-2's: a refusal is a WARNING wherever this repo emits one
-# (`core.symlinked-files`, `node-ts.symlinked-files`), for the stated reason that the
-# survey below it is INCOMPLETE and the operator has to know that before trusting the
-# report. Taking a file out of the core suite's refusal line and listing it on an `ok`
-# check whose sentence reads "everything looks fine" is not telling anybody anything —
-# measured, and green, before this constant came back.
-#
-# It is a different job from the one this name had in R11-A2, where it bounded a fuzzy
-# PREFIX match. Nothing here is fuzzy any more: the tier decides whether a check counts
-# as an announcement, not whether a string counts as a name.
-_REFUSAL_LOUD_TIERS = ("blocker", "warning")
+# R13-ARCH-A: the rule moved up to `ANNOUNCEMENT_TIERS`, beside `TIERS`, where it is a
+# property of the taxonomy rather than a filter this guard happens to want. The old name
+# stays as an alias because it is what the refusal message and two tests call it, and
+# renaming a constant in the same commit that moves it is two changes wearing one diff.
+_REFUSAL_LOUD_TIERS = ANNOUNCEMENT_TIERS
 
 
 def _refused_paths_problem(module, root, refused, reported):

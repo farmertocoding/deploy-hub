@@ -689,6 +689,43 @@ def test_issue_r12_arch_1_the_live_refusal_checks_are_loud_enough_to_vouch():
     assert fallbacks._MAX_SKIPPED_REPORTED > 0
 
 
+def test_issue_r13_arch_a_the_announcement_tiers_are_part_of_the_taxonomy():
+    """R13-ARCH-A. The vouching rule was a bare tuple two hundred lines from `TIERS`, so
+    nothing said it was a subset of the taxonomy at all — a tier renamed in `TIERS` would
+    have left it naming a tier that no longer exists, silently accepting nothing (or, the
+    other way, silently accepting a tier nobody meant).
+
+    That sentence is what a constant beside `TIERS` can have asserted about it, and a
+    tuple in a guard's neighbourhood cannot.
+    """
+    assert set(core.ANNOUNCEMENT_TIERS) <= set(core.TIERS), (
+        f"an announcement tier is not a tier: "
+        f"{sorted(set(core.ANNOUNCEMENT_TIERS) - set(core.TIERS))}")
+    assert core._REFUSAL_LOUD_TIERS is core.ANNOUNCEMENT_TIERS, (
+        "the alias drifted from the thing it aliases")
+    # The excluded ones, named so the exclusion is a decision and not an oversight:
+    # `advice` and `ok` are read as "nothing to do here", and `pending_sandbox` is a check
+    # that has not run and therefore cannot have refused anything.
+    assert set(core.TIERS) - set(core.ANNOUNCEMENT_TIERS) == {
+        "advice", "ok", "pending_sandbox"}
+
+
+def test_issue_r13_arch_a_every_live_refusal_check_can_vouch(tmp_path):
+    """…and the two checks that actually carry `refused_paths` are in it, on a real tree.
+
+    A refusal channel whose tier is outside `ANNOUNCEMENT_TIERS` cannot vouch for its own
+    refusals, so `scan` would raise on any tree where a module subtracted one — a failure
+    that only appears with a committed symlink in it. This is that tree, kept small.
+    """
+    report = core.scan(_two_producer_tree(tmp_path))
+    carrying = [c for c in report["checks"] if c.get("refused_paths")]
+
+    assert {c["id"] for c in carrying} == {"core.symlinked-files",
+                                           "node-ts.symlinked-files"}
+    for check in carrying:
+        assert check["tier"] in core.ANNOUNCEMENT_TIERS, check
+
+
 # ── R13-ARCH-B: one conversion, three call sites ─────────────────────────────
 #
 # "The walked absolute path in, the repo-relative POSIX spelling out" is the seam the S2

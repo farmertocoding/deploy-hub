@@ -263,6 +263,21 @@ const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0" };
 //
 // The label is the only word this composes, which is the §4b line for a screen that
 // otherwise renders the server verbatim.
+//
+// R13-ARCH-A — RENDERED FROM ANY TIER, AND THAT IS WIDER THAN THE SCANNER'S VOUCHING
+// RULE ON PURPOSE. `scanner.core.ANNOUNCEMENT_TIERS` lets only a blocker or a warning
+// vouch for a refusal, because vouching DELETES another check's line and a fact on an
+// `ok` row is a fact nobody is told. Rendering deletes nothing: a `refused_paths` list on
+// any check is a list of files the scan did not read, and showing it can only add truth
+// to the screen.
+//
+// The asymmetry is the point — permissive where it can only inform, strict where it can
+// remove — and it is also what makes this component safe against reports it did not
+// produce: a stored `scan_report` from another version, or a check family that grows the
+// field later, renders its refusals here whatever tier it chose, rather than this screen
+// quietly dropping a list because the tier was not one of two. Narrowing the render to
+// match the guard would mean the screen hiding something the report contains, which is
+// the opposite direction from every finding this field exists because of.
 export function CheckBody({ check }) {
   const refused = check.refused_paths || [];
   return (
