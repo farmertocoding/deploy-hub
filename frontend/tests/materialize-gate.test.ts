@@ -179,16 +179,91 @@ function clientSources(dir = fileURLToPath(new URL("../src", import.meta.url)), 
   return found;
 }
 
-test("r8-1: no client module authors a refusal string the server already sends", () => {
+// R9-9: AND THE COPY IS DERIVED TOO, from the module that sends it.
+//
+// The file set has been walked since r8 for a stated reason — a hand-typed list is
+// R4-12's class — and then the two strings decided the verdict were hand-typed, in the
+// test whose own header says that is the defect. It cost what it always costs:
+// `warnings_unconfirmed` ("the readiness report has warnings; confirm to proceed") was
+// outside a pin that greps for `re-scanned` and `readiness report has blockers`, so a
+// client could author the warnings gate's copy — the one control round-9 item 2 is
+// about — and stay green.
+//
+// So the forbidden copy is read out of `wizard/materialize.py` at test time. Two anchors,
+// because the module raises refusals in two shapes: the `"detail":` key of a `problems`
+// entry, and the message argument of a direct `MaterializeRefused(...)` — the second is
+// how the warnings gate raises, which is exactly the one the typed list missed. Adjacent
+// string literals are joined, because that is what Python does with them.
+//
+// READ-ONLY, and no backend file is touched: this is a test reading a source file, the
+// same way `clientSources` reads the client's.
+const MATERIALIZE_PY = fileURLToPath(new URL("../../wizard/materialize.py", import.meta.url));
+
+function serverRefusalCopy(): string[] {
+  const source = readFileSync(MATERIALIZE_PY, "utf8");
+  const anchor = /"detail":|MaterializeRefused\(\s*"(?:[^"\\]|\\.)*",/g;
+  const literal = /\s*"((?:[^"\\]|\\.)*)"/y;
+  const found = new Set<string>();
+  for (const match of source.matchAll(anchor)) {
+    let at = match.index! + match[0].length;
+    const parts: string[] = [];
+    for (;;) {
+      literal.lastIndex = at;
+      const piece = literal.exec(source);
+      if (!piece) break;                    // e.g. `"detail": self.message`
+      parts.push(piece[1]);
+      at = literal.lastIndex;
+    }
+    if (parts.length) found.add(parts.join(""));
+  }
+  return [...found];
+}
+
+// Whole strings are not enough on their own: R8-1's actual defect was a PARAPHRASE
+// ("Blockers must be fixed and rescanned first"), which no literal match catches. So the
+// unit is a run of words. Normalising away hyphens and punctuation is what makes
+// `rescanned` and `re-scanned` the same word, which is the case the typed pin had to
+// spell out twice and this one gets for nothing.
+const words = (text: string) =>
+  text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ");
+const RUN = 5;
+
+test("r9-9: the forbidden copy is the server's own literals, not a list typed here", () => {
+  const copy = serverRefusalCopy();
+  // The extraction is load-bearing: a regex that matched nothing would make the pin below
+  // pass forever, which is this test's own failure mode and the one it must not have.
+  assert.ok(copy.length >= 5, `only extracted ${copy.length} refusal strings`);
+  assert.ok(copy.some((s) => s === "required questions are unanswered"), copy);
+  assert.ok(copy.some((s) => s.includes("has blockers")), copy);
+  // The second anchor, named: this is the one a `"detail":`-only regex would miss, and it
+  // is the copy behind the ack checkbox.
+  assert.ok(copy.some((s) => s === "the readiness report has warnings; confirm to proceed"),
+    `the MaterializeRefused(...) shape was not extracted: ${JSON.stringify(copy)}`);
+  // …and the multi-line implicit concatenation Python joins for it.
+  assert.ok(copy.some((s) => s.includes("must be fixed and the project re-scanned")), copy);
+});
+
+test("r8-1/r9-9: no client module authors a refusal the server already sends", () => {
   const sources = clientSources();
   // The walk itself is load-bearing: an empty or truncated one would pass silently.
   assert.ok(sources.length >= 4, `only walked ${sources.length} client modules`);
   assert.ok(sources.some(([name]) => name === "Readiness.jsx"),
     "the walk missed Readiness.jsx, which is the file this rule is about");
+
+  const forbidden: Array<[string, string]> = [];
+  for (const copy of serverRefusalCopy()) {
+    const w = words(copy);
+    for (let i = 0; i + RUN <= w.length; i++)
+      forbidden.push([w.slice(i, i + RUN).join(" "), copy]);
+  }
+  assert.ok(forbidden.length >= 20, `only ${forbidden.length} phrases to check`);
+
   for (const [name, src] of sources) {
-    assert.ok(!/rescanned|re-scanned/.test(src),
-      `${name} spells out a refusal the server sends — take the tooltip from state.blocking`);
-    assert.ok(!/readiness report has blockers/.test(src), `${name}: same`);
+    const haystack = ` ${words(src).join(" ")} `;
+    for (const [phrase, copy] of forbidden)
+      assert.ok(!haystack.includes(` ${phrase} `),
+        `${name} reproduces the server's refusal copy ("…${phrase}…", from ` +
+        `"${copy}") — render state.blocking's own detail instead`);
   }
 });
 
