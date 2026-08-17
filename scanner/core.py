@@ -117,6 +117,25 @@ def module_supersedes(module):
     return frozenset(getattr(module, "supersedes", _DEFAULT_SUPERSEDES))
 
 
+def module_refused_paths(module, root):
+    """The repo-controlled paths `module` reports refusing, or none (R10-A3).
+
+    OPTIONAL, and absent means "this module names no refusals of its own", which is
+    true of every module but `node-ts` today: `fallbacks` and `django` read through the
+    shared walk and the shared `read_contained`, whose refusals ARE the core check's
+    list, so there is nothing for them to declare and nothing to subtract.
+
+    A module that declares one is saying "I have already told the operator about these
+    files, in my own words" — and `scan` takes it at its word by dropping them from
+    `core.symlinked-files`. That is the one-fact-one-line rule, and it is subtractive on
+    the FILE rather than on the check, which is why it is not spelled as supersession:
+    `core.symlinked-files` fires for every module's escapes and for reads no module
+    makes, so replacing it whole would delete refusals nothing else reports.
+    """
+    hook = getattr(module, "refused_paths", None)
+    return list(hook(root)) if hook is not None else []
+
+
 def register(module, fallback=False):
     # Item 8: the per-module invariant row is keyed by name, so two modules sharing one
     # would have collapsed into a single row and the second would have been checked by
@@ -189,7 +208,15 @@ def scan(root):
         # notice the suite emits so a repo carrying one is told it is not honored.
         # `scanner/declarations.py` stays on master, parked and unit-tested, and returns
         # as its own phase behind a written threat model.
-        core_suite = common_checks(root)             # runs over the SCAN root, once
+        #
+        # R10-A3: the matched modules are asked what they have already refused BEFORE
+        # the core suite composes its refusal line, so that line can leave those files
+        # to the module that names them better. Asked here rather than collected from
+        # the loop below because the core suite is built first — and it is built first
+        # so that supersession can replace an entry in place, which is the property the
+        # report's stable check ordering rests on.
+        refused_elsewhere = [p for m in mods for p in module_refused_paths(m, root)]
+        core_suite = common_checks(root, refused_elsewhere)   # over the SCAN root, once
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
     for m in mods:

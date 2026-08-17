@@ -1360,7 +1360,7 @@ def _check_exposure_auth(texts):
     )
 
 
-def common_checks(root):
+def common_checks(root, refused_elsewhere=()):
     """The common-core static check suite (id prefix `core.`), composed into every
     scan report by `scanner.core.scan` (D-010) and called directly by tests.
 
@@ -1368,6 +1368,13 @@ def common_checks(root):
     `deployhub.yaml` read of a scan (R7-13's one-read rule, which existed because two
     reads of a repo-controlled file can disagree inside one scan); with no reads at all
     the rule is moot and the signature says so.
+
+    R10-A3: `refused_elsewhere` is the paths a matched module has already told the
+    operator it refused, and it narrows `core.symlinked-files` and NOTHING ELSE — in
+    particular not the secret-scan carve-out, which still reads every escaping file the
+    walk found. Defaulted to empty because this function is called directly by tests and
+    by nothing else that knows which modules matched; `scanner.core.scan` is the one
+    caller with that answer.
     """
     root = Path(root)
     # R7-2: one list, filled by the one walk the suite makes, read by the one check that
@@ -1398,14 +1405,14 @@ def common_checks(root):
         suite.append(notice)
     # APPENDED LAST, and only when something was refused — same property, and last so
     # that a repo carrying a `deployhub.yaml` and no symlink keeps the report it had.
-    refusals = _check_symlinked_files(root, escaped)
+    refusals = _check_symlinked_files(root, escaped, refused_elsewhere)
     if refusals is not None:
         suite.append(refusals)
     return suite
 
 
-def _check_symlinked_files(root, escaped):
-    """`core.symlinked-files`, or None when the walk refused nothing.
+def _check_symlinked_files(root, escaped, refused_elsewhere=()):
+    """`core.symlinked-files`, or None when the walk refused nothing this check owns.
 
     THE REFUSAL CHANNEL, and it is core-level rather than per-module by choice. The
     alternative the finding offered was each module's own problem channel — what
@@ -1424,9 +1431,27 @@ def _check_symlinked_files(root, escaped):
     a file they can see is not in it, and losing that line for a link under a cache
     directory costs nothing a reader would act on.
 
+    ONE FACT, ONE LINE (R10-A3). A framework module that has its own refusal channel —
+    `node-ts.symlinked-files` — walks part of the same tree, so an escaping link inside
+    a surveyed package was named here AND there: two warnings for one file, counted
+    twice in the tier summary, and offered twice to the operator who has to accept the
+    warnings before a manifest can be materialized. `refused_elsewhere` is what that
+    module already said, and those files are dropped from this line.
+
+    SUBTRACTIVE ON THE FILE, and deliberately not the other instrument available.
+    Declaring `core.symlinked-files` in node-ts's `supersedes` would have replaced this
+    result outright — and this check does not report node-ts's escapes, it reports the
+    CORE walk's, which covers reads no framework module makes at all (a linked `.env`
+    is the sharp one: refused here, and nothing node-ts ever opens). Supersession would
+    have deleted those. Excluding the named file leaves every other refusal exactly
+    where it was, including on trees where this line drops to nothing and vanishes,
+    which is the same None-omission property the check has always had.
+
     Warning rather than advice, for `core.declaration-file`'s reason: it is actionable,
     and the operator's model of what the scan read is wrong until they read it.
     """
+    elsewhere = {Path(p) for p in refused_elsewhere}
+    escaped = [pair for pair in escaped if pair[0] not in elsewhere]
     if not escaped:
         return None
     shown = [_report_path(root, path) for path, _ in escaped[:_MAX_SKIPPED_REPORTED]]

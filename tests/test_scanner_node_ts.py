@@ -1325,3 +1325,86 @@ def test_issue_r10_a4_the_workspace_rule_reads_the_shared_comparison(tmp_path,
     monkeypatch.setattr(fallbacks, "_resolves_outside", lambda root, path: True)
     problem = node_ts._workspace_candidate_problem(root, pkg)
     assert problem is not None and "resolves outside the scanned repository" in problem
+
+
+# ── R10-A3: one refused file, two warnings ─────────────────────────────────────
+#
+# `core.symlinked-files` reports what the CORE walk refused; `node-ts.symlinked-files`
+# reports what the node-ts SURVEY refused. On the §F8 edge tree those are the same file
+# — `packages/server/src/metrics.ts` is an ordinary source file inside a surveyed
+# package, so both walks reach it — and it was named twice, counted twice in the tier
+# summary, and offered twice to the operator who has to tick "I have read the warnings
+# above and accept them" before a manifest can be materialized.
+#
+# THE RULE, chosen and stated at the seam: whichever check names a file names it alone,
+# and the MODULE's line wins where both could speak. See `_check_symlinked_files` for
+# why the alternative — node-ts declaring supersession of `core.symlinked-files` — is
+# the wrong shape: that check fires for every module's escapes, so replacing it whole
+# deletes refusals nothing else reports.
+
+def _edge_tree(tmp_path):
+    """The §F8 edge repo, near enough: a pnpm monorepo whose service package carries a
+    committed symlink out of the tree, plus the neighbour it points at."""
+    neighbour = tmp_path / "edge-neighbour" / "shared-lib" / "src"
+    neighbour.mkdir(parents=True)
+    (neighbour / "metrics.ts").write_text(
+        "// NEIGHBOUR-TREE-MARKER\nexport const WORKERS = 7;\n", encoding="utf-8")
+
+    root = tmp_path / "edgerepo"
+    src = root / "packages" / "server" / "src"
+    src.mkdir(parents=True)
+    (root / "package.json").write_text(
+        '{"name": "atlas-edge", "private": true}\n', encoding="utf-8")
+    (root / "pnpm-workspace.yaml").write_text(
+        "packages:\n  - 'packages/*'\n", encoding="utf-8")
+    (root / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (root / "packages" / "server" / "package.json").write_text(
+        '{"name": "@atlas/server", "main": "dist/index.js",\n'
+        ' "dependencies": {"fastify": "^4.28.0"}}\n', encoding="utf-8")
+    (src / "index.ts").write_text(
+        "import Fastify from 'fastify';\nconst app = Fastify();\n", encoding="utf-8")
+    os.symlink("../../../../edge-neighbour/shared-lib/src/metrics.ts",
+               src / "metrics.ts")
+    return root
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r10_a3_one_refused_file_is_one_line_in_the_report(tmp_path):
+    """R10-A3. The refusal is one fact. Two checks said it, so the readiness screen's
+    warning count was 3 where the tree has 2 things wrong with it, and the ack checkbox
+    asked the operator to accept the same file twice under two titles.
+    """
+    root = _edge_tree(tmp_path)
+
+    report = core.scan(root)
+    naming_it = [c["id"] for c in report["checks"]
+                 if "metrics.ts" in c["detail"]]
+
+    assert naming_it == ["node-ts.symlinked-files"], naming_it
+    assert report["summary"]["warning"] == sum(
+        1 for c in report["checks"] if c["tier"] == "warning")
+    assert "core.symlinked-files" not in [c["id"] for c in report["checks"]]
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r10_a3_a_refusal_no_module_reported_is_still_reported(tmp_path):
+    """The guard on the rule, and the reason supersession was the wrong instrument.
+
+    `core.symlinked-files` fires for EVERY module's escapes and for the core suite's
+    own reads — a committed `.env` linked at a neighbour's secrets is refused by the
+    core walk and is nothing node-ts ever looks at. Excluding what a module named is
+    subtractive on the file; superseding the check would have deleted this line.
+    """
+    root = _edge_tree(tmp_path)
+    (tmp_path / "edge-neighbour" / "secrets.env").write_text(
+        "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n", encoding="utf-8")
+    os.symlink("../edge-neighbour/secrets.env", root / ".env")
+
+    report = core.scan(root)
+    refused = by_id(report, "core.symlinked-files")
+
+    assert refused["tier"] == "warning"
+    assert ".env" in refused["detail"]
+    assert "metrics.ts" not in refused["detail"], (
+        "the node-ts line already names it; this one must not name it again")
+    assert "metrics.ts" in by_id(report, "node-ts.symlinked-files")["detail"]

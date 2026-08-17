@@ -280,3 +280,25 @@ def test_module_emitting_unknown_core_id_is_a_loud_error(tmp_path):
     finally:
         core._FRAMEWORK_MODULES[:] = fw
         core._FALLBACK_MODULES[:] = fb
+
+
+# ── R10-A3: the refusal hook, and what a module that has none declares ─────────
+
+def test_issue_r10_a3_a_module_without_the_hook_declares_no_refusals():
+    """`refused_paths` is optional, and its absence is a claim: this module has told the
+    operator about no files of its own, so `core.symlinked-files` keeps all of them.
+
+    That is true of every registered module but `node-ts` — `fallbacks` and `django`
+    read through the shared walk and the shared `read_contained`, whose refusals ARE the
+    core check's list — so the default is what almost every scan uses and it may not
+    quietly become "refuses everything".
+    """
+    class Plain:
+        name = "plain"
+
+    assert core.module_refused_paths(Plain(), "/nonexistent") == []
+
+    framework, fallback = core.registered_modules()
+    declaring = [m.name for m in framework + fallback
+                 if getattr(m, "refused_paths", None) is not None]
+    assert declaring == ["node-ts"], declaring

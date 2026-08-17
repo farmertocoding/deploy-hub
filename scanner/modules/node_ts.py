@@ -312,7 +312,7 @@ def _load_tsconfig(text):
         return {}
 
 
-def _iter_source_files(base, root=None, problems=None):
+def _iter_source_files(base, root=None, problems=None, refused=None):
     """Yield the module's source files under `base`, which must stay inside `root`.
 
     `root` is the scan root; it defaults to `base`, which is the honest default for a
@@ -320,6 +320,12 @@ def _iter_source_files(base, root=None, problems=None):
     channel — a list, appended to and de-duplicated by the caller's own contents, because
     this walk runs once per package directory and a link inside the service package is
     seen twice.
+
+    R10-A3: `refused`, when given, collects the same refusals as PATHS rather than as
+    sentences. Two lists rather than one list of pairs because they are read by two
+    different readers — the sentences by this module's own report line, the paths by
+    `scanner.core.scan`, which subtracts them from the core suite's refusal list so one
+    refused file is one line in the report.
 
     OUT OF ROUND-7 SCOPE, fixed on the round-7 branch: this followed symlinked
     directories, so a repo containing one link back at an ancestor was an infinite walk
@@ -377,6 +383,8 @@ def _iter_source_files(base, root=None, problems=None):
                 if problem:
                     if problems is not None and problem not in problems:
                         problems.append(problem)
+                    if refused is not None and path not in refused:
+                        refused.append(path)
                     continue
                 yield path
 
@@ -399,6 +407,13 @@ class _Survey:
         # package was not read" are different things to tell an operator, and a single
         # channel would have to be titled for one of them and lie about the other.
         self.symlink_problems = []
+        # R10-A3: the same refusals as PATHS. `scanner.core.scan` reads this one and
+        # subtracts it from the core suite's refusal list, so a file this module has
+        # already named is not named a second time by `core.symlinked-files`. Paths
+        # rather than sentences because the reader is doing set arithmetic, and a
+        # sentence is a rendering — matching on one would be `core.symlinked-files`
+        # parsing this module's report copy.
+        self.symlink_refused = []
         self.package_dirs = self._find_package_dirs()
         self.packages = {d: self._read_package_json(d) for d in self.package_dirs}
         self.service_dir = self._pick_service_dir()
@@ -441,8 +456,27 @@ class _Survey:
     # repo pointed those names at. Four sites, three of them fixed, is not a boundary.
     # A new read of a repo-controlled path belongs here or it is a fifth.
     def _iter_sources(self, base):
-        """`_iter_source_files` bound to this survey's root and refusal channel."""
-        return _iter_source_files(base, self.root, self.symlink_problems)
+        """`_iter_source_files` bound to this survey's root and refusal channels."""
+        return _iter_source_files(base, self.root, self.symlink_problems,
+                                  self.symlink_refused)
+
+    def _refuse(self, path, kind):
+        """True when `path` is a link out of the tree, recording it in both channels.
+
+        R10-A3: ONE recorder, because there are now two lists to keep in step and three
+        call sites that fill them. A refusal recorded as a sentence but not as a path
+        would be reported twice in the report — the defect A3 names — and one recorded
+        as a path but not as a sentence would be reported nowhere at all, which is
+        worse. Neither is possible from here.
+        """
+        problem = _symlink_escape_problem(self.root, path, kind)
+        if problem is None:
+            return False
+        if problem not in self.symlink_problems:
+            self.symlink_problems.append(problem)
+        if path not in self.symlink_refused:
+            self.symlink_refused.append(path)
+        return True
 
     def _read_contained(self, path, kind):
         """The text of `path`, or `""` if it is a link out of the tree.
@@ -451,12 +485,7 @@ class _Survey:
         existing empty-input path is the refusal path — no caller learns a new failure
         mode, and none of them can accidentally treat a refused read as content.
         """
-        problem = _symlink_escape_problem(self.root, path, kind)
-        if problem:
-            if problem not in self.symlink_problems:
-                self.symlink_problems.append(problem)
-            return ""
-        return _read(path)
+        return "" if self._refuse(path, kind) else _read(path)
 
     def _pick_tsconfig(self):
         """The tsconfig the strict-build check judges: the service package's, else the
@@ -480,10 +509,7 @@ class _Survey:
         honest to say about it.
         """
         path = directory / "package.json"
-        problem = _symlink_escape_problem(self.root, path, "package.json")
-        if problem:
-            if problem not in self.symlink_problems:
-                self.symlink_problems.append(problem)
+        if self._refuse(path, "package.json"):
             return {}
         return _load_json(path)
 
@@ -741,6 +767,30 @@ class NodeTsScannerModule:
             if isinstance(main, str) and _SERVERISH_MAIN_RE.search(main):
                 return True
         return False
+
+    # ── the refusal seam (§S1 optional hook, R10-A3) ────────────────────────
+    def refused_paths(self, root):
+        """The repo-controlled paths this module refused to read, for `core.scan`.
+
+        R10-A3. `core.symlinked-files` reports what the CORE walk refused and
+        `node-ts.symlinked-files` reports what this survey refused, and on any tree
+        where both walks reach the same escaping link — an ordinary source file inside
+        a surveyed package is the common case — one refused file was two warning lines,
+        two entries in the tier summary, and two things to accept before a manifest
+        could be materialized.
+
+        `scan` subtracts what this returns from the core suite's list. The MODULE's
+        line wins because it says more: which package the file belonged to, what kind
+        of read it was refused from, and therefore what the survey below it is missing.
+
+        THE COST, stated rather than discovered: this builds a `_Survey`, and `checks`,
+        `wizard_questions` and `manifest_fragment` each build their own already. A
+        fourth is one more of a thing that already happens three times, and the
+        alternative — caching a survey on this module object, which is a singleton
+        shared by every scan in the process — is a staleness bug waiting for the first
+        re-scan of a tree that moved.
+        """
+        return list(_Survey(root).symlink_refused)
 
     # ── static checks (§S4) ─────────────────────────────────────────────────
     def checks(self, root):
