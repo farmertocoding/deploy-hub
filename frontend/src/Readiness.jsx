@@ -476,28 +476,36 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
         </section>
       ))}
       {project?.sites?.map((s) => (
-        <SiteWizard key={s.id} site={s} onChanged={onChanged} />
+        <SiteWizard key={s.id} site={s} refreshKey={refreshKey} onChanged={onChanged} />
       ))}
     </div>
   );
 }
 
-function SiteWizard({ site, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [state, setState] = useState(undefined);
-  const [draft, setDraft] = useState({});
-  const [ack, setAck] = useState(false);
-  const [msg, setMsg] = useState(null); // {ok, text} | {problems}
-  const [busy, setBusy] = useState(false);
-
-  const load = () =>
-    api(`v1/sites/${site.id}/wizard/`).then(({ status, data }) =>
-      setState(status === 200 ? data : { error: data.detail || `HTTP ${status}` }));
-  useEffect(() => { if (open) load(); }, [open]);
-
+// R11-Q1: what this form SENDS and what it does with the answer, outside the component.
+//
+// THE DEAD ZONE. `materializeGate` and `materializeOutcome` were extracted in rounds 8
+// and 9 because a decision inside a component is a decision no test can look at — and
+// the two handlers that USE them stayed inside, where the same argument applies with more
+// force: they are the only code on this screen that composes a request body. Two
+// mutations, applied to the shipped file, survived all 79 tests:
+//
+//   * `{ confirm_warnings: … }` renamed to `{ ack: … }` — the ack checkbox stops
+//     reaching the server entirely, so the one control the warnings gate exists for does
+//     nothing and the POST is refused (or accepted) for reasons unrelated to it;
+//   * `if (outcome.reloadWizard) load();` deleted — the R9-4 convergence, which is the
+//     whole of round 9's item 4, silently gone: the 409 panel goes back to sitting above
+//     a wizard state the server has just contradicted.
+//
+// The fixtures cannot catch either, because the fixtures are the server: they answer
+// what they are asked and never see what the client failed to ask for. So the handlers
+// take their collaborators as arguments and the test drives them with a spy in `api`'s
+// place. `SiteWizard` stays thin — it owns the state hooks and hands them over.
+export function makeWizardHandlers({ siteId, state, draft, ack, load, onChanged,
+                                     setBusy, setMsg, setDraft, api: call = api }) {
   async function save() {
     setBusy(true); setMsg(null);
-    const { status, data } = await api(`v1/sites/${site.id}/wizard/`, draft, "PATCH");
+    const { status, data } = await call(`v1/sites/${siteId}/wizard/`, draft, "PATCH");
     setBusy(false);
     if (status === 200) { setDraft({}); load(); setMsg({ ok: true, text: "Saved." }); }
     else setMsg({ ok: false, text: Object.entries(data).map(([f, e]) =>
@@ -510,8 +518,8 @@ function SiteWizard({ site, onChanged }) {
     // is not rendered in that case, so this can only differ after the server's warnings
     // go away under an operator who already ticked it, and sending `true` there is
     // confirming a set that no longer exists.
-    const { status, data } = await api(`v1/sites/${site.id}/manifest/`,
-      { confirm_warnings: !!state.warnings?.length && ack });
+    const { status, data } = await call(`v1/sites/${siteId}/manifest/`,
+      { confirm_warnings: !!state?.warnings?.length && ack });
     setBusy(false);
     const outcome = materializeOutcome(status, data);
     setMsg(outcome.msg);
@@ -520,6 +528,33 @@ function SiteWizard({ site, onChanged }) {
     if (outcome.reloadWizard) load();
     if (outcome.refreshProject) onChanged();
   }
+
+  return { save, materialize };
+}
+
+function SiteWizard({ site, refreshKey, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState(undefined);
+  const [draft, setDraft] = useState({});
+  const [ack, setAck] = useState(false);
+  const [msg, setMsg] = useState(null); // {ok, text} | {problems}
+  const [busy, setBusy] = useState(false);
+
+  const load = () =>
+    api(`v1/sites/${site.id}/wizard/`).then(({ status, data }) =>
+      setState(status === 200 ? data : { error: data.detail || `HTTP ${status}` }));
+  // R11-UX-F3: `refreshKey` is in the deps, and it is a sibling's convergence that puts
+  // it there. A 409 on ONE site means the project's stored report moved — that is what
+  // the refusal says — and every other open wizard on the page is then showing preflight
+  // answers computed against the report from before it moved. The panel above them
+  // re-read (it has taken `refreshKey` since R9-4); the wizards did not, so the screen
+  // held a blocker list and a sibling gate saying the deploy may proceed at the same
+  // time. Same prop, same reason, one component further down.
+  useEffect(() => { if (open) load(); }, [open, refreshKey]);
+
+  const { save, materialize } = makeWizardHandlers({
+    siteId: site.id, state, draft, ack, load, onChanged, setBusy, setMsg, setDraft,
+  });
 
   if (!open)
     return <button style={{ ...box, marginTop: 6 }} onClick={() => setOpen(true)}>

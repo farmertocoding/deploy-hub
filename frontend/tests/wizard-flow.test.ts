@@ -14,7 +14,9 @@
 // purpose and every convergence defect above is a property of what it returns.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { materializeGate, materializeOutcome } from "../src/Readiness.jsx";
+import { readFileSync } from "node:fs";
+import { makeWizardHandlers, materializeGate, materializeOutcome }
+  from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -184,4 +186,151 @@ test("r10: the ack checkbox is the only difference between the 409 and the 201",
 
   const created = await live("v1/sites/3/manifest/", { confirm_warnings: true });
   assert.equal(created.status, 201);
+});
+
+// ── R11-Q1: the handlers, which no test could reach ──────────────────────────
+//
+// Everything above drives the FIXTURES: it asserts what the server answers, given the
+// request the test makes. What none of it touches is the request the CLIENT makes — and
+// that is where the ack checkbox turns into a body key and the outcome turns into a
+// re-read. Two mutations of the shipped `SiteWizard`, both surviving all 79 tests:
+//
+//     -      { confirm_warnings: !!state.warnings?.length && ack });
+//     +      { ack: !!state.warnings?.length && ack });
+//
+//     -    if (outcome.reloadWizard) load();
+//
+// The first makes the warnings gate's one control unreachable; the second deletes the
+// R9-4 convergence. The fixtures cannot see either, because a fixture answers what it is
+// asked and never learns what it was not asked for. `makeWizardHandlers` puts the two
+// handlers where a spy can stand in for `api`.
+
+type Call = { path: string; body?: any; method?: string };
+
+function harness(state: any, ack: boolean, responses: Array<any>, draft: any = {}) {
+  const calls: Call[] = [];
+  const events: string[] = [];
+  const api = async (path: string, body?: any, method?: string) => {
+    calls.push({ path, body, method });
+    return responses.shift() ?? { status: 500, data: { detail: "no response queued" } };
+  };
+  const msgs: any[] = [];
+  const busy: boolean[] = [];
+  const drafts: any[] = [];
+  const handlers = makeWizardHandlers({
+    siteId: 7, state, draft, ack, api,
+    load: () => { events.push("load"); },
+    onChanged: () => { events.push("onChanged"); },
+    setBusy: (b: boolean) => busy.push(b),
+    setMsg: (m: any) => msgs.push(m),
+    setDraft: (d: any) => drafts.push(d),
+  });
+  return { handlers, calls, events, msgs, busy, drafts };
+}
+
+const WITH_WARNINGS = { warnings: [{ id: "node-ts.symlinked-files", title: "w" }],
+                        blocking: [], can_materialize: true, questions: [] };
+const NO_WARNINGS = { warnings: [], blocking: [], can_materialize: true, questions: [] };
+const CREATED = { status: 201, data: { version: 4 } };
+
+test("r11-q1: the ack reaches the server as confirm_warnings, and only when it applies",
+  async () => {
+    // Warnings on screen and the box ticked: the one case that may confirm.
+    let h = harness(WITH_WARNINGS, true, [CREATED]);
+    await h.handlers.materialize();
+    assert.deepEqual(h.calls, [{ path: "v1/sites/7/manifest/",
+                                 body: { confirm_warnings: true }, method: undefined }],
+      "the ack must reach the server under the key materialize.py reads");
+
+    // Warnings on screen, box not ticked: this is the 409 the gate exists for.
+    h = harness(WITH_WARNINGS, false, [{ status: 409, data: { code: "x" } }]);
+    await h.handlers.materialize();
+    assert.deepEqual(h.calls[0].body, { confirm_warnings: false });
+
+    // R10-UX-F6: no warnings, no consent — whatever `ack` happens to hold. Ticked and
+    // then the server's warnings went away is the only way to get here, and confirming
+    // a set that no longer exists is not a thing to send.
+    h = harness(NO_WARNINGS, true, [CREATED]);
+    await h.handlers.materialize();
+    assert.deepEqual(h.calls[0].body, { confirm_warnings: false });
+  });
+
+test("r11-q1: what each status re-reads — 201 both, 409 both, 500 neither", async () => {
+  let h = harness(NO_WARNINGS, false, [CREATED]);
+  await h.handlers.materialize();
+  assert.deepEqual(h.events, ["load", "onChanged"],
+    "a 201 re-reads the wizard and the project list");
+  assert.deepEqual(h.msgs, [null, { ok: true, text: "Manifest v4 created." }]);
+
+  // R9-4: a 409 is the server telling this client its copy is stale, and the only
+  // correct response is to go and read the current one. Deleting this re-read is the
+  // mutation that survived every test in this file.
+  h = harness(WITH_WARNINGS, false,
+              [{ status: 409, data: { code: "warnings_unconfirmed", detail: "d" } }]);
+  await h.handlers.materialize();
+  assert.deepEqual(h.events, ["load", "onChanged"],
+    "a 409 re-reads too — the refusal exists because the screen is out of date");
+  assert.ok(h.msgs[1].problems, "the refusal panel gets the problems list");
+
+  // A 500 or a dead socket re-reads nothing on purpose: the server said nothing about
+  // this site's state, so there is nothing to converge ON.
+  h = harness(NO_WARNINGS, false, [{ status: 500, data: { detail: "boom" } }]);
+  await h.handlers.materialize();
+  assert.deepEqual(h.events, [], "nothing to converge on — a refetch would loop");
+  assert.deepEqual(h.msgs[1], { ok: false, text: "boom" });
+});
+
+test("r11-q1: the busy flag brackets the request, both ways", async () => {
+  const h = harness(NO_WARNINGS, false, [CREATED]);
+  await h.handlers.materialize();
+  assert.deepEqual(h.busy, [true, false],
+    "a button that never re-enables is a screen the operator has to reload");
+});
+
+test("r11-q1: save PATCHes the draft, clears it on 200, and re-reads", async () => {
+  const draft = { "site.domain": "takko.market" };
+  let h = harness(NO_WARNINGS, false, [{ status: 200, data: {} }], draft);
+  await h.handlers.save();
+
+  assert.deepEqual(h.calls, [{ path: "v1/sites/7/wizard/", body: draft,
+                               method: "PATCH" }]);
+  assert.deepEqual(h.drafts, [{}], "the typed answers are the server's now");
+  assert.deepEqual(h.events, ["load"], "…and the form shows what the server kept");
+  assert.deepEqual(h.msgs[1], { ok: true, text: "Saved." });
+
+  // A rejected answer keeps the draft — retyping a domain because the server said it was
+  // malformed is the round-1 error-proofing property.
+  h = harness(NO_WARNINGS, false,
+              [{ status: 400, data: { "site.domain": [{ message: "not a domain" }] } }],
+              draft);
+  await h.handlers.save();
+  assert.deepEqual(h.drafts, []);
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.msgs[1], { ok: false, text: "site.domain: not a domain" });
+});
+
+// ── R11-UX-F3: the sibling wizard that never re-read ─────────────────────────
+//
+// `refreshKey` is bumped whenever a write (or a refusal) means this screen's data is out
+// of date. `ReadinessPanel` has taken it since R9-4 and re-reads the report; `SiteWizard`
+// did not take it at all, so on a project with two sites the panel converged on the
+// re-scanned truth while the OTHER site's wizard went on showing preflight answers
+// computed against the report from before it moved — a blocker list and a gate saying the
+// deploy may proceed, on one screen.
+//
+// The behavioural half of this pin is in sim-contract.test.ts, where the fixtures can
+// actually move a sibling's payload. What is asserted here is the wiring, because
+// `useEffect` does not run under `renderToStaticMarkup` and there is no DOM test runner
+// on this tree: a dependency array is not observable, so it is read.
+
+test("r11-ux-f3: SiteWizard takes refreshKey and re-reads on it", () => {
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+
+  assert.match(source, /function SiteWizard\(\{ site, refreshKey, onChanged \}\)/,
+    "SiteWizard does not receive the key that says its data is stale");
+  assert.match(source, /useEffect\(\(\) => \{ if \(open\) load\(\); \}, \[open, refreshKey\]\)/,
+    "the wizard's load effect does not depend on refreshKey — a sibling's 409 " +
+    "converges the panel and leaves this form showing the report from before it");
+  assert.match(source, /<SiteWizard key=\{s\.id\} site=\{s\} refreshKey=\{refreshKey\}/,
+    "the panel renders its wizards without passing the key down");
 });
