@@ -173,7 +173,11 @@ def module_refused_paths(module, root):
         `(truncated)`), so a deeply nested file is named by a prefix of its own path. A
         guard demanding the whole string would accuse the module that behaves most
         carefully. A prefix of `_REFUSAL_NAMED_PREFIX` characters counts, and that floor
-        is well below any truncation limit a readable report could use.
+        is well below any truncation limit a readable report could use — but ONLY in a
+        `_REFUSAL_LOUD_TIERS` detail (F-2). A prefix names a directory rather than a
+        file, so two siblings under a deep path share one; requiring the weaker match to
+        appear where an operator reads refusals is what keeps a passing mention of
+        `alpha.ts` from vouching for `beta.ts`.
 
     It is still not proof that the module's sentence is a GOOD one — nothing mechanical
     can be — but "the file appears in this module's own report" is the claim the
@@ -189,11 +193,30 @@ def module_refused_paths(module, root):
 # two different files sharing it would have to be siblings under a deep path.
 _REFUSAL_NAMED_PREFIX = 60
 
+# …and "siblings under a deep path" is not a hypothetical, which is F-2. Two files in one
+# deep directory share their first 60 characters, so a line about `alpha.ts` satisfied the
+# guard for `beta.ts` — and `beta.ts` then vanished from `core.symlinked-files` with
+# nothing anywhere saying it was not read. The tolerance added to keep the guard honest
+# was itself a way through it.
+#
+# The prefix now counts only in a WARNING-OR-WORSE detail. Every refusal this repo emits
+# is a warning (`core.symlinked-files`, `node-ts.symlinked-files`) and for a stated
+# reason — the survey below it is INCOMPLETE and the operator has to know that before
+# trusting the report — so the weaker match is admitted only where an operator reads
+# refusals from. A module that mentions a sibling in passing, in an `advice` or `ok` line,
+# is no longer vouching for a file it never named.
+#
+# The EXACT spelling still counts in any tier, and that asymmetry is the point: a full
+# path names one file and nothing else, so where it is said is a question of quality
+# rather than of identity. A prefix names a directory, and a directory is not a file.
+_REFUSAL_LOUD_TIERS = ("blocker", "warning")
+
 
 def _refused_paths_problem(module, root, refused, emitted):
     """The R11-A2 contract, as a sentence to raise or None. See `module_refused_paths`."""
     root = Path(root)
     details = "\n".join(c.detail or "" for c in emitted)
+    loud = "\n".join(c.detail or "" for c in emitted if c.tier in _REFUSAL_LOUD_TIERS)
     for raw in refused:
         path = Path(raw)
         try:
@@ -208,7 +231,7 @@ def _refused_paths_problem(module, root, refused, emitted):
                 f"twice: once by `core.symlinked-files` and once by this module")
         named = rel in details or (
             len(rel) > _REFUSAL_NAMED_PREFIX
-            and rel[:_REFUSAL_NAMED_PREFIX] in details)
+            and rel[:_REFUSAL_NAMED_PREFIX] in loud)
         if not named:
             return (
                 f"module {module.name!r} declares a refusal of {rel!r} and names it in "
@@ -216,7 +239,12 @@ def _refused_paths_problem(module, root, refused, emitted):
                 f"`core.symlinked-files`, on the module's word that it has already told "
                 f"the operator about it — so a file nothing then mentions is a refusal "
                 f"the operator is told about by nobody. Either report it in a check's "
-                f"`detail`, or leave it in the core suite's list")
+                f"`detail`, or leave it in the core suite's list. (A path longer than "
+                f"{_REFUSAL_NAMED_PREFIX} characters may be named by its first "
+                f"{_REFUSAL_NAMED_PREFIX}, for reports that bound repo-controlled text "
+                f"— but only in a {' or '.join(_REFUSAL_LOUD_TIERS)} check, because a "
+                f"prefix names a directory and a sibling in an advice line is not this "
+                f"file)")
     return None
 
 

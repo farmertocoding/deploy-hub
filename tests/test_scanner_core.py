@@ -323,9 +323,14 @@ class _RefusingModule:
 
     name = "refusing-test-module"
 
-    def __init__(self, returned, detail=None):
+    def __init__(self, returned, detail=None, tier="warning"):
         self._returned = returned
         self._detail = detail
+        # F-2: the TIER the module's own sentence is emitted at. A refusal is a warning
+        # (`node-ts.symlinked-files` and `core.symlinked-files` both are) — this is a
+        # parameter so a test can emit the sentence somewhere the operator does not read
+        # a refusal from, which is how the prefix rule was defeated.
+        self._tier = tier
 
     def detect(self, root):
         return True
@@ -336,7 +341,7 @@ class _RefusingModule:
     def checks(self, root):
         if self._detail is None:
             return []
-        return [core.CheckResult(id="refusing-test-module.refusals", tier="warning",
+        return [core.CheckResult(id="refusing-test-module.refusals", tier=self._tier,
                                  title="what this module refused to read",
                                  detail=self._detail(pathlib.Path(root)))]
 
@@ -456,7 +461,11 @@ def test_issue_r11_a2_a_long_path_printed_in_bounded_form_is_not_accused(
     (root / "app.py").write_text("x = 1\n", encoding="utf-8")
     rel = (deep / "metrics.ts").relative_to(root).as_posix()
     assert len(rel) > 80, rel
-    os.symlink("../../../../../../../neighbour/metrics.ts", deep / "metrics.ts")
+    os.symlink(os.path.relpath(neighbour / "metrics.ts", deep), deep / "metrics.ts")
+    # …and it really does leave the tree, so the refusal under test is a refusal. The
+    # first draft of this counted `..` by hand, came up one short, and asserted the
+    # absence of a check that a contained link would never have produced.
+    assert not (deep / "metrics.ts").resolve().is_relative_to(root)
 
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
         returned=lambda r: [r / rel],
@@ -465,7 +474,13 @@ def test_issue_r11_a2_a_long_path_printed_in_bounded_form_is_not_accused(
 
     report = core.scan(root)
 
-    assert "core.symlinked-files" not in [c["id"] for c in report["checks"]]
+    assert "core.symlinked-files" not in [c["id"] for c in report["checks"]], (
+        "the subtraction did not land — the module named the file in the only form a "
+        "bounded report can print it in")
+    # The module's line is the only one that mentions the file at all — by the bounded
+    # prefix, which is the only spelling of it a truncating report contains.
+    assert [c["id"] for c in report["checks"] if rel[:80] in c["detail"]] == \
+        ["refusing-test-module.refusals"]
 
 
 def test_issue_r11_a2_the_live_module_satisfies_its_own_contract(tmp_path):
@@ -492,3 +507,84 @@ def test_issue_r11_a2_the_live_module_satisfies_its_own_contract(tmp_path):
 
     assert [c["id"] for c in report["checks"] if "metrics.ts" in c["detail"]] == \
         ["node-ts.symlinked-files"]
+
+
+def _sibling_links(tmp_path):
+    """A deep package with two escaping source links, `alpha.ts` and `beta.ts`.
+
+    The directory part is longer than `_REFUSAL_NAMED_PREFIX`, so the two files'
+    repo-relative spellings share their first 60 characters — which is the whole point:
+    the truncation tolerance cannot tell them apart, and something else has to.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    for name in ("alpha.ts", "beta.ts"):
+        (neighbour / name).write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    deep = root / ("packages/a-rather-long-package-name/src/features/telemetry/"
+                   "collectors/runtime")
+    deep.mkdir(parents=True)
+    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    rel = {name: (deep / name).relative_to(root).as_posix()
+           for name in ("alpha.ts", "beta.ts")}
+    assert rel["alpha.ts"][:core._REFUSAL_NAMED_PREFIX] == \
+        rel["beta.ts"][:core._REFUSAL_NAMED_PREFIX], rel
+    for name in ("alpha.ts", "beta.ts"):
+        # `relpath` rather than a hand-counted run of `..`: the first draft of this
+        # helper was one `..` short, so both links resolved INSIDE the root, nothing
+        # escaped, and the assertion that core still reports the unnamed sibling passed
+        # over an empty list. A committed link that does not escape is not this fixture.
+        os.symlink(os.path.relpath(neighbour / name, deep), deep / name)
+        assert not (deep / name).resolve().is_relative_to(root), name
+    return root, rel
+
+
+def test_issue_f2_a_prefix_match_only_counts_where_a_refusal_is_reported(
+        tmp_path, registry_sandbox):
+    """F-2: the truncation tolerance let a SIBLING's name vouch for a file, in any tier.
+
+    `_REFUSAL_NAMED_PREFIX` exists so a module that prints a bounded form of a long path
+    is not accused of hiding a refusal it reported. Two files under one deep directory
+    share that prefix, so an `advice`-tier line mentioning `alpha.ts` satisfied the guard
+    for `beta.ts` — and `beta.ts` then dropped out of `core.symlinked-files` with nothing
+    anywhere saying it was not read. Fail-open, through the tolerance added to keep the
+    guard honest.
+
+    A refusal is a WARNING wherever this repo emits one (`core.symlinked-files`,
+    `node-ts.symlinked-files`), so a prefix now only counts in a warning-or-worse detail:
+    the weaker match is admitted only where the operator reads refusals from. The exact
+    spelling still counts anywhere, because it names the file and nothing else does.
+    """
+    root, rel = _sibling_links(tmp_path)
+    core._FRAMEWORK_MODULES[:] = [_RefusingModule(
+        returned=lambda r: [r / rel["beta.ts"]],
+        detail=lambda r: f"vendored module {rel['alpha.ts']!r} is imported from outside",
+        tier="advice")]
+    core._FALLBACK_MODULES[:] = []
+
+    with pytest.raises(ValueError, match="names it in no check"):
+        core.scan(root)
+
+
+def test_issue_f2_the_same_line_at_warning_tier_is_accepted(tmp_path, registry_sandbox):
+    """…and the tier is the whole of the difference, so the rule is about WHERE the
+    sentence is and not about what it says.
+
+    Same module, same detail, emitted as a warning: the prefix counts, and this is the
+    honest long-path case R11-A2 added the tolerance for. Its own path is what the line
+    names here — a module quoting a bounded form of the file it refused.
+    """
+    root, rel = _sibling_links(tmp_path)
+    truncated = rel["beta.ts"][:core._REFUSAL_NAMED_PREFIX]
+    core._FRAMEWORK_MODULES[:] = [_RefusingModule(
+        returned=lambda r: [r / rel["beta.ts"]],
+        detail=lambda r: f"symlinked source file {truncated!r} (truncated) — not read")]
+    core._FALLBACK_MODULES[:] = []
+
+    report = core.scan(root)
+    refusals = [c for c in report["checks"] if c["id"] == "core.symlinked-files"]
+
+    assert refusals, "alpha.ts was never named by the module and must still be reported"
+    assert "alpha.ts" in refusals[0]["detail"]
+    assert "beta.ts" not in refusals[0]["detail"], (
+        "the module's own line names it; this one must not name it again")

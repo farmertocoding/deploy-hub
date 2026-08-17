@@ -1469,14 +1469,32 @@ def test_issue_r11_dos_two_committed_directory_symlinks_do_not_take_the_scan_dow
     assert _data_files_out_of_process(root, timeout=20) == ["data/app.sqlite3"]
 
 
-def test_issue_r11_dos_a_directory_reached_twice_is_one_data_file(tmp_path):
-    """The `seen` set is keyed on the RESOLVED directory, so the same directory reached
-    by two names contributes its files once.
+@pytest.mark.parametrize("alias", ["aa-link", "zzz-link"])
+def test_issue_r11_dos_a_directory_reached_twice_is_one_data_file(tmp_path, alias):
+    """The same directory reached by two names contributes its files once, AND it is the
+    real directory that names the volume — whatever the alias is called.
 
-    The disclosure's own measurement: `data/loop -> data` beside one `app.sqlite3` gave
-    41 `data_files` entries for one file on disk, and `data_dir()` reads
-    `data_files[0].parts[0]` — so a link sorting before the real name was the volume
-    that landed in the manifest fragment.
+    THE PRE-R11-DOS MEASUREMENT, stated in the right direction (the first version of this
+    docstring had it backwards). The walk had no `seen` set, so both names were traversed
+    and `data_files` carried the file twice. Which one came FIRST — and `data_dir()` reads
+    `data_files[0].parts[0]`, which is the string that lands in the manifest fragment —
+    was decided by the stack: entries are appended in sorted order and popped LIFO, so
+    the LAST-sorted directory is walked first. Measured on master:
+
+        aa-link  -> data   data_files=['data/app.sqlite3', 'aa-link/app.sqlite3']  data
+        zzz-link -> data   data_files=['zzz-link/app.sqlite3', 'data/app.sqlite3']  zzz-link
+
+    F-1: the `seen` set inverted that and did not remove it. The key is claimed at APPEND
+    time, in sorted order, so the FIRST-sorted name won instead — same defect, mirrored,
+    and worse in one respect: with the duplicate gone the real path does not merely lose
+    the naming, it disappears from `data_files` entirely.
+
+        aa-link  -> data   data_files=['aa-link/app.sqlite3']  data_dir='aa-link'
+
+    The `zzz-link` parameter is the case the original pin covered, and it passed on both
+    sides of that regression, which is exactly why it did not catch it. Both parameters
+    now assert the same answer, because the answer must not depend on what the operator
+    happened to call the link.
     """
     root = tmp_path / "svc"
     (root / "data").mkdir(parents=True)
@@ -1484,7 +1502,7 @@ def test_issue_r11_dos_a_directory_reached_twice_is_one_data_file(tmp_path):
         json.dumps({"name": "dup", "main": "dist/index.js",
                     "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
     (root / "data" / "app.sqlite3").write_bytes(b"")
-    (root / "zzz-link").symlink_to(root / "data", target_is_directory=True)
+    (root / alias).symlink_to(root / "data", target_is_directory=True)
 
     survey = node_ts._Survey(root)
     assert [p.as_posix() for p in survey.data_files] == ["data/app.sqlite3"]

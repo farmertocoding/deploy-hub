@@ -682,10 +682,34 @@ class _Survey:
     # volume and backup fragment — and that is a change to what the manifest says about
     # a repository, which wants its own commit with the manifest consequences in the
     # diff rather than a ride inside a termination fix. So a link out of the tree still
-    # contributes exactly what it contributed before, and only the loops and the
-    # already-walked duplicates stop. The characterization pin that says so, and that a
-    # future §N1/§N6 commit has to delete on purpose, is
+    # contributes what it contributed before, and only the loops and the already-walked
+    # duplicates stop. The characterization pin that says so, and that a future §N1/§N6
+    # commit has to delete on purpose, is
     # `…test_issue_r11_dos_a_link_out_of_the_tree_still_contributes_its_data_files`.
+    #
+    # F-1, AND IT IS WHY "TERMINATION ONLY" WAS TOO CONFIDENT A SENTENCE. De-duplicating
+    # by resolved directory decides something the duplicate-carrying walk never had to:
+    # WHICH of two names for one directory is the one that survives. The first version of
+    # this fix answered "whichever `sorted()` reaches first", which is the operator's
+    # choice of link name, and on `aa-link -> data` that answer was the LINK — the real
+    # `data/` vanished from `data_files` entirely and `data_dir()` returned `aa-link`, the
+    # string that lands in the manifest volume. Master returned both paths and named
+    # `data`; the mirror of the same defect the disclosure already described, produced by
+    # its remedy, on a tree with no loop in it at all.
+    #
+    # So the order is pinned rather than incidental: at each level, NON-SYMLINK entries
+    # are visited before symlinked ones, so a real directory always claims its resolved
+    # key before any alias of it can. The alias is then a directory already walked, which
+    # is what it is. `sorted()` still orders within each of the two groups, so the walk
+    # stays deterministic; the only behaviour this adds beyond de-duplication is that when
+    # a file, too, is reachable by both names, the real path is the one reported.
+    #
+    # NOT COVERED, and named because it is the same question one level up: an alias at a
+    # SHALLOWER level still claims the key before the real directory deeper down
+    # (`top-link -> a/b` beside `a/`, walked from the root). Ordering within a level
+    # cannot see that, and the fix that would is a breadth-first walk that prefers the
+    # shortest real path — a different walk, whose output ordering is a manifest-visible
+    # change and therefore §N1/§N6's commit, not this one's.
     #
     # A COSMETIC ASYMMETRY, noted for the same reader: a LIVE symlink candidate that is
     # not a package at all is still refused loudly by `_workspace_candidate_problem` as
@@ -706,7 +730,12 @@ class _Survey:
         while stack:
             directory = stack.pop()
             try:
-                entries = sorted(directory.iterdir())
+                # F-1: real entries first, aliases second, each group by name. `sorted`
+                # alone let `aa-link -> data` claim `data`'s resolved key and take the
+                # directory's place in the report; `is_symlink()` is the whole of the
+                # difference between a name and the thing it names.
+                entries = sorted(directory.iterdir(),
+                                 key=lambda p: (p.is_symlink(), p.name))
             except OSError:
                 continue
             for path in entries:
