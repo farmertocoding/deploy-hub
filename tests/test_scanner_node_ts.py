@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import shutil
+import sys
 from typing import NamedTuple
 
 import pytest
@@ -1408,3 +1409,110 @@ def test_issue_r10_a3_a_refusal_no_module_reported_is_still_reported(tmp_path):
     assert "metrics.ts" not in refused["detail"], (
         "the node-ts line already names it; this one must not name it again")
     assert "metrics.ts" in by_id(report, "node-ts.symlinked-files")["detail"]
+
+
+# ── R11-DOS: the data walk, and the disclosure that said it terminates ─────────
+
+_DATA_WALK_PROBE = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from scanner.modules.node_ts import _Survey
+print(json.dumps(sorted(p.as_posix() for p in _Survey(sys.argv[2]).data_files)))
+"""
+
+
+def _data_files_out_of_process(root, timeout):
+    """`_Survey(root).data_files`, computed in a child that is KILLED at `timeout`.
+
+    R11-DOS red-first. The failing case of the test below is not a wrong answer, it is a
+    walk that does not come back — and a test that hangs is evidence of nothing, it is a
+    suite nobody can run. So the walk happens somewhere killable and the assertion is
+    about whether it returned at all. `subprocess` rather than `signal.alarm` because the
+    alarm handler only fires between bytecodes and this loop spends its time in
+    `iterdir`; a child that can be SIGKILLed has no such qualification.
+    """
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, "-c", _DATA_WALK_PROBE, str(REPO), str(root)],
+        capture_output=True, text=True, timeout=timeout)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def test_issue_r11_dos_two_committed_directory_symlinks_do_not_take_the_scan_down(
+        tmp_path):
+    """`_find_data_files` followed symlinked directories with no `seen` set, and the
+    in-module disclosure claimed that was survivable because the OS returns ELOOP at
+    ~40 levels of resolution: "it terminates, measured".
+
+    It terminates with ONE loop. Two of them do not add, they multiply — each level of
+    `src/self` can be entered through `src/up` and vice versa — so the walk enumerates
+    the paths of a two-symbol alphabet up to the ELOOP depth, and the operator's scan
+    never comes back. Both links are ordinary committed relative symlinks: nothing in
+    the repository's text contains a `..` a reviewer would notice.
+
+    Measured on the pre-fix tree: one loop, 0.002s; two loops, still climbing past 20
+    seconds when the probe was killed.
+    """
+    root = tmp_path / "svc"
+    (root / "src").mkdir(parents=True)
+    (root / "data").mkdir()
+    (root / "package.json").write_text(
+        json.dumps({"name": "dos", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "src" / "index.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    (root / "data" / "app.sqlite3").write_bytes(b"")
+    (root / "src" / "up").symlink_to("..", target_is_directory=True)
+    (root / "src" / "self").symlink_to(".", target_is_directory=True)
+
+    assert _data_files_out_of_process(root, timeout=20) == ["data/app.sqlite3"]
+
+
+def test_issue_r11_dos_a_directory_reached_twice_is_one_data_file(tmp_path):
+    """The `seen` set is keyed on the RESOLVED directory, so the same directory reached
+    by two names contributes its files once.
+
+    The disclosure's own measurement: `data/loop -> data` beside one `app.sqlite3` gave
+    41 `data_files` entries for one file on disk, and `data_dir()` reads
+    `data_files[0].parts[0]` — so a link sorting before the real name was the volume
+    that landed in the manifest fragment.
+    """
+    root = tmp_path / "svc"
+    (root / "data").mkdir(parents=True)
+    (root / "package.json").write_text(
+        json.dumps({"name": "dup", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "data" / "app.sqlite3").write_bytes(b"")
+    (root / "zzz-link").symlink_to(root / "data", target_is_directory=True)
+
+    survey = node_ts._Survey(root)
+    assert [p.as_posix() for p in survey.data_files] == ["data/app.sqlite3"]
+    assert survey.data_dir() == "data"
+
+
+def test_issue_r11_dos_a_link_out_of_the_tree_still_contributes_its_data_files(tmp_path):
+    """THE SCOPE OF THE R11-DOS FIX, pinned rather than described.
+
+    This is a CHARACTERIZATION pin, not an endorsement. The fix above is termination
+    only: a directory already walked is not walked again. What a `data_files` entry
+    reached THROUGH a link should mean — whether the volume and backup fragment
+    (§N1/§N6) may be steered by a neighbouring tree at all — is the decision the module's
+    disclosure defers, and it is a behaviour change to the manifest rather than a hang.
+    Making it here would have hidden that change inside a termination fix.
+
+    So the link below still contributes, exactly as it did before the `seen` set, and
+    this test is what a future §N1/§N6 commit has to come and delete on purpose.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    (neighbour / "warehouse.parquet").write_bytes(b"")
+    root = tmp_path / "svc"
+    root.mkdir()
+    (root / "package.json").write_text(
+        json.dumps({"name": "linked", "main": "dist/index.js",
+                    "dependencies": {"fastify": "^4.0.0"}}) + "\n", encoding="utf-8")
+    (root / "outside").symlink_to(neighbour, target_is_directory=True)
+
+    survey = node_ts._Survey(root)
+    assert [p.as_posix() for p in survey.data_files] == ["outside/warehouse.parquet"]

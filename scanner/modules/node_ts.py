@@ -646,28 +646,46 @@ class _Survey:
     #
     # NOT CONTAINED, AND KNOWN — the one walk in this module the round-9 rule above does
     # not cover, disclosed here rather than in a handoff note because this is where the
-    # next reader will be standing. It follows symlinked DIRECTORIES (no `is_symlink()`
-    # prune, no `seen` set), which the source walk stopped doing in round 7:
+    # next reader will be standing. It follows symlinked DIRECTORIES, and until R11-DOS
+    # it did so with no `seen` set at all:
     #
-    #   * a symlinked directory loop is bounded only by the OS returning ELOOP at ~40
-    #     levels of resolution — so it terminates, measured, rather than hanging like
-    #     the round-7 bug did, but it yields the SAME data file once per level:
-    #     `data/loop -> data` beside one `app.sqlite3` measured 41 `data_files` entries
-    #     for one file on disk. `data_dir()` reads `data_files[0].parts[0]`, so a link
-    #     that sorts before the real directory names the volume — `zzz-link -> data`
-    #     measured `data_dir() == "zzz-link"`, which is the path that lands in the
-    #     manifest fragment;
     #   * a link to a neighbouring tree contributes its `*.parquet`/`*.duckdb`/
     #     `*.sqlite3` entries, and this walk steers by EXISTENCE rather than content:
     #     one outside `.sqlite3` is enough to flip `node-ts.local-state`, add
     #     `deploy_strategy: recreate` and a named volume to the manifest fragment.
+    #     STILL TRUE, and still deliberately not decided here — see the scope below;
+    #   * `data/loop -> data` beside one `app.sqlite3` measured 41 `data_files` entries
+    #     for one file on disk, and `data_dir()` reads `data_files[0].parts[0]`, so a
+    #     link sorting before the real directory named the volume that lands in the
+    #     manifest fragment. FIXED by the `seen` set below: one directory, once.
     #
-    # LEFT AS IS, DELIBERATELY, and it is future work rather than a hole nobody saw: the
-    # fix is not the containment call — it is the same prune-and-`seen` treatment
-    # `_iter_source_files` carries, plus deciding what `data_files` means for a path
-    # reached through a link, and that is a behaviour change to the volume and backup
-    # fragment (§N1/§N6) rather than a read boundary. It wants its own commit with the
-    # manifest consequences in the diff.
+    # R11-DOS — AND THE SENTENCE THAT USED TO BE HERE WAS FALSE. It read: "a symlinked
+    # directory loop is bounded only by the OS returning ELOOP at ~40 levels of
+    # resolution — so it terminates, measured, rather than hanging like the round-7 bug
+    # did". That measurement was taken with ONE loop, and one loop does terminate. Two
+    # do not add, they multiply: with `src/up -> ..` and `src/self -> .` committed side
+    # by side, every level of one can be entered through the other, so the walk
+    # enumerates the strings of a two-symbol alphabet up to the ELOOP depth and the
+    # operator's scan never comes back. Measured on the same tree: one loop 0.002s, two
+    # loops still climbing past 20 seconds when the probe was killed. Neither link
+    # contains a `..` in anything the repository commits as text.
+    #
+    # A disclosure that measures the easy case and generalises from it is worse than
+    # silence — it is a hazard somebody looked at and signed off. The tests are
+    # `tests/test_scanner_node_ts.py::test_issue_r11_dos_*`, and the DOS one runs the
+    # walk in a child process it can kill, because a red run that hangs proves nothing.
+    #
+    # THE SCOPE OF THE FIX, stated because it is narrower than the treatment
+    # `_iter_source_files` carries and deliberately so: `seen` only, keyed on the
+    # RESOLVED directory. No `is_symlink()` prune. A prune would ALSO decide the
+    # §N1/§N6 question — what a `data_files` entry reached through a link means for the
+    # volume and backup fragment — and that is a change to what the manifest says about
+    # a repository, which wants its own commit with the manifest consequences in the
+    # diff rather than a ride inside a termination fix. So a link out of the tree still
+    # contributes exactly what it contributed before, and only the loops and the
+    # already-walked duplicates stop. The characterization pin that says so, and that a
+    # future §N1/§N6 commit has to delete on purpose, is
+    # `…test_issue_r11_dos_a_link_out_of_the_tree_still_contributes_its_data_files`.
     #
     # A COSMETIC ASYMMETRY, noted for the same reader: a LIVE symlink candidate that is
     # not a package at all is still refused loudly by `_workspace_candidate_problem` as
@@ -677,6 +695,14 @@ class _Survey:
     def _find_data_files(self):
         found = []
         stack = [self.root]
+        # The root goes in first, so `src/up -> ..` is a directory already walked rather
+        # than a new one. `resolve()` is the key for `_iter_source_files`'s reason: a
+        # loop can be spelled with `..` and with a link, and only the resolved path is
+        # the same string both ways.
+        try:
+            seen = {self.root.resolve()}
+        except (OSError, RuntimeError):                          # pragma: no cover
+            return found
         while stack:
             directory = stack.pop()
             try:
@@ -685,8 +711,20 @@ class _Survey:
                 continue
             for path in entries:
                 if path.is_dir():
-                    if path.name not in _SKIP_DIRS and not path.name.startswith("."):
-                        stack.append(path)
+                    if path.name in _SKIP_DIRS or path.name.startswith("."):
+                        continue
+                    try:
+                        key = path.resolve()
+                    except (OSError, RuntimeError):
+                        # A name the filesystem cannot resolve is not walked. Same arm
+                        # and same reason as `_iter_source_files`'s: on 3.11 a resolution
+                        # loop raises `RuntimeError`, and a directory nobody can name is
+                        # a directory nobody can read.
+                        continue
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    stack.append(path)
                 elif path.is_file():
                     if path.suffix in _DATA_SUFFIXES or path.name.endswith("-wal"):
                         found.append(path.relative_to(self.root))
