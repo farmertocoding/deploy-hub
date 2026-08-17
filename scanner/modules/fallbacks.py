@@ -521,6 +521,40 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".
 # left for the next reader to find, which is the mistake this fix is undoing.
 
 
+def _resolves_outside(root, path):
+    """True when `path`'s resolved location is neither `root` itself nor under it.
+
+    THE NAKED COMPARISON, with no symlink gate and no exception handling, because its
+    two callers disagree about both and are right to (R10-A4):
+
+      * `escapes_root` below asks it only about symlinks — an ordinary file found by a
+        walk that already prunes symlinked directories is contained by construction, and
+        resolving every file of every scan would be paid for nothing.
+      * `node_ts._workspace_candidate_problem` asks it only about NON-symlinks: a
+        symlinked workspace base is refused one line earlier, outright and for a
+        different reason (it is a second NAME for a package, so accepting it
+        double-counts a package the survey already has, whatever it points at).
+
+      * `escapes_root` answers an unresolvable path with True and nothing else, because
+        its callers want a verdict.
+      * `_workspace_candidate_problem` answers it with a SENTENCE naming the exception
+        class, because its caller is composing a report line the operator reads.
+
+    So what is shared is the comparison and only the comparison. This raises whatever
+    `resolve()` raises and the caller says what that means.
+
+    THE ROOT-ITSELF ARM IS A RECONCILIATION, not a preserved difference, and this is the
+    one place the two old spellings gave different answers. `_workspace_candidate_problem`
+    carried `resolved != root_resolved`; `escapes_root` did not, so it called a link
+    resolving TO the scan root an escape — the root is not among its own parents. A path
+    that resolves to the root is inside the root by any reading, and the old answer was
+    reachable only for a symlink to a directory, which every reader in this repo then
+    fails to read anyway. One answer, and it is the defensible one.
+    """
+    resolved, root_resolved = Path(path).resolve(), Path(root).resolve()
+    return resolved != root_resolved and root_resolved not in resolved.parents
+
+
 def escapes_root(root, path):
     """True when `path` is a symlink resolving outside `root`. The containment rule.
 
@@ -541,13 +575,12 @@ def escapes_root(root, path):
     if not path.is_symlink():
         return False
     try:
-        resolved, root_resolved = path.resolve(), Path(root).resolve()
+        return _resolves_outside(root, path)
     except (OSError, RuntimeError):
         # Unresolvable is not demonstrably contained, and this rule fails closed: the
         # secret-scan carve-out is the only axis allowed to read one of these, and it
         # gets them from the `escaping` list either way.
         return True
-    return root_resolved not in resolved.parents
 
 
 def read_contained(root, path, skipped=None, escaping=None):

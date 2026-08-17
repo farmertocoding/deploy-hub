@@ -1297,3 +1297,31 @@ def test_issue_r10_q1_a_looping_fixed_name_link_is_refused_rather_than_raised(tm
     assert survey.env_example == ""
     report = core.scan(root)
     assert by_id(report, "node-ts.symlinked-files")["tier"] == "warning"
+
+
+# ── R10-A4: the workspace rule reads the shared comparison ─────────────────────
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r10_a4_the_workspace_rule_reads_the_shared_comparison(tmp_path,
+                                                                     monkeypatch):
+    """R10-A4. `_workspace_candidate_problem` kept its own inline resolve-compare, so
+    the containment arithmetic this repo has already paid for three times was written
+    twice again.
+
+    Monkeypatching `fallbacks._resolves_outside` is how a test asserts there is only ONE
+    of it: with a second copy living in this module the patch reaches nothing and the
+    candidate is accepted. The sentence stays this module's own — the shared thing is
+    the comparison, not the report line.
+    """
+    from scanner.modules import fallbacks
+
+    root = tmp_path / "repo"
+    pkg = root / "packages" / "web"
+    pkg.mkdir(parents=True)
+    (pkg / "package.json").write_text('{"name": "web"}\n', encoding="utf-8")
+
+    assert node_ts._workspace_candidate_problem(root, pkg) is None
+
+    monkeypatch.setattr(fallbacks, "_resolves_outside", lambda root, path: True)
+    problem = node_ts._workspace_candidate_problem(root, pkg)
+    assert problem is not None and "resolves outside the scanned repository" in problem

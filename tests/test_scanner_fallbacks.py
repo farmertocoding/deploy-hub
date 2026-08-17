@@ -1052,3 +1052,49 @@ def test_issue_r10_q1_a_scan_of_the_looping_tree_returns_a_report(tmp_path):
     assert report["schema_version"] == core.SCHEMA_VERSION
     assert "core.lockfile" in [c["id"] for c in report["checks"]], (
         "a scan that reports nothing is no scan")
+
+
+# ── R10-A4: two spellings of one comparison ────────────────────────────────────
+#
+# `escapes_root` and `node_ts._workspace_candidate_problem` each wrote out the same
+# resolve-and-compare. The workspace rule cannot call `escapes_root` — that one is
+# symlink-gated and a candidate reaching its compare is by definition NOT a symlink, so
+# it would answer False about everything — which is exactly how a second copy gets
+# written. `_resolves_outside` is the comparison with the gate and the exception
+# handling lifted off it, so there is one of it.
+
+def test_issue_r10_a4_a_path_that_resolves_to_the_root_is_inside_the_root(tmp_path):
+    """The one case the two old spellings answered differently, reconciled rather than
+    preserved: the workspace rule carried `resolved != root_resolved`, `escapes_root`
+    did not — the root is not among its own parents — so a link resolving TO the scan
+    root was an escape by one reading and contained by the other.
+    """
+    repo = tmp_path / "repo"
+    (repo / "packages").mkdir(parents=True)
+    (repo / "packages" / "up").symlink_to("..", target_is_directory=True)
+
+    assert fallbacks._resolves_outside(repo, repo) is False
+    assert fallbacks._resolves_outside(repo, repo / "packages" / "up") is False
+    assert fallbacks._resolves_outside(repo, tmp_path) is True
+
+
+def test_issue_r10_a4_escapes_root_is_the_symlink_gate_plus_the_comparison(monkeypatch,
+                                                                          tmp_path):
+    """…and nothing else. Both halves are asserted through the shared function rather
+    than through a tree, because the claim is about which pieces `escapes_root` is made
+    of: an ordinary file never reaches the comparison, and a symlink returns whatever it
+    says.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "real.txt").write_text("x")
+    (repo / "link.txt").symlink_to("real.txt")
+
+    monkeypatch.setattr(fallbacks, "_resolves_outside", lambda root, path: True)
+    assert fallbacks.escapes_root(repo, repo / "real.txt") is False, (
+        "the gate: a file that is not a symlink is contained by construction and the "
+        "comparison is never paid for")
+    assert fallbacks.escapes_root(repo, repo / "link.txt") is True
+
+    monkeypatch.setattr(fallbacks, "_resolves_outside", lambda root, path: False)
+    assert fallbacks.escapes_root(repo, repo / "link.txt") is False

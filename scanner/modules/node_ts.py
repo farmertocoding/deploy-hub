@@ -158,11 +158,22 @@ def _workspace_pattern_problem(pattern):
 def _workspace_candidate_problem(root, candidate):
     """A sentence if `candidate` may not be surveyed as a package, else None.
 
-    `root` is the scan root as given; both sides are resolved here, because the scan
-    root itself is frequently reached through a symlink (`/tmp` on macOS, a checkout
-    under a linked home) and comparing an unresolved root against a resolved candidate
-    would refuse every package in such a tree.
+    `root` is the scan root as given; both sides are resolved, because the scan root
+    itself is frequently reached through a symlink (`/tmp` on macOS, a checkout under a
+    linked home) and comparing an unresolved root against a resolved candidate would
+    refuse every package in such a tree.
+
+    R10-A4: the resolve-compare that used to be written out here is
+    `fallbacks._resolves_outside`, which `escapes_root` also reads. This function cannot
+    call `escapes_root` itself — that one is symlink-gated and a candidate reaching this
+    line is by definition not a symlink, so it would answer False about everything — and
+    an inline second copy of the comparison is the drift N6, N7 and R4-12 each are. What
+    stays here is what genuinely differs: WHEN the comparison is asked (non-symlinks
+    only, the symlink arms above having already spoken) and what an unresolvable path
+    means (a sentence naming the exception class, not a bare True).
     """
+    from scanner.modules.fallbacks import _resolves_outside
+
     try:
         rel = _quote_pattern(str(candidate.relative_to(root)))
     except ValueError:                                            # pragma: no cover
@@ -180,11 +191,11 @@ def _workspace_candidate_problem(root, candidate):
                 f"directory in the repository, and a link is a name for a tree the "
                 f"scan was not pointed at — it was not surveyed")
     try:
-        resolved, root_resolved = candidate.resolve(), Path(root).resolve()
+        outside = _resolves_outside(root, candidate)
     except (OSError, RuntimeError) as exc:
         return (f"workspace package {rel} could not be resolved "
                 f"({exc.__class__.__name__}); it was not surveyed")
-    if resolved != root_resolved and root_resolved not in resolved.parents:
+    if outside:
         return (f"workspace package {rel} resolves outside the scanned repository; a "
                 f"scan reads only the tree it was pointed at — it was not surveyed")
     return None
