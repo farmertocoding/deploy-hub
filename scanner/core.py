@@ -176,10 +176,29 @@ def repo_relative(root, path):
     keep the registry free of an import cycle. A helper in `fallbacks` would make that
     function-scoped import load-bearing for the guard as well.
 
-    `as_posix()` is the part a hand-written copy forgets, and it is not cosmetic: a
-    backslash is a separator on one of the platforms `PurePath` knows about and an
-    ordinary character in a filename on this one, so `str()` and `as_posix()` differ on a
-    name a repository can legally commit — which is exactly the class S3 was.
+    `as_posix()` IS A NO-OP ON THIS PLATFORM, and R13-REM-1 is the correction: an earlier
+    version of this paragraph said `str()` and `as_posix()` "differ on a name a repository
+    can legally commit", and cited S3's backslash for it. That is false here.
+    `Path.relative_to` returns a `PosixPath`, whose `__str__` and `as_posix` are the same
+    string for every filename, backslashes included — so on POSIX no input distinguishes
+    them and no test can. Swapping this call for `str()` passed all 867 tests, which is
+    how the claim was caught: a sentence about a guard, in the module that holds the
+    guard, asserting a property nothing checks.
+
+    The call stays, and the honest reason is smaller than the one it replaces: it DECLARES
+    the spelling. This function's contract is "a POSIX string", the value is compared
+    against POSIX spellings and stored in JSON a browser reads, and a reader should not
+    have to know that `str()` happens to coincide on the one platform the Hub runs on. On
+    a `PureWindowsPath` the two do differ — `src\a.ts` against `src/a.ts` — which is what
+    the declaration is a declaration OF, and
+    `tests/test_scanner_core.py::test_issue_r13_rem_1_*` pins that semantics with pure
+    paths, on any host, and says in its own docstring that it is documenting the reason
+    for the call rather than observing this platform.
+
+    WHAT ACTUALLY DEFENDS THE ONE-CONVERSION PROPERTY is not a spelling test at all: it is
+    `…_the_producers_call_the_shared_helper`, which patches this function in both producer
+    modules and asserts both conversions came through it. Three copies that agree today
+    are three copies; one function is one function.
 
     NONE RATHER THAN A RAISE OR AN ABSOLUTE STRING. Every caller's answer to "this path is
     not in the repository" is the same — keep it out of the report — but they say it

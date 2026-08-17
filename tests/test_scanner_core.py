@@ -733,6 +733,12 @@ def test_issue_r13_arch_a_every_live_refusal_check_can_vouch(tmp_path):
 # `fallbacks`' core refusal line, and in the guard that compares the two. Only the
 # node-ts↔guard pair was ever pinned together, so the third copy agreed by inspection —
 # which is the state every drift in this repo has started from.
+#
+# R13-REM-1: and the copies agreed on every legal filename, not just today's. The
+# extraction's case is that three of anything drift, which is a case about the future; the
+# first version of these tests dressed it up as a present defect by naming a spelling
+# difference that does not exist on this platform. The pins below are what each one can
+# actually see, and they say so.
 
 EXOTIC = "sécr\\et fiéld.ts"     # non-ASCII, a backslash, and a space, all legal
 # The same name with a suffix `node_ts._SOURCE_SUFFIXES` does not claim, so the CORE walk
@@ -770,12 +776,21 @@ def _two_producer_tree(tmp_path):
 
 
 def test_issue_r13_arch_b_repo_relative_is_the_one_conversion(tmp_path):
-    """The helper itself, on the names that make the three copies disagree.
+    """The helper's own contract: repo-relative, POSIX, `None` for anything outside.
 
-    A backslash is a path SEPARATOR on one of the platforms `PurePath` knows about and an
-    ordinary character on this one; `as_posix()` is what makes that irrelevant, and it is
-    the call a hand-written copy forgets. Non-ASCII is here because a byte-oriented
-    shortcut passes ASCII and fails this.
+    R13-REM-1 CORRECTS WHAT THIS DOCSTRING USED TO CLAIM. It said these were "the names
+    that make the three copies disagree", because a backslash is a separator on one of
+    the platforms `PurePath` knows about. That is not true of the copies as written: they
+    all called `relative_to`, which returns a `PosixPath` here, and `PosixPath.__str__`
+    and `.as_posix()` are the same string for every filename. Swapping `as_posix()` for
+    `str()` in the helper passed all 867 tests.
+
+    So this is a CONTRACT test and nothing more — the exotic name (non-ASCII, a
+    backslash, a space) is here because those are legal in a committed filename and a
+    byte-oriented or `repr`-based shortcut would fail them, which is the S3 class. What it
+    does NOT check is that there is only one conversion; that is
+    `…_the_producers_call_the_shared_helper`, and it checks it by patching this function
+    and watching both producers arrive.
     """
     root = tmp_path / "repo"
     (root / "src").mkdir(parents=True)
@@ -787,6 +802,38 @@ def test_issue_r13_arch_b_repo_relative_is_the_one_conversion(tmp_path):
     # decides, and every caller's answer is "do not put this in the report".
     assert core.repo_relative(root, tmp_path / "neighbour" / EXOTIC) is None
     assert core.repo_relative(str(root), str(inside)) == f"src/{EXOTIC}"
+
+
+def test_issue_r13_rem_1_as_posix_is_a_declaration_and_here_is_what_it_declares():
+    """What `repo_relative`'s `as_posix()` call is FOR, pinned where it can be seen.
+
+    On this platform the call is a no-op: `relative_to` gives a `PosixPath` and its two
+    spellings are identical, so no input to `repo_relative` can distinguish `str()` from
+    `as_posix()` and no test of it can either. Saying "it is not cosmetic" and then citing
+    a name nothing could ever fail on is the hollow-assertion class this repo files
+    findings about — in the module that holds the gate, which is worse.
+
+    The call is a DECLARATION: the contract is a POSIX string, the value is compared
+    against POSIX spellings and stored in JSON a browser reads, and a reader should not
+    have to know that `str()` coincides here. This is that declaration's content, on the
+    pure-path class where the two DO differ — no Windows host required, and no claim that
+    this platform behaves that way. If the difference is ever load-bearing, this is the
+    semantics the code was written against.
+    """
+    windows = pathlib.PureWindowsPath("repo/src/a.ts").relative_to("repo")
+    assert str(windows) == "src\\a.ts"
+    assert windows.as_posix() == "src/a.ts"
+
+    posix = pathlib.PurePosixPath(f"repo/src/{EXOTIC}").relative_to("repo")
+    assert str(posix) == posix.as_posix() == f"src/{EXOTIC}", (
+        "the platform this runs on cannot tell the two apart — which is why the pin "
+        "above is a contract test and the one-conversion property is the spy's")
+
+    # …and the helper's live answer agrees with the declared spelling, which is the part
+    # that would move if `relative_to` ever stopped returning a POSIX flavour.
+    root = pathlib.Path("/repo")
+    assert core.repo_relative(root, root / "src" / EXOTIC) == \
+        pathlib.PurePosixPath("src", EXOTIC).as_posix()
 
 
 def test_issue_r13_arch_b_both_producers_and_the_guard_agree_on_an_exotic_name(

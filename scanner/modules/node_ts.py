@@ -495,11 +495,16 @@ class _Survey:
 
         R13-ARCH-B: the conversion is `core.repo_relative`, which the core refusal line
         and the guard that compares the two also call. This function's whole content used
-        to be a third copy of it — agreeing with the other two by inspection, on a
-        `relative_to`/`as_posix` pair whose difference only shows on names a repository
-        can legally commit. A path not under the root is dropped, which is that helper's
-        `None` and the direction that cannot leak this machine's layout into a stored
-        report.
+        to be a third copy of it, agreeing with the other two by inspection — which is
+        the whole objection, and R13-REM-1 corrects what this paragraph used to offer as
+        evidence for it: it claimed the copies could disagree over `relative_to`/
+        `as_posix` "on names a repository can legally commit", and on POSIX they cannot.
+        `PosixPath.__str__` and `.as_posix()` are the same string for every filename. The
+        copies were a hazard because three of anything drift, not because they were
+        already drifting on a name somebody could commit today.
+
+        A path not under the root is dropped, which is that helper's `None` and the
+        direction that cannot leak this machine's layout into a stored report.
         """
         out = [repo_relative(self.root, path) for path in self.symlink_refused]
         return [rel for rel in out if rel is not None]
