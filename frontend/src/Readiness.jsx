@@ -4,28 +4,44 @@
 //
 // §F9 rules applied here: status is never color-only (every tier carries a symbol +
 // word); dark palette matches Phase 0; every data panel carries its staleness stamp.
-// §F8: the states (empty/loading/live/stale/error/degraded) are reachable without a
-// backend via ?sim=<state> — see sim.js, and the contract test that pins the fixtures
-// to the generated zod schemas. `stale` is the one where the wizard says the deploy may
-// proceed and the POST still refuses, which is the only screen the 409 panel is
-// reachable from. (`accepted` left with D-012: no answer clears a blocker this phase.)
+// §F8: the states (empty / loading + loading-report + loading-wizard / live / stale /
+// error / degraded) are reachable without a backend via ?sim=<state> — see sim.js, and
+// the contract test that pins the fixtures to the generated zod schemas. TWO states
+// reach the 409 panel with the button ENABLED, and they are different refusals: `stale`
+// is a report that moved between the GET and the POST, and `live` on atlas-edge is the
+// warnings gate, which the ack checkbox below actually clears. (`accepted` left with
+// D-012: no answer clears a blocker this phase.)
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+// R9-8: the plural is per tier, not `word + "s"`.
+//
+// Two of the four tiers do not take an -s and the naive rule produced both of them:
+// "3 Deferred to sandboxs" (the plural is of the CHECKS, and there is one sandbox), and
+// "2 Advices" (advice is a mass noun in English — you have two pieces of it). The
+// singular is the one a reader would write; where they are the same, they are the same on
+// purpose and saying so here is cheaper than the next reader re-deriving it.
 const TIER_BADGE = {
-  blocker: { sym: "⛔", word: "Blocker", color: "#ff7b72" },
-  warning: { sym: "⚠", word: "Warning", color: "#e3b341" },
-  advice: { sym: "ℹ", word: "Advice", color: "#79c0ff" },
-  pending_sandbox: { sym: "⏳", word: "Deferred to sandbox", color: "#8b949e" },
+  blocker: { sym: "⛔", one: "Blocker", many: "Blockers", color: "#ff7b72" },
+  warning: { sym: "⚠", one: "Warning", many: "Warnings", color: "#e3b341" },
+  advice: { sym: "ℹ", one: "Advice", many: "Advice", color: "#79c0ff" },
+  pending_sandbox: { sym: "⏳", one: "Deferred to sandbox",
+                     many: "Deferred to sandbox", color: "#8b949e" },
 };
 
-function Badge({ tier, n }) {
+export function Badge({ tier, n }) {
   const b = TIER_BADGE[tier];
   // Symbol + word + count: readable colorblind, greyscale, or by screen reader.
+  //
+  // The aria-label is DERIVED from what is on screen rather than composed a second time.
+  // It used to be `${n} ${word}` — the singular at every count — so a screen reader heard
+  // "3 Blocker" while the screen read "3 Blockers": two renderings of one fact, which is
+  // the arrangement §F9 exists to forbid and the arrangement that lets them drift.
+  const text = `${n} ${n === 1 ? b.one : b.many}`;
   return (
-    <span style={{ color: b.color, marginRight: 10 }} aria-label={`${n} ${b.word}`}>
-      {b.sym} {n} {b.word}{n === 1 ? "" : "s"}
+    <span style={{ color: b.color, marginRight: 10 }} aria-label={text}>
+      {b.sym} {text}
     </span>
   );
 }
@@ -70,7 +86,113 @@ export function materializeGate(state) {
     .filter((item) => !(item.awaiting_acceptance || []).length);
   if (blockerProblems.length && !hard.length)
     return { disabled: true, label: "Answer required", title };
+  // Round-9 item 3. A refusal made ENTIRELY of things the operator types into this form
+  // is not a blocked deploy, and the ⛔ glyph — which everywhere else on this screen means
+  // a blocker-tier finding in the report — said it was. Every clean project met that
+  // label before anyone typed the domain: a repository with nothing wrong with it,
+  // announced as blocked. Both codes here refuse for the same reason and clear the same
+  // way, in this form, with no re-scan and no change to the tree.
+  //
+  // Named codes rather than "no blockers_present": `scan_required` also arrives without
+  // one and is NOT answerable here, so a fallback arm would mislabel it. A code this
+  // list has not met keeps the conservative label, which is the safe direction.
+  if (blocking.length && blocking.every((p) => ANSWERABLE_REFUSALS.has(p.code)))
+    return { disabled: true, label: "Answers needed", title };
   return { disabled: true, label: "⛔ Blocked", title };
+}
+
+const ANSWERABLE_REFUSALS = new Set(["answers_missing", "answers_need_reentry"]);
+
+// R9-4: what the client does with the response, as a named thing rather than three
+// branches inside an async handler — the same argument `materializeGate` was extracted
+// under, and the same test file looks at both.
+//
+// THE 409 BRANCH USED TO RE-READ NOTHING. It set a message; `onChanged` fired only on
+// 201. So a refusal that exists precisely BECAUSE the server's state is not what this
+// screen is showing left the screen showing it: in ?sim=stale, a refusal naming a
+// committed Stripe key under a panel reading "✓ No findings", with the button still
+// enabled. A 409 here is the server telling the client its copy is stale, and the only
+// correct response to that is to go and read the current one.
+//
+// A 500 or a dead socket re-reads nothing on purpose: the server said nothing about this
+// site's state, so there is nothing to converge ON, and a refetch would either loop or
+// paper over the error with a spinner.
+export function materializeOutcome(status, data) {
+  if (status === 201)
+    return { msg: { ok: true, text: `Manifest v${data.version} created.` },
+             reloadWizard: true, refreshProject: true };
+  if (status === 409)
+    return { msg: { problems: data.problems || [data] },
+             reloadWizard: true, refreshProject: true };
+  return { msg: { ok: false, text: data.detail || `HTTP ${status}` },
+           reloadWizard: false, refreshProject: false };
+}
+
+// R9-1: a check's `detail` and `fix_hint` are MULTI-LINE server text, and HTML does not
+// believe in newlines. `core.secret-scan` sends fifteen `file:line` findings joined with
+// \n, then a blank line and two paragraphs of hint; rendered into a bare <p> the whole
+// thing arrived as one run-on paragraph with the filenames run together — the check whose
+// entire job is telling an operator WHICH files to go and look at.
+//
+// `pre-line` rather than `pre`: it honours the newlines the server put there and still
+// wraps long lines to the panel, where `pre` would give a paragraph of prose a horizontal
+// scrollbar. The blank line between sections survives it, which is how the fix hint's own
+// two paragraphs stay two paragraphs.
+const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0" };
+
+export function CheckBody({ check }) {
+  return (
+    <>
+      {check.detail && <p style={PRE_LINE}>{check.detail}</p>}
+      {check.fix_hint &&
+        <p style={{ ...PRE_LINE, color: "#8b949e" }}>Fix: {check.fix_hint}</p>}
+    </>
+  );
+}
+
+// R9-5: the three things an empty section list can mean, told apart.
+//
+// "No findings" was rendered whenever every tier was empty — including for a project
+// whose `scan_report` is `{}`, where nothing has been LOOKED at. A green check and "this
+// project is ready to configure" on a repository no scanner has read is the strongest
+// false reassurance this screen can give, and the wizard directly below it refuses that
+// same project with `scan_required`: two panels, one screen, opposite claims.
+//
+// `scanned_at` is the discriminator because it is the one field that says a scan
+// happened, and it comes from the project row rather than from the report's contents —
+// an empty report and an absent one are indistinguishable by their check lists.
+export function reportSummary(report) {
+  const r = report || {};
+  const sections = [
+    ["blocker", r.blockers], ["warning", r.warnings],
+    ["advice", r.advice], ["pending_sandbox", r.pending_sandbox || []],
+  ];
+  if (sections.some(([, checks]) => checks?.length)) return { kind: "findings", sections };
+  return { kind: r.scanned_at ? "clean" : "never-scanned", sections };
+}
+
+// R9-7: the reason is TEXT, not only a tooltip.
+//
+// `title=` on a DISABLED button reaches a pointer hovering it and nobody else: the
+// element is not focusable, so keyboard and screen-reader users never meet it, and on a
+// touch screen there is no hover at all. For most refusals the panel above happened to
+// repeat the reason — the blockers are listed as findings — but for `scan_required` and
+// the R8-2 schema-skew refusal there is nothing above: the report is empty (or refused),
+// so the tooltip was the whole explanation of a button that will not move.
+//
+// The text is `gate.title`, which materializeGate takes verbatim from `state.blocking`,
+// so the §4b pin still holds — this renders the server's sentence in a second place, it
+// does not compose a new one. The `title=` stays for the pointer.
+export function MaterializeControl({ gate, busy, onClick }) {
+  return (
+    <>
+      <button style={box} disabled={busy || gate.disabled} onClick={onClick}
+        title={gate.title}>
+        {gate.label}</button>
+      {gate.disabled && !!gate.title &&
+        <p style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
+    </>
+  );
 }
 
 function Stamp({ at }) {
@@ -82,22 +204,33 @@ export default function ReadinessScreen() {
   const [projects, setProjects] = useState(undefined); // undefined = loading
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
+  // R9-4: bumped when a write (or a refusal) means the panel's report is out of date.
+  // A prop rather than a call, because the panel owns its own fetch.
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const load = () => {
+  // `quiet` re-reads WITHOUT emptying the screen first. The loud version is right on
+  // first paint and on Retry — there is nothing to show, so show the spinner — and wrong
+  // after a materialize: it unmounts the wizard, and with it the refusal the operator is
+  // reading and the answers they have typed. The refusal that triggers the re-read would
+  // be the first thing destroyed by it.
+  const load = ({ quiet = false } = {}) => {
     setError("");
-    setProjects(undefined);
+    if (!quiet) setProjects(undefined);
     api("v1/projects/").then(({ status, data }) => {
       if (status === 200) setProjects(data);
       else setError(data.detail || `Could not load projects (HTTP ${status})`);
     });
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
+
+  // What a site's wizard calls when the server's answer means this screen is stale.
+  const refresh = () => { load({ quiet: true }); setRefreshKey((k) => k + 1); };
 
   if (error)
     return (
       <div style={{ padding: 16 }}>
         <p style={{ color: "#ff7b72" }}>{error}</p>
-        <button style={box} onClick={load}>Retry</button>
+        <button style={box} onClick={() => load()}>Retry</button>
       </div>
     );
   if (projects === undefined) return <p style={{ padding: 16 }}>Loading projects…</p>;
@@ -140,45 +273,57 @@ export default function ReadinessScreen() {
         ))}
       </div>
       {selected != null && <ReadinessPanel projectId={selected}
-        project={projects.find((p) => p.id === selected)} onChanged={load} />}
+        project={projects.find((p) => p.id === selected)}
+        refreshKey={refreshKey} onChanged={refresh} />}
     </div>
   );
 }
 
-function ReadinessPanel({ projectId, project, onChanged }) {
+function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
   const [report, setReport] = useState(undefined);
   const [error, setError] = useState("");
 
+  // Selecting a different project empties the panel; a refresh of the SAME project does
+  // not (R9-4). Two effects because they are two events: the first is "this is a
+  // different thing now, show nothing until it arrives", the second is "read it again",
+  // and a refresh that cleared the report would take the wizard and its refusal with it.
+  useEffect(() => { setReport(undefined); setError(""); }, [projectId]);
   useEffect(() => {
-    setReport(undefined);
-    setError("");
+    let current = true;
     api(`v1/projects/${projectId}/readiness/`).then(({ status, data }) => {
-      if (status === 200) setReport(data);
+      if (!current) return;   // a slow response for a project the operator left
+      if (status === 200) { setReport(data); setError(""); }
       else setError(data.detail || `Could not load report (HTTP ${status})`);
     });
-  }, [projectId]);
+    return () => { current = false; };
+  }, [projectId, refreshKey]);
 
   if (error) return <p style={{ color: "#ff7b72" }}>{error}</p>;
   if (report === undefined) return <p>Loading report…</p>;
 
-  const sections = [
-    ["blocker", report.blockers], ["warning", report.warnings],
-    ["advice", report.advice], ["pending_sandbox", report.pending_sandbox || []],
-  ];
+  const { kind, sections } = reportSummary(report);
   return (
     <div style={{ flex: 1 }}>
       <h3 style={{ marginTop: 0 }}>Readiness — {project?.name}
         {" "}<small><Stamp at={report.scanned_at} /></small></h3>
-      {sections.every(([, checks]) => !checks?.length) &&
+      {kind === "clean" &&
         <p style={{ color: "#3fb950" }}>✓ No findings. This project is ready to configure.</p>}
+      {kind === "never-scanned" && (
+        <div style={{ color: "#8b949e" }}>
+          <p style={{ color: "#e6e6e6" }}>⏳ Not scanned yet — this project has no
+            readiness report, which is not the same as having nothing to report.</p>
+          <p>Run <code>python -m hub scan &lt;path&gt;</code> (or the scan endpoint) and
+            this panel fills in. Until then the wizard below cannot materialize a
+            manifest, and says so in the server's own words.</p>
+        </div>
+      )}
       {sections.map(([tier, checks]) => !!checks?.length && (
         <section key={tier} style={{ marginBottom: 12 }}>
           <h4><Badge tier={tier} n={checks.length} /></h4>
           {checks.map((c) => (
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
               <summary>{c.title}</summary>
-              {c.detail && <p>{c.detail}</p>}
-              {c.fix_hint && <p style={{ color: "#8b949e" }}>Fix: {c.fix_hint}</p>}
+              <CheckBody check={c} />
             </details>
           ))}
         </section>
@@ -217,9 +362,12 @@ function SiteWizard({ site, onChanged }) {
     const { status, data } = await api(`v1/sites/${site.id}/manifest/`,
       { confirm_warnings: ack });
     setBusy(false);
-    if (status === 201) { setMsg({ ok: true, text: `Manifest v${data.version} created.` }); onChanged(); }
-    else if (status === 409) setMsg({ problems: data.problems || [data] });
-    else setMsg({ ok: false, text: data.detail || `HTTP ${status}` });
+    const outcome = materializeOutcome(status, data);
+    setMsg(outcome.msg);
+    // Both re-reads are quiet: the message above stays put while the screen underneath
+    // it catches up with the server (R9-4).
+    if (outcome.reloadWizard) load();
+    if (outcome.refreshProject) onChanged();
   }
 
   if (!open)
@@ -264,9 +412,7 @@ function SiteWizard({ site, onChanged }) {
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
         {" "}I have read the warnings above and accept them
       </label>{" "}
-      <button style={box} disabled={busy || gate.disabled} onClick={materialize}
-        title={gate.title}>
-        {gate.label}</button>
+      <MaterializeControl gate={gate} busy={busy} onClick={materialize} />
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
       {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}
@@ -280,6 +426,10 @@ function SiteWizard({ site, onChanged }) {
                 <li key={j}>{it.prompt || it.title || it.id}</li>)}</ul>}
             </li>))}
           </ul>
+          {/* Said once, here, because the panel above visibly changes under the
+              operator when this happens and an unexplained change is its own defect. */}
+          <p style={{ color: "#8b949e" }}>The report and this form were re-read from the
+            server after this answer, so what you see above is its current state.</p>
         </div>
       )}
     </div>

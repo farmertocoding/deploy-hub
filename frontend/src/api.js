@@ -1,11 +1,15 @@
 // Shared fetch wrapper (extracted from App.jsx, gaining a method argument for the
 // wizard's PATCH) + the §F8 simulation harness.
 //
-// ?sim=empty|loading|live|stale|degraded|error serves canned responses instead of
-// the network, so every review round can walk every §F8 state with no backend at
-// all. The fixtures live in sim.js and are pinned to the GENERATED zod schemas by
-// frontend/tests/sim-contract.test.ts — a sim state that drifts from the real API
-// shape fails the build rather than silently reviewing a fiction.
+// ?sim=empty|loading|loading-report|loading-wizard|live|stale|degraded|error serves
+// canned responses instead of the network, so every review round can walk every §F8
+// state with no backend at all. The fixtures live in sim.js and are pinned to the
+// GENERATED zod schemas by frontend/tests/sim-contract.test.ts — a sim state that drifts
+// from the real API shape fails the build rather than silently reviewing a fiction.
+//
+// The three `loading` states are one per spinner (round-9 item 10): the screen makes
+// three fetches in a chain, so a state that hangs the first one leaves the other two
+// spinners on screens the reviewer cannot get to.
 import { SIM_FIXTURES } from "./sim.js";
 
 function getCookie(name) {
