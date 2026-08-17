@@ -254,11 +254,42 @@ def _apply_answers(body, site, answers, known, *, actor=None):
     is written into `body` (round-1 F1): the body carries names + the bundle ref, and
     the values live only as vault ciphertext. Secret answers are decrypted here,
     inside the materialize transaction, through the audited vault.get path.
+
+    R9-SEC-1: `known` — the project's question map — is consulted BEFORE any branch, and
+    a row whose id is in no question this project has contributes nothing to the
+    manifest. Every branch below is a way for an answer to write into the frozen record:
+    the catch-all puts the id and value straight into `module_answers`, and `_env_name`
+    matches on the substring `.env.` alone, so an id one namespace over from a real one
+    puts a variable name of its own choosing into `env_names` and its value into the
+    vault env bundle. The filter belongs at the top because it is a property of the
+    ANSWER, not of the branch the answer happens to land in.
+
+    DROPPED, NOT REFUSED, and the distinction is the one `questions.py`'s docstring
+    draws. That warning — "silently dropping an answer is how a site deploys with a
+    half-configured env and nobody finds out until it 500s" — is about an answer to a
+    question that WAS asked: the operator was shown a field, filled it, and the value
+    went nowhere. There is no such expectation here. `set_answers` rejects an unknown id
+    on the write path (`UnknownQuestion`), so a row can only reach this loop with an id
+    the project does not have by being RESIDUE — a question the scanner used to emit and
+    no longer does, left behind by a re-scan or by D-012 leaving Phase 1. Nobody was
+    asked it and no configuration is half-finished by ignoring it.
+
+    Refusing instead would be worse than useless: the operator has no way to delete a
+    stored answer through the API, so a residue row would wedge the site's materialize
+    button permanently on a fact they cannot act on — the wizard-hostile shape
+    `MaterializeRefused`'s own docstring is written against. Nor is the drop invisible:
+    `service.answered_state` returns every stored row, so the residue is still on the
+    wizard screen as an answer to no question; what changes is that it stops being
+    copied into an append-only, GET-returnable manifest where a reader cannot tell it
+    from an answer somebody was actually asked for.
     """
     env_names, env_values = [], {}
 
     for answer in answers:
         qid = answer.question_id
+
+        if qid not in known:
+            continue
 
         if answer.is_secret:
             name = _env_name(qid)

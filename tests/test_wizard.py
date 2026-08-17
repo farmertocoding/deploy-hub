@@ -4,6 +4,8 @@ Organised by the five properties the 2026-08-09 design debate said this chunk mu
 hold: error-proofing on human input, secrets never leaving the vault, refusals that
 name their cause, append-only manifests, and no crash paths on ordinary user actions.
 """
+import json
+
 import pytest
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -288,6 +290,59 @@ def test_manifest_freezes_the_scan_draft(answered_site):
 def test_module_answers_are_recorded_not_dropped(answered_site):
     manifest = materialize(answered_site)
     assert manifest.body["module_answers"]["django.db"] == "postgres"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r9_sec_1_an_unknown_qid_is_not_written_into_the_frozen_manifest(
+        answered_site):
+    """R9-SEC-1. The catch-all `else` in `_apply_answers` wrote ANY answer row whose id
+    was not `site.domain`, `site.exposure` or an `.env.` name into `module_answers` —
+    including one whose id belongs to no question this project has.
+
+    The existing residue test (tests/test_d012_out_of_phase_1.py) covers the BLOCKED
+    path only: that report has blockers, so materialization refuses before
+    `_apply_answers` runs at all, and the row's inertness is asserted about a call that
+    never happened. On the unblocked path — this test — the row reached the manifest,
+    which is an append-only, GET-returnable security record: `module_answers` is where a
+    reader looks to see what the operator was asked and what they said, and a row nobody
+    was ever asked lands there indistinguishable from one that was.
+
+    The qid used is the shape the residue actually has on this fleet: a
+    `scanner.test_material.*` confirm from before D-012 left Phase 1, whose question no
+    live scanner emits any more.
+    """
+    WizardAnswer.objects.create(
+        site=answered_site,
+        question_id="scanner.test_material.deadbeefcafe",
+        value="true", is_secret=False)
+
+    manifest = materialize(answered_site)
+
+    # The asked question is still recorded — this must not become "drop everything".
+    assert manifest.body["module_answers"] == {"django.db": "postgres"}
+    assert "deadbeefcafe" not in json.dumps(manifest.body)
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_issue_r9_sec_1_an_unknown_env_qid_cannot_write_a_name_into_the_bundle(
+        answered_site):
+    """The same row one namespace over, and it is the sharper half: `_env_name` matches
+    on the substring `.env.` alone, so a residue id containing it took the branch ABOVE
+    the catch-all and put a name of the row's choosing into `env_names` — the frozen
+    list of variables a deploy injects — with its value in the vault env bundle.
+
+    `known` is consulted before any branch for that reason: the qid filter is a property
+    of the answer, not of the branch it happens to land in.
+    """
+    WizardAnswer.objects.create(
+        site=answered_site,
+        question_id="scanner.test_material.env.EVIL_TOKEN",
+        value="injected", is_secret=False)
+
+    manifest = materialize(answered_site)
+
+    assert manifest.body["env_names"] == ["DATABASE_PASSWORD"]
+    assert "EVIL_TOKEN" not in json.dumps(manifest.body)
 
 
 @pytest.mark.req("WIZ-V5-ONE-MANIFEST")
