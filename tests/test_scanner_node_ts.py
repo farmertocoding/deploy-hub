@@ -1142,3 +1142,32 @@ def test_issue_r9_1_an_in_root_symlinked_file_is_still_read(tmp_path):
     assert survey.symlink_problems == []
     assert [c["id"] for c in core.scan(root)["checks"]
             if c["id"] == "node-ts.symlinked-files"] == []
+
+
+# ── round-9 queue item 3: the candidate that died before the refusal ────────────
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_3_a_dangling_workspace_symlink_is_refused_out_loud(tmp_path):
+    """`packages/gone -> ../../removed`, which is what a workspace looks like after
+    somebody deletes the tree it pointed at (or checks the repo out on a machine where
+    that tree never existed).
+
+    The R8-3/F3 rule is refuse and say so, and this candidate said nothing: a broken
+    link fails `candidate.is_dir()` on the line ABOVE `_workspace_candidate_problem`, so
+    the pattern the repo declared expanded to a package the survey silently dropped —
+    the exact "config names five packages, report surveys four" reading the problem
+    channel exists to prevent.
+    """
+    root = _workspace_repo(tmp_path, ["packages/*"])
+    os.symlink("../../removed", root / "packages" / "gone")
+
+    survey = node_ts._Survey(root)
+
+    assert [p.name for p in survey.package_dirs] == ["repo", "server"]
+    assert any("gone" in problem for problem in survey.workspace_problems), \
+        survey.workspace_problems
+
+    refused = by_id(core.scan(root), "node-ts.workspace-patterns")
+    assert refused["tier"] == "warning"
+    assert repr("packages/gone") in refused["detail"], refused

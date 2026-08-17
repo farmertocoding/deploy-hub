@@ -168,6 +168,14 @@ def _workspace_candidate_problem(root, candidate):
     except ValueError:                                            # pragma: no cover
         rel = _quote_pattern(str(candidate))
     if candidate.is_symlink():
+        if not candidate.exists():
+            # Round-9 item 3. Its own sentence rather than the one below, because "a
+            # name for a tree the scan was not pointed at" describes a tree, and here
+            # there is none: the link is broken, which is what a workspace looks like
+            # after the tree it pointed at is deleted, or on a machine where that tree
+            # never existed.
+            return (f"workspace package {rel} is a broken symlink; it names a tree that "
+                    f"is not there — it was not surveyed")
         return (f"workspace package {rel} is a symlink; a workspace package is a "
                 f"directory in the repository, and a link is a name for a tree the "
                 f"scan was not pointed at — it was not surveyed")
@@ -419,9 +427,19 @@ class _Survey:
                     f"({exc.__class__.__name__}); it was ignored")
                 continue
             for candidate in candidates:
-                if not (candidate.is_dir() and (candidate / "package.json").is_file()):
-                    continue
+                # Round-9 item 3: the refusal is decided BEFORE the shape gate below,
+                # not after it. A dangling symlink is not a directory and has no
+                # package.json, so it died at `is_dir()` one line above the check that
+                # would have spoken about it — the declared package was dropped in
+                # silence, which is the one thing this channel exists to prevent. The
+                # gate keeps its own silence for what it is actually for: a candidate
+                # that is simply NOT A PACKAGE (a file, or a directory with no
+                # manifest, that the pattern happened to match) was never refused and
+                # there is nothing to report about it.
                 problem = _workspace_candidate_problem(self.root, candidate)
+                if problem is None and not (candidate.is_dir()
+                                            and (candidate / "package.json").is_file()):
+                    continue
                 if problem:
                     if problem not in self.workspace_problems:
                         self.workspace_problems.append(problem)
