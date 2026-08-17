@@ -1171,3 +1171,102 @@ def test_issue_r9_3_a_dangling_workspace_symlink_is_refused_out_loud(tmp_path):
     refused = by_id(core.scan(root), "node-ts.workspace-patterns")
     assert refused["tier"] == "warning"
     assert repr("packages/gone") in refused["detail"], refused
+
+
+# ── round-9 item 1, second pass: the reads that never went through the walk ─────
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_a_symlinked_env_example_cannot_arm_the_financial_path(tmp_path):
+    """The escape the first pass's own comment names, still live through a FIXED-NAME
+    read: "a broker env name that arms the financial-signals path".
+
+    `.env.example` is not a source file and not a manifest, so neither `_iter_sources`
+    nor `_read_package_json` ever saw it — it was read straight off `self.root` by name.
+    One committed link is enough, and the steer is the sharpest in the module: the
+    neighbour's broker env names arm `financial_signals()`, which flips the wizard's
+    exposure default from `public` to `mesh_only` and rewrites the prompt to tell the
+    operator this service "appears to handle financial/broker data". A recommendation
+    about somebody else's repository, echoed back with the neighbour's variable names in
+    the `node-ts.secrets-env` detail.
+    """
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "env.example").write_text(
+        "BINANCE_API_KEY=\nBINANCE_API_SECRET=\n", encoding="utf-8")
+
+    root = _single_package_repo(tmp_path)
+    os.symlink("../victim/env.example", root / ".env.example")
+
+    survey = node_ts._Survey(root)
+
+    assert survey.env_example == ""
+    assert survey.broker_env_names() == []
+    assert not survey.financial_signals()
+
+    report = core.scan(root)
+    assert "BINANCE" not in json.dumps(report)
+    questions = {q["id"]: q for q in report["wizard_questions"]}
+    assert questions["node-ts.exposure"]["default"] == "public"
+
+    refused = by_id(report, "node-ts.symlinked-files")
+    assert repr(".env.example") in refused["detail"], refused
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_a_symlinked_tsconfig_cannot_vouch_for_strict_mode(tmp_path):
+    """The same class pointing the other way, and that direction is why containment on
+    a config read is not cosmetic.
+
+    Every escape demonstrated so far ADDS a finding — a worker count, an armed check, a
+    broker warning. This one REMOVES one: a link to a neighbouring `tsconfig.json` with
+    `"strict": true` turns `node-ts.strict-build` from a warning into `ok`, so the report
+    vouches for strict mode this repository does not have and the operator has been told
+    the thing that makes `tsc --noEmit` a real gate is on.
+    """
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"strict": True}}) + "\n", encoding="utf-8")
+
+    root = _single_package_repo(tmp_path)
+    os.symlink("../victim/tsconfig.json", root / "tsconfig.json")
+
+    strict = by_id(core.scan(root), "node-ts.strict-build")
+
+    assert strict["tier"] == "warning", strict
+    assert "strict" in strict["title"].lower()
+
+    refused = by_id(core.scan(root), "node-ts.symlinked-files")
+    assert repr("tsconfig.json") in refused["detail"], refused
+
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r9_1_the_remaining_fixed_name_reads_are_contained_too(tmp_path):
+    """`pnpm-workspace.yaml` and `pyproject.toml`, same class and lower impact — the
+    first decides which packages exist, the second co-detects the §N7 offline component
+    and puts `node-ts.jobs-image` in the report. Fixed in the same commit because
+    "route every fixed-name read through the containment rule" is a smaller thing to
+    review, and to keep true, than four sites with three of them done.
+    """
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "pnpm-workspace.yaml").write_text(
+        "packages:\n  - 'packages/*'\n", encoding="utf-8")
+    (victim / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["duckdb>=1.0"]\n', encoding="utf-8")
+
+    root = _single_package_repo(tmp_path)
+    os.symlink("../victim/pnpm-workspace.yaml", root / "pnpm-workspace.yaml")
+    os.symlink("../victim/pyproject.toml", root / "pyproject.toml")
+
+    survey = node_ts._Survey(root)
+
+    assert survey.offline_deps == []
+    assert survey.package_dirs == [root]
+
+    report = core.scan(root)
+    assert [c["id"] for c in report["checks"] if c["id"] == "node-ts.jobs-image"] == []
+    detail = by_id(report, "node-ts.symlinked-files")["detail"]
+    assert repr("pnpm-workspace.yaml") in detail, detail
+    assert repr("pyproject.toml") in detail, detail

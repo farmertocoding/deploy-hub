@@ -259,9 +259,14 @@ def _load_json(path):
         return {}
 
 
-def _load_tsconfig(path):
-    """tsconfig is JSONC in the wild — strip // and /* */ comments, then parse."""
-    text = _read(path)
+def _load_tsconfig(text):
+    """tsconfig is JSONC in the wild — strip // and /* */ comments, then parse.
+
+    Takes TEXT, not a path: the one caller reads through `_Survey._read_contained`, and a
+    function that opened the file itself would be a second way into a repo-controlled
+    path that skips the containment rule. An empty string parses to `{}`, which is the
+    refusal path and the missing-file path both.
+    """
     text = re.sub(r"//[^\n]*", "", text)
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     try:
@@ -355,6 +360,17 @@ class _Survey:
         self.packages = {d: self._read_package_json(d) for d in self.package_dirs}
         self.service_dir = self._pick_service_dir()
         self.service_pkg = self.packages.get(self.service_dir, {})
+        # Read HERE rather than in `_check_strict_build`, which is where it used to
+        # happen, and the ordering is the reason: `_detection_recording` composes the
+        # refusal line out of `symlink_problems` and runs BEFORE the build checks, so a
+        # refusal discovered inside a check arrived after the report had already said
+        # there was nothing to report. Every read the module makes now happens in this
+        # constructor, which is what "one static pass; every check reads from here" has
+        # always claimed.
+        self.tsconfig_path = self._pick_tsconfig()
+        self.tsconfig = _load_tsconfig(
+            self._read_contained(self.tsconfig_path, "tsconfig.json")
+            if self.tsconfig_path else "")
         base = self.service_dir if self.service_dir else self.root
         self.service_sources = {p: _read(p) for p in
                                 self._iter_sources(base)}
@@ -365,12 +381,49 @@ class _Survey:
         self.all_deps = self._collect_deps()
         self.data_files = self._find_data_files()
         self.offline_deps = self._offline_deps()
-        self.env_example = _read(self.root / ".env.example")
+        # `.env.example` is the sharpest steer in the module and was the last read still
+        # taken by name off disk: the broker env names it carries arm
+        # `financial_signals()`, which rewrites the exposure question and flips its
+        # default from `public` to `mesh_only`.
+        self.env_example = self._read_contained(self.root / ".env.example",
+                                                ".env.example")
 
     # ── reads that the scanned repo can point somewhere else ────────────────
+    #
+    # EVERY read this module performs goes through one of the three below. That is the
+    # rule, and it is stated as a rule because the first pass at round-9 item 1 did not
+    # have one: it contained the WALK and the package.json reads, which is where the
+    # finding's two probes landed, and left every FIXED-NAME read — `.env.example`,
+    # `tsconfig.json`, `pnpm-workspace.yaml`, `pyproject.toml` — opening whatever the
+    # repo pointed those names at. Four sites, three of them fixed, is not a boundary.
+    # A new read of a repo-controlled path belongs here or it is a fifth.
     def _iter_sources(self, base):
         """`_iter_source_files` bound to this survey's root and refusal channel."""
         return _iter_source_files(base, self.root, self.symlink_problems)
+
+    def _read_contained(self, path, kind):
+        """The text of `path`, or `""` if it is a link out of the tree.
+
+        `""` is what an unreadable file already yields through `_read`, so every caller's
+        existing empty-input path is the refusal path — no caller learns a new failure
+        mode, and none of them can accidentally treat a refused read as content.
+        """
+        problem = _symlink_escape_problem(self.root, path, kind)
+        if problem:
+            if problem not in self.symlink_problems:
+                self.symlink_problems.append(problem)
+            return ""
+        return _read(path)
+
+    def _pick_tsconfig(self):
+        """The tsconfig the strict-build check judges: the service package's, else the
+        root's, else None. The pick is a file-existence question and stays out of the
+        containment rule — the READ is what `_read_contained` guards."""
+        for candidate in ((self.service_dir or self.root) / "tsconfig.json",
+                          self.root / "tsconfig.json"):
+            if candidate.is_file():
+                return candidate
+        return None
 
     def _read_package_json(self, directory):
         """The manifest of `directory`, or `{}` if it is a link out of the tree.
@@ -400,7 +453,8 @@ class _Survey:
         patterns = []
         if self.workspace_file.is_file():
             try:
-                data = yaml.safe_load(_read(self.workspace_file)) or {}
+                data = yaml.safe_load(self._read_contained(
+                    self.workspace_file, "pnpm-workspace.yaml")) or {}
             except yaml.YAMLError:
                 data = {}
             patterns.extend(p for p in (data.get("packages") or []) if isinstance(p, str))
@@ -512,7 +566,7 @@ class _Survey:
         if not py.is_file():
             return []
         try:
-            data = tomllib.loads(_read(py))
+            data = tomllib.loads(self._read_contained(py, "pyproject.toml"))
         except tomllib.TOMLDecodeError:
             return []
         dep_lines = [str(d) for d in (data.get("project", {}).get("dependencies") or [])]
@@ -520,6 +574,37 @@ class _Survey:
         return sorted(d for d in _OFFLINE_DEPS if d in joined)
 
     # ── local state (§S3 data-path heuristics, §N1/N5/N6) ───────────────────
+    #
+    # NOT CONTAINED, AND KNOWN — the one walk in this module the round-9 rule above does
+    # not cover, disclosed here rather than in a handoff note because this is where the
+    # next reader will be standing. It follows symlinked DIRECTORIES (no `is_symlink()`
+    # prune, no `seen` set), which the source walk stopped doing in round 7:
+    #
+    #   * a symlinked directory loop is bounded only by the OS returning ELOOP at ~40
+    #     levels of resolution — so it terminates, measured, rather than hanging like
+    #     the round-7 bug did, but it yields the SAME data file once per level:
+    #     `data/loop -> data` beside one `app.sqlite3` measured 41 `data_files` entries
+    #     for one file on disk. `data_dir()` reads `data_files[0].parts[0]`, so a link
+    #     that sorts before the real directory names the volume — `zzz-link -> data`
+    #     measured `data_dir() == "zzz-link"`, which is the path that lands in the
+    #     manifest fragment;
+    #   * a link to a neighbouring tree contributes its `*.parquet`/`*.duckdb`/
+    #     `*.sqlite3` entries, and this walk steers by EXISTENCE rather than content:
+    #     one outside `.sqlite3` is enough to flip `node-ts.local-state`, add
+    #     `deploy_strategy: recreate` and a named volume to the manifest fragment.
+    #
+    # LEFT AS IS, DELIBERATELY, and it is future work rather than a hole nobody saw: the
+    # fix is not the containment call — it is the same prune-and-`seen` treatment
+    # `_iter_source_files` carries, plus deciding what `data_files` means for a path
+    # reached through a link, and that is a behaviour change to the volume and backup
+    # fragment (§N1/§N6) rather than a read boundary. It wants its own commit with the
+    # manifest consequences in the diff.
+    #
+    # A COSMETIC ASYMMETRY, noted for the same reader: a LIVE symlink candidate that is
+    # not a package at all is still refused loudly by `_workspace_candidate_problem` as
+    # a "workspace package", while a plain non-package candidate is skipped in silence.
+    # Behaviour left alone on purpose — the loud side is the safe side, and quietening
+    # it would mean deciding, from a link, whether it "would have been" a package.
     def _find_data_files(self):
         found = []
         stack = [self.root]
@@ -754,11 +839,8 @@ class NodeTsScannerModule:
 
     # ── build & runtime ─────────────────────────────────────────────────────
     def _check_strict_build(self, s):
-        base = s.service_dir or s.root
-        tsconfig_path = base / "tsconfig.json"
-        if not tsconfig_path.is_file():
-            tsconfig_path = s.root / "tsconfig.json"
-        if not tsconfig_path.is_file():
+        tsconfig_path = s.tsconfig_path
+        if tsconfig_path is None:
             return CheckResult(
                 id="node-ts.strict-build", tier="warning",
                 title="No tsconfig.json found",
@@ -766,7 +848,12 @@ class NodeTsScannerModule:
                        "cannot be verified.",
                 fix_hint="Add a tsconfig.json with \"strict\": true; the sandbox "
                          "`tsc --noEmit` check verifies the build stays clean.")
-        options = _load_tsconfig(tsconfig_path).get("compilerOptions", {})
+        # A refused tsconfig parses to `{}` and lands on the warning below, which is the
+        # safe direction and the only one available: the escape here is
+        # TRUST-INCREASING — a neighbouring tsconfig with `"strict": true` turned this
+        # check `ok` and had the report vouch for strict mode the scanned repo does not
+        # have. Every other escape in this module adds a finding; this one removed one.
+        options = s.tsconfig.get("compilerOptions", {})
         if options.get("strict") is True:
             return CheckResult(
                 id="node-ts.strict-build", tier="ok",
