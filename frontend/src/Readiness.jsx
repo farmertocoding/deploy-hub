@@ -11,7 +11,7 @@
 // is a report that moved between the GET and the POST, and `live` on atlas-edge is the
 // warnings gate, which the ack checkbox below actually clears. (`accepted` left with
 // D-012: no answer clears a blocker this phase.)
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
@@ -47,6 +47,12 @@ const TIER_BADGE = {
   advice: { sym: "ℹ", one: "Advice", many: "Advice", color: "#79c0ff" },
   pending_sandbox: { sym: "⏳", one: "Deferred to sandbox",
                      many: "Deferred to sandbox", color: "#8b949e" },
+  // R12-F12-2: `ok` has no SECTION — the payload groups the four tiers the screens
+  // render and `ok` appears in `summary` as a count and nowhere else — but it now has a
+  // word, because the scope line below counts it. Here rather than in that component, so
+  // there is still exactly one place this screen decides what a tier is called and how it
+  // pluralizes (R9-8: the plural is per tier, not `word + "s"`).
+  ok: { sym: "✓", one: "OK", many: "OK", color: "#3fb950" },
 };
 
 export function Badge({ tier, n }) {
@@ -70,6 +76,52 @@ export function Badge({ tier, n }) {
     <span style={{ color: b.color, marginRight: 10 }}>
       {b.sym} {text}
     </span>
+  );
+}
+
+// R12-F12-2: what this report is a report OF.
+//
+// The panel rendered the findings and nothing about the scan that produced them, so two
+// facts an operator needs before trusting a green screen were on it nowhere:
+//
+//   * WHICH MODULES RAN. `modules` is in every payload and was rendered by nothing. A
+//     Django repo scanned as a plain static site produces a short, calm, entirely honest
+//     report — of the wrong suite. "✓ No findings" and "scanned by: static" are different
+//     screens, and only one of them was reachable;
+//   * HOW MANY CHECKS PASSED. `summary` carries `ok`, and the sections deliberately do
+//     not (the payload groups the four tiers the screens render). So "10 checks, all ok"
+//     and "1 check, ok" rendered identically — a green tick over a suite that barely ran
+//     looks exactly like a green tick over one that ran fully.
+//
+// PAYLOAD FIELDS ONLY, which is §4b applied to a line that is not a refusal: `modules`
+// and `summary` verbatim, the tier words from `TIER_BADGE` (this screen's existing one
+// spelling, R9-8), and no sentence claiming anything the payload does not say. The tiers
+// are listed in TIER order rather than in whatever order `summary`'s keys arrive in,
+// because the payload's key order is the server's serialization detail and this is a
+// reading order.
+//
+// The `pending_sandbox` word already carries the execution distinction — "Deferred to
+// sandbox" is what `execution: "executing"` means on this screen, and it is the same
+// table the section heading uses, so the two cannot drift.
+const SCOPE_TIERS = ["blocker", "warning", "advice", "pending_sandbox", "ok"];
+
+export function ReportScope({ report }) {
+  const r = report || {};
+  const modules = r.modules || [];
+  const summary = r.summary || {};
+  const counted = SCOPE_TIERS.filter((tier) => summary[tier]);
+  if (!modules.length && !counted.length) return null;
+  return (
+    <p style={{ color: "#8b949e", margin: "4px 0 12px" }}>
+      {!!modules.length && <span>Scanned by {modules.join(", ")}</span>}
+      {!!modules.length && !!counted.length && <span> · </span>}
+      {counted.map((tier, i) => (
+        <span key={tier}>
+          {i > 0 && ", "}
+          {summary[tier]} {summary[tier] === 1 ? TIER_BADGE[tier].one : TIER_BADGE[tier].many}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -245,11 +297,35 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
   return (
     <>
       <button style={disabledBox(off)} disabled={off} onClick={onClick}
-        title={gate.title} aria-describedby={shown ? reasonId : undefined}>
+        aria-busy={busy} title={gate.title}
+        aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
       {shown &&
         <p id={reasonId} style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
     </>
+  );
+}
+
+// R12-F12-3: the label does not move while the request is in flight.
+//
+// It read "…" — three characters where a sentence had been — so the control an operator
+// had just pressed lost its accessible NAME mid-action: a screen reader that re-reads the
+// focused element announces an ellipsis, and a sighted operator loses the only text
+// saying what the button does. `MaterializeControl` keeps `gate.label` throughout and
+// always has, so this screen said "working" two different ways depending on which button
+// you pressed.
+//
+// `aria-busy` is the part that actually says it to a reader, and it is on both controls
+// now. The visible signal is `disabledBox` (R11-UX-F5), which the button already wears
+// while the request is in flight.
+//
+// Extracted for readiness-render.test.ts's reason, the same one `MaterializeControl` was
+// extracted under: the only way to assert markup is to render it, and everything else in
+// `SiteWizard` fetches.
+export function SaveButton({ busy, disabled, onClick }) {
+  return (
+    <button style={disabledBox(disabled)} disabled={disabled} aria-busy={!!busy}
+      onClick={onClick}>Save answers</button>
   );
 }
 
@@ -423,8 +499,14 @@ export function ProjectRowSelector({ project, selected, onSelect }) {
       onClick={onSelect} onKeyDown={rowKeyHandler(onSelect)}>
       {/* The non-colour half of the selection signal. `aria-hidden` because
           `aria-pressed` already says this to a screen reader, and two spellings of one
-          fact is what R10-UX-F7 took out of `Badge`. */}
-      {selected && <span aria-hidden="true">▸ </span>}
+          fact is what R10-UX-F7 took out of `Badge`.
+
+          R12-F12-4: the span is rendered in BOTH states and reserves its width. Added
+          only when selected, it shifted the project's name sideways on every click —
+          the row the operator is reading moves under the cursor at the moment they
+          choose it, and on a keyboard walk down the list every row jumps in turn. */}
+      <span aria-hidden="true"
+        style={{ display: "inline-block", width: "1.1em" }}>{selected ? "▸" : ""}</span>
       <ProjectRow project={project} />
     </div>
   );
@@ -456,14 +538,38 @@ export default function ReadinessScreen() {
   // What a site's wizard calls when the server's answer means this screen is stale.
   const refresh = () => { load({ quiet: true }); setRefreshKey((k) => k + 1); };
 
+  // R12-F12-1: Retry unmounts the button that was pressed.
+  //
+  // The error panel is a message and a Retry button; pressing it swaps the whole panel
+  // for "Loading projects…", so the focused element ceases to exist and focus falls to
+  // `<body>`. For a screen-reader user that is the entire feedback for the press: nothing
+  // is announced, and the next Tab starts from the top of the document. If the retry fails
+  // again, the error text they were meant to read is not announced either.
+  //
+  // `retried` gates it so first paint does not steal focus — nobody pressed anything, and
+  // moving focus on load is its own defect. Both swap targets carry the ref, because which
+  // one renders next is the server's answer, not this component's choice.
+  const statusRef = useRef(null);
+  const [retried, setRetried] = useState(false);
+  useEffect(() => {
+    if (retried) statusRef.current?.focus();
+  }, [retried, projects === undefined, error]);
+
   if (error)
     return (
       <div style={{ padding: 16 }}>
-        <p style={{ color: "#ff7b72" }}>{error}</p>
-        <button style={box} onClick={() => load()}>Retry</button>
+        <p ref={statusRef} tabIndex={-1} style={{ color: "#ff7b72" }}>{error}</p>
+        <button style={box} onClick={() => { setRetried(true); load(); }}>Retry</button>
       </div>
     );
-  if (projects === undefined) return <p style={{ padding: 16 }}>Loading projects…</p>;
+  // NOT FOCUSED, and it is the same judgement in the other direction: when the retry
+  // SUCCEEDS this paragraph is replaced by the project list, and `statusRef` is null, so
+  // nothing is focused and the operator's focus is back at the top of a screen that now
+  // has content. Moving it into a data region unasked interrupts whatever the reader is
+  // saying with a heading nobody requested. The failure path is the one where the
+  // feedback is otherwise silent.
+  if (projects === undefined)
+    return <p ref={statusRef} tabIndex={-1} style={{ padding: 16 }}>Loading projects…</p>;
   if (!projects.length)
     return (
       <div style={{ padding: 16 }}>
@@ -517,6 +623,7 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
     <div style={{ flex: 1 }}>
       <h3 style={{ marginTop: 0 }}>Readiness — {project?.name}
         {" "}<small><Stamp at={report.scanned_at} /></small></h3>
+      <ReportScope report={report} />
       {kind === "clean" &&
         <p style={{ color: "#3fb950" }}>✓ No findings. This project is ready to configure.</p>}
       {kind === "never-scanned" && (
@@ -649,6 +756,7 @@ function SiteWizard({ site, refreshKey, onChanged }) {
   const [ack, setAck] = useState(false);
   const [msg, setMsg] = useState(null); // {ok, text} | {problems}
   const [busy, setBusy] = useState(false);
+  const openedRef = useRef(null);
 
   const load = () =>
     api(`v1/sites/${site.id}/wizard/`).then(({ status, data }) =>
@@ -666,25 +774,45 @@ function SiteWizard({ site, refreshKey, onChanged }) {
     siteId: site.id, state, draft, ack, load, onChanged, setBusy, setMsg, setDraft,
   });
 
+  // R12-F12-1: where the keyboard is after the button that was there is gone.
+  //
+  // "Configure & materialize" REPLACES itself with the form — the collapsed button is
+  // unmounted by the click that opens it. The element that had focus no longer exists, so
+  // the browser drops focus to `<body>`: a screen-reader user hears nothing about the form
+  // that just appeared, and the next Tab starts again from the top of the document, above
+  // the project list, several stops from the thing they opened.
+  //
+  // `tabIndex={-1}` makes the container programmatically focusable without adding a tab
+  // stop, which is the standard treatment for a region that receives focus after an
+  // action. Focusing the CONTAINER rather than the first input is deliberate: the heading
+  // and the question list are read from there, and landing on the first field would skip
+  // the form's own name.
+  //
+  // All three post-open renders take the ref — the form, the "Loading wizard…" spinner and
+  // the error line — because the fetch is in flight when the click lands, so which of them
+  // exists at that moment depends on the network. A ref on only the happy one focuses
+  // nothing exactly when the operator has least information.
+  useEffect(() => { if (open) openedRef.current?.focus(); }, [open, state === undefined]);
+
   if (!open)
     return <button style={{ ...box, marginTop: 6 }} onClick={() => setOpen(true)}>
       Configure &amp; materialize — {site.name}</button>;
-  if (state === undefined) return <p>Loading wizard…</p>;
-  if (state.error) return <p style={{ color: "#ff7b72" }}>{state.error}</p>;
+  if (state === undefined) return <p ref={openedRef} tabIndex={-1}>Loading wizard…</p>;
+  if (state.error)
+    return <p ref={openedRef} tabIndex={-1} style={{ color: "#ff7b72" }}>{state.error}</p>;
 
   const unanswered = state.questions.filter((q) => !(q.id in (state.answered || {})));
   const gate = materializeGate(state);
   return (
-    <div style={{ ...box, marginTop: 8 }}>
+    <div ref={openedRef} tabIndex={-1} style={{ ...box, marginTop: 8 }}>
       <h4 style={{ marginTop: 0 }}>{site.name} — configuration</h4>
       {state.questions.map((q) => (
         <QuestionField key={q.id} siteId={site.id} question={q}
           prior={state.answered?.[q.id]} drafted={draft[q.id]}
           onChange={(value) => setDraft({ ...draft, [q.id]: value })} />
       ))}
-      <button style={disabledBox(busy || !Object.keys(draft).length)}
-        disabled={busy || !Object.keys(draft).length} onClick={save}>
-        {busy ? "…" : "Save answers"}</button>{" "}
+      <SaveButton busy={busy} disabled={busy || !Object.keys(draft).length}
+        onClick={save} />{" "}
       <WarningsAck warnings={state.warnings} checked={ack}
         onChange={(e) => setAck(e.target.checked)} />{" "}
       <MaterializeControl gate={gate} busy={busy} onClick={materialize}

@@ -357,3 +357,47 @@ test("r11-ux-f3: after a sibling's 409 the OTHER site's gate shows the new truth
     assert.ok(materializeGate(after.data).title.includes("blockers"),
       "…and the reason on screen is the server's own sentence");
   });
+
+// ── R12-F12-1: where the keyboard is after the thing it was on disappears ────
+//
+// Two swaps on this screen unmount the element that has focus: "Configure & materialize"
+// replaces itself with the form, and Retry replaces the error panel with the spinner. In
+// both cases focus falls to `<body>` — the press is announced by nothing, and the next Tab
+// starts again at the top of the document.
+//
+// THE BOUNDARY, stated as R11-UX-F3's pin states it rather than left for the next reader
+// to discover: `renderToStaticMarkup` runs no effects and this tree has no DOM runner, so
+// "focus moved" is not observable here. What IS observable is the markup that makes it
+// possible — a focusable container, on every branch that can render after the swap — and
+// the effect that asks for it. The first is rendered and asserted; the second is read.
+
+test("f12-1: the opened wizard is focusable, on every branch the swap can land on", () => {
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+  const wizard = source.slice(source.indexOf("function SiteWizard("));
+
+  // The fetch is in flight when the click lands, so which of these three renders at that
+  // moment depends on the network. A ref on only the happy one focuses nothing exactly
+  // when the operator has least information.
+  assert.equal((wizard.match(/ref=\{openedRef\} tabIndex=\{-1\}/g) || []).length, 3,
+    "the form, the spinner and the error line must all be able to receive focus");
+  assert.match(wizard,
+    /useEffect\(\(\) => \{ if \(open\) openedRef\.current\?\.focus\(\); \}/,
+    "nothing asks for focus when the wizard opens");
+});
+
+test("f12-1: Retry's swap target is focusable, and first paint is not", () => {
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+  const screen = source.slice(source.indexOf("export default function ReadinessScreen"));
+
+  assert.equal((screen.match(/ref=\{statusRef\} tabIndex=\{-1\}/g) || []).length, 2,
+    "the error line and the spinner are the two things Retry can swap to");
+  assert.match(screen, /onClick=\{\(\) => \{ setRetried\(true\); load\(\); \}\}/,
+    "Retry does not record that a person pressed something");
+  assert.match(screen, /if \(retried\) statusRef\.current\?\.focus\(\);/,
+    "…and nothing acts on it");
+  // The gate matters as much as the focus call: moving focus on FIRST paint, when nobody
+  // has pressed anything, is its own defect — the operator is dropped into a region they
+  // did not ask for, on a screen they have not read yet.
+  assert.ok(!/useEffect\(\(\) => \{\s*statusRef\.current\?\.focus\(\)/.test(screen),
+    "focus is taken on every render, first paint included");
+});

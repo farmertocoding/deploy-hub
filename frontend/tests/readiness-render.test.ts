@@ -13,11 +13,12 @@
 // Readiness.jsx itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
-  ProjectRowSelector, QuestionField, WarningsAck, questionFieldId, reportSummary,
-  rowKeyHandler } from "../src/Readiness.jsx";
+  ProjectRowSelector, QuestionField, ReportScope, SaveButton, WarningsAck,
+  questionFieldId, reportSummary, rowKeyHandler } from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -429,4 +430,111 @@ test("r11-ux-f5: a disabled control is visibly disabled", () => {
     { gate: ready, busy: true, onClick: () => {} });
   assert.equal(style(busy), style(off),
     "a button disabled because a request is in flight still looks pressable");
+});
+
+// ── R12-F12-2: what the report is a report OF ────────────────────────────────
+
+test("f12-2: the scope line names the modules that ran and counts every tier", async () => {
+  const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/2/readiness/");
+  const text = visibleText(render(ReportScope, { report }));
+
+  for (const module of report.modules) assert.ok(text.includes(module), module);
+  // Every tier the payload counted, in reading order, with the singular/plural this
+  // screen already uses for its section headings.
+  assert.ok(text.includes(`${report.summary.blocker} Blockers`), text);
+  assert.ok(text.includes(`${report.summary.warning} Warnings`), text);
+  assert.ok(text.includes(`${report.summary.advice} Advice`), text);
+  assert.ok(text.includes(`${report.summary.pending_sandbox} Deferred to sandbox`), text);
+  assert.ok(text.includes(`${report.summary.ok} OK`), text);
+  assert.equal(text.indexOf("Blockers") < text.indexOf("OK"), true,
+    "the tiers read in tier order, not in whatever order the payload's keys arrive in");
+});
+
+test("f12-2: the CLEAN report says how much passed, which was the point", async () => {
+  // "✓ No findings" over a suite that barely ran looks exactly like one that ran fully.
+  // takko's report is ten `ok` checks and nothing else, and the panel showed neither
+  // number nor module before this line existed.
+  const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/1/readiness/");
+  assert.deepEqual(report.blockers, []);
+
+  const text = visibleText(render(ReportScope, { report }));
+
+  assert.ok(text.includes(`${report.summary.ok} OK`), text);
+  assert.ok(text.includes(report.modules[0]), text);
+  for (const absent of ["Blockers", "Warnings", "Deferred"])
+    assert.ok(!text.includes(absent), `a zero count is not a fact worth a word: ${text}`);
+});
+
+test("f12-2: a never-scanned report renders no scope line at all", async () => {
+  // `modules: []` and `summary: {}` — there is nothing to say, and R9-5's whole finding
+  // is that this screen must not imply a scan happened.
+  const { data: report } = await (SIM_FIXTURES.degraded as any)("v1/projects/4/readiness/");
+  assert.equal(render(ReportScope, { report }), "");
+  assert.equal(render(ReportScope, { report: undefined }), "");
+});
+
+test("f12-2: the scope line claims nothing the payload does not say", async () => {
+  // §4b applied to a line that is not a refusal: every word in it is either a payload
+  // value or the tier vocabulary this screen already owns (TIER_BADGE, R9-8).
+  const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/3/readiness/");
+  const text = visibleText(render(ReportScope, { report }));
+  const vocabulary = ["Scanned by", "·", ",", "Blocker", "Blockers", "Warning",
+                      "Warnings", "Advice", "Deferred to sandbox", "OK"];
+
+  // Longest first, or stripping "Warning" leaves the "s" of "Warnings" behind and the
+  // test reports a defect it invented.
+  const known = [...report.modules, ...Object.values(report.summary).map(String),
+                 ...vocabulary].sort((a, b) => b.length - a.length);
+  let residue = text;
+  for (const word of known) residue = residue.split(word).join("");
+  assert.equal(residue.trim(), "",
+    `the line contains text from neither the payload nor TIER_BADGE: ${residue}`);
+});
+
+test("f12-2: and the panel actually renders it, under the heading", () => {
+  // The component tests above prove the line is right; this one proves it is ON the
+  // screen. `ReadinessPanel` fetches, so it cannot be rendered here — the same boundary
+  // the F12-1 pins state, and the same remedy: read the source rather than pretend a
+  // component test covers a wiring question.
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+  const panel = source.slice(source.indexOf("function ReadinessPanel("));
+  const heading = panel.indexOf("Readiness — {project?.name}");
+  const scope = panel.indexOf("<ReportScope report={report} />");
+
+  assert.ok(scope > 0, "the panel renders no scope line at all");
+  assert.ok(heading < scope && scope < panel.indexOf('kind === "clean"'),
+    "the scope line belongs under the heading, above the findings it is the scope of");
+});
+
+// ── R12-F12-3 / F12-4: two controls that moved under the operator ────────────
+
+test("f12-3: Save keeps its label while busy and says so with aria-busy", () => {
+  const markup = render(SaveButton, { busy: true, disabled: true, onClick: () => {} });
+  assert.match(markup, /aria-busy="true"/);
+  assert.ok(visibleText(markup).includes("Save answers"),
+    "the button lost its accessible name mid-action — it read “…”");
+});
+
+test("f12-3: Materialize announces busy the same way", () => {
+  const ready = { disabled: false, label: "Materialize manifest", title: "" };
+  assert.match(render(MaterializeControl, { gate: ready, busy: true, onClick: () => {} }),
+    /aria-busy="true"/);
+  assert.match(render(MaterializeControl, { gate: ready, busy: false, onClick: () => {} }),
+    /aria-busy="false"/);
+});
+
+test("f12-4: the selection marker reserves its width in both states", async () => {
+  const { data: projects } = await (SIM_FIXTURES.live as any)("v1/projects/");
+  const on = render(ProjectRowSelector,
+    { project: projects[0], selected: true, onSelect: () => {} });
+  const off = render(ProjectRowSelector,
+    { project: projects[0], selected: false, onSelect: () => {} });
+
+  const marker = /<span aria-hidden="true" style="([^"]*)">/;
+  assert.match(on, marker);
+  assert.match(off, marker,
+    "added only when selected, the marker shoves the project's name sideways on click");
+  assert.equal(on.match(marker)![1], off.match(marker)![1],
+    "the reserved box must be the same in both states or it reserves nothing");
+  assert.match(on.match(marker)![1], /width:1.1em/);
 });
