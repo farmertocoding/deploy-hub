@@ -139,6 +139,40 @@ _FALLBACK_MODULES = []
 _DEFAULT_SUPERSEDES = frozenset()
 
 
+def repo_relative(root, path):
+    r"""`path` as a repo-relative POSIX string, or None when it is not under `root`.
+
+    R13-ARCH-B: ONE conversion. "The walked absolute path in, the report's spelling out"
+    is the seam the R12-A1 bypasses lived on — a module refuses `root/src/metrics.ts`, the
+    report carries `src/metrics.ts`, and the guard compares the two — and it was written
+    three times: in `node_ts._Survey.refused_relative_paths`, in `fallbacks`' core refusal
+    line, and in the guard below. Only the first and the third were ever pinned against
+    each other, so the middle copy agreed by inspection, which is the state every drift in
+    this repo has started from.
+
+    HERE RATHER THAN IN `fallbacks`, where the other containment primitive (`escapes_root`)
+    lives, and the reason is import direction: `fallbacks` and `node_ts` both already
+    import from this module, while this module imports `fallbacks` only INSIDE `scan`, to
+    keep the registry free of an import cycle. A helper in `fallbacks` would make that
+    function-scoped import load-bearing for the guard as well.
+
+    `as_posix()` is the part a hand-written copy forgets, and it is not cosmetic: a
+    backslash is a separator on one of the platforms `PurePath` knows about and an
+    ordinary character in a filename on this one, so `str()` and `as_posix()` differ on a
+    name a repository can legally commit — which is exactly the class S3 was.
+
+    NONE RATHER THAN A RAISE OR AN ABSOLUTE STRING. Every caller's answer to "this path is
+    not in the repository" is the same — keep it out of the report — but they say it
+    differently: the two producers drop the entry (a stored report that names this
+    machine's `/tmp` is a leak of the host's layout), and the guard turns it into the
+    refusal that tells the module its spelling is wrong.
+    """
+    try:
+        return Path(path).relative_to(root).as_posix()
+    except ValueError:
+        return None
+
+
 def module_supersedes(module):
     return frozenset(getattr(module, "supersedes", _DEFAULT_SUPERSEDES))
 
@@ -258,9 +292,8 @@ def _refused_paths_problem(module, root, refused, reported):
     root = Path(root)
     for raw in refused:
         path = Path(raw)
-        try:
-            rel = path.relative_to(root).as_posix()
-        except ValueError:
+        rel = repo_relative(root, path)
+        if rel is None:
             return (
                 f"module {module.name!r} declares a refusal of {str(path)!r}, which is "
                 f"outside the scan root {str(root)!r}. `refused_paths` returns the "

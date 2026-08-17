@@ -21,7 +21,13 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from scanner.core import CheckResult, SandboxSpec, WizardQuestion, register
+from scanner.core import (
+    CheckResult,
+    SandboxSpec,
+    WizardQuestion,
+    register,
+    repo_relative,
+)
 
 _SKIP_DIRS = {".git", "node_modules", ".pnpm-store", "dist", "build", "coverage",
               "__pycache__", ".venv", "venv"}
@@ -485,18 +491,18 @@ class _Survey:
         R12-A1. `symlink_refused` holds the WALKED paths, absolute, because that is what
         `scanner.core.scan` subtracts from the core suite's list by `Path` equality. What
         goes IN the report is repo-relative and POSIX, because a report is about a
-        repository and not about this machine's `/tmp`. One conversion, here, rather than
-        the same `relative_to` written at each call site — and a path that is somehow not
-        under the root is dropped rather than printed absolute, which is the direction
-        that cannot leak a filesystem layout into a stored report.
+        repository and not about this machine's `/tmp`.
+
+        R13-ARCH-B: the conversion is `core.repo_relative`, which the core refusal line
+        and the guard that compares the two also call. This function's whole content used
+        to be a third copy of it — agreeing with the other two by inspection, on a
+        `relative_to`/`as_posix` pair whose difference only shows on names a repository
+        can legally commit. A path not under the root is dropped, which is that helper's
+        `None` and the direction that cannot leak this machine's layout into a stored
+        report.
         """
-        out = []
-        for path in self.symlink_refused:
-            try:
-                out.append(path.relative_to(self.root).as_posix())
-            except ValueError:                                   # pragma: no cover
-                continue
-        return out
+        out = [repo_relative(self.root, path) for path in self.symlink_refused]
+        return [rel for rel in out if rel is not None]
 
     def _read_contained(self, path, kind):
         """The text of `path`, or `""` if it is a link out of the tree.

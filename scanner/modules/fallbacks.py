@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 
 from scanner import core
+from scanner.core import repo_relative
 
 # The name of the file the presence notice below looks for. A literal, deliberately:
 # `scanner.declarations` owns the parser and it is PARKED (D-012 out of Phase 1), so
@@ -1492,7 +1493,12 @@ def _check_symlinked_files(root, escaped, refused_elsewhere=()):
         # report is for reading. `refused_paths` is for the guard in `scanner.core.scan`
         # and for anything else that needs to know which files this line is about without
         # parsing prose that quotes, truncates and pluralizes.
-        refused_paths=[Path(path).relative_to(root).as_posix() for path, _ in escaped],
+        # R13-ARCH-B: `core.repo_relative`, which `node_ts` and the guard in
+        # `scanner.core.scan` also call. This line used to be the third hand-written copy
+        # of that conversion, and the only one of the three that nothing compared against
+        # either of the others.
+        refused_paths=[rel for rel in (repo_relative(root, path) for path, _ in escaped)
+                       if rel is not None],
         fix_hint=(
             "A scan reads only the tree it was pointed at, so these files decided "
             "nothing above: no check verdict, no wizard default, no manifest value was "

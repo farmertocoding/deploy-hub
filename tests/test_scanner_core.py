@@ -687,3 +687,120 @@ def test_issue_r12_arch_1_the_live_refusal_checks_are_loud_enough_to_vouch():
 
     assert core._REFUSAL_LOUD_TIERS == ("blocker", "warning")
     assert fallbacks._MAX_SKIPPED_REPORTED > 0
+
+
+# ── R13-ARCH-B: one conversion, three call sites ─────────────────────────────
+#
+# "The walked absolute path in, the repo-relative POSIX spelling out" is the seam the S2
+# and S3 bypasses lived on, and it was written three times: in `node_ts`' survey, in
+# `fallbacks`' core refusal line, and in the guard that compares the two. Only the
+# node-ts↔guard pair was ever pinned together, so the third copy agreed by inspection —
+# which is the state every drift in this repo has started from.
+
+EXOTIC = "sécr\\et fiéld.ts"     # non-ASCII, a backslash, and a space, all legal
+# The same name with a suffix `node_ts._SOURCE_SUFFIXES` does not claim, so the CORE walk
+# is the only one that meets it — which is how one tree exercises both producers.
+EXOTIC_DOC = "sécr\\et fiéld.md"
+
+
+def _two_producer_tree(tmp_path):
+    """A node monorepo carrying two escaping links with the same awkward name.
+
+    One is a `.ts` inside a surveyed package, which `node-ts` refuses, reports and
+    subtracts from the core line; the other is a `.md`, a suffix `_SOURCE_SUFFIXES` does
+    not claim, so the CORE walk is the only one that meets it. Both producers run over one
+    tree, which is what makes their agreement assertable.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    (neighbour / "target.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    surveyed = root / "packages" / "server" / "src"
+    surveyed.mkdir(parents=True)
+    (root / "package.json").write_text(
+        '{"name": "e", "private": true}\n', encoding="utf-8")
+    (root / "pnpm-workspace.yaml").write_text("packages:\n  - 'packages/*'\n",
+                                              encoding="utf-8")
+    (root / "packages" / "server" / "package.json").write_text(
+        '{"name": "@e/server", "main": "dist/index.js",\n'
+        ' "dependencies": {"fastify": "^4.28.0"}}\n', encoding="utf-8")
+    (surveyed / "index.ts").write_text("import Fastify from 'fastify';\n",
+                                       encoding="utf-8")
+    (root / "docs").mkdir()
+    for link in (surveyed / EXOTIC, root / "docs" / EXOTIC_DOC):
+        os.symlink(os.path.relpath(neighbour / "target.ts", link.parent), link)
+    return root
+
+
+def test_issue_r13_arch_b_repo_relative_is_the_one_conversion(tmp_path):
+    """The helper itself, on the names that make the three copies disagree.
+
+    A backslash is a path SEPARATOR on one of the platforms `PurePath` knows about and an
+    ordinary character on this one; `as_posix()` is what makes that irrelevant, and it is
+    the call a hand-written copy forgets. Non-ASCII is here because a byte-oriented
+    shortcut passes ASCII and fails this.
+    """
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    inside = root / "src" / EXOTIC
+
+    assert core.repo_relative(root, inside) == f"src/{EXOTIC}"
+    assert core.repo_relative(root, root) == "."
+    # Outside the root is None rather than an exception or an absolute string: the caller
+    # decides, and every caller's answer is "do not put this in the report".
+    assert core.repo_relative(root, tmp_path / "neighbour" / EXOTIC) is None
+    assert core.repo_relative(str(root), str(inside)) == f"src/{EXOTIC}"
+
+
+def test_issue_r13_arch_b_both_producers_and_the_guard_agree_on_an_exotic_name(
+        tmp_path):
+    """The property the three copies were supposed to have, asserted end to end.
+
+    One tree, two refusals with the same awkward name: one inside a surveyed node package
+    — which `node-ts` refuses, reports and subtracts from the core line — and one outside
+    any package, which only the CORE walk sees. So both producers run, on a name that
+    would break a byte-wise or a `str()`-wise conversion, and the guard has to accept the
+    module's word about the first while `core.symlinked-files` still reports the second.
+
+    A `ValueError` out of `scan` here is the S3 shape: a legal committed filename taking
+    the whole scan down. A missing entry is the S2 shape: a refusal nobody is told about.
+    """
+    root = _two_producer_tree(tmp_path)
+
+    report = core.scan(root)
+    by_id = {c["id"]: c for c in report["checks"]}
+
+    assert by_id["node-ts.symlinked-files"]["refused_paths"] == [
+        f"packages/server/src/{EXOTIC}"]
+    assert by_id["core.symlinked-files"]["refused_paths"] == [f"docs/{EXOTIC_DOC}"]
+    # …and the two lists are disjoint, which is the one-fact-one-line rule (R10-A3) on a
+    # tree where both channels fire.
+    assert not set(by_id["node-ts.symlinked-files"]["refused_paths"]) & \
+        set(by_id["core.symlinked-files"]["refused_paths"])
+
+
+def test_issue_r13_arch_b_the_producers_call_the_shared_helper(tmp_path):
+    """…and they agree because they are the same code, not because they were compared
+    once. Patching the helper is how a test asserts there is one of it — the R10-A5
+    precedent, applied to a conversion rather than to a body."""
+    from scanner.modules import fallbacks, node_ts
+
+    calls = []
+    original = core.repo_relative
+
+    def spy(root, path):
+        calls.append((str(root), str(path)))
+        return original(root, path)
+
+    root = _two_producer_tree(tmp_path)
+    try:
+        fallbacks.repo_relative = spy
+        node_ts.repo_relative = spy
+        core.scan(root)
+    finally:
+        fallbacks.repo_relative = original
+        node_ts.repo_relative = original
+
+    converted = [path for _, path in calls]
+    assert any(path.endswith(f"src/{EXOTIC}") for path in converted), converted
+    assert any(path.endswith(f"docs/{EXOTIC_DOC}") for path in converted), converted
