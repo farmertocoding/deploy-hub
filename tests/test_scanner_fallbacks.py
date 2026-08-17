@@ -887,3 +887,83 @@ def test_issue_r9_a_a_repo_with_no_symlinks_reports_exactly_what_it_did_before(t
     """
     ids = [c.id for c in fallbacks.common_checks(FIXTURES / "dockerfile_project")]
     assert "core.symlinked-files" not in ids
+
+
+# ── R9-Q1: the depth cap was a number nothing asserted ──────────────────────────
+
+def test_issue_r9_q1_the_walk_does_not_open_a_directory_past_the_cap(tmp_path,
+                                                                     monkeypatch):
+    """R9-Q1. `max_depth` is the reason `django.project_root` can look for a `manage.py`
+    in a monorepo without descending a vendored tree, and R8-6's whole fix was making it
+    "a walk that stops rather than a filter applied after descending forever". Mutating
+    the bound to `max_depth=None` survived 776 tests: every existing test asserts what
+    came BACK, and a walk that descends the whole tree and then filters returns exactly
+    the same files.
+
+    So the contract asserted here is the DESCENT, not the yield — `iterdir` is spied on
+    and the assertion is that a directory which could only hold files past the cap is
+    never opened at all. Cost, not correctness, is what the bound buys, and cost is
+    invisible to a result set.
+
+    The tree is one chain, and `max_depth=3` is the interesting cut: `d1/d2` holds a file
+    at depth 3 and must be read; `d1/d2/d3` can hold nothing shallower than depth 4 and
+    must not be touched, along with everything under it.
+    """
+    root = tmp_path / "repo"
+    (root / "d1" / "d2" / "d3" / "d4").mkdir(parents=True)
+    (root / "a.txt").write_text("1")
+    (root / "d1" / "b.txt").write_text("2")
+    (root / "d1" / "d2" / "c.txt").write_text("3")
+    (root / "d1" / "d2" / "d3" / "e.txt").write_text("4")
+    (root / "d1" / "d2" / "d3" / "d4" / "f.txt").write_text("5")
+
+    opened = []
+    real_iterdir = pathlib.Path.iterdir
+
+    def spy(self):
+        opened.append(pathlib.Path(self).resolve())
+        return real_iterdir(self)
+
+    monkeypatch.setattr(pathlib.Path, "iterdir", spy)
+
+    found = sorted(p.relative_to(root).as_posix()
+                   for p in fallbacks._iter_files(root, max_depth=3))
+
+    assert found == ["a.txt", "d1/b.txt", "d1/d2/c.txt"]
+    for past_the_cap in ("d1/d2/d3", "d1/d2/d3/d4"):
+        assert (root / past_the_cap).resolve() not in opened, (
+            f"{past_the_cap} was opened; the cap is filtering results rather than "
+            f"stopping the descent")
+    # …and the directories at or inside the cap WERE opened, so the assertion above
+    # cannot pass because the walk did nothing.
+    assert (root / "d1" / "d2").resolve() in opened
+
+
+def test_issue_r9_q1_a_directory_past_the_cap_is_not_a_skipped_path(tmp_path):
+    """The other half of "not opened": a directory the walk declined to descend is not a
+    directory the filesystem refused, so it must not land in `skipped` — that list is
+    `core.secret-scan`'s honesty signal (R7-2), and filling it with directories the
+    scanner chose not to read would fire the "part of the tree could not be read"
+    warning on every deep repo. Which is the over-correction R7-2's own ruling names.
+    """
+    root = tmp_path / "repo"
+    (root / "d1" / "d2" / "d3").mkdir(parents=True)
+    (root / "d1" / "d2" / "d3" / "e.txt").write_text("4")
+
+    skipped = []
+    list(fallbacks._iter_files(root, skipped, max_depth=2))
+
+    assert skipped == []
+
+
+def test_issue_r9_q1_no_cap_still_means_no_cap(tmp_path):
+    """The default is unbounded and stays unbounded: `common_checks`' own walk passes no
+    `max_depth`, and a secret three directories down is still a secret. Asserted so the
+    fix for the cap cannot become a cap on everything."""
+    root = tmp_path / "repo"
+    (root / "d1" / "d2" / "d3" / "d4").mkdir(parents=True)
+    (root / "d1" / "d2" / "d3" / "d4" / "deep.txt").write_text("x")
+
+    found = [p.relative_to(root).as_posix() for p in fallbacks._iter_files(root)]
+
+    assert found == ["d1/d2/d3/d4/deep.txt"]
