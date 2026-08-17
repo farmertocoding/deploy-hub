@@ -479,6 +479,25 @@ class _Survey:
             self.symlink_refused.append(path)
         return True
 
+    def refused_relative_paths(self):
+        """`symlink_refused` as repo-relative POSIX strings — the report's spelling.
+
+        R12-A1. `symlink_refused` holds the WALKED paths, absolute, because that is what
+        `scanner.core.scan` subtracts from the core suite's list by `Path` equality. What
+        goes IN the report is repo-relative and POSIX, because a report is about a
+        repository and not about this machine's `/tmp`. One conversion, here, rather than
+        the same `relative_to` written at each call site — and a path that is somehow not
+        under the root is dropped rather than printed absolute, which is the direction
+        that cannot leak a filesystem layout into a stored report.
+        """
+        out = []
+        for path in self.symlink_refused:
+            try:
+                out.append(path.relative_to(self.root).as_posix())
+            except ValueError:                                   # pragma: no cover
+                continue
+        return out
+
     def _read_contained(self, path, kind):
         """The text of `path`, or `""` if it is a link out of the tree.
 
@@ -971,6 +990,13 @@ class NodeTsScannerModule:
                 id="node-ts.symlinked-files", tier="warning",
                 title="Symlinked files outside the scan root were not read",
                 detail="; ".join(s.symlink_problems) + ".",
+                # R12-A1: the sentence above and the fact beside it. The detail prints
+                # these names through `_quote_pattern` — `repr`, truncated at 80 — which
+                # is right for a report line and useless as data: a legal committed link
+                # called `src/metri\cs.ts` appears there with the backslash escaped, and
+                # the guard that used to read this string accused this module of hiding
+                # a refusal it had just announced, on every scan of that repository.
+                refused_paths=s.refused_relative_paths(),
                 fix_hint="A scan reads only the tree it was pointed at. Keep committed "
                          "symlinks inside the repository, or vendor the file itself — "
                          "content from a neighbouring tree would otherwise decide this "

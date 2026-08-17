@@ -862,7 +862,10 @@ const EDGE_REPORT = {
       "title": "Symlinked files outside the scan root were not read",
       "detail": "symlinked source file 'packages/server/src/metrics.ts' resolves outside the scan root; a scan reads only the tree it was pointed at — not read.",
       "fix_hint": "A scan reads only the tree it was pointed at. Keep committed symlinks inside the repository, or vendor the file itself — content from a neighbouring tree would otherwise decide this report's findings and the defaults the wizard offers.",
-      "execution": "static"
+      "execution": "static",
+      "refused_paths": [
+        "packages/server/src/metrics.ts"
+      ]
     }
   ],
   "advice": [],
@@ -1063,7 +1066,7 @@ const EDGE_MANIFEST = {
     },
     "env_bundle_ref": null
   },
-  "scan_report_hash": "59672e5d77598b402901c601842385b49f3b29631c272fc3bda030295f498196",
+  "scan_report_hash": "8158c227a249f0bc2a854264cf36f3ca0ee4ec812b6792687de095775238f6a1",
   "created_at": "2026-08-17T05:39:02.278683Z"
 };
 
@@ -1447,7 +1450,14 @@ const edgeRow = () => liveMaterialized.has(3) ? EDGE_PROJECT_AFTER : EDGE_PROJEC
 // takko's sites. `stale` is ONE event — the report moved under this project — and the
 // only transition captured against the moved report is site 1's refusal. Every other
 // write to a takko site in this state has no payload behind it (see `notCovered`).
-const TAKKO_SITES = [1, 4];
+//
+// R12-A2: DERIVED from the captured row rather than typed, and exported so the test that
+// walks these sites reads the same list. It was `[1, 4]` here and `[1, 4]` again in
+// sim-contract.test.ts — two hand-typed copies of a fact the payload already carries, in
+// a file whose whole rule is that nothing in it is typed. `CLEAN_PROJECT` is takko's row
+// as `ProjectListView` produced it, so a site added to the generator arrives here without
+// an edit, and a test cannot walk a set of sites the simulation does not route.
+export const TAKKO_SITES = CLEAN_PROJECT.sites.map((s) => s.id);
 
 // The self-identified synthetic refusal, and the established pattern for one: `degraded`
 // answers the routes it does not cover with a `[sim]`-prefixed 503 rather than a sentence

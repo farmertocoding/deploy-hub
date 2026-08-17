@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { schemas } from "../src/api/zod.ts";
-import { SIM_FIXTURES } from "../src/sim.js";
+import { SIM_FIXTURES, TAKKO_SITES } from "../src/sim.js";
 
 // window shim: sim.js is a browser module; the fixtures themselves are pure.
 (globalThis as any).window = { location: { search: "" } };
@@ -479,8 +479,6 @@ test("r11-q2: the walk covers every constant a transition can produce", async ()
 // walk above forbids, and it was two clicks from the state whose whole job is being the
 // truth after a refusal.
 
-const TAKKO_SITES = [1, 4];
-
 test("r11-ux-f1: no takko site can materialize under the converged blocking report",
   async () => {
     const stale = SIM_FIXTURES.stale as any;
@@ -612,4 +610,18 @@ test("r11-ux-f6: a second materialize is refused rather than replayed", async ()
   // …and the row is unchanged by the refusal, which is the R10-UX-F3 property.
   const row = (await live("v1/projects/")).data.find((p: any) => p.name === "takko");
   assert.equal(row.sites[0].latest_manifest_version, first.data.version);
+});
+
+test("r12-a2: the takko site list is derived from the captured row, not typed", () => {
+  // It was `[1, 4]` in sim.js and `[1, 4]` again in this file — two hand-typed copies of
+  // a fact `CLEAN_PROJECT` already carries, in the pair of files whose whole rule is that
+  // nothing in them is typed. The derivation is exported; this asserts it is a derivation
+  // and not a literal that happens to agree, by comparing it against the payload the
+  // simulation serves rather than against the numbers.
+  const takko = (SIM_FIXTURES.live as any)("v1/projects/").data
+    .find((p: any) => p.name === "takko");
+
+  assert.deepEqual(TAKKO_SITES, takko.sites.map((s: any) => s.id));
+  assert.ok(TAKKO_SITES.length >= 2,
+    "the stale-state walk needs the sibling site the finding was about");
 });

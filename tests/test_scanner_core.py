@@ -305,32 +305,32 @@ def test_issue_r10_a3_a_module_without_the_hook_declares_no_refusals():
     assert declaring == ["node-ts"], declaring
 
 
-# ── R11-A2: the refusal hook had a contract nobody wrote down and nothing checked ──
+# ── R11-A2 / R12-A1: the refusal hook, and a guard that used to read prose ────
 #
-# `module_refused_paths` subtracts what a module returns from `core.symlinked-files`.
-# What SPELLING of a path makes that subtraction land was stated nowhere, and the
-# subtraction is done by set membership on `Path`, so a module returning the same file
-# under a different spelling subtracts nothing and one file is two warning lines again —
-# the exact defect R10-A3 closed, reopened silently. In the other direction there was no
-# check at all: a path the module never mentioned in any check it emits deletes core's
-# line for that file, and the operator is told about it by nobody.
-#
-# Both are fail-open, and both are demonstrated below against modules that pass every
-# other gate in this file.
+# `module_refused_paths` lets a module say "I have already told the operator about these
+# files, in my own words", and `scan` acts on it by dropping them from
+# `core.symlinked-files`. R11-A2 gave that claim a guard. R12-A1 replaced what the guard
+# LOOKS AT: it read `detail`, which is a report line — quoted through `repr`, truncated,
+# capped, pluralized — and matching a path against a report line is a coincidence
+# detector. Three demonstrations below, all on trees anybody can commit, all green before
+# the machine-readable field existed.
 
 class _RefusingModule:
-    """A module that declares a refusal. What it RETURNS is the test's variable."""
+    """A module that declares a refusal. What it RETURNS and what its check REPORTS are
+    the test's two variables, because the whole finding is that those are different
+    things and only one of them is a fact."""
 
     name = "refusing-test-module"
 
-    def __init__(self, returned, detail=None, tier="warning"):
+    def __init__(self, returned, detail=None, declared=None, tier="warning",
+                 check_id="refusing-test-module.refusals", supersedes=None):
         self._returned = returned
         self._detail = detail
-        # F-2: the TIER the module's own sentence is emitted at. A refusal is a warning
-        # (`node-ts.symlinked-files` and `core.symlinked-files` both are) — this is a
-        # parameter so a test can emit the sentence somewhere the operator does not read
-        # a refusal from, which is how the prefix rule was defeated.
+        self._declared = declared
         self._tier = tier
+        self._check_id = check_id
+        if supersedes is not None:
+            self.supersedes = supersedes
 
     def detect(self, root):
         return True
@@ -339,11 +339,14 @@ class _RefusingModule:
         return self._returned(pathlib.Path(root))
 
     def checks(self, root):
-        if self._detail is None:
+        if self._detail is None and self._declared is None:
             return []
-        return [core.CheckResult(id="refusing-test-module.refusals", tier=self._tier,
-                                 title="what this module refused to read",
-                                 detail=self._detail(pathlib.Path(root)))]
+        root = pathlib.Path(root)
+        return [core.CheckResult(
+            id=self._check_id, tier=self._tier,
+            title="what this module refused to read",
+            detail=self._detail(root) if self._detail else "",
+            refused_paths=list(self._declared(root) if self._declared else []))]
 
     def sandbox_checks(self, root):
         return []
@@ -355,19 +358,6 @@ class _RefusingModule:
         return {}
 
 
-def _linked_env(tmp_path):
-    """A tree whose committed `.env` resolves into a neighbour — the refusal both the
-    core walk and a framework module could name."""
-    neighbour = tmp_path / "neighbour"
-    neighbour.mkdir()
-    (neighbour / "secrets.env").write_text("AWS_SECRET_ACCESS_KEY=x\n", encoding="utf-8")
-    root = tmp_path / "repo"
-    root.mkdir()
-    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
-    os.symlink("../neighbour/secrets.env", root / ".env")
-    return root
-
-
 @pytest.fixture
 def registry_sandbox():
     """Register modules for one test and put the real registry back afterwards."""
@@ -377,21 +367,37 @@ def registry_sandbox():
     core._FALLBACK_MODULES[:] = fallbacks
 
 
+def _escaping_tree(tmp_path, names, contents="export const x = 1;\n"):
+    """A repo whose `src/` carries one committed symlink per name, each resolving into a
+    neighbouring tree — the shape both refusal channels are about."""
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    for name in names:
+        target = neighbour / pathlib.PurePosixPath(name).name
+        target.write_text(contents, encoding="utf-8")
+        link = root / "src" / pathlib.PurePosixPath(name).name
+        os.symlink(os.path.relpath(target, link.parent), link)
+        assert not link.resolve().is_relative_to(root), name
+    return root
+
+
 def test_issue_r11_a2_a_resolved_spelling_is_refused_out_loud(tmp_path,
                                                               registry_sandbox):
-    """DEFEAT ONE: the same file, resolved.
+    """The spelling half of the contract, unchanged by R12-A1.
 
     `_check_symlinked_files` subtracts by `Path` equality against what the CORE walk
     found, which is the root-joined walked spelling. A module that returns
-    `path.resolve()` — the obvious thing to write, and what half this module's own
-    containment code does — hands over a path that matches nothing, subtracts nothing,
-    and the file is reported twice: once by core and once by the module. Silently, and
-    in the direction R10-A3 was filed about.
+    `path.resolve()` hands over a path that matches nothing, subtracts nothing, and the
+    file is reported twice — by core and by the module — which is the defect R10-A3 was
+    filed to fix, reopened by a one-word edit.
     """
-    root = _linked_env(tmp_path)
+    root = _escaping_tree(tmp_path, ["metrics.ts"])
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [(r / ".env").resolve()],
-        detail=lambda r: "refused '.env'")]
+        returned=lambda r: [(r / "src/metrics.ts").resolve()],
+        declared=lambda r: ["src/metrics.ts"])]
     core._FALLBACK_MODULES[:] = []
 
     with pytest.raises(ValueError, match="outside the scan root"):
@@ -400,32 +406,27 @@ def test_issue_r11_a2_a_resolved_spelling_is_refused_out_loud(tmp_path,
 
 def test_issue_r11_a2_a_refusal_the_module_never_reported_is_refused_out_loud(
         tmp_path, registry_sandbox):
-    """DEFEAT TWO: fail-open, in the direction that deletes a warning.
-
-    The hook's whole justification is "I have already told the operator about these
-    files, in my own words". A module that returns a path and says nothing about it
-    anywhere deletes core's line for that file and leaves no trace: no check names it,
-    no count moves, and the operator's model of what the scan read is wrong with nothing
-    on screen to correct it.
-    """
-    root = _linked_env(tmp_path)
+    """Fail-open, in the direction that deletes a warning: a module that returns a path
+    and reports it in no check deletes core's line for that file and leaves no trace."""
+    root = _escaping_tree(tmp_path, ["metrics.ts"])
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [r / ".env"], detail=None)]
+        returned=lambda r: [r / "src/metrics.ts"])]
     core._FALLBACK_MODULES[:] = []
 
-    with pytest.raises(ValueError, match="names it in no check"):
+    with pytest.raises(ValueError, match="no check in the finished report"):
         core.scan(root)
 
 
 def test_issue_r11_a2_an_honest_module_is_not_accused(tmp_path, registry_sandbox):
-    """…and the guard has to let the honest arrangement through, or it is a gate that
-    forbids the feature. The contract is: the root-joined walked spelling, named in the
-    detail of a check this module emits. Both halves, and the subtraction still lands.
+    """…and the guard has to let the honest arrangement through, or it forbids the
+    feature. The contract is: the walked spelling from the hook, the repo-relative POSIX
+    spelling in some check's `refused_paths`, and the subtraction still lands.
     """
-    root = _linked_env(tmp_path)
+    root = _escaping_tree(tmp_path, ["metrics.ts"])
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [r / ".env"],
-        detail=lambda r: "symlinked file '.env' resolves outside the scan root")]
+        returned=lambda r: [r / "src/metrics.ts"],
+        declared=lambda r: ["src/metrics.ts"],
+        detail=lambda r: "symlinked file 'src/metrics.ts' resolves outside the root")]
     core._FALLBACK_MODULES[:] = []
 
     report = core.scan(root)
@@ -434,157 +435,190 @@ def test_issue_r11_a2_an_honest_module_is_not_accused(tmp_path, registry_sandbox
     assert "refusing-test-module.refusals" in ids
     assert "core.symlinked-files" not in ids, (
         "the subtraction did not land — the file is refused twice again")
-    # `core.secret-scan` still names it, and that is the R9-A carve-out rather than a
-    # second refusal line: an escaping `.env` is READ by the secret axis on purpose,
-    # because a linked credential is a finding whichever tree it lives in.
-    assert ".env" in next(c for c in report["checks"]
-                          if c["id"] == "core.secret-scan")["detail"]
 
 
-def test_issue_r11_a2_a_long_path_printed_in_bounded_form_is_not_accused(
+def test_issue_r12_a1_s2_a_longer_name_containing_the_path_does_not_vouch_for_it(
         tmp_path, registry_sandbox):
-    """The one way an honest module could have tripped this, closed by design.
+    """S2: `rel in details` was an UNANCHORED SUBSTRING match.
 
-    Repo-controlled text in a report is BOUNDED — `node_ts._quote_pattern` cuts at 80
-    characters and appends `(truncated)` — so a deeply nested refused file is named in
-    the detail by a prefix of its own path. A guard demanding the whole string would
-    accuse the module that behaves most carefully, which is the wrong direction for a
-    gate to be wrong in.
+    `src/metrics.ts` is a substring of `src/metrics.tsx`, so a module that refused the
+    first while its report named the second passed the guard. Measured before the fix, on
+    this tree: the scan returned green, `core.symlinked-files` named `src/metrics.tsx`
+    alone, and `src/metrics.ts` — refused, subtracted, gone — appeared in no check at all.
+
+    Two files whose names differ by one character is the smallest version. The same hole
+    swallowed any pair where one path contains the other, which on a real tree is every
+    `foo.ts` beside a `foo.ts.map`.
     """
-    neighbour = tmp_path / "neighbour"
-    neighbour.mkdir()
-    (neighbour / "metrics.ts").write_text("export const m = 1;\n", encoding="utf-8")
-    root = tmp_path / "repo"
-    deep = root / ("packages/a-rather-long-package-name/src/features/telemetry/"
-                   "collectors/runtime")
-    deep.mkdir(parents=True)
-    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
-    rel = (deep / "metrics.ts").relative_to(root).as_posix()
-    assert len(rel) > 80, rel
-    os.symlink(os.path.relpath(neighbour / "metrics.ts", deep), deep / "metrics.ts")
-    # …and it really does leave the tree, so the refusal under test is a refusal. The
-    # first draft of this counted `..` by hand, came up one short, and asserted the
-    # absence of a check that a contained link would never have produced.
-    assert not (deep / "metrics.ts").resolve().is_relative_to(root)
-
+    root = _escaping_tree(tmp_path, ["metrics.ts", "metrics.tsx"])
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [r / rel],
-        detail=lambda r: f"symlinked source file {rel[:80]!r} (truncated) — not read")]
+        returned=lambda r: [r / "src/metrics.ts"],
+        declared=lambda r: ["src/metrics.tsx"],
+        detail=lambda r: "refused src/metrics.tsx")]
     core._FALLBACK_MODULES[:] = []
 
-    report = core.scan(root)
-
-    assert "core.symlinked-files" not in [c["id"] for c in report["checks"]], (
-        "the subtraction did not land — the module named the file in the only form a "
-        "bounded report can print it in")
-    # The module's line is the only one that mentions the file at all — by the bounded
-    # prefix, which is the only spelling of it a truncating report contains.
-    assert [c["id"] for c in report["checks"] if rel[:80] in c["detail"]] == \
-        ["refusing-test-module.refusals"]
-
-
-def test_issue_r11_a2_the_live_module_satisfies_its_own_contract(tmp_path):
-    """The contract is not a rule invented for the test modules above: the one module
-    that declares the hook has to pass it on a real tree, through the real registry."""
-    neighbour = tmp_path / "edge-neighbour" / "shared-lib" / "src"
-    neighbour.mkdir(parents=True)
-    (neighbour / "metrics.ts").write_text("export const m = 1;\n", encoding="utf-8")
-    root = tmp_path / "edgerepo"
-    src = root / "packages" / "server" / "src"
-    src.mkdir(parents=True)
-    (root / "package.json").write_text('{"name": "edge", "private": true}\n',
-                                       encoding="utf-8")
-    (root / "pnpm-workspace.yaml").write_text("packages:\n  - 'packages/*'\n",
-                                              encoding="utf-8")
-    (root / "packages" / "server" / "package.json").write_text(
-        '{"name": "@e/server", "main": "dist/index.js",\n'
-        ' "dependencies": {"fastify": "^4.28.0"}}\n', encoding="utf-8")
-    (src / "index.ts").write_text("import Fastify from 'fastify';\n", encoding="utf-8")
-    os.symlink("../../../../edge-neighbour/shared-lib/src/metrics.ts",
-               src / "metrics.ts")
-
-    report = core.scan(root)
-
-    assert [c["id"] for c in report["checks"] if "metrics.ts" in c["detail"]] == \
-        ["node-ts.symlinked-files"]
-
-
-def _sibling_links(tmp_path):
-    """A deep package with two escaping source links, `alpha.ts` and `beta.ts`.
-
-    The directory part is longer than `_REFUSAL_NAMED_PREFIX`, so the two files'
-    repo-relative spellings share their first 60 characters — which is the whole point:
-    the truncation tolerance cannot tell them apart, and something else has to.
-    """
-    neighbour = tmp_path / "neighbour"
-    neighbour.mkdir()
-    for name in ("alpha.ts", "beta.ts"):
-        (neighbour / name).write_text("export const x = 1;\n", encoding="utf-8")
-    root = tmp_path / "repo"
-    deep = root / ("packages/a-rather-long-package-name/src/features/telemetry/"
-                   "collectors/runtime")
-    deep.mkdir(parents=True)
-    (root / "app.py").write_text("x = 1\n", encoding="utf-8")
-    rel = {name: (deep / name).relative_to(root).as_posix()
-           for name in ("alpha.ts", "beta.ts")}
-    assert rel["alpha.ts"][:core._REFUSAL_NAMED_PREFIX] == \
-        rel["beta.ts"][:core._REFUSAL_NAMED_PREFIX], rel
-    for name in ("alpha.ts", "beta.ts"):
-        # `relpath` rather than a hand-counted run of `..`: the first draft of this
-        # helper was one `..` short, so both links resolved INSIDE the root, nothing
-        # escaped, and the assertion that core still reports the unnamed sibling passed
-        # over an empty list. A committed link that does not escape is not this fixture.
-        os.symlink(os.path.relpath(neighbour / name, deep), deep / name)
-        assert not (deep / name).resolve().is_relative_to(root), name
-    return root, rel
-
-
-def test_issue_f2_a_prefix_match_only_counts_where_a_refusal_is_reported(
-        tmp_path, registry_sandbox):
-    """F-2: the truncation tolerance let a SIBLING's name vouch for a file, in any tier.
-
-    `_REFUSAL_NAMED_PREFIX` exists so a module that prints a bounded form of a long path
-    is not accused of hiding a refusal it reported. Two files under one deep directory
-    share that prefix, so an `advice`-tier line mentioning `alpha.ts` satisfied the guard
-    for `beta.ts` — and `beta.ts` then dropped out of `core.symlinked-files` with nothing
-    anywhere saying it was not read. Fail-open, through the tolerance added to keep the
-    guard honest.
-
-    A refusal is a WARNING wherever this repo emits one (`core.symlinked-files`,
-    `node-ts.symlinked-files`), so a prefix now only counts in a warning-or-worse detail:
-    the weaker match is admitted only where the operator reads refusals from. The exact
-    spelling still counts anywhere, because it names the file and nothing else does.
-    """
-    root, rel = _sibling_links(tmp_path)
-    core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [r / rel["beta.ts"]],
-        detail=lambda r: f"vendored module {rel['alpha.ts']!r} is imported from outside",
-        tier="advice")]
-    core._FALLBACK_MODULES[:] = []
-
-    with pytest.raises(ValueError, match="names it in no check"):
+    with pytest.raises(ValueError, match="src/metrics.ts"):
         core.scan(root)
 
 
-def test_issue_f2_the_same_line_at_warning_tier_is_accepted(tmp_path, registry_sandbox):
-    """…and the tier is the whole of the difference, so the rule is about WHERE the
-    sentence is and not about what it says.
-
-    Same module, same detail, emitted as a warning: the prefix counts, and this is the
-    honest long-path case R11-A2 added the tolerance for. Its own path is what the line
-    names here — a module quoting a bounded form of the file it refused.
+def test_issue_r12_a1_a_sibling_under_the_same_directory_does_not_vouch_either(
+        tmp_path, registry_sandbox):
+    """…and the deep-sibling case with it, which the deleted prefix tolerance had to be
+    tiered to survive (F-2). Set membership has no tolerance to tier: `alpha.ts` is not
+    `beta.ts`, at any path length, in any check.
     """
-    root, rel = _sibling_links(tmp_path)
-    truncated = rel["beta.ts"][:core._REFUSAL_NAMED_PREFIX]
+    root = _escaping_tree(tmp_path, ["alpha.ts", "beta.ts"])
     core._FRAMEWORK_MODULES[:] = [_RefusingModule(
-        returned=lambda r: [r / rel["beta.ts"]],
-        detail=lambda r: f"symlinked source file {truncated!r} (truncated) — not read")]
+        returned=lambda r: [r / "src/beta.ts"],
+        declared=lambda r: ["src/alpha.ts"])]
     core._FALLBACK_MODULES[:] = []
 
-    report = core.scan(root)
-    refusals = [c for c in report["checks"] if c["id"] == "core.symlinked-files"]
+    with pytest.raises(ValueError, match="src/beta.ts"):
+        core.scan(root)
 
-    assert refusals, "alpha.ts was never named by the module and must still be reported"
-    assert "alpha.ts" in refusals[0]["detail"]
-    assert "beta.ts" not in refusals[0]["detail"], (
-        "the module's own line names it; this one must not name it again")
+
+def test_issue_r12_a1_s3_a_backslash_in_a_committed_name_does_not_kill_the_scan(
+        tmp_path):
+    """S3: the LIVE module, and a one-file denial of service.
+
+    `node-ts` names refused paths in its report through `_quote_pattern`, which is
+    `repr` — correct for a report line, because a filename may contain a newline. The
+    guard compared the RAW spelling against that line, so a committed symlink called
+    `src/metri\\cs.ts` — legal on every filesystem this runs on, and committable —
+    printed as `'src/metri\\\\cs.ts'` and matched nothing. `scan()` then raised, accusing
+    the module of hiding a refusal it had just announced: every scan of that repository
+    dead, from one file in it.
+
+    No registry substitution here: this is the real module through the real registry, on
+    the tree that produced the crash.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    (neighbour / "metrics.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    src = root / "src"
+    src.mkdir(parents=True)
+    (root / "package.json").write_text(
+        '{"name": "e", "main": "dist/index.js",\n'
+        ' "dependencies": {"fastify": "^4.28.0"}}\n', encoding="utf-8")
+    (src / "index.ts").write_text("import Fastify from 'fastify';\n", encoding="utf-8")
+    link = src / "metri\\cs.ts"
+    os.symlink(os.path.relpath(neighbour / "metrics.ts", src), link)
+
+    report = core.scan(root)
+    line = next(c for c in report["checks"] if c["id"] == "node-ts.symlinked-files")
+
+    assert line["refused_paths"] == ["src/metri\\cs.ts"], (
+        "the fact carries the name the filesystem has")
+    assert "metri\\\\cs.ts" in line["detail"], (
+        "…and the sentence still quotes it, which is why the two cannot be one field")
+
+
+def test_issue_r12_a1_s4_a_second_supersession_cannot_delete_the_naming(
+        tmp_path, registry_sandbox):
+    """S4: the guard ran on what each module EMITTED, before supersession resolved.
+
+    An honest module refuses a file, reports it, and satisfies the guard. A second module
+    superseding the same core id then replaces that check — and the refusal the first
+    module had subtracted from `core.symlinked-files` is reported by nothing that reaches
+    the operator. Measured before the fix: `core.symlinked-files` surviving as an `ok`
+    line reading "Nothing was refused", with the escaping file named nowhere, and the
+    scan returning 0.
+
+    The guard now runs against the SURVIVING report. `register` refuses this pair
+    outright as well (below); the two are not redundant — registration catches the
+    declaration, this catches the report, and a test that swaps the registry directly
+    (as this one does) is exactly the shape a future in-process caller might have.
+    """
+    root = _escaping_tree(tmp_path, ["metrics.ts", "other.ts"])
+    namer = _RefusingModule(
+        returned=lambda r: [r / "src/metrics.ts"],
+        declared=lambda r: ["src/metrics.ts"],
+        detail=lambda r: "src/metrics.ts — not read",
+        check_id="core.symlinked-files",
+        supersedes=frozenset({"core.symlinked-files"}))
+    quieter = _RefusingModule(
+        returned=lambda r: [], declared=lambda r: [], tier="ok",
+        detail=lambda r: "", check_id="core.symlinked-files",
+        supersedes=frozenset({"core.symlinked-files"}))
+    quieter.name = "quieter-test-module"
+    core._FRAMEWORK_MODULES[:] = [namer, quieter]
+    core._FALLBACK_MODULES[:] = []
+
+    with pytest.raises(ValueError, match="no check in the finished report"):
+        core.scan(root)
+
+
+def test_issue_r12_a1_s4_two_modules_may_not_supersede_one_core_id(registry_sandbox):
+    """…and the declaration itself is refused at import time, where the diff shows it.
+
+    Supersession replaces an entry IN PLACE, so with two claimants the report shows
+    whichever module ran last — an ordering nothing declares and no test reads.
+    """
+    core._FRAMEWORK_MODULES[:] = []
+    core._FALLBACK_MODULES[:] = []
+    first = _RefusingModule(returned=lambda r: [],
+                            supersedes=frozenset({"core.lockfile"}))
+    second = _RefusingModule(returned=lambda r: [],
+                             supersedes=frozenset({"core.lockfile", "core.gitignore"}))
+    second.name = "second-test-module"
+
+    core.register(first)
+    with pytest.raises(ValueError, match="core.lockfile"):
+        core.register(second)
+
+    # A module that supersedes something else entirely is fine — the rule is about one
+    # id having one owner, not about supersession being rare.
+    third = _RefusingModule(returned=lambda r: [],
+                            supersedes=frozenset({"core.gitignore"}))
+    third.name = "third-test-module"
+    core.register(third)
+
+
+def test_issue_r12_a1_s4_the_live_registry_has_no_overlapping_supersessions():
+    """The rule holds for the modules that are actually loaded, which `register` can only
+    promise for modules registered THROUGH it — the tests above swap the lists directly,
+    and so could a future caller."""
+    framework, fallback = core.registered_modules()
+    claimed = {}
+    for module in framework + fallback:
+        for check_id in core.module_supersedes(module):
+            claimed.setdefault(check_id, []).append(module.name)
+
+    assert {k: v for k, v in claimed.items() if len(v) > 1} == {}, claimed
+
+
+def test_issue_r12_a1_the_field_is_absent_from_a_check_that_refused_nothing():
+    """`as_dict` omits `refused_paths` when it is empty, which is almost every check.
+
+    A stored report from a tree with no committed links is BYTE-IDENTICAL to the one this
+    field did not exist for — which is what keeps the recorded demo artifacts, the sim
+    fixtures and every `Project.scan_report` in the database where they are, and why
+    `SCHEMA_VERSION` does not move: a bump means a stored report's MEANING changed (R8-2),
+    and absent still means "no refusals", exactly as it did when absence was the only
+    possibility.
+    """
+    plain = core.CheckResult(id="x.y", tier="ok", title="t").as_dict()
+    assert sorted(plain) == ["detail", "execution", "fix_hint", "id", "tier", "title"]
+
+    naming = core.CheckResult(id="x.y", tier="warning", title="t",
+                              refused_paths=["src/a.ts"]).as_dict()
+    assert naming["refused_paths"] == ["src/a.ts"]
+
+
+def test_issue_r12_a1_the_core_refusal_line_reports_every_path_it_is_about(tmp_path):
+    """`core.symlinked-files` prints ten paths and counts the rest, because a report is
+    for reading. The FACT is all of them — a guard that read the prose would have been
+    satisfied by the first ten and blind to the eleventh."""
+    from scanner.modules.fallbacks import _MAX_SKIPPED_REPORTED
+
+    names = [f"file{i:02d}.ts" for i in range(_MAX_SKIPPED_REPORTED + 3)]
+    root = _escaping_tree(tmp_path, names)
+
+    # `common_checks` directly: this tree is a `.py` file and a row of links, which no
+    # framework module claims, so a full `scan` composes no core suite at all.
+    line = next(c for c in common_checks(root) if c.id == "core.symlinked-files")
+
+    assert sorted(line.refused_paths) == [f"src/{name}" for name in names]
+    assert line.detail.count("\n") < len(names), "the prose is capped, as designed"
+    assert "and 3 more" in line.detail

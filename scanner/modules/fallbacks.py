@@ -1487,6 +1487,12 @@ def _check_symlinked_files(root, escaped, refused_elsewhere=()):
         id="core.symlinked-files", tier="warning",
         title="Files linked out of the scanned repository were not read",
         detail="\n".join(lines),
+        # R12-A1: the same files as a machine-readable fact, and ALL of them — the detail
+        # above shows `_MAX_SKIPPED_REPORTED` of them and counts the rest, because a
+        # report is for reading. `refused_paths` is for the guard in `scanner.core.scan`
+        # and for anything else that needs to know which files this line is about without
+        # parsing prose that quotes, truncates and pluralizes.
+        refused_paths=[Path(path).relative_to(root).as_posix() for path, _ in escaped],
         fix_hint=(
             "A scan reads only the tree it was pointed at, so these files decided "
             "nothing above: no check verdict, no wizard default, no manifest value was "
