@@ -142,13 +142,15 @@ test("r8-1: a blocker no answer can clear is blocked, in the server's own words"
 });
 
 test("r8-1: a refusal code this UI has never seen still disables and shows its detail", () => {
+  // R10-UX-F5 moved `scan_required` to its own label, so the code here is one no
+  // version of this gate has met — which is what the test was always about.
   const gate = materializeGate({
     can_materialize: false,
-    blocking: [{ code: "scan_required", detail: "this project has not been scanned yet", items: [] }],
+    blocking: [{ code: "schema_skew", detail: "this report predates the current schema", items: [] }],
   });
   assert.equal(gate.disabled, true);
   assert.equal(gate.label, "⛔ Blocked");
-  assert.equal(gate.title, "this project has not been scanned yet");
+  assert.equal(gate.title, "this report predates the current schema");
 });
 
 // §4b.4. The rule, enforced rather than remembered: the client authors no refusal copy.
@@ -321,14 +323,53 @@ test("r9-3: one blocker beside the missing answer and it is Blocked again", () =
 });
 
 test("r9-3: an unknown refusal code is still Blocked — the arm is not a fallback", () => {
-  // `scan_required` is not something the operator answers in this form, and neither is
-  // whatever the next code turns out to be. The new arm names its two codes; anything
-  // else keeps the conservative label.
+  // Whatever the next code turns out to be, it is not something the operator answers in
+  // this form. The arm names its two codes; anything else keeps the conservative label.
   const gate = materializeGate({
     can_materialize: false,
-    blocking: [{ code: "scan_required", detail: "not scanned", items: [] }],
+    blocking: [{ code: "schema_skew", detail: "report predates the schema", items: [] }],
   });
   assert.equal(gate.label, "⛔ Blocked");
+});
+
+// ── R10-UX-F5: ⛔ on a project with nothing to report ─────────────────────────
+//
+// R9-3 reserved ⛔ for "a blocker-tier finding in the report" and then left
+// `scan_required` wearing it. A project nobody has scanned has no findings at all, and
+// the panel directly above the button says so — so the screen announced a blockage the
+// report it is showing does not contain, and pointed the operator at nothing to look at.
+
+test("r10-ux-f5: scan_required gets its own neutral label", () => {
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [{ code: "scan_required", detail: "this project has not been scanned yet",
+                 items: [] }],
+  });
+  assert.equal(gate.disabled, true);
+  assert.equal(gate.label, "Scan required");
+  assert.ok(!gate.label.includes("⛔"), "the glyph means a finding in the report");
+  // …and the reason is still the server's own sentence, verbatim (§4b).
+  assert.equal(gate.title, "this project has not been scanned yet");
+});
+
+test("r10-ux-f5: scan_required beside a real blocker is Blocked again", () => {
+  const gate = materializeGate({
+    can_materialize: false,
+    blocking: [
+      { code: "scan_required", detail: "not scanned", items: [] },
+      { code: "blockers_present", detail: PLAIN_DETAIL,
+        items: [{ id: "core.secret-scan", title: "Committed secrets detected" }] },
+    ],
+  });
+  assert.equal(gate.label, "⛔ Blocked");
+});
+
+test("r10-ux-f5: the real never-scanned fixture renders the new label", async () => {
+  // orders-api/prod out of ?sim=degraded: a real `_state()` run on a project with an
+  // empty scan_report, not a payload written to suit this test.
+  const { data } = await (SIM_FIXTURES.degraded as any)("v1/sites/5/wizard/");
+  assert.deepEqual(data.blocking.map((p: any) => p.code), ["scan_required"]);
+  assert.equal(materializeGate(data).label, "Scan required");
 });
 
 test("r9-3: the real fixture for that screen renders the new arm", async () => {

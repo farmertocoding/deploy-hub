@@ -98,10 +98,27 @@ export function materializeGate(state) {
   // list has not met keeps the conservative label, which is the safe direction.
   if (blocking.length && blocking.every((p) => ANSWERABLE_REFUSALS.has(p.code)))
     return { disabled: true, label: "Answers needed", title };
+  // R10-UX-F5. The round-9 remedy above reserved ⛔ for "a blocker-tier finding in the
+  // report", and then left `scan_required` wearing it — a project nobody has scanned
+  // yet has no findings at all, and the panel beside this button says exactly that
+  // ("Not scanned yet — this project has no readiness report, which is not the same as
+  // having nothing to report"). ⛔ contradicted it in the same breath, and the operator
+  // reading "Blocked" has no finding to go and look at.
+  //
+  // A THIRD LABEL rather than folding it into either of the two above: this refusal
+  // clears by scanning, which is neither "answer the form" nor "fix the repo and
+  // re-scan". Named code, like the arm above and for the same reason — a code this list
+  // has not met keeps ⛔, which is the conservative direction.
+  if (blocking.length && blocking.every((p) => NEUTRAL_REFUSALS.has(p.code)))
+    return { disabled: true, label: "Scan required", title };
   return { disabled: true, label: "⛔ Blocked", title };
 }
 
 const ANSWERABLE_REFUSALS = new Set(["answers_missing", "answers_need_reentry"]);
+// Refusals that are neither a finding nor an answer: nothing is wrong with the repo and
+// nothing in this form clears them. One code today; the set exists so the next one is a
+// one-line reviewable edit rather than a new arm.
+const NEUTRAL_REFUSALS = new Set(["scan_required"]);
 
 // R9-4: what the client does with the response, as a named thing rather than three
 // branches inside an async handler — the same argument `materializeGate` was extracted
