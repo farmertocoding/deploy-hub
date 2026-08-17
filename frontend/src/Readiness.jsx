@@ -15,19 +15,33 @@ import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+// R9-8: the plural is per tier, not `word + "s"`.
+//
+// Two of the four tiers do not take an -s and the naive rule produced both of them:
+// "3 Deferred to sandboxs" (the plural is of the CHECKS, and there is one sandbox), and
+// "2 Advices" (advice is a mass noun in English — you have two pieces of it). The
+// singular is the one a reader would write; where they are the same, they are the same on
+// purpose and saying so here is cheaper than the next reader re-deriving it.
 const TIER_BADGE = {
-  blocker: { sym: "⛔", word: "Blocker", color: "#ff7b72" },
-  warning: { sym: "⚠", word: "Warning", color: "#e3b341" },
-  advice: { sym: "ℹ", word: "Advice", color: "#79c0ff" },
-  pending_sandbox: { sym: "⏳", word: "Deferred to sandbox", color: "#8b949e" },
+  blocker: { sym: "⛔", one: "Blocker", many: "Blockers", color: "#ff7b72" },
+  warning: { sym: "⚠", one: "Warning", many: "Warnings", color: "#e3b341" },
+  advice: { sym: "ℹ", one: "Advice", many: "Advice", color: "#79c0ff" },
+  pending_sandbox: { sym: "⏳", one: "Deferred to sandbox",
+                     many: "Deferred to sandbox", color: "#8b949e" },
 };
 
-function Badge({ tier, n }) {
+export function Badge({ tier, n }) {
   const b = TIER_BADGE[tier];
   // Symbol + word + count: readable colorblind, greyscale, or by screen reader.
+  //
+  // The aria-label is DERIVED from what is on screen rather than composed a second time.
+  // It used to be `${n} ${word}` — the singular at every count — so a screen reader heard
+  // "3 Blocker" while the screen read "3 Blockers": two renderings of one fact, which is
+  // the arrangement §F9 exists to forbid and the arrangement that lets them drift.
+  const text = `${n} ${n === 1 ? b.one : b.many}`;
   return (
-    <span style={{ color: b.color, marginRight: 10 }} aria-label={`${n} ${b.word}`}>
-      {b.sym} {n} {b.word}{n === 1 ? "" : "s"}
+    <span style={{ color: b.color, marginRight: 10 }} aria-label={text}>
+      {b.sym} {text}
     </span>
   );
 }
@@ -155,6 +169,30 @@ export function reportSummary(report) {
   ];
   if (sections.some(([, checks]) => checks?.length)) return { kind: "findings", sections };
   return { kind: r.scanned_at ? "clean" : "never-scanned", sections };
+}
+
+// R9-7: the reason is TEXT, not only a tooltip.
+//
+// `title=` on a DISABLED button reaches a pointer hovering it and nobody else: the
+// element is not focusable, so keyboard and screen-reader users never meet it, and on a
+// touch screen there is no hover at all. For most refusals the panel above happened to
+// repeat the reason — the blockers are listed as findings — but for `scan_required` and
+// the R8-2 schema-skew refusal there is nothing above: the report is empty (or refused),
+// so the tooltip was the whole explanation of a button that will not move.
+//
+// The text is `gate.title`, which materializeGate takes verbatim from `state.blocking`,
+// so the §4b pin still holds — this renders the server's sentence in a second place, it
+// does not compose a new one. The `title=` stays for the pointer.
+export function MaterializeControl({ gate, busy, onClick }) {
+  return (
+    <>
+      <button style={box} disabled={busy || gate.disabled} onClick={onClick}
+        title={gate.title}>
+        {gate.label}</button>
+      {gate.disabled && !!gate.title &&
+        <p style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
+    </>
+  );
 }
 
 function Stamp({ at }) {
@@ -374,9 +412,7 @@ function SiteWizard({ site, onChanged }) {
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
         {" "}I have read the warnings above and accept them
       </label>{" "}
-      <button style={box} disabled={busy || gate.disabled} onClick={materialize}
-        title={gate.title}>
-        {gate.label}</button>
+      <MaterializeControl gate={gate} busy={busy} onClick={materialize} />
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
       {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}

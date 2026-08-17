@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CheckBody, reportSummary } from "../src/Readiness.jsx";
+import { Badge, CheckBody, MaterializeControl, reportSummary } from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -74,4 +74,61 @@ test("r9-5: a report with findings is neither", async () => {
   const summary = reportSummary(report);
   assert.deepEqual(summary.sections.map(([tier]: any) => tier),
     ["blocker", "warning", "advice", "pending_sandbox"]);
+});
+
+// ── item 7: the refusal that only a mouse could find ─────────────────────────
+
+test("r9-7: the refusal detail is visible text, not only a tooltip", () => {
+  const detail = "this project has not been scanned yet";
+  const markup = render(MaterializeControl, {
+    gate: { disabled: true, label: "⛔ Blocked", title: detail },
+    busy: false, onClick: () => {},
+  });
+  assert.ok(markup.includes(`title="${detail}"`), "the tooltip stays for the pointer");
+  assert.ok(visibleText(markup).includes(detail),
+    "a disabled button cannot be focused, so its title= reaches nobody who is not " +
+    "hovering it — for scan_required and the schema-skew refusal that was the only " +
+    "carrier of the reason");
+});
+
+test("r9-7: an enabled control has no refusal to show", () => {
+  const markup = render(MaterializeControl, {
+    gate: { disabled: false, label: "Materialize manifest", title: "" },
+    busy: false, onClick: () => {},
+  });
+  assert.equal(visibleText(markup).trim(), "Materialize manifest");
+});
+
+// ── item 8: "3 Deferred to sandboxs" ─────────────────────────────────────────
+
+test("r9-8: every tier pluralizes as English rather than by appending s", () => {
+  const plurals = ["blocker", "warning", "advice", "pending_sandbox"]
+    .map((tier) => visibleText(render(Badge, { tier, n: 3 })).trim());
+  for (const text of plurals) {
+    assert.ok(!/sandboxs|Advices/.test(text), text);
+    assert.match(text, /^\S+ 3 /, text);
+  }
+  assert.deepEqual(plurals, ["⛔ 3 Blockers", "⚠ 3 Warnings", "ℹ 3 Advice",
+                             "⏳ 3 Deferred to sandbox"]);
+});
+
+test("r9-8: singulars are unchanged", () => {
+  const singulars = ["blocker", "warning", "advice", "pending_sandbox"]
+    .map((tier) => visibleText(render(Badge, { tier, n: 1 })).trim());
+  assert.deepEqual(singulars, ["⛔ 1 Blocker", "⚠ 1 Warning", "ℹ 1 Advice",
+                               "⏳ 1 Deferred to sandbox"]);
+});
+
+test("r9-8: the aria-label is what the badge says", () => {
+  // It used to be the singular for every count — a screen reader heard "3 Blocker"
+  // while the screen read "3 Blockers", which is §F9's rule broken in the one direction
+  // that rule exists to prevent.
+  for (const tier of ["blocker", "warning", "advice", "pending_sandbox"]) {
+    for (const n of [1, 2, 3]) {
+      const markup = render(Badge, { tier, n });
+      const label = markup.match(/aria-label="([^"]*)"/)?.[1];
+      assert.equal(label, visibleText(markup).trim().replace(/^\S+\s/, ""),
+        `${tier} n=${n}: the label and the text disagree`);
+    }
+  }
 });
