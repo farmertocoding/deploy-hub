@@ -900,3 +900,52 @@ def test_issue_r8_6_a_scan_root_under_a_pruned_directory_name_is_still_scanned(t
     assert sorted(p.name for p in dj._iter_files(root, "*.py")) == ["manage.py",
                                                                     "settings.py"]
     assert dj.module.project_root(root) == root
+
+
+# ── R10-Q1: the other family of glob callers ───────────────────────────────────
+#
+# `_deps_text`, `_versions` and `_check_deps_pinned` each `glob("requirements*.txt")`
+# and hand every hit to `_read_contained`, which is `fallbacks.escapes_root` plus this
+# module's own reader. A `glob` yields symlinks and has been through no walk, so the
+# containment rule is the only thing standing between those three and a neighbour's
+# pins — and on a symlink loop it raised `RuntimeError` instead of refusing.
+#
+# `detect` is the entry point that matters: it calls `project_root`, which calls
+# `_deps_text`, so the failure landed before any check ran and took the whole report
+# with it whatever else the repo contained.
+
+def test_issue_r10_q1_a_looping_requirements_link_does_not_take_detection_down(tmp_path):
+    """R10-Q1, django half. `requirements.txt -> requirements.txt`: ELOOP, which
+    CPython 3.11's `Path.resolve()` re-raises as `RuntimeError` rather than `OSError`.
+
+    A refused read is `""` here — the same thing an unreadable file already yields — so
+    the module answers the way it does for any file it may not read: django is detected
+    on its own `manage.py`, and nothing in the report was decided by a path the
+    filesystem could not resolve.
+    """
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    (root / "manage.py").write_text("#\n", encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["django>=5.0"]\n', encoding="utf-8")
+    (root / "config" / "settings.py").write_text("DEBUG = False\n", encoding="utf-8")
+    (root / "requirements.txt").symlink_to("requirements.txt")
+
+    assert dj.module.detect(root) is True
+    assert dj._read_contained(root, root / "requirements.txt") == ""
+
+
+def test_issue_r10_q1_the_looping_link_cannot_pin_or_version_the_repo(tmp_path):
+    """…and the two verdicts those globs feed say what a repo with no readable
+    requirements file says, rather than raising: `django.deps-pinned` reports the
+    manifest it can see, and the version probe finds no Django version in a file it
+    was refused.
+    """
+    root = tmp_path / "repo"
+    (root / "config").mkdir(parents=True)
+    (root / "manage.py").write_text("#\n", encoding="utf-8")
+    (root / "config" / "settings.py").write_text("DEBUG = False\n", encoding="utf-8")
+    (root / "requirements.txt").symlink_to("requirements.txt")
+
+    assert dj.module._versions(root) == (None, None)
+    assert dj.module._check_deps_pinned(root).id == "django.deps-pinned"

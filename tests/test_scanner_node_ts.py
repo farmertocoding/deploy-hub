@@ -1270,3 +1270,30 @@ def test_issue_r9_1_the_remaining_fixed_name_reads_are_contained_too(tmp_path):
     detail = by_id(report, "node-ts.symlinked-files")["detail"]
     assert repr("pnpm-workspace.yaml") in detail, detail
     assert repr("pyproject.toml") in detail, detail
+
+
+# ── R10-Q1 audit: the same OSError-only guard, in this module ──────────────────
+#
+# `escapes_root` was the finding; `_symlink_escape_problem` is the sibling the finding
+# asked to be audited. It resolves both sides itself, inside its own `except OSError`,
+# to compose the "could not be resolved" wording — so on a symlink loop it raised
+# `RuntimeError` out of `_Survey.__init__`, which runs inside `detect()`.
+
+@pytest.mark.req("SCAN-S3-DETECTION-RULES")
+def test_issue_r10_q1_a_looping_fixed_name_link_is_refused_rather_than_raised(tmp_path):
+    """R10-Q1, node-ts half. `.env.example -> .env.example`, which is the read this
+    module calls its sharpest steer — the broker env names it carries rewrite the
+    exposure question and flip its default. It is read by NAME, unconditionally, so the
+    loop reaches the rule rather than dying at an `is_file()` gate the way a looping
+    source file does. The survey names it as unresolvable and reads nothing, which is
+    what the refusal channel exists to say.
+    """
+    root = _single_package_repo(tmp_path)
+    os.symlink(".env.example", root / ".env.example")
+
+    survey = node_ts._Survey(root)
+
+    assert ".env.example" in "; ".join(survey.symlink_problems)
+    assert survey.env_example == ""
+    report = core.scan(root)
+    assert by_id(report, "node-ts.symlinked-files")["tier"] == "warning"

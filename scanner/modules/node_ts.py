@@ -181,7 +181,7 @@ def _workspace_candidate_problem(root, candidate):
                 f"scan was not pointed at — it was not surveyed")
     try:
         resolved, root_resolved = candidate.resolve(), Path(root).resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         return (f"workspace package {rel} could not be resolved "
                 f"({exc.__class__.__name__}); it was not surveyed")
     if resolved != root_resolved and root_resolved not in resolved.parents:
@@ -269,7 +269,7 @@ def _symlink_escape_problem(root, path, kind):
     try:
         path.resolve()
         Path(root).resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         return (f"symlinked {kind} {rel} could not be resolved "
                 f"({exc.__class__.__name__}); not read")
     if escapes_root(root, path):
@@ -349,7 +349,13 @@ def _iter_source_files(base, root=None, problems=None):
                     continue
                 try:
                     key = path.resolve()
-                except OSError:
+                except (OSError, RuntimeError):
+                    # R10-Q1, and this one is the loop-detection arm itself: `seen` is
+                    # what stops a `..`-shaped path walking forever, and on 3.11 the
+                    # exception a loop raises is `RuntimeError`. Unreachable from a
+                    # committed link today — a looping name answers False to both
+                    # `is_dir()` and `is_file()` — and named for the same reason the
+                    # sibling in `fallbacks._iter_files` is.
                     continue
                 if key in seen:
                     continue

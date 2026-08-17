@@ -526,13 +526,23 @@ def escapes_root(root, path):
 
     Public because `django` reads through it too: one rule, one implementation. A second
     copy is the defect N6, N7 and R4-12 are each an instance of.
+
+    R10-Q1 — WHY THE EXCEPT CLAUSE NAMES TWO TYPES. `Path.resolve()` does not report an
+    unresolvable path with one exception class. CPython 3.11's implementation catches
+    the `OSError(ELOOP)` a symlink loop raises and re-raises it as `RuntimeError`
+    ("Symlink loop from …"), so `except OSError` — the whole fail-closed arm — did not
+    fire for the one input it most obviously exists for. It propagated instead: out of
+    this function, out of `django.detect`, out of `scanner.core.scan`, and the operator
+    of a repo carrying `requirements.txt -> requirements.txt` got a traceback and no
+    report at all. A rule that fails closed must fail closed on every way its probe can
+    fail, and the list of ways is the interpreter's, not this module's.
     """
     path = Path(path)
     if not path.is_symlink():
         return False
     try:
         resolved, root_resolved = path.resolve(), Path(root).resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         # Unresolvable is not demonstrably contained, and this rule fails closed: the
         # secret-scan carve-out is the only axis allowed to read one of these, and it
         # gets them from the `escaping` list either way.
@@ -637,7 +647,12 @@ def _iter_files(root, skipped=None, *, prune=None, max_depth=None, escaping=None
                     continue
                 try:
                     key = path.resolve()
-                except OSError:
+                except (OSError, RuntimeError):
+                    # R10-Q1: `RuntimeError` for the same reason `escapes_root` names
+                    # it — CPython 3.11 re-raises ELOOP as one. Unreachable today (a
+                    # looping link is neither `is_dir()` nor `is_file()`, so it never
+                    # gets here), and named anyway: this is the loop-detection arm of a
+                    # walk, and it may not be the thing a loop takes down.
                     if skipped is not None:
                         skipped.append(path)
                     continue

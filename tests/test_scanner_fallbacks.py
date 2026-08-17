@@ -967,3 +967,88 @@ def test_issue_r9_q1_no_cap_still_means_no_cap(tmp_path):
     found = [p.relative_to(root).as_posix() for p in fallbacks._iter_files(root)]
 
     assert found == ["d1/d2/d3/d4/deep.txt"]
+
+
+# ── R10-Q1: the containment rule fell over a symlink loop ───────────────────────
+#
+# `escapes_root` catches `OSError` around `Path.resolve()`, and on CPython 3.11 a
+# symlink loop does not raise one: `pathlib._PosixFlavour.resolve` catches the
+# `OSError(ELOOP)` itself and re-raises `RuntimeError("Symlink loop from …")`. So the
+# one rule that exists to FAIL CLOSED failed open, upward, out of `scanner.core.scan`,
+# and the operator got a traceback instead of a report.
+#
+# Two entry points, because the two `glob` families that reach the rule live in
+# different modules and neither is covered by the other's test: `_has_pinned_requirements`
+# here (`requirements*.txt`, one of the three ways `core.lockfile` is satisfied), and
+# `django._deps_text` / `_versions` / `_check_deps_pinned` in test_scanner_django.py.
+#
+# The tree is the reviewer's, verbatim: a `requirements.txt` symlink whose target is
+# its own name.
+
+def _loop_link(directory, name="requirements.txt"):
+    """A committed symlink that points at itself — ELOOP on any resolve()."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).symlink_to(name)
+    return directory / name
+
+
+def test_issue_r10_q1_a_symlink_loop_is_refused_rather_than_raised(tmp_path):
+    """R10-Q1. `requirements.txt -> requirements.txt`, which is what a rename accident
+    or a half-applied vendoring script leaves behind, and which the filesystem answers
+    with ELOOP rather than with a path.
+
+    Fails closed: unresolvable is not demonstrably contained, which is the rule
+    `escapes_root`'s own docstring states for the `OSError` arm. `core.lockfile` is the
+    verdict that read hangs off — a pinned `requirements.txt` is one of the three ways
+    it is satisfied — and a file the filesystem will not resolve pins nothing.
+
+    NOT ASSERTED, and stated so the next reader does not take its absence for a claim:
+    `core.symlinked-files` does not fire here. The walk behind it reaches a file by
+    `is_file()`, which a looping link answers False to, so this refusal happens at the
+    `glob` read and is seen by no walk. That is a gap in the WALK's reach — see
+    `read_contained`, where R10-A8 records the same boundary — and closing it means
+    deciding what a report should say about a link that resolves nowhere at all, which
+    is a wording decision and its own diff.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    _loop_link(repo)
+
+    results = fallbacks.common_checks(repo)
+
+    assert by_id(results, "core.lockfile").tier == "warning"
+    assert [r.id for r in results], "a suite that returns nothing is no suite"
+
+
+def test_issue_r10_q1_the_rule_itself_fails_closed_on_a_loop(tmp_path):
+    """The seam, directly. Every caller in both modules reads this one answer, so the
+    property belongs to `escapes_root` rather than to any check that consults it."""
+    repo = tmp_path / "repo"
+    link = _loop_link(repo, "looped.txt")
+
+    assert fallbacks.escapes_root(repo, link) is True
+
+
+def test_issue_r10_q1_a_scan_of_the_looping_tree_returns_a_report(tmp_path):
+    """The demonstration verbatim: `scanner.core.scan` over `{pyproject.toml,
+    requirements.txt -> requirements.txt}` raised `RuntimeError` out of django's
+    `detect`, so the repo got no report — a regression against f80d09a, where the
+    identical tree scanned fine because no containment rule existed to trip over yet.
+
+    A `Dockerfile` is added to the reviewer's two files so that a module MATCHES and the
+    core suite is therefore composed: `scan` over a tree no module recognizes returns an
+    empty check list by design, which would make this assertion pass without saying
+    anything.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    (repo / "Dockerfile").write_text("FROM python:3.12-slim\nUSER app\nEXPOSE 8000\n")
+    _loop_link(repo)
+
+    report = core.scan(repo)
+
+    assert report["schema_version"] == core.SCHEMA_VERSION
+    assert "core.lockfile" in [c["id"] for c in report["checks"]], (
+        "a scan that reports nothing is no scan")
