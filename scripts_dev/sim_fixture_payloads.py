@@ -61,10 +61,27 @@ RESCAN_AT = datetime.datetime(2026, 8, 12, 7, 20, tzinfo=UTC)
 class _Tree(NamedTuple):
     """How one report-carrying sim.js payload's tree is built, and when it was scanned.
 
-    `files` and `links` are the dicts in `sim_fixture_repos`, referenced rather than
-    named by string: the inventory and the trees are one thing, so a tree added there
-    and not here is a `KeyError` at the call site rather than a payload the gate below
-    silently never looks at.
+    `files` and `links` are the dicts in `sim_fixture_repos`, REFERENCED rather than
+    named by string, and it is worth being exact about what that buys — an earlier
+    version of this docstring claimed a guard it does not have.
+
+    WHAT ACTUALLY FIRES, both of them:
+
+      * a referenced dict RENAMED OR REMOVED in `sim_fixture_repos` is an
+        `AttributeError` while this module is being imported, which takes the harness
+        and the drift gate down together. Named by string it would have been a fixture
+        tree that quietly resolved to nothing.
+      * a payload added to `frontend/src/sim.js` with no entry HERE is caught on the
+        sim.js side, by
+        `tests/test_simulation.py::test_issue_r10_a2_the_gate_covers_every_report_payload_sim_js_carries`
+        — every `*_REPORT` constant the file declares must appear in the inventory, with
+        `UNSCANNED_REPORT` the one exemption and exempted by name.
+
+    WHAT DOES NOT, stated so the next reader does not take the reference for a
+    completeness check: a NEW, unreferenced dict added to `sim_fixture_repos` and not
+    added here fires nothing at all. Nothing scans that module for trees, and a tree with
+    no sim.js payload has nothing to compare against — it becomes a finding the moment
+    someone gives it a payload, via the second mechanism above.
     """
 
     directory: str

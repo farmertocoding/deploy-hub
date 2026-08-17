@@ -215,10 +215,21 @@ def report_drift(name, shown, live, what="the scan of the fixture"):
 # The scope is now the tree inventory itself (`sim_fixture_payloads.SIM_REPORT_TREES`),
 # so a fixture tree added there is a payload this gate compares, without an edit here.
 #
-# A payload naming no checks compares vacuously — {} against {} is never drift — and
-# CLEAN_REPORT is legitimately one of those: its tree has nothing wrong with it. Saying
-# which payloads must name checks is the difference between a gate and a green light.
-MUST_NAME_CHECKS = {"MESSY_REPORT", "EDGE_REPORT", "RESCANNED_REPORT"}
+# A payload naming no checks compares vacuously — {} against {} is never drift, and
+# under the one-way direction rule an EMPTY sim.js payload over a check-emitting tree is
+# additions-only, which is not drift either. So this set is the only thing standing
+# between "the fixture is empty" and a green gate.
+#
+# EXEMPT BY NAME, not include by name (R10-BE-2). It was written the other way round —
+# a list of the payloads that must name checks — and a list like that defaults the next
+# payload somebody adds to vacuous-allowed: it would sit in the inventory, be scanned,
+# be compared, and pass on an empty literal forever. The exemption is the reviewable act
+# and the default is the strict one.
+#
+# CLEAN_REPORT is the only member and it earns it: its tree is the digest-pinned clean
+# service and the scan emits nothing but `ok`. UNSCANNED_REPORT does not appear because
+# it is exempted a level up — it has no tree and no inventory entry at all.
+VACUOUS_OK = {"CLEAN_REPORT"}
 
 
 def test_issue_r10_a2_every_sim_js_report_payload_still_describes_the_live_scanner(
@@ -234,14 +245,22 @@ def test_issue_r10_a2_every_sim_js_report_payload_still_describes_the_live_scann
     harness = _harness()
     live_payloads = harness.payloads(tmp_path)
 
-    assert set(live_payloads) >= MUST_NAME_CHECKS, sorted(live_payloads)
+    assert VACUOUS_OK <= set(live_payloads), sorted(live_payloads)
 
     for name in sorted(live_payloads):
+        live = harness.check_tiers(live_payloads[name])
         shown = sim_check_tiers(name)
-        if name in MUST_NAME_CHECKS:
+        if name in VACUOUS_OK:
+            # …and the exemption is checked against the tree, not just honoured. A tree
+            # that starts emitting findings under an exempt payload is the one case the
+            # one-way rule cannot see: sim.js stays empty, every live id is an addition,
+            # and the gate reports nothing forever.
+            assert not live, (
+                f"{name} is exempt from naming checks and its tree now emits "
+                f"{sorted(live)} — the exemption has outlived its reason")
+        else:
             assert shown, f"sim.js's {name} names no checks at all"
-        report_drift(name, shown, harness.check_tiers(live_payloads[name]),
-                     f"the scan of {name}'s fixture tree")
+        report_drift(name, shown, live, f"the scan of {name}'s fixture tree")
 
 
 def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
