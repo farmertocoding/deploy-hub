@@ -113,6 +113,12 @@ def sim_check_tiers(name="MESSY_REPORT"):
     JS comment, a trailing comma, an interpolated value — the regex reads the same pairs
     out of the raw text and the check keeps working rather than turning into a parse
     error somebody silences.
+
+    R10-A5: the JSON reading is `sim_fixture_payloads.check_tiers`, which is the same
+    function applied to the LIVE payload on the other side of the comparison. It had a
+    fourth copy of the payload's key tuple here, and a comparison whose two sides read
+    their input with two different key lists is a comparison that can agree while the
+    payloads differ.
     """
     text = SIM_JS.read_text(encoding="utf-8")
     body = _sim_object_literal(text, name)
@@ -121,9 +127,19 @@ def sim_check_tiers(name="MESSY_REPORT"):
         payload = json.loads(body)
     except ValueError:
         return {cid: tier for cid, tier in _ID_TIER_RE.findall(body)}
-    return {check["id"]: check["tier"]
-            for key in ("blockers", "warnings", "advice", "pending_sandbox")
-            for check in payload.get(key, [])}
+    return _harness().check_tiers(payload)
+
+
+def _harness():
+    """`scripts_dev/sim_fixture_payloads`, importable from a test run."""
+    import sys
+
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    if str(repo / "scripts_dev") not in sys.path:
+        sys.path.insert(0, str(repo / "scripts_dev"))
+    import sim_fixture_payloads
+
+    return sim_fixture_payloads
 
 
 def test_issue_r9_q2_sim_js_project_2_still_describes_the_live_scanner(tmp_path):

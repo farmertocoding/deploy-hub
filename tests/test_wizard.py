@@ -1071,3 +1071,76 @@ def test_the_env_marker_splits_on_the_first_occurrence_only():
     assert _env_name("django.env.A.env.B") == "A.env.B"
     assert _env_name("django.env.DATABASE_URL") == "DATABASE_URL"
     assert _env_name("django.database_url") is None
+
+
+# ── R10-A5: the readiness body, spelled once ──────────────────────────────────
+#
+# The tier grouping and its four not-quite-plural key names were written out three
+# times: in `ReadinessView.get`, and once in each half of
+# `scripts_dev/sim_fixture_payloads.py` — the file whose entire job is proving that
+# `frontend/src/sim.js` is what this endpoint returns. A harness that re-implements the
+# endpoint proves sim.js matches a SECOND implementation of it, which is the
+# fixture-rot class three rounds running have now filed.
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_issue_r10_a5_the_readiness_wire_output_is_unchanged(auth_client, project):
+    """The pin the refactor had to survive: the exact body, key for key, for a report
+    carrying one check of every tier. `wizard/views.py` is not on the sensitive-path
+    list, and the serializers are untouched, so nothing else would have noticed a
+    grouping that quietly moved an `advice` into `warnings`.
+    """
+    project.scan_report = make_report(checks=[
+        {"id": "b", "tier": "blocker", "title": "B"},
+        {"id": "w", "tier": "warning", "title": "W"},
+        {"id": "a", "tier": "advice", "title": "A"},
+        {"id": "s", "tier": "pending_sandbox", "title": "S"},
+        {"id": "o", "tier": "ok", "title": "O"},
+    ])
+    project.save()
+
+    body = auth_client.get(reverse("readiness", args=[project.pk])).json()
+
+    assert sorted(body) == ["advice", "blockers", "modules", "pending_sandbox",
+                            "scanned_at", "summary", "warnings"]
+    assert [c["id"] for c in body["blockers"]] == ["b"]
+    assert [c["id"] for c in body["warnings"]] == ["w"]
+    assert [c["id"] for c in body["advice"]] == ["a"]
+    assert [c["id"] for c in body["pending_sandbox"]] == ["s"]
+    # `ok` is in the summary counts and in no list — the payload groups the four tiers
+    # the screens render, and that is what the drift gate compares.
+    listed = [c["id"] for key in ("blockers", "warnings", "advice", "pending_sandbox")
+              for c in body[key]]
+    assert listed == ["b", "w", "a", "s"]
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_issue_r10_a5_the_view_returns_the_shared_body(auth_client, project,
+                                                       monkeypatch):
+    """…and it returns it by CALLING the shared function, which is the claim a second
+    copy in the view would silently break. Patching `readiness_body` is how a test
+    asserts there is one of it."""
+    from wizard import views
+
+    project.scan_report = make_report(checks=[
+        {"id": "b", "tier": "blocker", "title": "B"}])
+    project.save()
+    monkeypatch.setattr(views, "readiness_body",
+                        lambda report, scanned_at: {"sentinel": True})
+
+    assert auth_client.get(reverse("readiness", args=[project.pk])).json() == {
+        "sentinel": True}
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_issue_r10_a5_the_payload_keys_are_the_endpoints_own(project):
+    """The key list the drift gate reads a payload with is the view's, not a fourth
+    copy. Two of the four are not the tier name — a copy that pluralized all four would
+    read `advices`/`pending_sandboxs`, find nothing, and report "no findings"."""
+    from wizard.views import READINESS_KEYS, READINESS_TIERS, readiness_body
+
+    body = readiness_body({"checks": [{"id": "x", "tier": t} for t in READINESS_TIERS]},
+                          None)
+
+    assert READINESS_KEYS == ("blockers", "warnings", "advice", "pending_sandbox")
+    for key in READINESS_KEYS:
+        assert body[key], f"{key} is not a key of the payload this endpoint returns"

@@ -67,24 +67,19 @@ def build():
     from wizard.views import (
         ManifestSerializer,
         ProjectSummarySerializer,
-        ReadinessSerializer,
         WizardStateSerializer,
         _state,
+        readiness_body,
     )
 
     def readiness(project):
-        """ReadinessView.get's body, against a project row rather than a request."""
-        report = project.scan_report or {}
-        checks = report.get("checks", [])
-        by_tier = {tier: [c for c in checks if c.get("tier") == tier]
-                   for tier in ("blocker", "warning", "advice", "pending_sandbox")}
-        return as_json(ReadinessSerializer({
-            "scanned_at": project.scanned_at,
-            "modules": report.get("modules", []),
-            "summary": report.get("summary", {}),
-            "blockers": by_tier["blocker"], "warnings": by_tier["warning"],
-            "advice": by_tier["advice"], "pending_sandbox": by_tier["pending_sandbox"],
-        }).data)
+        """ReadinessView.get's body, against a project row rather than a request.
+
+        R10-A5: `readiness_body` IS the view's body. This used to re-implement the tier
+        grouping, which made the drift gate downstream compare sim.js against a second
+        implementation of the endpoint rather than against the endpoint.
+        """
+        return as_json(readiness_body(project.scan_report, project.scanned_at))
 
     def wizard(site):
         return as_json(WizardStateSerializer(_state(site)).data)
@@ -226,10 +221,15 @@ SCANNED_AT = {
 
 # The readiness payload's list keys, in tier order. NOT the tier names for two of the
 # four — `ReadinessSerializer` pluralizes `blocker`/`warning` and does not pluralize
-# `advice`/`pending_sandbox`. Spelled once, here, because reading the payload with the
-# tier names silently yields the two lists whose names happen to collide and an empty
-# result for the other two, which reads exactly like "no blockers".
-PAYLOAD_KEYS = ("blockers", "warnings", "advice", "pending_sandbox")
+# `advice`/`pending_sandbox` — so reading the payload with the tier names silently
+# yields the two lists whose names happen to collide and an empty result for the other
+# two, which reads exactly like "no blockers".
+#
+# R10-A5: IMPORTED rather than spelled. This was a third copy of a mapping the endpoint
+# already owns, in the file whose entire job is proving that sim.js is what the endpoint
+# returns.
+from wizard.views import READINESS_KEYS as PAYLOAD_KEYS  # noqa: E402
+
 
 def _setup_django():
     """Enough Django for the serializers, and nothing more — no database is touched.
@@ -253,24 +253,16 @@ def _setup_django():
 def readiness_payload(root, scanned_at):
     """`GET /api/v1/projects/<id>/readiness/`'s body for a scan of `root`.
 
-    The tier grouping is `wizard.views.ReadinessView.get`'s, and the serializer is its
-    serializer. What this cannot borrow is the view itself, which needs a `Project` row.
+    R10-A5: the body is `wizard.views.readiness_body`, which is what the view returns.
+    What this cannot borrow is the VIEW, which needs a `Project` row and a database; the
+    grouping and the serializer are no longer re-implemented to work around that.
     """
     _setup_django()
     from scanner import core as scanner_core
-    from wizard.views import ReadinessSerializer
+    from wizard.views import readiness_body
 
-    report = scanner_core.scan(root)
-    checks = report.get("checks", [])
-    return json.loads(json.dumps(ReadinessSerializer({
-        "scanned_at": scanned_at,
-        "modules": report.get("modules", []),
-        "summary": report.get("summary", {}),
-        "blockers": [c for c in checks if c.get("tier") == "blocker"],
-        "warnings": [c for c in checks if c.get("tier") == "warning"],
-        "advice": [c for c in checks if c.get("tier") == "advice"],
-        "pending_sandbox": [c for c in checks if c.get("tier") == "pending_sandbox"],
-    }).data))
+    return json.loads(json.dumps(
+        readiness_body(scanner_core.scan(root), scanned_at)))
 
 
 def build_trees(base="/tmp"):

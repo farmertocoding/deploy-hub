@@ -129,6 +129,49 @@ class ReadinessSerializer(serializers.Serializer):
     pending_sandbox = serializers.ListField(child=serializers.DictField())
 
 
+# The tiers the readiness payload groups, in the order the screens render them. NOT the
+# payload's key names for two of the four — `ReadinessSerializer` pluralizes
+# `blocker`/`warning` and does not pluralize `advice`/`pending_sandbox` — which is the
+# reason the mapping below is written out rather than derived by adding an `s`.
+READINESS_TIERS = ("blocker", "warning", "advice", "pending_sandbox")
+_READINESS_KEYS = {"blocker": "blockers", "warning": "warnings",
+                   "advice": "advice", "pending_sandbox": "pending_sandbox"}
+# The payload's list keys, in tier order — what a reader of the response walks. Exported
+# because `scripts_dev/sim_fixture_payloads.py` had its own copy of it, and reading the
+# payload with the TIER names instead silently yields the two lists whose names happen
+# to collide and an empty result for the other two, which reads exactly like "no
+# blockers".
+READINESS_KEYS = tuple(_READINESS_KEYS[tier] for tier in READINESS_TIERS)
+
+
+def readiness_body(report, scanned_at):
+    """`GET /api/v1/projects/<id>/readiness/`'s response body, from a report and a stamp.
+
+    R10-A5: THE ONE SPELLING of the tier grouping. It was written out three times — in
+    `ReadinessView.get` below, and once in each half of
+    `scripts_dev/sim_fixture_payloads.py` — and the harness halves exist precisely to
+    prove that `frontend/src/sim.js` is what this endpoint returns. A harness that
+    re-implements the endpoint proves that it matches a second implementation of it,
+    which is the fixture-rot class this repo has now paid for in three rounds running.
+
+    Takes the report DICT rather than a `Project`, because the DB-free half of that
+    harness has a fresh `scanner.core.scan` result and no row to hang it on, and the
+    only thing the row contributed was two `.get`s and a datetime. `scanned_at` is
+    passed through to the serializer, which renders a `datetime` and passes a string
+    along unchanged — so both callers hand it whichever they have.
+    """
+    report = report or {}
+    checks = report.get("checks", [])
+    grouped = {_READINESS_KEYS[tier]: [c for c in checks if c.get("tier") == tier]
+               for tier in READINESS_TIERS}
+    return ReadinessSerializer({
+        "scanned_at": scanned_at,
+        "modules": report.get("modules", []),
+        "summary": report.get("summary", {}),
+        **grouped,
+    }).data
+
+
 class SiteSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
@@ -195,16 +238,4 @@ class ReadinessView(APIView):
     @extend_schema(responses={200: ReadinessSerializer})
     def get(self, request, project_id):
         project = get_object_or_404(Project, pk=project_id)
-        report = project.scan_report or {}
-        checks = report.get("checks", [])
-        by_tier = {tier: [c for c in checks if c.get("tier") == tier]
-                   for tier in ("blocker", "warning", "advice", "pending_sandbox")}
-        return Response(ReadinessSerializer({
-            "scanned_at": project.scanned_at,
-            "modules": report.get("modules", []),
-            "summary": report.get("summary", {}),
-            "blockers": by_tier["blocker"],
-            "warnings": by_tier["warning"],
-            "advice": by_tier["advice"],
-            "pending_sandbox": by_tier["pending_sandbox"],
-        }).data)
+        return Response(readiness_body(project.scan_report, project.scanned_at))
