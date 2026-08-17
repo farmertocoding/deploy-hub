@@ -15,8 +15,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow, WarningsAck,
-  reportSummary } from "../src/Readiness.jsx";
+import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
+  ProjectRowSelector, QuestionField, WarningsAck, questionFieldId, reportSummary,
+  rowKeyHandler } from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -308,4 +309,124 @@ test("r10-ux-f8: the re-read sentence does not claim an answer was given", async
   assert.ok(text.includes("re-read from the server"), text);
   assert.ok(!text.includes("after this answer"),
     "this refusal is reachable with no answer given at all");
+});
+
+// ── R11-UX-F2: two wizards on one page, one set of DOM ids ───────────────────
+
+test("r11-ux-f2: a question's input id is per SITE, and the label points at its own",
+  () => {
+    const question = { id: "site.domain", prompt: "Public domain for this site",
+                       kind: "domain", default: null, choices: [], secret: false };
+    const markups = [1, 4].map((siteId) =>
+      render(QuestionField, { siteId, question, prior: undefined,
+                              drafted: undefined, onChange: () => {} }));
+
+    const ids = markups.map((m) => m.match(/ id="([^"]+)"/)![1]);
+    assert.deepEqual(ids, ["site-1-site.domain", "site-4-site.domain"]);
+    for (const markup of markups) {
+      const forAttr = markup.match(/for="([^"]+)"/)![1];
+      const idAttr = markup.match(/ id="([^"]+)"/)![1];
+      assert.equal(forAttr, idAttr,
+        "the label points somewhere other than its own field");
+    }
+  });
+
+test("r11-ux-f2: a two-site project page has no duplicate ids at all", async () => {
+  // The page that produced the defect: takko, whose two sites are asked the same
+  // questions, so every id in one wizard had a twin in the other. `getElementById` and
+  // every `<label for>` resolve to the FIRST match, so clicking staging's domain label
+  // focused prod's box and the typing went into the wrong site's form.
+  const { data: prod } = await (SIM_FIXTURES.live as any)("v1/sites/1/wizard/");
+  const { data: staging } = await (SIM_FIXTURES.live as any)("v1/sites/4/wizard/");
+
+  const ids: string[] = [];
+  for (const [siteId, state] of [[1, prod], [4, staging]] as Array<[number, any]>) {
+    for (const question of state.questions) {
+      const markup = render(QuestionField, { siteId, question,
+                                             prior: state.answered?.[question.id],
+                                             drafted: undefined, onChange: () => {} });
+      ids.push(...[...markup.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]));
+    }
+    // The other id-bearing control in the same wizard, rendered the way `SiteWizard`
+    // renders it — the `aria-describedby` target R10-UX-F7 added, which was already
+    // per-site and is where the naming rule this fix follows came from.
+    const control = render(MaterializeControl, {
+      gate: { disabled: true, label: "⛔ Blocked", title: "the report has blockers" },
+      busy: false, onClick: () => {}, id: questionFieldId(siteId, "materialize"),
+    });
+    ids.push(...[...control.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]));
+  }
+  assert.ok(ids.length >= 8, `the fixture stopped asking questions: ${ids.length}`);
+  assert.equal(new Set(ids).size, ids.length,
+    `duplicate ids on one page: ${ids.filter((v, i) => ids.indexOf(v) !== i)}`);
+});
+
+// ── R11-UX-F4: a row that called itself a button ─────────────────────────────
+
+test("r11-ux-f4: Enter and Space both activate the row, and Space does not scroll", () => {
+  const pressed: string[] = [];
+  let prevented = 0;
+  const handler = rowKeyHandler(() => pressed.push("selected"));
+  const press = (key: string) =>
+    handler({ key, preventDefault: () => { prevented += 1; } } as any);
+
+  press("Enter");
+  press(" ");
+  assert.deepEqual(pressed, ["selected", "selected"],
+    "Space is the key most people press on something that says role=button");
+  assert.equal(prevented, 2,
+    "Space scrolls the page unless the handler says otherwise — which is what it did");
+
+  press("a");
+  press("Tab");
+  assert.equal(pressed.length, 2, "typing must not select a project");
+});
+
+test("r11-ux-f4: the selected row says so in aria and in something other than colour",
+  async () => {
+    const { data: projects } = await (SIM_FIXTURES.live as any)("v1/projects/");
+    const on = render(ProjectRowSelector,
+      { project: projects[0], selected: true, onSelect: () => {} });
+    const off = render(ProjectRowSelector,
+      { project: projects[0], selected: false, onSelect: () => {} });
+
+    assert.match(on, /aria-pressed="true"/);
+    assert.match(off, /aria-pressed="false"/,
+      "a role=button with no pressed state tells a screen reader nothing about selection");
+    assert.match(on, /role="button"/);
+    assert.match(on, /tabindex="0"/);
+
+    // The non-colour half. `outline` was the whole signal, which is a colour, and §F9's
+    // rule is that status is never colour-only — state is no different.
+    const marker = /▸/;
+    assert.match(on, marker);
+    assert.ok(!marker.test(off), "the unselected row carries the selection marker");
+    assert.equal(visibleText(on).replace("▸", "").trim(), visibleText(off).trim(),
+      "the marker is the ONLY text the selection adds — anything else here would be a " +
+      "second signal, and the row's content is the project's own row");
+  });
+
+// ── R11-UX-F5: a disabled button that looked exactly like a live one ─────────
+
+test("r11-ux-f5: a disabled control is visibly disabled", () => {
+  const blocked = { disabled: true, label: "⛔ Blocked", title: "the report has blockers" };
+  const ready = { disabled: false, label: "Materialize manifest", title: "" };
+
+  const off = render(MaterializeControl, { gate: blocked, busy: false, onClick: () => {} });
+  const on = render(MaterializeControl, { gate: ready, busy: false, onClick: () => {} });
+
+  const style = (markup: string) => markup.match(/style="([^"]*)"/)![1];
+  assert.notEqual(style(off), style(on),
+    "an inline style= overrides the browser's :disabled rendering, so a disabled " +
+    "button drawn from the same object is pixel-identical to a live one");
+  assert.match(style(off), /cursor:not-allowed/);
+  assert.match(style(off), /color:#6e7681/);
+  assert.match(off, /disabled=""/);
+
+  // …and `busy` disables it too — a request in flight is the other way this button
+  // stops taking clicks, and it wore the live styling for the whole round trip.
+  const busy = render(MaterializeControl,
+    { gate: ready, busy: true, onClick: () => {} });
+  assert.equal(style(busy), style(off),
+    "a button disabled because a request is in flight still looks pressable");
 });

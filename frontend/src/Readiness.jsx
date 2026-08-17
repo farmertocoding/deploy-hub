@@ -15,6 +15,25 @@ import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+
+// R11-UX-F5: a control that cannot be pressed has to LOOK like one.
+//
+// The browser's own `:disabled` styling is the reason nobody usually thinks about this,
+// and an inline `style=` is exactly what overrides it: `background` and `color` set here
+// win over the user-agent stylesheet, so the disabled Materialize button and the disabled
+// Save button rendered PIXEL-IDENTICAL to their enabled selves. Every refusal on this
+// screen was therefore announced by a button that looked pressable — the operator clicks
+// it, nothing happens, and nothing on screen explains the difference between "nothing
+// happened" and "it did not take my click".
+//
+// Inline, because this tree has no stylesheet at all (§A8: shadcn/Tailwind arrive with
+// the first real screen) and inventing one for a hover state would be the larger change.
+// Three signals rather than one, per §F9's never-color-only rule: dimmer text, a flatter
+// background, and `not-allowed` under the pointer.
+const disabledBox = (disabled) => disabled
+  ? { ...box, color: "#6e7681", background: "#15181e", borderColor: "#2a2e35",
+      cursor: "not-allowed" }
+  : box;
 // R9-8: the plural is per tier, not `word + "s"`.
 //
 // Two of the four tiers do not take an -s and the naive rule produced both of them:
@@ -222,9 +241,10 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
   // would point every button at the first one's reason.
   const reasonId = `${id}-reason`;
   const shown = gate.disabled && !!gate.title;
+  const off = busy || gate.disabled;
   return (
     <>
-      <button style={box} disabled={busy || gate.disabled} onClick={onClick}
+      <button style={disabledBox(off)} disabled={off} onClick={onClick}
         title={gate.title} aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
       {shown &&
@@ -361,6 +381,55 @@ export function ProjectRow({ project: p }) {
   );
 }
 
+// R11-UX-F4: the left column's rows are a keyboard control, and were one by half.
+//
+// `role="button"` is a PROMISE about behaviour: a thing so labelled is expected to
+// activate on Enter AND on Space, and to say whether it is currently the chosen one. The
+// row handled Enter only — so a keyboard operator pressing Space (the key most people
+// reach for on something that calls itself a button) scrolled the page instead of opening
+// the project, with no feedback of any kind. And selection was communicated by an
+// `outline` and nothing else: invisible to a screen reader, and a colour to everyone
+// else, which is the arrangement §F9 forbids for status and is no better for state.
+//
+// NOT CONVERTED TO A REAL <button>, and the reason is the markup rather than preference:
+// a `<button>`'s content model is PHRASING content, and this row is a block — tier
+// badges in a `<div>`, the staleness stamp in another, one line per site. Browsers
+// reparent invalid nesting, so the honest options were "flatten the row into spans" or
+// "keep role=button and honour the whole contract". The second is smaller and touches no
+// markup a reviewer has already read.
+export function rowActivates(event) {
+  // " " is the modern spelling; "Spacebar" is IE/Edge-legacy and costs one comparison.
+  return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+}
+
+// The handler itself, named so a test can call it: `renderToStaticMarkup` produces no
+// events, and an `onKeyDown` written inline in JSX is unreachable from this tree's
+// runner. `preventDefault` is half the fix — Space on a focused element scrolls the page,
+// which is what it did instead of selecting, and a selection that also scrolls is a
+// selection the operator has to go and find.
+export function rowKeyHandler(onSelect) {
+  return (event) => {
+    if (!rowActivates(event)) return;
+    event.preventDefault();
+    onSelect();
+  };
+}
+
+export function ProjectRowSelector({ project, selected, onSelect }) {
+  return (
+    <div style={{ ...box, marginBottom: 8, cursor: "pointer",
+        outline: selected ? "2px solid #58a6ff" : "none" }}
+      role="button" tabIndex={0} aria-pressed={selected}
+      onClick={onSelect} onKeyDown={rowKeyHandler(onSelect)}>
+      {/* The non-colour half of the selection signal. `aria-hidden` because
+          `aria-pressed` already says this to a screen reader, and two spellings of one
+          fact is what R10-UX-F7 took out of `Badge`. */}
+      {selected && <span aria-hidden="true">▸ </span>}
+      <ProjectRow project={project} />
+    </div>
+  );
+}
+
 export default function ReadinessScreen() {
   const [projects, setProjects] = useState(undefined); // undefined = loading
   const [error, setError] = useState("");
@@ -410,13 +479,8 @@ export default function ReadinessScreen() {
       <div style={{ minWidth: 280 }}>
         <h3 style={{ marginTop: 0 }}>Projects</h3>
         {projects.map((p) => (
-          <div key={p.id} style={{ ...box, marginBottom: 8, cursor: "pointer",
-              outline: selected === p.id ? "2px solid #58a6ff" : "none" }}
-            role="button" tabIndex={0}
-            onClick={() => setSelected(p.id)}
-            onKeyDown={(e) => e.key === "Enter" && setSelected(p.id)}>
-            <ProjectRow project={p} />
-          </div>
+          <ProjectRowSelector key={p.id} project={p} selected={selected === p.id}
+            onSelect={() => setSelected(p.id)} />
         ))}
       </div>
       {selected != null && <ReadinessPanel projectId={selected}
@@ -478,6 +542,52 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
       {project?.sites?.map((s) => (
         <SiteWizard key={s.id} site={s} refreshKey={refreshKey} onChanged={onChanged} />
       ))}
+    </div>
+  );
+}
+
+// R11-UX-F2: one question, one input, and an id nothing else on the page shares.
+//
+// THE DEFECT: the field carried `id={q.id}` and the label `htmlFor={q.id}`, and a project
+// page renders ONE WIZARD PER SITE. takko has two, and both wizards ask `site.domain` —
+// so the page contained two elements with `id="site.domain"`, which is invalid HTML with
+// a defined and unhelpful resolution: `getElementById` and every label point at the FIRST
+// one. Clicking "Public domain for this site" under `staging` focused `prod`'s box.
+// Typing then went into the wrong site's form, and the operator's only clue was that the
+// caret was somewhere else on the screen.
+//
+// The prefix is the site's pk, which is the same key `MaterializeControl`'s `id` prop
+// already uses for the same reason ("this control renders once per site on a project with
+// several, and duplicate ids would point every button at the first one's reason"). One
+// rule, spelled once, in a function both the field and the label read.
+//
+// Extracted for readiness-render.test.ts's reason as well: the only way to assert markup
+// is to render it, and everything else in `SiteWizard` fetches.
+export const questionFieldId = (siteId, questionId) => `site-${siteId}-${questionId}`;
+
+export function QuestionField({ siteId, question: q, prior, drafted, onChange }) {
+  const id = questionFieldId(siteId, q.id);
+  const priorText = typeof prior === "object" ? "" : prior ?? "";
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <label htmlFor={id}>{q.prompt}
+        {q.kind === "secret" && prior?.answered &&
+          <em style={{ color: "#8b949e" }}> — set {new Date(prior.changed_at).toLocaleDateString()}; leave blank to keep</em>}
+      </label><br />
+      {q.kind === "choice"
+        ? <select id={id} style={box} value={drafted ?? priorText}
+            onChange={(e) => onChange(e.target.value)}>
+            <option value="" disabled>choose…</option>
+            {q.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        : q.kind === "bool"
+        ? <input id={id} type="checkbox" checked={drafted ?? prior ?? false}
+            onChange={(e) => onChange(e.target.checked)} />
+        : <input id={id} style={{ ...box, width: "60%" }}
+            type={q.kind === "secret" ? "password" : "text"}
+            autoComplete={q.kind === "secret" ? "new-password" : "off"}
+            value={drafted ?? (q.kind === "secret" ? "" : priorText)}
+            onChange={(e) => onChange(e.target.value)} />}
     </div>
   );
 }
@@ -567,37 +677,18 @@ function SiteWizard({ site, refreshKey, onChanged }) {
   return (
     <div style={{ ...box, marginTop: 8 }}>
       <h4 style={{ marginTop: 0 }}>{site.name} — configuration</h4>
-      {state.questions.map((q) => {
-        const prior = state.answered?.[q.id];
-        return (
-          <div key={q.id} style={{ marginBottom: 8 }}>
-            <label htmlFor={q.id}>{q.prompt}
-              {q.kind === "secret" && prior?.answered &&
-                <em style={{ color: "#8b949e" }}> — set {new Date(prior.changed_at).toLocaleDateString()}; leave blank to keep</em>}
-            </label><br />
-            {q.kind === "choice"
-              ? <select id={q.id} style={box} value={draft[q.id] ?? (typeof prior === "object" ? "" : prior ?? "")}
-                  onChange={(e) => setDraft({ ...draft, [q.id]: e.target.value })}>
-                  <option value="" disabled>choose…</option>
-                  {q.choices.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              : q.kind === "bool"
-              ? <input id={q.id} type="checkbox" checked={draft[q.id] ?? prior ?? false}
-                  onChange={(e) => setDraft({ ...draft, [q.id]: e.target.checked })} />
-              : <input id={q.id} style={{ ...box, width: "60%" }}
-                  type={q.kind === "secret" ? "password" : "text"}
-                  autoComplete={q.kind === "secret" ? "new-password" : "off"}
-                  value={draft[q.id] ?? (q.kind === "secret" ? "" : (typeof prior === "object" ? "" : prior ?? ""))}
-                  onChange={(e) => setDraft({ ...draft, [q.id]: e.target.value })} />}
-          </div>
-        );
-      })}
-      <button style={box} disabled={busy || !Object.keys(draft).length} onClick={save}>
+      {state.questions.map((q) => (
+        <QuestionField key={q.id} siteId={site.id} question={q}
+          prior={state.answered?.[q.id]} drafted={draft[q.id]}
+          onChange={(value) => setDraft({ ...draft, [q.id]: value })} />
+      ))}
+      <button style={disabledBox(busy || !Object.keys(draft).length)}
+        disabled={busy || !Object.keys(draft).length} onClick={save}>
         {busy ? "…" : "Save answers"}</button>{" "}
       <WarningsAck warnings={state.warnings} checked={ack}
         onChange={(e) => setAck(e.target.checked)} />{" "}
       <MaterializeControl gate={gate} busy={busy} onClick={materialize}
-        id={`site-${site.id}-materialize`} />
+        id={questionFieldId(site.id, "materialize")} />
       {!!unanswered.length &&
         <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
       <OutcomeRegion msg={msg} />
