@@ -499,3 +499,55 @@ def test_a_dependency_pin_edit_discards_the_cache(tmp_path):
                                                encoding="utf-8")
 
     assert mutation_gate._fingerprint(root) != before
+
+
+def test_a_new_dependency_pin_file_is_watched_without_being_remembered(tmp_path):
+    """Round-9 queue item 2. The pin list was the fourth hand-typed list in a module
+    written about the cost of the first three.
+
+    `DEPENDENCY_PINS` was `("requirements.txt", "requirements-dev.txt")`, typed out, with
+    nothing asserting it against the tree. That is R4-12's shape exactly: the day a
+    `requirements-prod.txt` or a second constraints file lands, it pins the versions that
+    decide every mutant's verdict and the cache inherits the previous release's answers
+    with no signal anywhere — the same silence that cost `wizard/` its place in the
+    bandit and log-scrubber scopes, separately.
+
+    Derived instead, and stated at the cache key over a fixture tree like the other F2
+    tests: a pin file that exists is watched because it exists, not because somebody
+    remembered it.
+    """
+    import mutation_gate
+
+    root = _fixture_repo(tmp_path / "repo")
+    (root / "requirements.txt").write_text("pyyaml>=6\n", encoding="utf-8")
+    (root / "requirements-prod.txt").write_text("gunicorn==23.0.0\n", encoding="utf-8")
+    before = mutation_gate._fingerprint(root)
+
+    (root / "requirements-prod.txt").write_text("gunicorn==22.0.0\n", encoding="utf-8")
+
+    assert mutation_gate._fingerprint(root) != before
+    assert "requirements-prod.txt" in mutation_scope.sandbox_files(root)
+
+
+def test_the_dependency_pins_are_the_repos_pin_files_not_a_typed_list():
+    """The assertion that pins the derivation, in the direction that matters.
+
+    The test above proves a new pin file is picked up in a fixture tree; this one proves
+    the constant this repository actually runs with is the tree's own answer. Both
+    patterns are restated here on purpose — narrowing the derivation to match a typed
+    list again has to change this file too, which is the same bargain
+    `GATE_BEARING` and `py_roots` strike above.
+
+    `constraints*.txt` is in the pattern set and matches nothing today. That is
+    deliberate: it is pip's other pin file, it is the name a future one would land under,
+    and a pattern that matches nothing costs a glob.
+    """
+    expected = sorted({p.name for p in REPO.glob("requirements*.txt")}
+                      | {p.name for p in REPO.glob("constraints*.txt")})
+
+    assert list(mutation_scope.DEPENDENCY_PINS) == expected
+    assert mutation_scope.DEPENDENCY_PINS == mutation_scope.dependency_pins(REPO)
+    # The two the F2 commit named, asserted individually as well as through the
+    # derivation — a derivation that is right today and a finding that names two files
+    # are two different claims.
+    assert {"requirements.txt", "requirements-dev.txt"} <= set(expected)

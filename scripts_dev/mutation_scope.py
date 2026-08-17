@@ -59,16 +59,39 @@ MUTMUT_IMPLICIT_COPIES = ("tests", "pyproject.toml", "setup.cfg")
 # mutmut's operator set is the gate's definition of "every way this code could be
 # wrong". The same argument reaches one step further — a mutant's verdict is a property
 # of the whole installed dependency set, and a `pytest`, `django` or `pyyaml` pin moving
-# can flip a kill into a survivor with not one byte of this repository changed. These
-# two files are what this repository SAYS that set is, so a pin edit now discards the
-# cached verdicts instead of silently inheriting the previous release's.
+# can flip a kill into a survivor with not one byte of this repository changed. The pin
+# files are what this repository SAYS that set is, so a pin edit now discards the cached
+# verdicts instead of silently inheriting the previous release's.
+#
+# DERIVED, ROUND-9 ITEM 2: this was `("requirements.txt", "requirements-dev.txt")`,
+# typed out — the fourth hand-typed list in a module whose opening paragraph is about
+# what the first three cost. Nothing asserted it against the tree, so a
+# `requirements-prod.txt` landing next week would pin the versions that decide every
+# verdict while the cache went on inheriting the previous release's answers, with no
+# signal anywhere. That is R4-12's shape, and the answer is R4-12's answer: ask the tree.
 #
 # THE ENVIRONMENT-SHAPED HALF IS STILL OPEN and this does not pretend otherwise: a
 # `pip install -U` behind an unchanged `>=` floor moves the installed versions without
 # moving these files, and only hashing the resolved environment (`pip freeze`) would
 # catch that. That is a cost-per-run decision of its own; what is closed here is the
 # case where the repo's own diff shows the change and the gate ignored it.
-DEPENDENCY_PINS = ("requirements.txt", "requirements-dev.txt")
+#
+# `constraints*.txt` matches nothing today and is in the set anyway: it is pip's other
+# pin file and the name a future one lands under, and a pattern that matches nothing
+# costs one glob. The patterns are restated in
+# tests/test_mutation_gate.py::test_the_dependency_pins_are_the_repos_pin_files_not_a_typed_list,
+# which is what stops a future round narrowing them back into a list.
+PIN_FILE_PATTERNS = ("requirements*.txt", "constraints*.txt")
+
+
+def dependency_pins(root=None):
+    """The repo-root pip pin files, by pattern. Sorted, repo-relative, deduplicated."""
+    root = pathlib.Path(root or REPO)
+    return tuple(sorted({p.name for pattern in PIN_FILE_PATTERNS
+                         for p in root.glob(pattern) if p.is_file()}))
+
+
+DEPENDENCY_PINS = dependency_pins()
 
 # Names never hashed: caches whose contents change on every run (so watching them would
 # discard the cache every time) and vendored trees that are not inputs to any test.
@@ -235,15 +258,16 @@ def sandbox_files(root=None):
     not: enumerating which non-mutated modules a chain runs through is the same guessing
     game that produced the missed list in the first place. The union is mechanical.
 
-    `DEPENDENCY_PINS` joins it although those files are not copied into the sandbox: the
-    tests inside it import the versions those files pin, so the pins are an input to
-    every verdict even though nothing there opens them. See that constant for what is
-    and is not closed by watching them.
+    `dependency_pins(root)` joins it although those files are not copied into the
+    sandbox: the tests inside it import the versions those files pin, so the pins are an
+    input to every verdict even though nothing there opens them. Resolved against the
+    ROOT being fingerprinted rather than through the `DEPENDENCY_PINS` constant, which
+    answers for this repository only — a fixture tree's pins are its own.
     """
     root = pathlib.Path(root or REPO)
     config = tomllib.loads((root / "pyproject.toml").read_text("utf-8"))["tool"]["mutmut"]
     roots = [*config["source_paths"], *config.get("also_copy", ()),
-             *MUTMUT_IMPLICIT_COPIES, *DEPENDENCY_PINS]
+             *MUTMUT_IMPLICIT_COPIES, *dependency_pins(root)]
 
     found = set()
     for name in roots:
