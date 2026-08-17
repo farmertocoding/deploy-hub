@@ -230,17 +230,19 @@ def build():
     out["EDGE_PROJECT"] = project_row(edge)
     out["UNSCANNED_PROJECT"] = project_row(orders)
 
-    out["CLEAN_MANIFEST"] = post_manifest(prod)
-    out["REFUSAL_409"] = post_manifest(shop)
-    out["STAGING_409"] = post_manifest(staging)
-    # The warnings gate, both answers, same site, in the order the operator meets them.
-    out["WARNINGS_409"] = post_manifest(atlas, confirm_warnings=False)
-    out["EDGE_MANIFEST"] = post_manifest(atlas, confirm_warnings=True)
-
-    # ── and then the tree moves under the operator ────────────────────────────
-    # Same project, same site, same answers; a re-scan of the clean tree with one live
-    # -format Stripe key committed to it. The refusal and the three payloads the screen
-    # must converge on after it all come from this one state.
+    # ── the STALE timeline, played FIRST and at v3 (R10-UX-F3) ───────────────
+    #
+    # sim.js's `live` and `stale` are two different stories about the same site, and the
+    # stale one has to be observed BEFORE the live one's POST because its whole content
+    # is what the site looks like when a materialize did NOT happen: the tree moved, the
+    # POST was refused, and a refusal creates no manifest.
+    #
+    # Captured after the live POST — which is where this used to sit — the post-refusal
+    # row showed v4 with `manifest_current: false`, so the screen the operator converges
+    # on after a 409 read as though the refused request had incremented the version. The
+    # correct row is v3 (the three materializes above, and no fourth) with
+    # `manifest_current: false`, because the report under it moved.
+    clean_report, clean_at = takko.scan_report, takko.scanned_at
     takko.scan_report = scanner_core.scan(tree_path("RESCANNED_REPORT"))
     takko.scanned_at = RESCAN_AT
     takko.save(update_fields=["scan_report", "scanned_at"])
@@ -249,6 +251,58 @@ def build():
     out["RESCANNED_REPORT"] = readiness(takko)
     out["RESCANNED_WIZARD"] = wizard(prod)
     out["RESCANNED_PROJECT"] = project_row(takko)
+
+    # …and back to the report the LIVE state serves, so the POSTs below are the ones
+    # those screens really make. The rewind is a fixture-stitching step and is stated
+    # rather than hidden: nothing above it is re-captured, and every payload below is a
+    # real run against the clean tree's report, which is what `?sim=live` shows.
+    takko.scan_report, takko.scanned_at = clean_report, clean_at
+    takko.save(update_fields=["scan_report", "scanned_at"])
+
+    # ── the LIVE timeline's POSTs, and what the screen looks like after them ──
+    #
+    # R10-UX-F2: the `*_AFTER` rows are the missing half. `live` answered every request
+    # from one table, so the re-read a 201 triggers returned the PRE-POST row forever:
+    # "Manifest v1 created." beside "no manifest yet", permanently, on the one screen
+    # whose whole point is the ack checkbox changing the server's answer. These are the
+    # rows the same `ProjectListView` derivation produces one materialize later.
+    out["CLEAN_MANIFEST"] = post_manifest(prod)
+    out["CLEAN_PROJECT_AFTER"] = project_row(takko)
+    out["REFUSAL_409"] = post_manifest(shop)
+    out["STAGING_409"] = post_manifest(staging)
+    # The warnings gate, both answers, same site, in the order the operator meets them.
+    out["WARNINGS_409"] = post_manifest(atlas, confirm_warnings=False)
+    out["EDGE_MANIFEST"] = post_manifest(atlas, confirm_warnings=True)
+    out["EDGE_PROJECT_AFTER"] = project_row(edge)
+
+    # What a materialize does NOT change, asserted rather than assumed — this is the
+    # claim sim.js's post-201 state rests on when it goes on serving the same report and
+    # wizard payloads after the POST. A materialize freezes the manifest and applies the
+    # answers to the Site; it does not re-scan, and `_state` reads `preflight`, which
+    # reads the report. If that ever stops being true, the fixture needs a `*_AFTER`
+    # for these too and this line is what says so.
+    assert wizard(atlas) == out["EDGE_WIZARD"], "a materialize moved the wizard state"
+    assert readiness(edge) == out["EDGE_REPORT"], "a materialize moved the report"
+    assert readiness(takko) == out["CLEAN_REPORT"], "a materialize moved the report"
+
+    # ── the answer that clears "Answers needed" (R10-UX-F4) ──────────────────
+    #
+    # takko/staging is the site nobody has configured: its only refusal is
+    # `answers_missing`, the gate reads "Answers needed", and until now no sim state had
+    # a payload for what happens when the operator types the domain and presses Save.
+    # `live`'s PATCH returned `{}` and the refetch returned the same unanswered state
+    # forever, so the one refusal the form itself clears had no clearing path in any
+    # reviewable state. This is `_state(staging)` after a real `set_answers`.
+    #
+    # LAST, because it changes the site: every capture above sees staging unanswered,
+    # which is what `STAGING_WIZARD` and `STAGING_409` are.
+    wizard_service.set_answers(staging, {"site.domain": "staging.takko.market"})
+    out["STAGING_WIZARD_ANSWERED"] = wizard(staging)
+    # …and what the enabled button then does, because leaving `STAGING_409` behind an
+    # answered wizard would be a fixture saying `can_materialize: true` and refusing for
+    # `answers_missing` in the same breath.
+    out["STAGING_MANIFEST"] = post_manifest(staging)
+    out["CLEAN_PROJECT_ANSWERED"] = project_row(takko)
     return out
 
 
