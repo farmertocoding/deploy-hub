@@ -83,7 +83,7 @@ import re  # noqa: E402 — grouped with this section rather than at the top
 SIM_JS = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "src" / "sim.js"
 
 # Flip to True to make sim.js drift fail the suite. See the section comment.
-BLOCKING = False
+BLOCKING = True
 
 _ID_TIER_RE = re.compile(r'"id":\s*"([^"]+)"\s*,\s*"tier":\s*"([^"]+)"')
 
