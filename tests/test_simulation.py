@@ -87,6 +87,14 @@ BLOCKING = True
 
 _ID_TIER_RE = re.compile(r'"id":\s*"([^"]+)"\s*,\s*"tier":\s*"([^"]+)"')
 
+# R10-A7: the remediation line, and it is a command that RUNS. It used to end
+# `--project-2`, which `sim_fixture_payloads.main` has never accepted — it took its argv
+# and did nothing with it, so an operator following the instruction got a full
+# regeneration and believed they had scoped one. The generator now refuses arguments
+# outright (exit 2, the `mutation_gate.py` precedent from this round), and this string
+# is what it accepts.
+REGENERATE = "python scripts_dev/sim_fixture_payloads.py"
+
 
 def _sim_object_literal(text, name):
     """The `const <name> = { … };` body, by brace balance. None if it is not there."""
@@ -176,8 +184,7 @@ def test_issue_r9_q2_sim_js_project_2_still_describes_the_live_scanner(tmp_path)
         return
     message = ("frontend/src/sim.js's project-2 report has drifted from the scanner:\n  "
                + "\n  ".join(drift)
-               + "\n\nRegenerate it: python scripts_dev/sim_fixture_payloads.py "
-                 "--project-2")
+               + "\n\nRegenerate it: " + REGENERATE)
     if BLOCKING:
         raise AssertionError(message)
     warnings.warn(message, stacklevel=1)
@@ -222,3 +229,46 @@ def test_issue_r9_q2_the_sim_js_parse_survives_reformatting():
     mangled = ('{ "blockers": [ {\n  // a comment json.loads will not take\n'
                '  "id":   "core.secret-scan" ,\n  "tier":\t"blocker"\n} ] }')
     assert dict(_ID_TIER_RE.findall(mangled)) == {"core.secret-scan": "blocker"}
+
+
+# ── R10-A6/A7: the harness's key names, and a remediation line that runs ───────
+
+def test_issue_r10_a6_every_harness_key_is_a_sim_js_constant():
+    """R10-A6. The keys of the generator's output ARE the constant names in sim.js, so
+    regenerating is a splice rather than a translation step — and four of them were
+    `*_PROJECT_ROW` against sim.js's `*_PROJECT`.
+
+    A name that does not line up is not a cosmetic difference here: it is a payload
+    quietly not spliced, in the file whose whole point is that nothing in it is typed.
+    Read out of the generator's source rather than by running it, because running it
+    needs a test database and this assertion is about names.
+    """
+    source = (pathlib.Path(__file__).resolve().parent.parent / "scripts_dev"
+              / "sim_fixture_payloads.py").read_text(encoding="utf-8")
+    emitted = set(re.findall(r'out\["([A-Z0-9_]+)"\]', source))
+    declared = set(re.findall(r"^const ([A-Z0-9_]+) = \{",
+                              SIM_JS.read_text(encoding="utf-8"), re.M))
+
+    assert emitted, "the generator emits no keys at all"
+    assert emitted <= declared, sorted(emitted - declared)
+
+
+def test_issue_r10_a7_the_generator_refuses_arguments():
+    """R10-A7. `main` took argv and ignored it, and the drift gate's own remediation
+    line handed it `--project-2` — an option that has never existed. Someone following
+    the instruction got a full regeneration and believed they had scoped one.
+
+    Exit 2 rather than 1, the `mutation_gate.py` precedent from this round: the script
+    declining to run is a different thing from a verdict about the fixtures.
+    """
+    harness = _harness()
+
+    assert harness.main(["--project-2"]) == 2
+    assert harness.main(["anything"]) == 2
+
+
+def test_issue_r10_a7_the_remediation_line_is_a_command_that_runs():
+    """…and the gate's message says what the generator accepts. A remediation line
+    naming a flag its target refuses is worse than none: it is followed."""
+    assert REGENERATE == "python scripts_dev/sim_fixture_payloads.py"
+    assert "--" not in REGENERATE

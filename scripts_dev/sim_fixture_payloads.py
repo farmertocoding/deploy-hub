@@ -157,6 +157,11 @@ def build():
     out["UNSCANNED_REPORT"] = readiness(orders)
     out["UNSCANNED_WIZARD"] = wizard(orders_site)
 
+    # R10-A6: the keys of `out` ARE the constant names in sim.js, so that regenerating
+    # is a splice and not a translation step. These four were `*_PROJECT_ROW` against
+    # sim.js's `*_PROJECT` — the one family that did not line up, in the one place where
+    # a name that does not line up means a payload silently not spliced.
+    #
     # EVERY PROJECT ROW IS CAPTURED BEFORE THE POST THAT SCREEN MAKES, because the row is
     # what the operator is looking at when they press the button. takko/prod is three
     # manifests old, so the fourth is the one the sim returns; atlas-edge has none, so its
@@ -164,10 +169,10 @@ def build():
     # round-8 defect class was a fixture whose numbers were typed to agree with each other.
     for _ in range(3):
         materialize(prod)
-    out["CLEAN_PROJECT_ROW"] = project_row(takko)
-    out["MESSY_PROJECT_ROW"] = project_row(legacy)
-    out["EDGE_PROJECT_ROW"] = project_row(edge)
-    out["UNSCANNED_PROJECT_ROW"] = project_row(orders)
+    out["CLEAN_PROJECT"] = project_row(takko)
+    out["MESSY_PROJECT"] = project_row(legacy)
+    out["EDGE_PROJECT"] = project_row(edge)
+    out["UNSCANNED_PROJECT"] = project_row(orders)
 
     out["CLEAN_MANIFEST"] = post_manifest(prod)
     out["REFUSAL_409"] = post_manifest(shop)
@@ -187,11 +192,29 @@ def build():
     out["STALE_REFUSAL_409"] = post_manifest(prod)
     out["RESCANNED_REPORT"] = readiness(takko)
     out["RESCANNED_WIZARD"] = wizard(prod)
-    out["RESCANNED_PROJECT_ROW"] = project_row(takko)
+    out["RESCANNED_PROJECT"] = project_row(takko)
     return out
 
 
-def main():
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv:
+        # R10-A7, and it is the `mutation_gate.py` precedent from this same round. This
+        # generator takes no arguments and never has: it prints EVERY payload, because
+        # the drift they are checked against is a whole-file property and a partial
+        # regeneration is how half of sim.js gets left behind. The remediation line the
+        # drift gate printed said `--project-2`, an option this `main` has never
+        # accepted and would have silently ignored — so somebody following the
+        # instruction would have got a full run, believed they had scoped it, and been
+        # right by accident. Refusing is the only reading of an argument that cannot be
+        # wrong. Exit 2: declining to run, not a verdict about the fixtures.
+        print(f"sim_fixture_payloads: refusing to run with arguments {argv} — this "
+              f"generator takes none and prints every sim.js payload. The keys of its "
+              f"output are the constant names in frontend/src/sim.js; splice all of "
+              f"them, because the drift gate reads the file as a whole. Run "
+              f"`python scripts_dev/sim_fixture_payloads.py` with no arguments.",
+              file=sys.stderr)
+        return 2
     setup_test_environment()
     runner = DiscoverRunner(verbosity=0, interactive=False)
     old_config = runner.setup_databases()
@@ -200,10 +223,11 @@ def main():
         sys.stdout.write("\n")
     finally:
         runner.teardown_databases(old_config)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 
 # ── DB-free drift-gate entry points (merged from r9-backend-remedy) ─────────────
 #
