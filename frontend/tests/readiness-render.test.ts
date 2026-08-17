@@ -538,3 +538,56 @@ test("f12-4: the selection marker reserves its width in both states", async () =
     "the reserved box must be the same in both states or it reserves nothing");
   assert.match(on.match(marker)![1], /width:1.1em/);
 });
+
+// ── R12-ARCH-1: the guarded fact, on the screen ──────────────────────────────
+
+test("arch-1: a check's refused_paths are rendered under it", () => {
+  const markup = render(CheckBody, {
+    check: { detail: "3 symlinked files resolve outside the scanned repository:",
+             fix_hint: "commit the file itself",
+             refused_paths: ["src/a.ts", "src/b.ts", "src/c.ts"] },
+  });
+  const text = visibleText(markup);
+
+  assert.ok(text.includes("Did not read:"), text);
+  for (const path of ["src/a.ts", "src/b.ts", "src/c.ts"])
+    assert.ok(text.includes(path), `${path} is guarded and rendered nowhere: ${text}`);
+  // One element per path: a filename may contain a comma or a newline, and a delimiter a
+  // name can contain is a name that can forge two entries.
+  assert.equal((markup.match(/<li>/g) || []).length, 3);
+});
+
+test("arch-1: a check with no refusals renders no list and no label", () => {
+  const markup = render(CheckBody, { check: { detail: "d", fix_hint: "f" } });
+  assert.ok(!visibleText(markup).includes("Did not read"), markup);
+  assert.ok(!markup.includes("<ul"), markup);
+});
+
+test("arch-1: the rendered list composes no copy beyond its label", () => {
+  // The F12-2 strip: everything on screen is a payload value or the one label this
+  // component owns.
+  const refused = ["packages/server/src/metrics.ts", "src/metri\\cs.ts"];
+  const text = visibleText(render(CheckBody, { check: { refused_paths: refused } }));
+
+  assert.ok(text.includes("Did not read:"), "nothing rendered — this strip is vacuous");
+  let residue = text;
+  for (const word of [...refused, "Did not read:"]) residue = residue.split(word).join("");
+  assert.equal(residue.trim(), "", `the list says something the payload does not: ${text}`);
+});
+
+test("arch-1: the edge fixture's refusal renders the path the scanner guarded", async () => {
+  // The real payload, through the real component: `node-ts.symlinked-files` on
+  // atlas-edge carries the file its module took out of `core.symlinked-files`.
+  const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/3/readiness/");
+  const check = report.warnings.find((c: any) => c.id === "node-ts.symlinked-files");
+
+  assert.ok(check.refused_paths?.length, "the fixture lost the field");
+  const markup = render(CheckBody, { check });
+
+  // Asserted on the LIST, not on the text: this module's detail quotes the same path
+  // through `repr`, so a text search passes off the prose and proves nothing about the
+  // field — which is the whole finding one layer down.
+  assert.equal((markup.match(/<li>/g) || []).length, check.refused_paths.length);
+  for (const path of check.refused_paths)
+    assert.ok(markup.includes(`<li>${path}</li>`), path);
+});

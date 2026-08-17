@@ -622,3 +622,68 @@ def test_issue_r12_a1_the_core_refusal_line_reports_every_path_it_is_about(tmp_p
     assert sorted(line.refused_paths) == [f"src/{name}" for name in names]
     assert line.detail.count("\n") < len(names), "the prose is capped, as designed"
     assert "and 3 more" in line.detail
+
+
+# ── R12-ARCH-1: a fact nobody reads is not "telling the operator" ─────────────
+
+def test_issue_r12_arch_1_an_ok_tier_check_cannot_vouch_for_a_refusal(
+        tmp_path, registry_sandbox):
+    """R12-A1 moved the guard off the operator-visible prose and onto a machine field,
+    and dropped the tier constraint on the way.
+
+    So a module could list the refused path in the `refused_paths` of an `ok`-tier check
+    whose sentence reads "everything looks fine", satisfy the guard, and have core's
+    refusal line deleted — with nothing on the screen naming the file. Measured before
+    this fix:
+
+        core.symlinked-files present: False
+        prose naming the file: []
+        tier of the vouching check: ['ok']
+
+    That is F-2's reasoning, which R12-A1 deleted along with the substring machinery it
+    was attached to. It was never about substrings: a refusal is a WARNING wherever this
+    repo emits one (`core.symlinked-files`, `node-ts.symlinked-files`), for the stated
+    reason that the survey below it is INCOMPLETE and the operator has to know before
+    trusting the report. A module may only take a refusal out of the core suite's line by
+    putting it somewhere the operator reads refusals from.
+    """
+    root = _escaping_tree(tmp_path, ["metrics.ts"])
+    core._FRAMEWORK_MODULES[:] = [_RefusingModule(
+        returned=lambda r: [r / "src/metrics.ts"],
+        declared=lambda r: ["src/metrics.ts"],
+        detail=lambda r: "everything looks fine",
+        tier="ok")]
+    core._FALLBACK_MODULES[:] = []
+
+    with pytest.raises(ValueError, match="no check in the finished report"):
+        core.scan(root)
+
+
+@pytest.mark.parametrize("tier", ["blocker", "warning"])
+def test_issue_r12_arch_1_a_loud_check_still_vouches(tmp_path, registry_sandbox, tier):
+    """…and both tiers an operator reads a refusal from still do. The rule is about
+    where the fact is announced, not about making the hook harder to use."""
+    root = _escaping_tree(tmp_path, ["metrics.ts"])
+    core._FRAMEWORK_MODULES[:] = [_RefusingModule(
+        returned=lambda r: [r / "src/metrics.ts"],
+        declared=lambda r: ["src/metrics.ts"],
+        detail=lambda r: "symlinked file 'src/metrics.ts' was not read",
+        tier=tier)]
+    core._FALLBACK_MODULES[:] = []
+
+    report = core.scan(root)
+
+    assert "core.symlinked-files" not in [c["id"] for c in report["checks"]]
+    assert next(c for c in report["checks"]
+                if c["id"] == "refusing-test-module.refusals")["refused_paths"] == \
+        ["src/metrics.ts"]
+
+
+def test_issue_r12_arch_1_the_live_refusal_checks_are_loud_enough_to_vouch():
+    """The two checks that carry `refused_paths` today are warnings, so the rule above
+    costs the live code nothing — and if either is ever downgraded, the guard says so
+    rather than the refusal quietly stopping being announced."""
+    from scanner.modules import fallbacks
+
+    assert core._REFUSAL_LOUD_TIERS == ("blocker", "warning")
+    assert fallbacks._MAX_SKIPPED_REPORTED > 0

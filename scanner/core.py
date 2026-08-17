@@ -173,13 +173,23 @@ def module_refused_paths(module, root):
        files` and the module's own line both naming `.env`, warning count 4 on a tree
        with three things wrong with it.
 
-    2. THE MODULE MUST HAVE SAID SO, and R12-A1 changed WHERE that is checked: every
-       path returned here must appear in the `refused_paths` LIST of some check in the
-       finished report. Not in anybody's prose. The hook's entire justification is "I
-       have already told the operator, in my own words"; a module that returns a path
+    2. THE MODULE MUST HAVE ANNOUNCED IT, and R12-A1/R12-ARCH-1 between them fixed what
+       that means: every path returned here must appear in the `refused_paths` LIST of a
+       BLOCKER- OR WARNING-TIER check in the finished report. Not in anybody's prose (the
+       R12-A1 half), and not on an `ok` line either (the R12-ARCH-1 half). The hook's
+       justification is "I have already told the operator" — a module that returns a path
        and reports it nowhere deletes core's refusal line for that file and leaves NO
-       trace — no check names it, no count moves, and the operator's model of what the
-       scan read is wrong with nothing on screen to correct it.
+       trace, and a module that lists it on a check reading "everything looks fine" has
+       deleted the same line and told the same nobody.
+
+       "TOLD THE OPERATOR" IS ALSO NOW TRUE OF THE FIELD ITSELF. When the guard moved off
+       `detail`, the thing it checked became a machine value rendered on no screen — the
+       claim in this docstring outlived its evidence by one round. `CheckBody` in
+       `frontend/src/Readiness.jsx` renders `refused_paths` under the check that carries
+       it ("Did not read:", then the paths), so the fact the guard accepts as an
+       announcement is the fact the operator reads. The tier rule and the rendering are
+       two halves of one sentence: it has to be said, and it has to be said where a
+       refusal is read.
 
     WHY A FIELD AND NOT THE SENTENCE (R12-A1). The first version of this guard read
     `detail`, which is a REPORT LINE: it quotes repo-controlled text through `repr`, it
@@ -223,13 +233,27 @@ def module_refused_paths(module, root):
     return list(hook(root)) if hook is not None else []
 
 
+# The tiers a check may vouch from. R12-ARCH-1, and it is F-2's reasoning carried into
+# the mechanism that replaced F-2's: a refusal is a WARNING wherever this repo emits one
+# (`core.symlinked-files`, `node-ts.symlinked-files`), for the stated reason that the
+# survey below it is INCOMPLETE and the operator has to know that before trusting the
+# report. Taking a file out of the core suite's refusal line and listing it on an `ok`
+# check whose sentence reads "everything looks fine" is not telling anybody anything —
+# measured, and green, before this constant came back.
+#
+# It is a different job from the one this name had in R11-A2, where it bounded a fuzzy
+# PREFIX match. Nothing here is fuzzy any more: the tier decides whether a check counts
+# as an announcement, not whether a string counts as a name.
+_REFUSAL_LOUD_TIERS = ("blocker", "warning")
+
+
 def _refused_paths_problem(module, root, refused, reported):
     """The R11-A2/R12-A1 contract, as a sentence to raise or None.
 
-    `reported` is the set of repo-relative POSIX paths the SURVIVING report declares —
-    every `CheckResult.refused_paths` entry in the finished check list, after
-    supersession has replaced what it replaces. See `module_refused_paths` for why both
-    of those words are load-bearing.
+    `reported` is the set of repo-relative POSIX paths the SURVIVING report ANNOUNCES —
+    the `CheckResult.refused_paths` of every blocker- or warning-tier check in the
+    finished list, after supersession has replaced what it replaces. See
+    `module_refused_paths` for why each of those words is load-bearing.
     """
     root = Path(root)
     for raw in refused:
@@ -253,8 +277,10 @@ def _refused_paths_problem(module, root, refused, reported):
                 f"then reports is a refusal the operator is told about by nobody. Put "
                 f"the repo-relative POSIX path in the `refused_paths` of the check that "
                 f"announces it (the detail is the sentence; this is the fact), or leave "
-                f"the file in the core suite\'s list. Reported by the surviving report: "
-                f"{sorted(reported) or 'nothing'}")
+                f"the file in the core suite\'s list — and that check has to be one the "
+                f"operator reads a refusal from ({' or '.join(_REFUSAL_LOUD_TIERS)}), "
+                f"because a path listed on an `ok` line is a fact nobody is being told. "
+                f"Announced by the surviving report: {sorted(reported) or 'nothing'}")
     return None
 
 
@@ -403,7 +429,8 @@ def scan(root):
     # `strict=True`: the two sequences are built from `mods` a dozen lines apart, and a
     # length that stopped matching would silently pair a module with another module's
     # refusals — the fail-open this whole guard is about, one level up.
-    reported = {rel for c in checks for rel in c.refused_paths}
+    reported = {rel for c in checks if c.tier in _REFUSAL_LOUD_TIERS
+                for rel in c.refused_paths}
     for m, refused in zip(mods, refused_by_module, strict=True):
         problem = _refused_paths_problem(m, root, refused, reported)
         if problem is not None:

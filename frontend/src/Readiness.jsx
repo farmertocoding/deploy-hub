@@ -236,10 +236,46 @@ export function materializeOutcome(status, data) {
 // two paragraphs stay two paragraphs.
 const PRE_LINE = { whiteSpace: "pre-line", margin: "6px 0" };
 
+// R12-ARCH-1: the fact the scanner's guard accepts as an announcement, rendered.
+//
+// `CheckResult.refused_paths` (R12-A1) is the machine-readable list of files a check is
+// telling the operator were NOT READ. `scanner.core.scan` lets a module take those files
+// out of `core.symlinked-files` on the strength of it — and until this rendered, the
+// thing being checked was a value on no screen. The guard's own docstring claimed the
+// module had "already told the operator", which was true of the prose the guard used to
+// read and not of the field that replaced it.
+//
+// WHY IT IS NOT A SECOND SPELLING OF THE DETAIL, which is the objection this screen has
+// sustained before (R10-UX-F7 removed a duplicate `aria-label` for exactly that reason):
+// the two are not the same list. `core.symlinked-files` prints ten paths and counts the
+// rest — "… and 3 more" — because a report line is for reading; the field carries every
+// one. And `node-ts.symlinked-files` prints its paths through `repr`, so a committed file
+// called `metri\cs.ts` appears in the sentence with the backslash escaped and here as
+// what it is. Where they do coincide — one refused file, named once in prose — the cost
+// is one short line, and the alternative is a rule about when to render a fact, which is
+// how facts stop being rendered.
+//
+// ONE ITEM PER `<li>`, not a joined string: these are repo-controlled names, a filename
+// may contain a comma or a newline on every filesystem this runs on, and a delimiter that
+// a name can contain is a name that can forge two entries. The element boundary cannot be
+// typed into a filename. (React escapes the text itself, so this is about reading, not
+// injection.)
+//
+// The label is the only word this composes, which is the §4b line for a screen that
+// otherwise renders the server verbatim.
 export function CheckBody({ check }) {
+  const refused = check.refused_paths || [];
   return (
     <>
       {check.detail && <p style={PRE_LINE}>{check.detail}</p>}
+      {!!refused.length && (
+        <div style={{ margin: "6px 0", color: "#e3b341" }}>
+          Did not read:
+          <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em" }}>
+            {refused.map((path) => <li key={path}>{path}</li>)}
+          </ul>
+        </div>
+      )}
       {check.fix_hint &&
         <p style={{ ...PRE_LINE, color: "#8b949e" }}>Fix: {check.fix_hint}</p>}
     </>
