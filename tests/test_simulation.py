@@ -150,60 +150,86 @@ def _harness():
     return sim_fixture_payloads
 
 
-def test_issue_r9_q2_sim_js_project_2_still_describes_the_live_scanner(tmp_path):
-    """R9-Q2. Scan the committed fixture tree builder's output for real and compare the
-    check ids and tiers against the ones sim.js's project-2 report shows.
+# ── R10-Q3: the gate's own gate re-implemented the gate ────────────────────────
+#
+# `…_can_see_a_rename` existed because an advisory check that cannot fail is a green
+# light wired to nothing. It then wrote its own `missing` / `retiered` comprehensions
+# instead of driving the comparison it exists to exercise, so it proved a property of
+# itself. The demonstration is one line each: putting `if False` in front of BOTH real
+# conditions in the gate below left all five tests in this file green — the gate found
+# no drift because it can no longer see any, and its guard agreed because it was never
+# looking at the gate.
+#
+# So the comparison is a function, and both of them drive it.
 
-    Tolerant of ADDITIONS in the live report and of nothing else, which is the axis a
-    coordinated rename moves along. `tmp_path` rather than `/tmp`, because
-    `sim_fixture_repos.write` starts by deleting its target and two runs racing on one
-    hard-coded path is a flake rather than a finding.
+
+def drift_lines(shown, live, what="the scan of the fixture"):
+    """One line per way sim.js's `{id: tier}` disagrees with the live scan's.
+
+    DIRECTION, and it is deliberately one-way: an id in the LIVE scan that sim.js does
+    not carry is fine — a new check lands and the demo fixture catches up when someone
+    refreshes it. An id in SIM.JS that the live scan does not emit at that tier is the
+    finding: a rename, a removal, or a tier change, which is the sentence "sim.js is
+    fiction" in mechanical form.
     """
-    import sys
-
-    repo = pathlib.Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(repo / "scripts_dev"))
-    import sim_fixture_payloads
-
-    live = sim_fixture_payloads.check_tiers(
-        sim_fixture_payloads.payloads(tmp_path, keys={"project-2"})["project-2"])
-    shown = sim_check_tiers()
-
-    assert shown, "sim.js's project-2 report names no checks at all"
-
-    drift = []
+    lines = []
     for check_id, tier in sorted(shown.items()):
         if check_id not in live:
-            drift.append(f"sim.js shows {check_id!r} ({tier}); the scan of the messy "
-                         f"fixture emits no such check — renamed or removed")
+            lines.append(f"sim.js shows {check_id!r} ({tier}); {what} emits no such "
+                         f"check — renamed or removed")
         elif live[check_id] != tier:
-            drift.append(f"sim.js shows {check_id!r} at tier {tier!r}; the live scan "
+            lines.append(f"sim.js shows {check_id!r} at tier {tier!r}; the live scan "
                          f"reports it at {live[check_id]!r}")
+    return lines
 
-    if not drift:
+
+def report_drift(name, shown, live, what="the scan of the fixture"):
+    """Raise (or warn, if `BLOCKING` is ever turned off again) for any drift found.
+
+    The VERDICT half, separated from the comparison so a test can exercise the raise
+    without having to manufacture a whole drifted fixture tree. Both halves need
+    exercising for the same reason: a check nobody has ever seen fail is a check nobody
+    knows can.
+    """
+    lines = drift_lines(shown, live, what)
+    if not lines:
         return
-    message = ("frontend/src/sim.js's project-2 report has drifted from the scanner:\n  "
-               + "\n  ".join(drift)
+    message = (f"frontend/src/sim.js's {name} has drifted from the scanner:\n  "
+               + "\n  ".join(lines)
                + "\n\nRegenerate it: " + REGENERATE)
     if BLOCKING:
         raise AssertionError(message)
     warnings.warn(message, stacklevel=1)
 
 
-def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
-    """The gate's own gate. An advisory check that cannot fail is a green light wired to
-    nothing, and this one's failure path is a warning nobody would notice missing — so
-    the comparison is exercised against a deliberately renamed and re-tiered payload
-    rather than trusted because it was read.
+def test_issue_r9_q2_sim_js_project_2_still_describes_the_live_scanner(tmp_path):
+    """R9-Q2. Scan the committed fixture tree builder's output for real and compare the
+    check ids and tiers against the ones sim.js's project-2 report shows.
+
+    `tmp_path` rather than `/tmp`, because `sim_fixture_repos.write` starts by deleting
+    its target and two runs racing on one hard-coded path is a flake rather than a
+    finding.
     """
-    import sys
+    harness = _harness()
 
-    repo = pathlib.Path(__file__).resolve().parent.parent
-    sys.path.insert(0, str(repo / "scripts_dev"))
-    import sim_fixture_payloads
+    live = harness.check_tiers(
+        harness.payloads(tmp_path, keys={"project-2"})["project-2"])
+    shown = sim_check_tiers()
 
-    live = sim_fixture_payloads.check_tiers(
-        sim_fixture_payloads.payloads(tmp_path, keys={"project-2"})["project-2"])
+    assert shown, "sim.js's project-2 report names no checks at all"
+    report_drift("project-2 report", shown, live, "the scan of the messy fixture")
+
+
+def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
+    """The gate's own gate, DRIVING the gate (R10-Q3). A deliberately renamed and
+    re-tiered payload, through the same `drift_lines` the check above calls — so a
+    comparison that stops comparing takes this test down with it instead of leaving it
+    agreeing with itself.
+    """
+    harness = _harness()
+
+    live = harness.check_tiers(
+        harness.payloads(tmp_path, keys={"project-2"})["project-2"])
     assert "core.secret-scan" in live and live["core.secret-scan"] == "blocker"
 
     shown = dict(live)
@@ -211,13 +237,49 @@ def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
     shown["django.debug-hardcoded"] = "warning"                  # the tier change
     shown["core.declaration-file"] = "warning"                   # unchanged, must pass
 
-    missing = [k for k in shown if k not in live]
-    retiered = [k for k, t in shown.items() if k in live and live[k] != t]
+    lines = drift_lines(shown, live, "the scan of the messy fixture")
 
-    assert missing == ["core.secrets"]
-    assert retiered == ["django.debug-hardcoded"]
-    # …and an id the live scan has that sim.js does not is NOT drift.
+    assert len(lines) == 2, lines
+    assert "'core.secrets'" in lines[0] and "renamed or removed" in lines[0]
+    assert "'django.debug-hardcoded'" in lines[1] and "'blocker'" in lines[1]
+    # …and an id the live scan has that sim.js does not is NOT drift: the rename left
+    # `core.secret-scan` on the live side only, and it produced no line.
     assert set(live) - set(shown) == {"core.secret-scan"}
+    assert drift_lines(live, live) == []
+
+
+def test_issue_r10_q3_the_blocking_verdict_raises():
+    """The half no green run has ever executed. `BLOCKING` was flipped to True in
+    9f80060 on the strength of a run in which it found nothing — which is the only
+    state this branch has ever been observed in.
+
+    Exercised through `report_drift` rather than by drifting a fixture, so the assertion
+    is about the verdict and the message, and cannot be satisfied by a scanner change.
+    """
+    assert BLOCKING is True, "the gate is advisory; 9f80060 flipped it"
+
+    with pytest.raises(AssertionError) as caught:
+        report_drift("EDGE_REPORT", {"core.gone": "warning"}, {})
+
+    message = str(caught.value)
+    assert "EDGE_REPORT" in message
+    assert "renamed or removed" in message
+    assert REGENERATE in message, "a refusal without the remedy is a puzzle"
+
+
+def test_issue_r10_q3_the_advisory_verdict_warns_instead(monkeypatch):
+    """…and the other arm, which is what this check shipped as for one round and what it
+    returns to if anyone turns it off. A `BLOCKING = False` that silently raised, or a
+    True that silently warned, is the same defect in either direction."""
+    monkeypatch.setattr("tests.test_simulation.BLOCKING", False)
+
+    with pytest.warns(UserWarning, match="renamed or removed"):
+        report_drift("EDGE_REPORT", {"core.gone": "warning"}, {})
+
+    # No drift, no warning, either way round.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        report_drift("EDGE_REPORT", {"core.x": "ok"}, {"core.x": "ok"})
 
 
 def test_issue_r9_q2_the_sim_js_parse_survives_reformatting():
