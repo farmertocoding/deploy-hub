@@ -1,4 +1,5 @@
 """Fallback modules + common-core checks (review3 §V4; scanner/modules/fallbacks.py)."""
+import json
 import pathlib
 import shutil
 
@@ -681,3 +682,208 @@ def test_real_registry_prefers_django_module_over_fallbacks(tmp_path):
     names = [m.name for m in core.detect_modules(tmp_path)]
     assert "dockerfile" not in names
     assert "static" not in names
+
+
+# ── R9-A: containment at the shared seam ────────────────────────────────────────
+#
+# Round 9 contained node_ts: its source walk, its `package.json` reads and its four
+# fixed-name reads all judge a symlinked file by where it LANDS, and refuse one that
+# resolves outside the scan root. The comment that shipped with that work said the
+# reason `fallbacks` needed none of it was:
+#
+#     Nothing in fallbacks lets file CONTENT choose a default the operator is then
+#     offered.
+#
+# That was false in both directions and the two probes below are the reviewer's, run
+# against master:
+#
+#   * a repo whose only `Dockerfile` is `-> ../victim/Dockerfile` scanned as
+#     `modules: ['dockerfile']` with `manifest_draft.components.service.port = 9999`
+#     read off the neighbour, the `dockerfile.port` wizard question suppressed because a
+#     port had been "found", and `dockerfile.expose` / `dockerfile.non-root` /
+#     `dockerfile.latest-tag` all vouching `ok` for a file the repo does not contain;
+#   * a django repo whose `config/settings.py` is `-> ../../victim/settings.py` had
+#     `django.env.EVIL_TOKEN` injected into its wizard question list — settings
+#     discovery rides `_iter_files`, which yielded symlinked files unconditionally.
+#
+# The carve-out that survives is the SECRET-SCAN axis, and it is the one the round-7
+# comment was actually about: a committed symlinked `.env` pointing at a real secret is
+# exactly what `core.secret-scan` hunts, and refusing to read it there would hide the
+# finding the check exists for. Everything else — a check verdict, a wizard question or
+# default, a manifest fragment — may not be derived from content outside the root.
+
+def _victim_and_repo(tmp_path):
+    """A scan root with a neighbouring tree the scan was never pointed at."""
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    return victim, repo
+
+
+def test_issue_r9_a_a_symlinked_dockerfile_cannot_steer_the_report(tmp_path):
+    """Probe 1, verbatim. `_parse_root_dockerfile` opened `root / "Dockerfile"` by name
+    and read whatever the repo pointed that name at — no walk, no containment rule.
+
+    Every one of the four outputs it feeds is asserted here rather than the parse
+    result, because the parse result is not what an operator sees: the port lands in the
+    frozen manifest's service component, its absence is what makes the wizard ASK for a
+    port, and the three checks are the report lines that say this image is fine.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / "Dockerfile").write_text(
+        "FROM python:3.12-slim\nRUN useradd -m app\nUSER app\nEXPOSE 9999\n")
+    (repo / "Dockerfile").symlink_to("../victim/Dockerfile")
+    (repo / "index.html").write_text("<h1>hi</h1>\n")
+
+    report = core.scan(repo)
+    results = [core.CheckResult(**c) for c in report["checks"]]
+
+    assert report["modules"] == ["dockerfile"]
+    assert report["manifest_draft"]["components"]["service"]["port"] is None
+    assert "dockerfile.port" in [q["id"] for q in report["wizard_questions"]]
+    assert by_id(results, "dockerfile.expose").tier == "warning"
+    assert by_id(results, "dockerfile.non-root").tier == "warning"
+    refused = by_id(results, "core.symlinked-files")
+    assert refused.tier == "warning"
+    assert "Dockerfile" in refused.detail
+
+
+def test_issue_r9_a_a_symlinked_settings_module_cannot_inject_a_wizard_question(
+        tmp_path):
+    """Probe 2, verbatim. Django's settings discovery is `fallbacks._iter_files`, which
+    yielded a symlinked file unconditionally, so the neighbour's `os.environ['…']`
+    names became questions the operator is asked to fill in — and a `SECRET`-ish name
+    among them becomes a vault-stored secret, on somebody else's say-so.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / "settings.py").write_text(
+        "import os\n\nDEBUG = False\nEVIL = os.environ['EVIL_TOKEN']\n")
+    (repo / "manage.py").write_text("import sys\n")
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["django==5.2"]\n')
+    (repo / "config").mkdir()
+    (repo / "config" / "__init__.py").write_text("")
+    (repo / "config" / "settings.py").symlink_to("../../victim/settings.py")
+
+    report = core.scan(repo)
+
+    assert report["modules"] == ["django"]
+    assert "django.env.EVIL_TOKEN" not in [q["id"] for q in report["wizard_questions"]]
+    assert "EVIL_TOKEN" not in json.dumps(report)
+    refused = by_id([core.CheckResult(**c) for c in report["checks"]],
+                    "core.symlinked-files")
+    assert "config/settings.py" in refused.detail
+
+
+def test_issue_r9_a_the_remaining_fixed_name_reads_are_contained_too(tmp_path):
+    """The two other reads in this module that open a repo-controlled name and derive a
+    verdict from what comes back: `.gitignore` (whose content IS `core.gitignore`) and
+    `requirements*.txt` (whose `==` lines are one of the three ways `core.lockfile` is
+    satisfied). Both vouched for the scanned repo out of the neighbour's files.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / ".gitignore").write_text(".env\nnode_modules/\n")
+    (victim / "requirements.txt").write_text("django==5.2\ngunicorn==21.2.0\n")
+    (repo / ".gitignore").symlink_to("../victim/.gitignore")
+    (repo / "requirements.txt").symlink_to("../victim/requirements.txt")
+    (repo / "package.json").write_text('{"name": "x"}\n')
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    (repo / ".env").write_text("PLAIN=1\n")
+
+    results = fallbacks.common_checks(repo)
+
+    gitignore = by_id(results, "core.gitignore")
+    assert gitignore.tier == "warning", gitignore
+    assert ".env" in gitignore.detail and "node_modules" in gitignore.detail
+    assert by_id(results, "core.lockfile").tier == "warning"
+
+
+def test_issue_r9_a_the_secret_scan_still_reads_an_escaping_symlink(tmp_path):
+    """THE CARVE-OUT, and it is the whole reason this is not "refuse every link".
+
+    A committed `.env` that is a symlink to a real secret file is the finding
+    `core.secret-scan` exists to make. The refusal rule is scoped to the axis, not to
+    the walk: the escaping file is kept out of every OTHER check's input and handed to
+    the secret scan alone.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / "env").write_text("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n")
+    (repo / ".env").symlink_to("../victim/env")
+    (repo / "index.html").write_text("<h1>hi</h1>\n")
+
+    results = fallbacks.common_checks(repo)
+
+    secrets = by_id(results, "core.secret-scan")
+    assert secrets.tier == "blocker", secrets
+    assert ".env" in secrets.detail
+
+
+def test_issue_r9_a_the_carve_out_does_not_widen_to_the_other_axes(tmp_path):
+    """…and the same file may not answer a question about the repo's own shape. A
+    symlinked source file carrying an auth decorator used to satisfy `core.exposure-auth`
+    — an `ok` that says "this site authenticates its users" about a file the repo does
+    not contain.
+    """
+    victim, repo = _victim_and_repo(tmp_path)
+    (victim / "views.py").write_text(
+        "from django.contrib.auth.decorators import login_required\n"
+        "\n\n@login_required\ndef home(request):\n    return 1\n")
+    (repo / "views.py").symlink_to("../victim/views.py")
+    (repo / "index.html").write_text("<h1>hi</h1>\n")
+
+    results = fallbacks.common_checks(repo)
+
+    assert by_id(results, "core.exposure-auth").tier == "warning"
+
+
+def test_issue_r9_a_a_scan_root_reached_through_a_symlink_is_read_normally(tmp_path):
+    """False-positive guard 1, mirroring the node_ts test of the same shape: a scan root
+    is frequently reached THROUGH a symlink (`/tmp` on macOS, a checkout under a linked
+    home), so both sides are resolved. Comparing an unresolved root against a resolved
+    file refuses every file in such a tree — the whole repo would go dark.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "Dockerfile").write_text("FROM python:3.12-slim\nUSER app\nEXPOSE 8080\n")
+    (real / ".gitignore").write_text(".env\n")
+    linked = tmp_path / "linked"
+    linked.symlink_to(real, target_is_directory=True)
+
+    report = core.scan(linked)
+    results = [core.CheckResult(**c) for c in report["checks"]]
+
+    assert report["manifest_draft"]["components"]["service"]["port"] == 8080
+    assert by_id(results, "dockerfile.expose").tier == "ok"
+    assert [c for c in report["checks"] if c["id"] == "core.symlinked-files"] == []
+
+
+def test_issue_r9_a_an_in_root_symlinked_file_is_still_read(tmp_path):
+    """False-positive guard 2. `Dockerfile -> docker/Dockerfile.prod` and
+    `src/config.ts -> ../shared/config.ts` are ordinary committed layouts whose content
+    is inside the tree the operator pointed at either way. Containment, not
+    refuse-all-links: refusing these would drop real source out of the report for
+    nothing.
+    """
+    _victim, repo = _victim_and_repo(tmp_path)
+    (repo / "docker").mkdir()
+    (repo / "docker" / "Dockerfile.prod").write_text(
+        "FROM python:3.12-slim\nUSER app\nEXPOSE 8080\n")
+    (repo / "Dockerfile").symlink_to("docker/Dockerfile.prod")
+
+    report = core.scan(repo)
+    results = [core.CheckResult(**c) for c in report["checks"]]
+
+    assert report["manifest_draft"]["components"]["service"]["port"] == 8080
+    assert by_id(results, "dockerfile.expose").tier == "ok"
+    assert [c for c in report["checks"] if c["id"] == "core.symlinked-files"] == []
+
+
+def test_issue_r9_a_a_repo_with_no_symlinks_reports_exactly_what_it_did_before(tmp_path):
+    """`core.symlinked-files` is APPENDED and only when something was refused — the same
+    None-omission property `core.declaration-file` was added under, for the same reason:
+    a report from an ordinary repo must be byte-identical to the one it produced before
+    this check existed, or every recorded demo artifact moves.
+    """
+    ids = [c.id for c in fallbacks.common_checks(FIXTURES / "dockerfile_project")]
+    assert "core.symlinked-files" not in ids

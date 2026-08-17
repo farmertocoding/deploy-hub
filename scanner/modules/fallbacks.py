@@ -459,12 +459,119 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".
 
 # ── file walking (static reads only) ────────────────────────────────────────────
 
-def _iter_files(root, skipped=None, *, prune=None, max_depth=None):
+# ── R9-A: resolve-containment, and this is the seam it belongs on ──────────────
+#
+# Round 9 contained `node_ts` — its source walk, its `package.json` reads and its four
+# fixed-name reads — and the comment that shipped with that work said `fallbacks` needed
+# none of the same treatment because
+#
+#     Nothing in fallbacks lets file CONTENT choose a default the operator is then
+#     offered. Here it does, in every check in this module.
+#
+# THAT SENTENCE WAS FALSE, and it was false about both halves of this module. Two
+# probes, no `..` in anything the repo commits and no workspace pattern involved:
+#
+#   * `Dockerfile -> ../victim/Dockerfile`, and `_parse_root_dockerfile` opened the
+#     name. `EXPOSE 9999` from the neighbour became `manifest_draft.components.service
+#     .port`, which SUPPRESSED the `dockerfile.port` wizard question (a port had been
+#     "found", so the operator is never asked), and `dockerfile.expose`,
+#     `dockerfile.non-root` and `dockerfile.latest-tag` all reported `ok` about an image
+#     definition the scanned repo does not contain. That is a default chosen by outside
+#     content, a wizard question deleted by outside content, and three vouched check
+#     verdicts, from one link.
+#   * `config/settings.py -> ../../victim/settings.py`, and this one rides the walk
+#     below rather than a fixed name: `django._settings_files` is `_iter_files` plus a
+#     name rule, and every `os.environ['…']` in the neighbour's settings became a
+#     `django.env.<NAME>` wizard question — a `SECRET`-ish name among them becomes a
+#     value the operator is asked to type into the vault.
+#
+# So containment moves HERE, to the one walk both modules share, rather than being
+# copied into each caller: `_iter_files` refuses to YIELD an escaping file symlink, and
+# `read_contained` is the same rule for the reads that open a fixed name and never touch
+# the walk. Those two are the only ways into a repo-controlled path in this module and
+# in `django`, which is said out loud at each of them, because a rule that is not
+# written down is what produced this finding twice.
+#
+# THE CARVE-OUT, kept as narrow as it can be stated: the SECRET-SCAN axis may still read
+# an escaping link. A committed `.env` that is a symlink to a real secret file is
+# precisely what `core.secret-scan` hunts, and refusing to read it there would hide the
+# finding the check exists for — that much of the round-7 rationale was right. It is
+# scoped to the AXIS, not to the walk: `_text_files` puts escaping files in a separate
+# list, `common_checks` hands that list to `_check_secret_scan` and to nothing else, and
+# no other check, question, default or manifest fragment sees a byte of it.
+#
+# BOTH SIDES RESOLVED, and only symlinks are examined — `node_ts._symlink_escape_problem`
+# for both reasons. A scan root is frequently reached THROUGH a symlink (`/tmp` on macOS,
+# a checkout under a linked home), so comparing an unresolved root against a resolved
+# file would refuse every file in such a tree; and an ordinary file found by a walk that
+# already prunes symlinked directories is inside the tree by construction, so `resolve()`
+# on every file of every scan would be paid for nothing.
+#
+# WHAT THIS RULE IS NOT ABOUT: existence. `DockerfileModule.detect`, `StaticModule
+# .detect`, `_check_declaration_file` and `_locked_at_or_above` ask `is_file()` about a
+# name and read nothing, so a symlinked `Dockerfile` still selects the dockerfile module
+# — and then every check it makes reports the honest "no EXPOSE / no USER" of a file
+# this scan may not read — and a symlinked `package-lock.json` still satisfies
+# `core.lockfile`. Deriving a module's SELECTION, or a "this file is here" answer, from
+# a link is a smaller thing than deriving a verdict from its content; it points in the
+# safe direction for the two `detect`s, and for the lockfile probe it is the same
+# question the walk answers about every other committed file. Narrowing it is a
+# behaviour decision about what a linked path MEANS to a deploy — the same call
+# `node_ts._find_data_files` is parked on — and wants its own diff. Stated rather than
+# left for the next reader to find, which is the mistake this fix is undoing.
+
+
+def escapes_root(root, path):
+    """True when `path` is a symlink resolving outside `root`. The containment rule.
+
+    Public because `django` reads through it too: one rule, one implementation. A second
+    copy is the defect N6, N7 and R4-12 are each an instance of.
+    """
+    path = Path(path)
+    if not path.is_symlink():
+        return False
+    try:
+        resolved, root_resolved = path.resolve(), Path(root).resolve()
+    except OSError:
+        # Unresolvable is not demonstrably contained, and this rule fails closed: the
+        # secret-scan carve-out is the only axis allowed to read one of these, and it
+        # gets them from the `escaping` list either way.
+        return True
+    return root_resolved not in resolved.parents
+
+
+def read_contained(root, path, skipped=None, escaping=None):
+    """`_read_text` for a fixed-name read, refusing content that escapes `root`.
+
+    Returns None for a refused file — which is what `_read_text` already yields for an
+    unreadable one, so every caller's existing empty-input path IS the refusal path and
+    no caller learns a new failure mode.
+
+    ONE OF THE TWO ENTRY POINTS. Every read this module and `django` make of a
+    repo-controlled path goes through this or through `_iter_files`; a third way in is
+    the finding, not a convenience.
+    """
+    path = Path(path)
+    if escapes_root(root, path):
+        if escaping is not None:
+            escaping.append(path)
+        return None
+    return _read_text(path, skipped)
+
+
+def _iter_files(root, skipped=None, *, prune=None, max_depth=None, escaping=None):
     """Yield tracked-looking files under root, skipping dependency/build/cache dirs.
 
     Dotfiles (`.env`) and dot-directories (`.github/`) are both yielded — only the
     names in `_SKIP_DIRS` are pruned. Symlinked directories are not followed: a link
     out of the tree is not the project's source, and a link back into it is a loop.
+
+    R9-A: a symlinked FILE whose target resolves outside `root` is not yielded either —
+    see the comment above this function for the two escapes that were live through it.
+    `escaping`, when given, is a list this appends every such path to, which is how the
+    secret-scan carve-out gets its input and how `core.symlinked-files` reports the
+    refusal. A caller that passes nothing simply does not see the file, which is the
+    right default for every consumer of this walk but one.
 
     R7-2: `skipped`, when given, is a list this appends every path the filesystem
     REFUSED to it — a permission-denied directory, one that vanished mid-walk. It used
@@ -541,6 +648,10 @@ def _iter_files(root, skipped=None, *, prune=None, max_depth=None):
             elif path.is_file():
                 if max_depth is not None and depth + 1 > max_depth:
                     continue
+                if escapes_root(root, path):
+                    if escaping is not None:
+                        escaping.append(path)
+                    continue
                 yield path
 
 
@@ -581,18 +692,29 @@ def _read_text(path, skipped=None):
             return None
 
 
-def _text_files(root, skipped=None):
+def _text_files(root, skipped=None, escaped=None):
     """[(path, text)] for every scannable text file under root.
 
     `skipped` is threaded to both halves of the walk (R7-2) — the directories that could
     not be opened and the files that could not be read are one list, because they are
     one fact about the report: this is not everything.
+
+    R9-A: `escaped`, when given, is filled with the same `(path, text)` pairs for the
+    symlinked files the walk REFUSED because they resolve outside `root` — a separate
+    list rather than a flag on the tuple, so a check either asked for them or cannot
+    reach them. `common_checks` gives that list to `_check_secret_scan` and to nothing
+    else.
     """
     out = []
-    for path in _iter_files(root, skipped):
+    escaping = [] if escaped is not None else None
+    for path in _iter_files(root, skipped, escaping=escaping):
         text = _read_text(path, skipped)
         if text is not None:
             out.append((path, text))
+    for path in escaping or ():
+        text = _read_text(path, skipped)
+        if text is not None:
+            escaped.append((path, text))
     return out
 
 
@@ -962,9 +1084,14 @@ def _check_declaration_file(root):
     )
 
 
-def _has_pinned_requirements(directory):
+def _has_pinned_requirements(root, directory):
+    """R9-A: `glob` is a fixed-name read by another spelling — it yields symlinks and
+    never went through the walk. A pinned `requirements.txt` is one of the three ways
+    `core.lockfile` is satisfied, so a link to a neighbour's pinned file vouched for a
+    repo that pins nothing.
+    """
     for req in Path(directory).glob("requirements*.txt"):
-        text = _read_text(req)
+        text = read_contained(root, req)
         if text and "==" in text:
             return True
     return False
@@ -1027,8 +1154,8 @@ def _check_lockfile(root, files=None):
                            f"({' / '.join(_NODE_LOCKS[:4])}) beside it or above it")
     for manifest in _find_manifests(root, {"pyproject.toml"}, files):
         locked = (_locked_at_or_above(manifest, root, _PY_LOCKS)
-                  or _has_pinned_requirements(manifest.parent)
-                  or _has_pinned_requirements(root))
+                  or _has_pinned_requirements(root, manifest.parent)
+                  or _has_pinned_requirements(root, root))
         if not locked:
             missing.append(f"{manifest.relative_to(root)} without "
                            f"{' / '.join(_PY_LOCKS[:2])} or a pinned (==) "
@@ -1057,7 +1184,9 @@ def _check_gitignore(root, texts, files=None):
                      "projects) node_modules, so secrets and dependency trees "
                      "never enter the repo.",
         )
-    lines = [ln.strip() for ln in (_read_text(gitignore) or "").splitlines()
+    # R9-A: the content of this file IS `core.gitignore`'s verdict, so it is read
+    # through the containment rule like every other repo-controlled name.
+    lines = [ln.strip() for ln in (read_contained(root, gitignore) or "").splitlines()
              if ln.strip() and not ln.strip().startswith("#")]
 
     def covered(token):
@@ -1196,10 +1325,15 @@ def common_checks(root):
     # R7-2: one list, filled by the one walk the suite makes, read by the one check that
     # has anything to say about it.
     skipped = []
-    texts = _text_files(root, skipped)
+    # R9-A: and a second one exactly like it, for the same reason at the other end —
+    # `escaped` is what the walk refused to give the suite because it resolves outside
+    # the scan root, and `_check_secret_scan` is the one check allowed to read it. Scope
+    # the axis, not the walk.
+    escaped = []
+    texts = _text_files(root, skipped, escaped)
     paths = [path for path, _ in texts]
     suite = [
-        _check_secret_scan(root, texts, skipped),
+        _check_secret_scan(root, texts + escaped, skipped),
         _check_lockfile(root, paths),
         _check_gitignore(root, texts, paths),
         _check_tests_exist(root),
@@ -1214,14 +1348,72 @@ def common_checks(root):
     notice = _check_declaration_file(root)
     if notice is not None:
         suite.append(notice)
+    # APPENDED LAST, and only when something was refused — same property, and last so
+    # that a repo carrying a `deployhub.yaml` and no symlink keeps the report it had.
+    refusals = _check_symlinked_files(root, escaped)
+    if refusals is not None:
+        suite.append(refusals)
     return suite
+
+
+def _check_symlinked_files(root, escaped):
+    """`core.symlinked-files`, or None when the walk refused nothing.
+
+    THE REFUSAL CHANNEL, and it is core-level rather than per-module by choice. The
+    alternative the finding offered was each module's own problem channel — what
+    `node-ts.symlinked-files` is — and that shape does not fit here: the rule now lives
+    in ONE walk and ONE read helper shared by `fallbacks` and `django`, so a per-module
+    line would mean threading a list through every check signature in both modules to
+    report a fact the shared seam already knows. One check, emitted once per scan, says
+    the same thing in the place the reader is already looking.
+
+    WHAT IT COVERS, stated because it is not "every escaping link in the tree": these
+    are the files the CORE walk refused, which is `_SKIP_DIRS`-pruned and unbounded in
+    depth. `django` walks the same function with its own prune set (it skips `.hg`,
+    `.venv-scaffold` and `staticfiles`; this one skips `data/` and the framework cache
+    dirs), so a link under `data/` is refused to django's checks without being named
+    here. The REFUSAL is what protects the report; this line is how the operator learns
+    a file they can see is not in it, and losing that line for a link under a cache
+    directory costs nothing a reader would act on.
+
+    Warning rather than advice, for `core.declaration-file`'s reason: it is actionable,
+    and the operator's model of what the scan read is wrong until they read it.
+    """
+    if not escaped:
+        return None
+    shown = [_report_path(root, path) for path, _ in escaped[:_MAX_SKIPPED_REPORTED]]
+    rest = len(escaped) - len(shown)
+    lines = [f"{len(escaped)} symlinked file{'' if len(escaped) == 1 else 's'} "
+             f"resolve outside the scanned repository:"]
+    lines.extend(shown)
+    if rest > 0:
+        lines.append(f"… and {rest} more")
+    return core.CheckResult(
+        id="core.symlinked-files", tier="warning",
+        title="Files linked out of the scanned repository were not read",
+        detail="\n".join(lines),
+        fix_hint=(
+            "A scan reads only the tree it was pointed at, so these files decided "
+            "nothing above: no check verdict, no wizard default, no manifest value was "
+            "taken from them, and the results that would have used them report what "
+            "this repository alone contains. They ARE still read by the secret scan — a "
+            "linked .env pointing at a real credential is a finding whichever tree it "
+            "lives in. If one of these is genuinely part of this project, commit the "
+            "file itself (or move the target inside the repository) and scan again."),
+    )
 
 
 # ── fallback module: dockerfile (§V4) ───────────────────────────────────────────
 
 def _parse_root_dockerfile(root):
-    """(has_expose, first_port, has_user, latest_findings) for root Dockerfile."""
-    text = _read_text(Path(root) / "Dockerfile") or ""
+    """(has_expose, first_port, has_user, latest_findings) for root Dockerfile.
+
+    R9-A: through `read_contained`, because this is a fixed-name read that never touches
+    the walk — and it is the probe that demonstrated the finding. A refused Dockerfile
+    parses as the empty one, which lands on "no EXPOSE" (the wizard asks for a port),
+    "no USER" and no `:latest` findings: the safe direction in all three.
+    """
+    text = read_contained(root, Path(root) / "Dockerfile") or ""
     port, has_expose, has_user, latest = None, False, False, []
     aliases = set()
     for lineno, line in enumerate(text.splitlines(), 1):

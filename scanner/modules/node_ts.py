@@ -215,13 +215,29 @@ def _workspace_candidate_problem(root, candidate):
 # So a file symlink is judged by WHERE IT LANDS, and only a target outside the root is
 # refused.
 #
-# WHY `fallbacks` STILL READS THEM ALL, and it is not an inconsistency to tidy up later:
-# `fallbacks._iter_files` is the walk behind the SECRET suite, and a committed symlinked
-# `.env` is precisely the thing that suite exists to find — refusing to read it there
-# would hide the finding it was pointed at. Nothing in `fallbacks` lets file CONTENT
-# choose a default the operator is then offered. Here it does, in every check in this
-# module. Same mechanism, opposite consequence; `fallbacks.py` is deliberately not
-# touched by this.
+# WHY `fallbacks` STILL READS THEM ALL — WITHDRAWN (R9-A). What stood here said:
+#
+#     Nothing in `fallbacks` lets file CONTENT choose a default the operator is then
+#     offered. Here it does, in every check in this module. Same mechanism, opposite
+#     consequence; `fallbacks.py` is deliberately not touched by this.
+#
+# The first sentence was false, and the conclusion drawn from it left two escapes live
+# for a round. `fallbacks._parse_root_dockerfile` read `root / "Dockerfile"` by name, so
+# a link to a neighbour's `EXPOSE 9999` chose the manifest's service port AND deleted
+# the `dockerfile.port` question the operator would otherwise have been asked, while
+# three `dockerfile.*` checks vouched `ok` for an image the repo does not contain; and
+# `django`'s settings discovery rides `fallbacks._iter_files`, so a symlinked
+# `config/settings.py` put the neighbour's `os.environ['…']` names into the wizard as
+# `django.env.*` questions. Both are exactly the consequence this comment claimed was
+# unique to node_ts.
+#
+# What survived the correction is the CARVE-OUT, which was always the real content of
+# the paragraph: `fallbacks._iter_files` is the walk behind the SECRET suite, and a
+# committed symlinked `.env` is precisely the thing that suite exists to find. So since
+# R9-A that walk contains its file yields like this module does, and the escaping files
+# are handed to `_check_secret_scan` and to no other check. The rule is now one rule at
+# one seam — `fallbacks.escapes_root` — and `_symlink_escape_problem` below is this
+# module's problem-sentence wrapper around the same test.
 #
 # BOTH SIDES RESOLVED, for F3's reason: a scan root is frequently reached THROUGH a
 # symlink (`/tmp` on macOS, a checkout under a linked home), so comparing an unresolved
@@ -234,7 +250,16 @@ def _symlink_escape_problem(root, path, kind):
     Only symlinks are examined — an ordinary file found by a walk that already prunes
     symlinked directories is inside the tree by construction, and `resolve()` on every
     file of every scan would be paid for nothing.
+
+    R9-A: the containment TEST is `fallbacks.escapes_root`, which this module's walk and
+    `fallbacks`' walk now both use. What stays here is the SENTENCE — the `node-ts
+    .symlinked-files` detail line, with the quoting rule R8-3 gave every piece of
+    repo-controlled text in this module's report, and the separate wording for a link
+    the filesystem could not resolve at all. Two spellings of one comparison is the
+    drift this repo has paid for three times; two wordings of one refusal is a report.
     """
+    from scanner.modules.fallbacks import escapes_root
+
     if not path.is_symlink():
         return None
     try:
@@ -242,11 +267,12 @@ def _symlink_escape_problem(root, path, kind):
     except ValueError:                                            # pragma: no cover
         rel = _quote_pattern(str(path))
     try:
-        resolved, root_resolved = path.resolve(), Path(root).resolve()
+        path.resolve()
+        Path(root).resolve()
     except OSError as exc:
         return (f"symlinked {kind} {rel} could not be resolved "
                 f"({exc.__class__.__name__}); not read")
-    if root_resolved not in resolved.parents:
+    if escapes_root(root, path):
         return (f"symlinked {kind} {rel} resolves outside the scan root; a scan reads "
                 f"only the tree it was pointed at — not read")
     return None

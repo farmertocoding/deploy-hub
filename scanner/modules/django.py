@@ -105,10 +105,37 @@ def is_settings_module(path):
 
 
 def _read(path):
+    """Text of a path this module already trusts — one the WALK produced.
+
+    R9-A: every path reaching this function must have come from `_iter_files` above,
+    which since round 9 refuses to yield a symlinked file resolving outside the walk
+    root. A fixed name assembled from `root / "..."` or a `glob` has been through no
+    such rule and goes through `_read_contained` instead. Those two are the only ways
+    into a repo-controlled path in this module.
+    """
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _read_contained(root, path):
+    """`_read` for a fixed-name read, refusing content that resolves outside `root`.
+
+    The rule itself is `fallbacks.escapes_root` — one implementation, shared, because a
+    second copy of a containment test is the drift N6, N7 and R4-12 each are. The READER
+    stays this module's own: `fallbacks._read_text` declines binary and oversized files,
+    and swapping it in here would quietly change which manifests django parses on top of
+    a containment fix.
+
+    A refused file reads as `""`, which is what an unreadable one already returns, so no
+    caller learns a new failure mode. The refusal is REPORTED by the core suite's
+    `core.symlinked-files`, whose walk covers the same tree — see that check for the
+    prune-set gap between the two walks.
+    """
+    from scanner.modules.fallbacks import escapes_root
+
+    return "" if escapes_root(root, path) else _read(path)
 
 
 def _shannon(s):
@@ -260,9 +287,9 @@ class DjangoScannerModule:
         parts = []
         py = root / "pyproject.toml"
         if py.is_file():
-            parts.append(_read(py))
+            parts.append(_read_contained(root, py))
         for req in sorted(root.glob("requirements*.txt")):
-            parts.append(_read(req))
+            parts.append(_read_contained(root, req))
         return "\n".join(parts)
 
     def _compose_files(self, root):
@@ -320,7 +347,7 @@ class DjangoScannerModule:
         if not py.is_file():
             return {}
         try:
-            return tomllib.loads(_read(py))
+            return tomllib.loads(_read_contained(root, py))
         except tomllib.TOMLDecodeError:
             return {}
 
@@ -334,7 +361,7 @@ class DjangoScannerModule:
         django_v = None
         dep_lines = list(project.get("dependencies") or [])
         for req in sorted(Path(root).glob("requirements*.txt")):
-            dep_lines.extend(_read(req).splitlines())
+            dep_lines.extend(_read_contained(root, req).splitlines())
         for line in dep_lines:
             m = re.match(r"\s*[Dd]jango\s*(?:\[[^\]]*\])?\s*[=><~!]+=?\s*(\d+)\.(\d+)", line)
             if m:
@@ -377,9 +404,13 @@ class DjangoScannerModule:
     # ── compose sidecars (J7: worker/beat/scheduler/one-shot migrate) ───────
     def _compose_services(self, root):
         out = []
+        contain = getattr(self, "_scan_root", None) or root
         for cf in self._compose_files(root):
             try:
-                data = yaml.safe_load(_read(cf)) or {}
+                # Contained against the SCAN root, not the project root: `_compose_files`
+                # deliberately walks UP from `backend/` to the tree the operator pointed
+                # at, and a compose file up there is inside that tree.
+                data = yaml.safe_load(_read_contained(contain, cf)) or {}
             except yaml.YAMLError:
                 continue
             services = data.get("services") if isinstance(data, dict) else None
@@ -674,7 +705,7 @@ class DjangoScannerModule:
                                detail="uv.lock pins the full resolved dependency set.")
         unpinned = []
         for req in sorted(root.glob("requirements*.txt")):
-            for line in _read(req).splitlines():
+            for line in _read_contained(root, req).splitlines():
                 line = line.strip()
                 if not line or line.startswith(("#", "-")):
                     continue
