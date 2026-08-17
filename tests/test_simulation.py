@@ -202,22 +202,46 @@ def report_drift(name, shown, live, what="the scan of the fixture"):
     warnings.warn(message, stacklevel=1)
 
 
-def test_issue_r9_q2_sim_js_project_2_still_describes_the_live_scanner(tmp_path):
-    """R9-Q2. Scan the committed fixture tree builder's output for real and compare the
-    check ids and tiers against the ones sim.js's project-2 report shows.
+# ── R10-A2: the gate looked at one payload of four ─────────────────────────────
+#
+# GATE CHANGE, and this is what it changes: the drift check ran over `project-2`
+# (MESSY_REPORT) alone, because the harness's DB-free half carried its own two-entry
+# table hardcoding project-1 and project-2. EDGE_REPORT and RESCANNED_REPORT were
+# outside it — so the five stale edge payloads R10-Q2 found went past a blocking gate
+# that was green because it was not looking at them. A gate whose scope is a hand-typed
+# list of two is R4-12's finding, and this is the instance of it that already cost a
+# round.
+#
+# The scope is now the tree inventory itself (`sim_fixture_payloads.SIM_REPORT_TREES`),
+# so a fixture tree added there is a payload this gate compares, without an edit here.
+#
+# A payload naming no checks compares vacuously — {} against {} is never drift — and
+# CLEAN_REPORT is legitimately one of those: its tree has nothing wrong with it. Saying
+# which payloads must name checks is the difference between a gate and a green light.
+MUST_NAME_CHECKS = {"MESSY_REPORT", "EDGE_REPORT", "RESCANNED_REPORT"}
+
+
+def test_issue_r10_a2_every_sim_js_report_payload_still_describes_the_live_scanner(
+        tmp_path):
+    """R9-Q2, widened by R10-A2 to every report-carrying payload in sim.js. Scan the
+    committed fixture trees for real and compare each payload's check ids and tiers
+    against the ones the live scanner emits.
 
     `tmp_path` rather than `/tmp`, because `sim_fixture_repos.write` starts by deleting
     its target and two runs racing on one hard-coded path is a flake rather than a
     finding.
     """
     harness = _harness()
+    live_payloads = harness.payloads(tmp_path)
 
-    live = harness.check_tiers(
-        harness.payloads(tmp_path, keys={"project-2"})["project-2"])
-    shown = sim_check_tiers()
+    assert set(live_payloads) >= MUST_NAME_CHECKS, sorted(live_payloads)
 
-    assert shown, "sim.js's project-2 report names no checks at all"
-    report_drift("project-2 report", shown, live, "the scan of the messy fixture")
+    for name in sorted(live_payloads):
+        shown = sim_check_tiers(name)
+        if name in MUST_NAME_CHECKS:
+            assert shown, f"sim.js's {name} names no checks at all"
+        report_drift(name, shown, harness.check_tiers(live_payloads[name]),
+                     f"the scan of {name}'s fixture tree")
 
 
 def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
@@ -229,7 +253,7 @@ def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
     harness = _harness()
 
     live = harness.check_tiers(
-        harness.payloads(tmp_path, keys={"project-2"})["project-2"])
+        harness.payloads(tmp_path, keys={"MESSY_REPORT"})["MESSY_REPORT"])
     assert "core.secret-scan" in live and live["core.secret-scan"] == "blocker"
 
     shown = dict(live)
@@ -334,3 +358,36 @@ def test_issue_r10_a7_the_remediation_line_is_a_command_that_runs():
     naming a flag its target refuses is worse than none: it is followed."""
     assert REGENERATE == "python scripts_dev/sim_fixture_payloads.py"
     assert "--" not in REGENERATE
+
+
+def test_issue_r10_a2_the_gate_covers_every_report_payload_sim_js_carries(tmp_path):
+    """The gate's scope, asserted rather than trusted. R10-Q2 got through because the
+    scope was a two-entry table somebody had to remember to extend; naming the rule
+    here means the next payload added to sim.js is either covered or is a failing test.
+
+    UNSCANNED_REPORT is the one exemption and it is a real one: `orders-api` has never
+    been scanned, there is no tree to scan, and its payload's four lists are empty by
+    construction.
+    """
+    harness = _harness()
+    declared = set(re.findall(r"^const ([A-Z0-9_]+_REPORT) = \{",
+                              SIM_JS.read_text(encoding="utf-8"), re.M))
+
+    assert declared - set(harness.SIM_REPORT_TREES) == {"UNSCANNED_REPORT"}
+    assert set(harness.SIM_REPORT_TREES) <= declared, (
+        "the inventory names a payload sim.js does not declare")
+    assert set(harness.payloads(tmp_path)) == set(harness.SIM_REPORT_TREES)
+
+
+def test_issue_r10_a2_the_scan_stamp_is_spelled_once(tmp_path):
+    """The harness carried ISO strings restating `CLEAN_AT`/`MESSY_AT`, three lines
+    below their own definitions. It now passes the datetimes and the serializer renders
+    them — and what it renders has to be what sim.js shows, or the two spellings had
+    already drifted and nobody would have known.
+    """
+    harness = _harness()
+    live = harness.payloads(tmp_path)
+
+    for name, payload in sorted(live.items()):
+        shown = json.loads(_sim_object_literal(SIM_JS.read_text(encoding="utf-8"), name))
+        assert payload["scanned_at"] == shown["scanned_at"], name

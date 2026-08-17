@@ -31,6 +31,7 @@ import json
 import os
 import pathlib
 import sys
+from typing import NamedTuple
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -46,12 +47,67 @@ if not _apps.ready:
 from django.test.runner import DiscoverRunner  # noqa: E402
 from django.test.utils import setup_test_environment  # noqa: E402
 
+sys.path.insert(0, str(REPO / "scripts_dev"))          # this file's own directory
+import sim_fixture_repos as fixture_repos  # noqa: E402
+
 UTC = datetime.timezone.utc
 # The dates the fixtures are stitched with. Hand-written, and the sim.js header says so.
 CLEAN_AT = datetime.datetime(2026, 8, 9, 10, 0, tzinfo=UTC)
 MESSY_AT = datetime.datetime(2026, 8, 9, 9, 30, tzinfo=UTC)
 EDGE_AT = datetime.datetime(2026, 8, 9, 11, 15, tzinfo=UTC)
 RESCAN_AT = datetime.datetime(2026, 8, 12, 7, 20, tzinfo=UTC)
+
+
+class _Tree(NamedTuple):
+    """How one report-carrying sim.js payload's tree is built, and when it was scanned.
+
+    `files` and `links` are the dicts in `sim_fixture_repos`, referenced rather than
+    named by string: the inventory and the trees are one thing, so a tree added there
+    and not here is a `KeyError` at the call site rather than a payload the gate below
+    silently never looks at.
+    """
+
+    directory: str
+    files: dict
+    links: dict
+    scanned_at: datetime.datetime
+
+
+# ── the tree inventory, spelled once (R10-A2) ─────────────────────────────────
+#
+# KEYED BY THE sim.js CONSTANT, like everything else this file emits. It used to be
+# keyed `project-1` / `project-2` in a table that listed exactly those two, so the
+# blocking drift gate could not see EDGE_REPORT or RESCANNED_REPORT at all — which is
+# the precise gap R10-Q2 shipped through: five stale edge payloads, past a gate that was
+# green because it was not looking.
+#
+# `scanned_at` is the DATETIME, not a second copy of it as an ISO string. The strings
+# that used to live here restated CLEAN_AT and MESSY_AT, three lines below their own
+# definitions, and `DateTimeField.to_representation` renders the datetime to exactly
+# that string anyway — so the copy bought nothing and could disagree.
+SIM_REPORT_TREES = {
+    "CLEAN_REPORT": _Tree("cleanrepo", fixture_repos.CLEAN, None, CLEAN_AT),
+    "MESSY_REPORT": _Tree("messyrepo", fixture_repos.MESSY, None, MESSY_AT),
+    "EDGE_REPORT": _Tree("edgerepo", fixture_repos.EDGE, fixture_repos.EDGE_LINKS,
+                         EDGE_AT),
+    "RESCANNED_REPORT": _Tree("cleanrepo-rescanned", fixture_repos.CLEAN_RESCANNED,
+                              None, RESCAN_AT),
+}
+
+# Written beside them and carrying no payload of its own: what the edge tree's committed
+# symlink points AT. Without it that link is BROKEN rather than ESCAPING, which is a
+# different refusal with different wording, so the containment finding under test would
+# quietly stop being the one the fixture claims.
+SIM_SUPPORT_TREES = {"edge-neighbour": fixture_repos.NEIGHBOUR}
+
+# UNSCANNED_REPORT is deliberately absent: `orders-api` has never been scanned, its
+# payload carries no checks and no tree exists to scan. A drift gate entry for it would
+# compare {} with {} forever.
+
+
+def tree_path(key, base="/tmp"):
+    """Where `key`'s tree lives — one derivation, so no caller types `/tmp/cleanrepo`."""
+    return str(pathlib.Path(base) / SIM_REPORT_TREES[key].directory)
 
 
 def as_json(data):
@@ -123,9 +179,9 @@ def build():
 
     out = {}
 
-    takko = project("takko", "takko", "/tmp/cleanrepo", CLEAN_AT)
-    legacy = project("legacy-shop", "legacy-shop", "/tmp/messyrepo", MESSY_AT)
-    edge = project("atlas-edge", "atlas-edge", "/tmp/edgerepo", EDGE_AT)
+    takko = project("takko", "takko", tree_path("CLEAN_REPORT"), CLEAN_AT)
+    legacy = project("legacy-shop", "legacy-shop", tree_path("MESSY_REPORT"), MESSY_AT)
+    edge = project("atlas-edge", "atlas-edge", tree_path("EDGE_REPORT"), EDGE_AT)
     # Added and never scanned: the state `?sim=degraded` shows and `preflight` refuses
     # with `scan_required` before it reads anything else.
     orders = project("orders-api", "orders-api", "/tmp/not-scanned-yet", None)
@@ -185,7 +241,7 @@ def build():
     # Same project, same site, same answers; a re-scan of the clean tree with one live
     # -format Stripe key committed to it. The refusal and the three payloads the screen
     # must converge on after it all come from this one state.
-    takko.scan_report = scanner_core.scan("/tmp/cleanrepo-rescanned")
+    takko.scan_report = scanner_core.scan(tree_path("RESCANNED_REPORT"))
     takko.scanned_at = RESCAN_AT
     takko.save(update_fields=["scan_report", "scanned_at"])
 
@@ -232,16 +288,15 @@ if __name__ == "__main__":
 # ── DB-free drift-gate entry points (merged from r9-backend-remedy) ─────────────
 #
 # The section above builds every sim.js payload through a test database. The drift
-# gate (tests/test_simulation.py::test_issue_r9_q2_*) needs only the READINESS
-# payloads, per fresh scans of freshly written trees, with no database at all — so it
-# imports these instead of build(). Two entry points, one module, because a second
-# harness file would be a second copy of the derivation, which is the defect class
-# this file exists to close.
-
-SCANNED_AT = {
-    "project-1": "2026-08-09T10:00:00Z",
-    "project-2": "2026-08-09T09:30:00Z",
-}
+# gate (tests/test_simulation.py) needs only the READINESS payloads, per fresh scans of
+# freshly written trees, with no database at all — so it imports these instead of
+# build(). Two entry points, one module, because a second harness file would be a second
+# copy of the derivation, which is the defect class this file exists to close.
+#
+# R10-A2: and the trees they scan are `SIM_REPORT_TREES` above — the same inventory the
+# DB half builds its projects from. This section used to carry its own two-entry table
+# hardcoding project-1 and project-2, which is why the blocking gate never looked at
+# EDGE_REPORT or RESCANNED_REPORT.
 
 # The readiness payload's list keys, in tier order. NOT the tier names for two of the
 # four — `ReadinessSerializer` pluralizes `blocker`/`warning` and does not pluralize
@@ -290,27 +345,32 @@ def readiness_payload(root, scanned_at):
 
 
 def build_trees(base="/tmp"):
-    """Write the fixture repos and return `{project key: root}`.
+    """Write every fixture repo and return `{sim.js constant: root}`.
 
     `base` is a parameter so a test can build them under `tmp_path` instead of `/tmp`:
     two runs racing on one hard-coded path is a flake, and `sim_fixture_repos.write`
     starts by `rmtree`-ing its target.
-    """
-    if str(REPO / "scripts_dev") not in sys.path:
-        sys.path.insert(0, str(REPO / "scripts_dev"))
-    import sim_fixture_repos as fixtures
 
+    The support trees go first. They carry no payload, and the edge tree's committed
+    symlink resolves INTO one of them — written second, the link would still point at
+    nothing at the moment the scan reads it, and a broken link is a different refusal
+    from an escaping one.
+    """
     base = pathlib.Path(base)
-    return {
-        "project-1": fixtures.write(base / "cleanrepo", fixtures.CLEAN),
-        "project-2": fixtures.write(base / "messyrepo", fixtures.MESSY),
-    }
+    for directory, files in SIM_SUPPORT_TREES.items():
+        fixture_repos.write(base / directory, files)
+    return {key: fixture_repos.write(base / tree.directory, tree.files, tree.links)
+            for key, tree in SIM_REPORT_TREES.items()}
 
 
 def payloads(base="/tmp", keys=None):
-    """`{project key: readiness payload}`, freshly scanned off freshly written trees."""
+    """`{sim.js constant: readiness payload}`, freshly scanned off freshly written trees.
+
+    The keys are the sim.js constant names, so the gate that consumes this can name the
+    payload it is comparing rather than translating an id into one.
+    """
     roots = build_trees(base)
-    return {key: readiness_payload(root, SCANNED_AT[key])
+    return {key: readiness_payload(root, SIM_REPORT_TREES[key].scanned_at)
             for key, root in roots.items() if keys is None or key in keys}
 
 
