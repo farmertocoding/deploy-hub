@@ -29,6 +29,22 @@ def render_text(report):
             lines.append(f"  {TIER_ICONS[tier]} {c['id']}: {c['title']}")
             if c["detail"]:
                 lines.append(f"      {c['detail']}")
+            # R14-ARCH-A: the refusal list, ALL of it, one path per line.
+            #
+            # `core.symlinked-files`' detail prints ten paths and counts the rest, because
+            # a report line is for reading (`_MAX_SKIPPED_REPORTED`). `refused_paths` is
+            # the complete announcement — R12-A1 added it so the FACT would not be the
+            # prose — and this renderer printed the prose and stopped. On a tree with
+            # fourteen escaping links the CLI told the operator "… and 4 more" and gave
+            # them no way to learn which four: the four appeared in no line of its output.
+            # `CheckBody` in the UI has rendered all of them since R12-ARCH-1, so the two
+            # presentations of one report disagreed about what the report said, in the
+            # file whose docstring claims "one code path, two presentations".
+            #
+            # The prose cap stays exactly as it is. The cap is a reading decision about a
+            # paragraph; this is the list, and the list is why the field exists.
+            for path in c.get("refused_paths") or ():
+                lines.append(f"        {path}")
             if c["fix_hint"] and tier in ("blocker", "warning"):
                 lines.append(f"      fix: {c['fix_hint']}")
         lines.append("")

@@ -364,7 +364,7 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
   // R13-F13-2: two reasons to be dead, two treatments. A gate refusal is hard `disabled`
   // — the server said no, nothing is in flight, and it belongs out of the tab order. A
   // request in flight keeps the focus it was given and says `aria-disabled` instead.
-  const waiting = !!busy && !gate.disabled;
+  const waiting = isWaiting(busy, gate.disabled);
   return (
     <>
       <button style={disabledBox(waiting || gate.disabled)} disabled={gate.disabled}
@@ -399,7 +399,7 @@ export function SaveButton({ busy, disabled, onClick }) {
   // nothing to save" — no draft, nothing pressed, out of the tab order — while `busy`
   // means the operator just pressed this and is waiting, which is precisely when taking
   // their focus away is worst.
-  const waiting = !!busy && !disabled;
+  const waiting = isWaiting(busy, disabled);
   return (
     <button style={disabledBox(waiting || disabled)} disabled={disabled}
       aria-disabled={waiting || undefined} aria-busy={!!busy}
@@ -570,6 +570,14 @@ export function ProjectRow({ project: p }) {
 //
 // Exported and named because `renderToStaticMarkup` produces no events: the markup is
 // asserted by rendering, and the guard by calling it.
+// The rule itself, spelled once: a control is WAITING when a request it started is in
+// flight and nothing else has already taken it out of service. Module-private, because
+// both call sites are in this file and the two existing render pins drive both of them —
+// R14's reviewer noted the expression written twice, and one name is cheaper than two
+// readers checking that `!!busy && !gate.disabled` and `!!busy && !disabled` mean the
+// same thing.
+const isWaiting = (busy, refused) => !!busy && !refused;
+
 export function busyClickGuard(waiting, onClick) {
   return (event) => {
     if (waiting) {
