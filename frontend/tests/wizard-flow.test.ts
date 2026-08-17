@@ -334,3 +334,26 @@ test("r11-ux-f3: SiteWizard takes refreshKey and re-reads on it", () => {
   assert.match(source, /<SiteWizard key=\{s\.id\} site=\{s\} refreshKey=\{refreshKey\}/,
     "the panel renders its wizards without passing the key down");
 });
+
+test("r11-ux-f3: after a sibling's 409 the OTHER site's gate shows the new truth",
+  async () => {
+    // The behavioural half of the wiring pin above, and the screen it is about: takko has
+    // two sites, the operator opens both, presses Materialize on `prod`, and the server
+    // refuses because the report moved. `prod`'s form converges (R9-4). `staging`'s form
+    // is the one nobody touched — and its gate is computed from a payload that predates
+    // the re-scan, so the screen showed a blocker list beside a sibling button reading
+    // "Answers needed", which is a refusal an answer clears.
+    reset();
+    const before = await stale("v1/sites/4/wizard/");
+    assert.equal(materializeGate(before.data).label, "Answers needed");
+
+    const refused = await stale("v1/sites/1/manifest/", {});
+    assert.equal(refused.status, 409);
+
+    // `refreshKey` is what makes the sibling re-read; this is what it re-reads.
+    const after = await stale("v1/sites/4/wizard/");
+    assert.equal(materializeGate(after.data).label, "⛔ Blocked",
+      "the sibling gate still offers a refusal the operator can type their way out of");
+    assert.ok(materializeGate(after.data).title.includes("blockers"),
+      "…and the reason on screen is the server's own sentence");
+  });

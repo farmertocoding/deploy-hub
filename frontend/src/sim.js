@@ -1222,6 +1222,94 @@ const RESCANNED_WIZARD = {
   "can_materialize": false
 };
 
+// R11-UX-F1: takko's OTHER site, under the report the refusal converged on.
+//
+// The re-scan is a PROJECT fact — it moved the report under every site takko has — and
+// the converged state captured only site 1. So clicking `staging` after the refusal fell
+// through to `?sim=live`'s payload: `answers_missing` alone, under a panel listing a
+// blocker, and typing the domain into that form reached the live state's 201. A wizard
+// saying the deploy may proceed while the report beside it reports a blocker is the one
+// combination this phase must never show (`sim-contract.test.ts`'s d012 walk), and it was
+// reachable by clicking the second site.
+//
+// This is `_state(staging)` run at the moment the stored report is the re-scanned one:
+// both refusals, in preflight's own order, and `can_materialize: false`.
+const RESCANNED_STAGING_WIZARD = {
+  "questions": [
+    {
+      "id": "site.domain",
+      "prompt": "Public domain for this site (e.g. app.example.com)",
+      "kind": "domain",
+      "default": null,
+      "choices": [],
+      "secret": false
+    },
+    {
+      "id": "site.exposure",
+      "prompt": "How should this site be reachable?",
+      "kind": "choice",
+      "default": "public",
+      "choices": [
+        "public",
+        "mesh_only"
+      ],
+      "secret": false
+    },
+    {
+      "id": "dockerfile.domain",
+      "prompt": "Domain to serve this site on",
+      "kind": "text",
+      "default": null,
+      "choices": [],
+      "secret": false
+    },
+    {
+      "id": "dockerfile.exposure",
+      "prompt": "Who should reach this site?",
+      "kind": "choice",
+      "default": "public",
+      "choices": [
+        "public",
+        "mesh_only"
+      ],
+      "secret": false
+    },
+    {
+      "id": "dockerfile.env",
+      "prompt": "Environment variables/secrets the container needs (stored in the vault, injected at deploy)",
+      "kind": "secret",
+      "default": null,
+      "choices": [],
+      "secret": true
+    }
+  ],
+  "answered": {},
+  "blocking": [
+    {
+      "code": "blockers_present",
+      "detail": "the readiness report has blockers; these must be fixed and the project re-scanned",
+      "items": [
+        {
+          "id": "core.secret-scan",
+          "title": "Committed secrets detected"
+        }
+      ]
+    },
+    {
+      "code": "answers_missing",
+      "detail": "required questions are unanswered",
+      "items": [
+        {
+          "id": "site.domain",
+          "prompt": "Public domain for this site (e.g. app.example.com)"
+        }
+      ]
+    }
+  ],
+  "warnings": [],
+  "can_materialize": false
+};
+
 // ── project 4: orders-api, added and never scanned (the `degraded` state) ─────
 // The payload `?sim=degraded` used to hide. A project row with `scanned_at: null` was
 // already there; what was missing is what the server says about it, which is a report
@@ -1349,6 +1437,36 @@ const takkoRow = () =>
   liveMaterialized.has(4) ? CLEAN_PROJECT_ANSWERED
     : liveMaterialized.has(1) ? CLEAN_PROJECT_AFTER : CLEAN_PROJECT;
 
+// atlas-edge's row, per the same session memory. R11-UX-F1: written once because the
+// `stale` list used to name `EDGE_PROJECT` outright — so an operator who materialized
+// atlas-edge and then triggered takko's refusal watched the edge row forget its own 201.
+// Nothing about takko's re-scan touches another project's manifest, and a fixture that
+// says otherwise is a fiction about a project the state is not even about.
+const edgeRow = () => liveMaterialized.has(3) ? EDGE_PROJECT_AFTER : EDGE_PROJECT;
+
+// takko's sites. `stale` is ONE event — the report moved under this project — and the
+// only transition captured against the moved report is site 1's refusal. Every other
+// write to a takko site in this state has no payload behind it (see `notCovered`).
+const TAKKO_SITES = [1, 4];
+
+// The self-identified synthetic refusal, and the established pattern for one: `degraded`
+// answers the routes it does not cover with a `[sim]`-prefixed 503 rather than a sentence
+// invented here and attributed to the server. Same rule, different reason — this one is
+// not a simulated transport failure, it is a combination of states that NO capture in one
+// linear generator session produces, so there is nothing honest to return.
+//
+// R11-UX-F1's whole finding is what the alternative costs: falling through to the nearest
+// captured payload is not "approximately right", it is a screen asserting something the
+// server never said, in the state whose entire job is being the truth after a refusal.
+// 501 rather than 503: the sim is not pretending the transport failed, it is saying this
+// screen does not exist yet. Both are statuses the real server never sends, which is the
+// point — a fixture must never be mistaken for a transcript.
+const notCovered = (what) => ({
+  status: 501,
+  data: { detail: `[sim] NOT COVERED: ${what} — no captured payload exists for this `
+    + `combination, and the simulation will not invent one. Reload to start over.` },
+});
+
 // Each fixture: (path, body, method) => {status, data}
 export const SIM_FIXTURES = {
   // No projects at all — first-run experience.
@@ -1372,8 +1490,7 @@ export const SIM_FIXTURES = {
   // one that can materialize only after the warnings are acknowledged.
   live: (path, body, method) => {
     if (path === "v1/projects/")
-      return { status: 200, data: [takkoRow(), MESSY_PROJECT,
-        liveMaterialized.has(3) ? EDGE_PROJECT_AFTER : EDGE_PROJECT] };
+      return { status: 200, data: [takkoRow(), MESSY_PROJECT, edgeRow()] };
     if (path.endsWith("/readiness/"))
       return { status: 200, data: REPORTS[idOf(path)] || CLEAN_REPORT };
     // R10-UX-F4. The PATCH used to return `{}`, which the screen discards, and the
@@ -1395,7 +1512,15 @@ export const SIM_FIXTURES = {
     }
     if (path.endsWith("/manifest/")) {
       const site = idOf(path);
+      // R11-UX-F6: a captured 201 is consumed ONCE. Pressing Materialize again replayed
+      // the same manifest version forever — "Manifest v4 created." twice, beside a row
+      // that stayed at v4 — which is the only screen on this form that a real server
+      // cannot produce: the next materialize is v5. One linear generator session
+      // captures one manifest per site, so the second press has no payload behind it and
+      // says so rather than repeating the first.
       const created = (data) => {
+        if (liveMaterialized.has(site))
+          return notCovered(`a second materialize of site ${site}`);
         liveMaterialized.add(site);
         return { status: 201, data };
       };
@@ -1427,18 +1552,45 @@ export const SIM_FIXTURES = {
   // only way to review that panel from a screen the operator can actually reach — and,
   // after the refusal, the only way to review the client re-reading the server: the list,
   // the report and the wizard all move to the re-scanned truth.
+  //
+  // R11-UX-F1: AND THE CONVERGENCE IS THE WHOLE PROJECT, not site 1. The re-scan moved
+  // the report under every site takko has, and this state used to name site 1's payloads
+  // and fall through to `live` for everything else — so clicking `staging` after the
+  // refusal served the pre-rescan wizard: `answers_missing` alone, under a panel listing
+  // a blocker, and one PATCH away from the live state's 201. A screen that can materialize
+  // under a blocking report is the combination the d012 invariant exists to forbid, and
+  // it was two clicks from the state whose entire job is being the truth after a refusal.
+  //
+  // Two answers, and which one a request gets is the point of this whole finding:
+  //   * site 4's wizard has a CAPTURE now — `_state(staging)` run against the moved
+  //     report — so it is served, like site 1's;
+  //   * every WRITE to a takko site other than the refusal itself has no capture in a
+  //     linear generator session (the product of "which sites answered" × "which report
+  //     is stored" is not a chain), so it is REFUSED, visibly, by `notCovered`. Falling
+  //     through would answer with what the live state remembers, which is a screen the
+  //     server behind this state cannot produce.
   stale: (path, body, method) => {
     if (path.endsWith("/manifest/") && idOf(path) === 1) {
       staleRescanServed = true;
       return { status: 409, data: STALE_REFUSAL_409 };
     }
+    const write = method === "PATCH" || path.endsWith("/manifest/");
+    if (write && TAKKO_SITES.includes(idOf(path)))
+      return notCovered(
+        `writing to takko/site ${idOf(path)} in the stale state. This state is one `
+        + "event — the report moved under this project — and the only transition "
+        + "captured against the moved report is site 1's refusal");
     if (staleRescanServed) {
       if (path === "v1/projects/")
-        return { status: 200, data: [RESCANNED_PROJECT, MESSY_PROJECT, EDGE_PROJECT] };
+        // …and atlas-edge keeps its own session memory: nothing about takko's re-scan
+        // touches another project's manifest, and this list used to say it did.
+        return { status: 200, data: [RESCANNED_PROJECT, MESSY_PROJECT, edgeRow()] };
       if (path === "v1/projects/1/readiness/")
         return { status: 200, data: RESCANNED_REPORT };
-      if (path === "v1/sites/1/wizard/" && method !== "PATCH")
+      if (path === "v1/sites/1/wizard/")
         return { status: 200, data: RESCANNED_WIZARD };
+      if (path === "v1/sites/4/wizard/")
+        return { status: 200, data: RESCANNED_STAGING_WIZARD };
     }
     return SIM_FIXTURES.live(path, body, method);
   },

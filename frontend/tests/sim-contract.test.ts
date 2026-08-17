@@ -467,3 +467,149 @@ test("r11-q2: the walk covers every constant a transition can produce", async ()
   assert.equal([...seen].filter((s) => s.startsWith("list")).length, 4,
     "the list stopped moving after a 201 — the AFTER rows are unreachable again");
 });
+
+// ── R11-UX-F1: the converged state covered ONE of takko's two sites ──────────
+//
+// `?sim=stale` is a re-scan under the operator, and a re-scan moves the report under
+// every site the project has. The state named site 1's payloads and fell through to
+// `?sim=live` for everything else, so clicking `staging` after the refusal served the
+// PRE-rescan wizard — `answers_missing` alone, under a panel listing a blocker — and one
+// PATCH later the live state's 201 was reachable. A wizard that says the deploy may
+// proceed while the report beside it reports a blocker is the exact combination the d012
+// walk above forbids, and it was two clicks from the state whose whole job is being the
+// truth after a refusal.
+
+const TAKKO_SITES = [1, 4];
+
+test("r11-ux-f1: no takko site can materialize under the converged blocking report",
+  async () => {
+    const stale = SIM_FIXTURES.stale as any;
+    (SIM_FIXTURES.live as any).reset();
+    stale.reset();
+
+    const refused = await stale("v1/sites/1/manifest/", {});
+    assert.equal(refused.status, 409);
+    const { data: report } = await stale("v1/projects/1/readiness/");
+    assert.ok(report.blockers.length, "the convergence must put a blocker on screen");
+
+    for (const site of TAKKO_SITES) {
+      // What the operator does next, on the site whose only refusal LOOKS answerable:
+      // type the domain and press Save.
+      const patched = await stale(`v1/sites/${site}/wizard/`,
+                                  { "site.domain": "staging.takko.market" }, "PATCH");
+      if (patched.status === 200) {
+        // A state may answer this — but then what it answers with has to be a capture
+        // taken against the moved report, not the live state's memory.
+        assert.equal(patched.data.can_materialize, false,
+          `site ${site}: the wizard says the deploy may proceed while the report ` +
+          "reports a blocker — no answer clears a blocker this phase");
+      } else {
+        assert.match(patched.data.detail, /^\[sim\] NOT COVERED/,
+          `site ${site}: a state that will not answer must say so as the simulation, ` +
+          "not fall through to a payload from before the re-scan");
+      }
+
+      const { status, data: wizard } = await stale(`v1/sites/${site}/wizard/`);
+      assert.equal(status, 200, `site ${site}'s wizard must still be readable`);
+      assert.equal(wizard.can_materialize, false,
+        `site ${site}: can_materialize under a blocking report`);
+      assert.ok(schemas.WizardState.safeParse(wizard).success,
+        `site ${site}: the converged wizard drifted from WizardState`);
+    }
+  });
+
+test("r11-ux-f1: the converged wizard for takko/staging is the re-scanned one",
+  async () => {
+    // Not merely "not the live one": it has to be `_state(staging)` run against the
+    // moved report, which means BOTH refusals — the blocker the re-scan introduced and
+    // the domain nobody has typed — in preflight's own order.
+    const stale = SIM_FIXTURES.stale as any;
+    (SIM_FIXTURES.live as any).reset();
+    stale.reset();
+
+    const before = await stale("v1/sites/4/wizard/");
+    assert.deepEqual(before.data.blocking.map((p: any) => p.code), ["answers_missing"],
+      "before the refusal, the pre-rescan truth IS the truth");
+
+    await stale("v1/sites/1/manifest/", {});
+
+    const after = await stale("v1/sites/4/wizard/");
+    assert.deepEqual(after.data.blocking.map((p: any) => p.code),
+                     ["blockers_present", "answers_missing"]);
+    const { data: report } = await stale("v1/projects/1/readiness/");
+    const reported = new Set(report.blockers.map((c: any) => c.id));
+    for (const problem of after.data.blocking) {
+      if (problem.code !== "blockers_present") continue;
+      for (const item of problem.items)
+        assert.ok(reported.has(item.id),
+          `the sibling wizard refuses on ${item.id}, which the report does not report`);
+    }
+  });
+
+test("r11-ux-f1: the converged list does not forget another project's 201", async () => {
+  // atlas-edge's manifest has nothing to do with takko's re-scan, and the converged list
+  // named `EDGE_PROJECT` outright — so an operator who materialized atlas-edge and then
+  // triggered takko's refusal watched the edge row lose the manifest it had just created.
+  const stale = SIM_FIXTURES.stale as any;
+  (SIM_FIXTURES.live as any).reset();
+  stale.reset();
+
+  const created = await stale("v1/sites/3/manifest/", { confirm_warnings: true });
+  assert.equal(created.status, 201);
+  await stale("v1/sites/1/manifest/", {});
+
+  const list = (await stale("v1/projects/")).data;
+  const edge = list.find((p: any) => p.name === "atlas-edge");
+  assert.equal(edge.sites[0].latest_manifest_version, created.data.version,
+    "the edge row forgot its own 201 when another project's report moved");
+  for (const row of list)
+    assert.ok(schemas.ProjectSummary.safeParse(row).success,
+      `${row.name} drifted from ProjectSummary`);
+});
+
+test("r11-ux-f1: every refusal this simulation authors says it is the simulation",
+  async () => {
+    // The §4b rule sim.js lives under: it is a transcript of the server, so a sentence
+    // invented here is the one kind of lie the no-client-authored-copy pin cannot catch.
+    // A refusal it has to author anyway is marked, in the words `degraded` established.
+    const stale = SIM_FIXTURES.stale as any;
+    const live = SIM_FIXTURES.live as any;
+    live.reset();
+    stale.reset();
+    await stale("v1/sites/1/manifest/", {});
+
+    const authored = [
+      await stale("v1/sites/4/manifest/", {}),
+      await stale("v1/sites/1/wizard/", { "site.domain": "x.example.com" }, "PATCH"),
+      await (SIM_FIXTURES.degraded as any)("v1/sites/5/manifest/", {}),
+    ];
+    for (const { status, data } of authored) {
+      assert.ok(status >= 400, "a refusal that arrives as a 200 is not a refusal");
+      assert.match(data.detail, /^\[sim\] /,
+        "a synthetic response must say it is synthetic");
+    }
+  });
+
+// ── R11-UX-F6: one captured manifest, pressed twice ──────────────────────────
+
+test("r11-ux-f6: a second materialize is refused rather than replayed", async () => {
+  // The captured 201 is one manifest. Pressing the button again replayed it: "Manifest
+  // v4 created." twice, beside a list row that stayed at v4 — the one screen on this form
+  // a real server cannot produce, because its next materialize is v5. One linear
+  // generator session captures one manifest per site, so the honest answer to the second
+  // press is that there is no payload for it.
+  const live = SIM_FIXTURES.live as any;
+  live.reset();
+
+  const first = await live("v1/sites/1/manifest/", {});
+  assert.equal(first.status, 201);
+
+  const second = await live("v1/sites/1/manifest/", {});
+  assert.notEqual(second.status, 201,
+    "the same manifest version was created twice — no server does that");
+  assert.match(second.data.detail, /^\[sim\] NOT COVERED: a second materialize/);
+
+  // …and the row is unchanged by the refusal, which is the R10-UX-F3 property.
+  const row = (await live("v1/projects/")).data.find((p: any) => p.name === "takko");
+  assert.equal(row.sites[0].latest_manifest_version, first.data.version);
+});

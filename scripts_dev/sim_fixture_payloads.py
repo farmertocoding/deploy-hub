@@ -264,6 +264,17 @@ def build(base="/tmp"):
     out["RESCANNED_REPORT"] = readiness(takko)
     out["RESCANNED_WIZARD"] = wizard(prod)
     out["RESCANNED_PROJECT"] = project_row(takko)
+    # R11-UX-F1: takko has TWO sites, and the converged state only ever captured one of
+    # them. A project's report is a PROJECT fact — the re-scan moved it under every site
+    # — so the operator who clicks takko/staging after the refusal is looking at a
+    # different wizard from the one `?sim=live` serves, and sim.js was serving the live
+    # one: `answers_missing` alone, over a panel listing a blocker. Type the domain into
+    # that form and the fixture's own 201 was reachable under a blocking report, which is
+    # the combination the d012 invariant says must never appear on a screen.
+    #
+    # It is one more `_state` call at the point where the report has already moved, which
+    # is what "capture it rather than compose it" means here.
+    out["RESCANNED_STAGING_WIZARD"] = wizard(staging)
 
     # …and back to the report the LIVE state serves, so the POSTs below are the ones
     # those screens really make. The rewind is a fixture-stitching step and is stated
