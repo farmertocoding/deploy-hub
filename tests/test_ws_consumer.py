@@ -12,7 +12,12 @@ from channels.testing import WebsocketCommunicator
 import realtime.routing
 from realtime.publish import publish
 
-pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.asyncio]
+# django_db is module-wide (every test here touches the ORM through the consumer);
+# asyncio is per-test rather than module-wide, because two tests below are SYNC
+# source/AST inspections and a module-level `asyncio` mark warns on a sync function
+# (pytest-asyncio runs strict here). The mark now sits on the async tests that are
+# actually coroutines.
+pytestmark = pytest.mark.django_db(transaction=True)
 
 APP = AuthMiddlewareStack(URLRouter(realtime.routing.websocket_urlpatterns))
 
@@ -38,6 +43,7 @@ async def _connected_communicator():
 
 @pytest.mark.req("P0-2FA-TOTP")
 @pytest.mark.req("SEC-610-MANDATORY-2FA")
+@pytest.mark.asyncio
 async def test_unenrolled_session_rejected_on_ws_plane():
     """Round-2 finding: the HTTP-only gate left /ws/events/ open to password-only
     sessions of not-yet-enrolled users — both planes must enforce §6.10."""
@@ -51,6 +57,7 @@ async def test_unenrolled_session_rejected_on_ws_plane():
 
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")
+@pytest.mark.asyncio
 async def test_anonymous_socket_rejected_with_4401():
     comm = WebsocketCommunicator(APP, "/ws/events/")  # no session → AnonymousUser
     connected, _ = await comm.connect()
@@ -70,6 +77,7 @@ async def test_anonymous_socket_rejected_with_4401():
 
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")
+@pytest.mark.asyncio
 async def test_subscribe_denied_topic_refused_and_audited():
     comm = await _connected_communicator()
     await comm.send_to(json.dumps({"action": "subscribe", "topics": ["forbidden.topic!"]}))
@@ -86,6 +94,7 @@ async def test_subscribe_denied_topic_refused_and_audited():
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")
 @pytest.mark.req("P0-REALTIME")
+@pytest.mark.asyncio
 async def test_subscribe_receives_published_events_in_order():
     comm = await _connected_communicator()
     await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.wstest.log"]}))
@@ -102,6 +111,7 @@ async def test_subscribe_receives_published_events_in_order():
 
 
 @pytest.mark.req("P0-AUTHZ-TOPIC")
+@pytest.mark.asyncio
 async def test_unsubscribe_stops_delivery_and_bad_messages_answered():
     comm = await _connected_communicator()
     await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.wstest2.log"]}))
@@ -119,6 +129,7 @@ async def test_unsubscribe_stops_delivery_and_bad_messages_answered():
 
 @pytest.mark.req("P0-2FA-TOTP")
 @pytest.mark.req("P0-AUTHZ-TOPIC")
+@pytest.mark.asyncio
 async def test_post_reject_frames_are_dropped():
     """Round-6 finding (empirical): after the accept-then-close(4403) rejection, a
     subscribe frame racing the close was honored (group_add executed) because the
@@ -145,6 +156,7 @@ async def test_post_reject_frames_are_dropped():
 # no scope injection, using only the cookie a normal HTTP login planted.
 
 @pytest.mark.req("SEC-A1-SESSION-AUTH")
+@pytest.mark.asyncio
 async def test_issue_r4_11_ws_authenticates_from_the_http_login_session_cookie():
     from django.conf import settings
     from django.test import Client
@@ -188,6 +200,7 @@ async def test_issue_r4_11_ws_authenticates_from_the_http_login_session_cookie()
 
 
 @pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.asyncio
 async def test_issue_r19_arch_1_a_published_event_is_escaped_on_the_ws_wire():
     """R19-ARCH-1: the WebSocket is a fourth device-reaching exit.
 
