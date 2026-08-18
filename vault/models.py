@@ -55,7 +55,30 @@ class Secret(models.Model):
         # Explicit: a stray repr() in a traceback or log line must not carry bytes.
         return f"<Secret {self.pk} {self.kind} redacted>"
 
+    @staticmethod
+    def build_aad(kind, owner_type, owner_id) -> bytes:
+        """Associated data — binds a ciphertext to a row's identity, spelled ONCE.
+
+        R18 folded note. This expression was written three times: here, inline in
+        `vault.service.put`, and again in tests/test_vault.py. Drift fails CLOSED — the
+        decrypt raises `InvalidTag` and `get` audits it — so this was never a hole; it is
+        the one-fact rule, and a fact whose three copies can only be compared by eye is
+        one edit from an outage that reads like corruption. `put` now encrypts with the
+        same function `Secret.aad` decrypts with, and a test asserts the two agree.
+
+        THE `|` DELIMITER IS NOT ESCAPED, and that is safe TODAY rather than in general:
+        `kind` is a `Secret.Kind` choice, `owner_type` is one of a fixed set of strings
+        this codebase writes, and `owner_id` is a primary key rendered by `str()`. None of
+        them is repo-controlled or user-supplied, so none can carry a `|` and shift the
+        boundary between two fields (`a|b` + `c` colliding with `a` + `b|c`). If any of
+        the three ever becomes free text, this needs a canonical encoding — length
+        prefixes, or a delimiter the field cannot contain — BEFORE that lands, because the
+        collision it would open is silent: two different identities producing one AAD,
+        which is exactly the cut-and-paste the AAD exists to prevent.
+        """
+        return f"{kind}|{owner_type}|{owner_id}".encode()
+
     @property
     def aad(self) -> bytes:
-        """Associated data — binds the ciphertext to this row's identity."""
-        return f"{self.kind}|{self.owner_type}|{self.owner_id}".encode()
+        """This row's associated data. See `build_aad` for the spelling and its limits."""
+        return self.build_aad(self.kind, self.owner_type, self.owner_id)

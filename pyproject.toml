@@ -59,6 +59,14 @@ source_paths = [
     # security-relevant transform out of this gate, so the module comes with it. That is
     # a deliberate widening of the gate-bearing set, which is what this list is for.
     "scanner/presentation.py",
+    # R18-SEC-1. The API's exit. It is a small adapter — `super().render()`, decode,
+    # `json_safe`, encode — and every line of it is the difference between the class
+    # being escaped on the wire and not: the empty-body short circuit, the decode, the
+    # call. The transform it applies is already mutated (above); this is the seam that
+    # applies it, and the derived test selection does not grow by adding it (the file
+    # that covers it is already selected), so the gate-bearing set gains a security seam
+    # for the cost of one line here.
+    "hub/renderers.py",
 ]
 
 # Which tests run. mutmut narrows this PER MUTANT from the per-function coverage it
@@ -71,6 +79,7 @@ source_paths = [
 # these modules and the gate goes red until it is listed.
 pytest_add_cli_args_test_selection = [
     "tests/acceptance/test_phase_1.py",
+    "tests/test_api_rendering.py",
     "tests/test_cli_render.py",
     "tests/test_d012_out_of_phase_1.py",
     "tests/test_scanner_declarations.py",

@@ -395,3 +395,48 @@ def test_prod_settings_refuse_fake_kek(monkeypatch):
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "fake")
     with pytest.raises(ImproperlyConfigured, match="not permitted in prod"):
         importlib.reload(importlib.import_module("hub.settings.prod"))
+
+
+# ── R18 folded note: the AAD, spelled once ───────────────────────────────────
+
+def test_issue_r18_the_encrypt_and_decrypt_paths_build_one_aad(db):
+    """`put` encrypts under the same associated data `Secret.aad` decrypts with.
+
+    The expression was written three times — in `put`, in the model property, and in this
+    file — with nothing comparing them. Drift fails CLOSED (an `InvalidTag` that `get`
+    audits as a security event), so this was never a hole; it is the one-fact rule, and
+    the failure it would produce reads like ciphertext corruption rather than like a typo
+    in a format string, which is the expensive way to find out.
+
+    Asserted against the ROW rather than against a literal: a test carrying its own copy
+    of the format string is the third spelling this closes.
+    """
+    secret = service.put(kind=Secret.Kind.API_TOKEN, owner_type="site",
+                               owner_id=7, plaintext=b"round-18-marker")
+
+    assert secret.aad == Secret.build_aad(Secret.Kind.API_TOKEN, "site", "7")
+    # …and the ciphertext really is bound to it, which is what makes the equality matter.
+    assert service.get(secret) == b"round-18-marker"
+
+
+def test_issue_r18_an_integer_owner_id_binds_to_the_string_the_row_stores(db):
+    """`put` takes `owner_id=7` and the row stores `"7"`. If the AAD were built from the
+    raw argument on the way in and from the field on the way out, every secret created
+    with an int pk would be undecryptable — the mismatch appears at READ time, arbitrarily
+    later than the write that caused it."""
+    secret = service.put(kind=Secret.Kind.API_TOKEN, owner_type="site",
+                               owner_id=7, plaintext=b"int-owner")
+
+    assert secret.owner_id == "7"
+    assert service.get(secret) == b"int-owner"
+
+
+def test_issue_r18_the_aad_delimiter_is_documented_where_it_is_built():
+    """The `|` is unescaped, and safe today because none of the three fields can contain
+    one. That is a property of the CURRENT field types, so it is written down beside the
+    expression rather than left for the next reader to re-derive — and this asserts the
+    note exists, because a note nobody can find is a note nobody reads."""
+    doc = Secret.build_aad.__doc__
+
+    assert "canonical encoding" in doc
+    assert "repo-controlled" in doc or "user-supplied" in doc

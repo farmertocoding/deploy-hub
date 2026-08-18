@@ -37,7 +37,12 @@ def put(*, kind, owner_type, owner_id, plaintext: bytes, actor=None) -> Secret:
     backend = get_backend()
     dek = os.urandom(DEK_BYTES)
     nonce = os.urandom(NONCE_BYTES)
-    aad = f"{kind}|{owner_type}|{owner_id}".encode()
+    # R18 folded note: the SAME function `Secret.aad` reads back with. `owner_id` goes
+    # through `str()` here exactly as the model field stores it, so what is encrypted
+    # under is what the row will produce — an `int` pk and its `"7"` would otherwise be
+    # two different AADs for one row, and the mismatch surfaces as `InvalidTag` at read
+    # time rather than as an error at write time.
+    aad = Secret.build_aad(kind, owner_type, str(owner_id))
     ciphertext = AESGCM(dek).encrypt(nonce, plaintext, aad)
 
     secret = Secret.objects.create(

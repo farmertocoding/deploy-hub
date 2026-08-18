@@ -38,6 +38,19 @@ thing the seam cannot: `safe_text` keeps `\n` because the renderer's own line br
 structure, so a path carrying a newline has to be escaped BEFORE it becomes a line of a
 list. Prose and paths are different policies; everything else is a backstop.
 
+WHERE THE AUTHORITY REACHES (R18-ARCH-1), so the list is a fact rather than a memory.
+Three exits carry a report to something that acts on it, and all three enforce
+`CONTROL_CLASS` from here:
+
+  * CLI TEXT — `hub/__main__.py::render_text`, escaped for DISPLAY at its seam;
+  * CLI JSON — `--json`, through `json_safe`, escaped for a PARSER;
+  * API JSON — `hub/renderers.py::ContainedJSONRenderer`, registered once in
+    `DEFAULT_RENDERER_CLASSES`, through the same `json_safe`. A JSON API's consumers are
+    terminals at least as often as they are parsers, and it had no treatment at all until
+    R18-SEC-1: U+009B and the bidi overrides went out in the response bytes.
+
+A fourth exit is a fourth entry here, and the rule above says where its escaping goes.
+
 WHAT THIS DOES NOT COVER, named rather than implied: the DOM. React escapes markup and a
 terminal escape is inert in a text node, so `CheckBody` needs no sanitizer for the C0/C1
 family. Bidi and zero-width display spoofing of a filename in a browser is real, is a

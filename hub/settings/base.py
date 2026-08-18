@@ -116,7 +116,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_RENDERER_CLASSES": [
-        "rest_framework.renderers.JSONRenderer",  # browsable API off (§B10)
+        # R18-SEC-1: JSONRenderer with the containment class escaped on the way out.
+        # Still no browsable API (§B10) — this is that renderer, at the seam where the
+        # API's bytes reach a device. `hub/renderers.py` says why it is here rather than
+        # in a serializer field.
+        "hub.renderers.ContainedJSONRenderer",
     ],
     # Rejected input is an attack signal, not just a 400 (§4.5).
     "EXCEPTION_HANDLER": "core.exception_handlers.audited_exception_handler",
