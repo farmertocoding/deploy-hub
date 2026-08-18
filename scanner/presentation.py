@@ -23,6 +23,28 @@ HOW a paragraph wraps, what colour a label is, whether a list is `<li>` or an in
 line — those stay with each renderer. The line is: if the two media could DISAGREE ABOUT
 WHAT THE REPORT SAYS, it belongs here; if they merely look different, it does not.
 
+── THE BOUNDARY RULE (R16-SEC-1), stated so it is inherited rather than remembered ──
+
+EVERY STRING A REPORT CARRIES IS UNTRUSTED, and the boundary is "repo-controlled text
+reaching a device", not "the fields somebody listed". R15-SEC-1 drew it around the check
+BODY, and the next title to interpolate a repository's own string walked through it — a
+monorepo service directory named `svc\x1b]0;PWNED\x07\x1b[2Jx` cleared the operator's
+screen from a HEADING line, in a field no sanitizer had been pointed at.
+
+So the text renderer sanitizes at its SEAM: `render_text` returns
+`safe_text("\n".join(lines))`, and a new field, heading or summary line is safe because
+of where it is printed. The per-field calls stay, and the one thing they buy is the one
+thing the seam cannot: `safe_text` keeps `\n` because the renderer's own line breaks are
+structure, so a path carrying a newline has to be escaped BEFORE it becomes a line of a
+list. Prose and paths are different policies; everything else is a backstop.
+
+WHAT THIS DOES NOT COVER, named rather than implied: the DOM. React escapes markup and a
+terminal escape is inert in a text node, so `CheckBody` needs no sanitizer for the C0/C1
+family. Bidi and zero-width display spoofing of a filename in a browser is real, is a
+different (lower) severity, and is not addressed here — see
+`scripts_dev/generate_presentation.py` for why it wants its own commit rather than a
+second implementation of this transform riding along.
+
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
 file. It imports nothing but `re`, so the CLI stays Django-free (that module's own
@@ -141,9 +163,22 @@ def _escaped(match):
     repository paint the terminal. So it is NAMED and never acted on — the same choice
     `declarations` made when it quoted a refused value's coordinates instead of the value,
     one step less severe because a check detail is not a section header.
+
+    F16-1: and the spelling is PYTHON'S OWN, which is what makes it one spelling rather
+    than a second one. The scanner composes prose about the same names — `_report_path`
+    quotes a path that spans lines through `repr`, `_quote_pattern` does the same for a
+    refused workspace pattern — so a filename could arrive in a check body twice, spelled
+    `'src/two\nlines.ts'` by the scanner's prose and `src/two\x0alines.ts` by this
+    module's list. One name, two escapes, in one panel.
+
+    `repr` of a single character is exactly the escape a Python reader already knows, and
+    for every code point in the class above it is an escape rather than the character
+    itself — so taking it verbatim makes the two agree BY CONSTRUCTION rather than by two
+    tables that match today. The outer quotes stay the scanner's business: they bound a
+    name inside a sentence (R7-3), and a list that gives each name its own line or `<li>`
+    has nothing to bound.
     """
-    code = ord(match.group())
-    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+    return repr(match.group())[1:-1]
 
 
 def safe_path(value):

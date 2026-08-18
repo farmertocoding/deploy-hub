@@ -79,7 +79,25 @@ def render_text(report):
                  f"volumes={len(draft['volumes'])}")
     if report["wizard_questions"]:
         lines.append(f"wizard: {len(report['wizard_questions'])} question(s) pending")
-    return "\n".join(lines)
+    # R16-SEC-1: THE SEAM. Every string this function assembles goes out through one
+    # sanitizer, so a field that reaches a terminal is safe because of where it is
+    # PRINTED and not because whoever added it remembered a rule.
+    #
+    # R15-SEC-1 drew the boundary around the check BODY — the fields `_render_fields`
+    # renders — and the first title to interpolate a repository's own string walked
+    # through it: `node-ts.service-package` names `service_dir.name`, and a monorepo
+    # service directory called `svc\x1b]0;PWNED\x07\x1b[2Jx` cleared the operator's
+    # screen from the heading line. A per-field opt-in is a rule every future
+    # interpolation has to remember, and this one was forgotten by the commit that wrote
+    # it.
+    #
+    # NOT INSTEAD OF THE PER-FIELD POLICY, and the difference is exactly one character:
+    # `safe_text` keeps `\n`, because the renderer's own line breaks are structure. A
+    # repo-controlled PATH containing a newline would already have been turned into two
+    # lines by the time it got here, so `_render_fields` escapes those with `safe_path`
+    # BEFORE the list is built. The seam is the backstop; the per-field call is the one
+    # place the distinction between prose and a path can still be made.
+    return presentation.safe_text("\n".join(lines))
 
 
 def main(argv=None):

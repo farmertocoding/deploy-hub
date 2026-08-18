@@ -193,10 +193,41 @@ def test_issue_r15_sec_1_the_sanitizers_keep_what_the_server_composed(tmp_path):
     refusal list. `safe_text` keeps `\\n`, `safe_path` does not.
     """
     assert presentation.safe_text("a\nb") == "a\nb"
-    assert presentation.safe_path("a\nb") == "a\\x0ab"
+    assert presentation.safe_path("a\nb") == "a\\nb"
     assert presentation.safe_text("a\x1bb") == "a\\x1bb"
     assert presentation.safe_text("正體中文 — ok") == "正體中文 — ok", (
         "ordinary non-ASCII is text, not a control character; this fleet is Taiwanese")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point():
+    """One name, one spelling, wherever it is escaped (F16-1).
+
+    The scanner composes prose about the same filenames this module lists —
+    `_report_path` quotes a path that spans lines through `repr` — so a name could appear
+    in one check body twice: `'src/two\\nlines.ts'` from the prose and
+    `src/two\\x0alines.ts` from the refusal list. Only the newline class diverged, because
+    everything else `repr` escapes it escapes the same way. That is why the answer is to
+    take `repr`'s spelling verbatim rather than keep a second table that matches today.
+
+    Asserted over the WHOLE class rather than a sample, and against `repr` itself rather
+    than a list of expected strings — a list of expected strings IS the second table.
+    This replaces the `< 0x100` boundary test the mutation gate asked for in R15: that
+    branch is gone, because there is no branch left.
+    """
+    import re as _re
+
+    every = "".join(map(chr, range(0x110000)))
+    for char in _re.findall(f"[{presentation.CONTROL_CLASS}]", every):
+        escaped = presentation.safe_path(char)
+        assert escaped == repr(char)[1:-1], (char, escaped)
+        assert not presentation._CONTROL_RE.search(escaped), (
+            f"U+{ord(char):04X} escaped to something still in the class: {escaped!r}")
+
+    # The ones the finding was about, spelled once and read twice.
+    assert presentation.safe_path("two\nlines.ts") == "two\\nlines.ts"
+    assert repr("two\nlines.ts")[1:-1] == "two\\nlines.ts"
+    assert presentation.safe_path("\x1b\t\udc9b\u200b") == "\\x1b\\t\\udc9b\\u200b"
 
 
 # ── R15-ARCH-1: one presentation model, two renderers ────────────────────────
@@ -298,34 +329,6 @@ def test_issue_r15_arch_1_a_multi_line_detail_keeps_its_indent(tmp_path):
     assert all(not line[len(presentation.TEXT_INDENT)].isspace() for line in findings)
     # …and the fix hint's own second paragraph too, which is the same value shape.
     assert f"{presentation.TEXT_INDENT}two" in lines
-
-
-@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
-def test_issue_r15_sec_1_the_escape_form_switches_at_the_byte_boundary():
-    """`\\xNN` below U+0100 and `\\uNNNN` at or above it — the boundary, exactly.
-
-    Found by `make mutation`: `code < 0x100` mutated to `<= 0x100` and to `< 257` both
-    survived, because no code point in today's class sits at U+0100 and nothing called
-    `_escaped` with one. The mutants are equivalent only for the class AS IT IS WRITTEN —
-    widen it by one range and `\\x100` starts appearing, which is a three-hex-digit `\\x`
-    escape: not a form Python, C or any reader parses back to one character.
-
-    So it is killed rather than waived. The property is about the ESCAPE FORM, which is
-    the operator's ability to retype the name of a file they have to go and delete, and
-    it holds for every code point rather than for the ones the class happens to contain.
-    """
-    import re
-
-    def escaped(char):
-        return presentation._escaped(re.match(".", char, re.DOTALL))
-
-    assert escaped("\x00") == "\\x00"
-    assert escaped("\x1b") == "\\x1b"
-    assert escaped("\x9f") == "\\x9f"          # the last two-digit code point
-    assert escaped("\xff") == "\\xff"
-    assert escaped("Ā") == "\\u0100"      # the first that is not
-    assert escaped("​") == "\\u200b"
-    assert escaped("﻿") == "\\ufeff"
 
 
 # ── R15-SEC-2: bytes that are not characters ─────────────────────────────────
@@ -435,3 +438,141 @@ def test_issue_r15_sec_2_the_json_escaper_touches_only_the_undecodable_bytes():
     assert json.loads(presentation.escape_surrogates(
         json.dumps({"p": "csi\udc9bmark.ts"}, ensure_ascii=False))) == {
             "p": "csi\udc9bmark.ts"}, "the consumer no longer receives what was found"
+
+
+# ── R16-SEC-1: the heading, which the boundary was not drawn around ──────────
+
+SERVICE_DIR_NAME = "svc\x1b]0;PWNED\x07\x1b[31m\x1b[2Jx"
+
+
+def _hostile_service_dir_tree(tmp_path):
+    """A pnpm monorepo whose SERVICE DIRECTORY is named with terminal escapes.
+
+    `node-ts.service-package`'s title interpolates `service_name()`, which is
+    `service_dir.name` — repo-controlled text, in a check's TITLE rather than its body.
+    """
+    root = tmp_path / "repo"
+    package = root / "packages" / SERVICE_DIR_NAME
+    (package / "src").mkdir(parents=True)
+    (root / "package.json").write_text('{"name": "m", "private": true}\n',
+                                       encoding="utf-8")
+    (root / "pnpm-workspace.yaml").write_text("packages:\n  - 'packages/*'\n",
+                                              encoding="utf-8")
+    (package / "package.json").write_text(
+        '{"name": "@m/server", "main": "dist/index.js",\n'
+        ' "dependencies": {"fastify": "^4.28.0"}}\n', encoding="utf-8")
+    (package / "src" / "index.ts").write_text("import Fastify from 'fastify';\n",
+                                              encoding="utf-8")
+    return root
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r16_sec_1_a_check_title_cannot_drive_the_terminal(tmp_path):
+    """R16-SEC-1 (medium). R15-SEC-1 sanitized the check BODY and printed the HEADING raw.
+
+    The boundary had been drawn in the wrong place — around "the fields `_render_fields`
+    renders" rather than around "repo-controlled text reaching a device" — so the first
+    title to interpolate a repository's own string walked straight through it.
+    `node-ts.service-package` is that title: it names `service_dir.name`. Measured before
+    the fix, on this tree:
+
+        raw ESC in output: True
+        raw BEL in output: True
+          line 56 : '  ✓ node-ts.service-package: Deployable service package: svc\\x1b]0;PWNED…'
+
+    Same payload, same consequences as R15-SEC-1 — `\\x1b[2J` clears the screen the
+    summary was printed on, OSC 0 retitles the window, OSC 52 writes the clipboard — by a
+    route that commit's tests could not see, because they asserted about details and
+    refusal lists.
+    """
+    root = _hostile_service_dir_tree(tmp_path)
+    report = core.scan(root)
+
+    title = next(c["title"] for c in report["checks"]
+                 if c["id"] == "node-ts.service-package")
+    assert "\x1b" in title, "the fixture stopped exercising the title path"
+
+    text = render_text(report)
+
+    assert not presentation._TEXT_CONTROL_RE.search(text), (
+        "repo-controlled text reached the terminal raw, through the heading")
+    assert "\\x1b]0;PWNED\\x07" in text, "…and the operator cannot see what it is called"
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r16_sec_1_the_renderer_is_safe_at_the_seam_not_per_field(tmp_path):
+    """SAFE BY CONSTRUCTION, which is the architectural half of the finding.
+
+    A per-field opt-in is a rule every future interpolation has to remember; this one was
+    forgotten by the commit that wrote the rule. `render_text` now sanitizes its WHOLE
+    output on the way out, so a new field, a new heading, a new summary line is safe
+    because of where it is printed rather than because somebody remembered.
+
+    Asserted by planting the payload in every string a check carries — id and tier
+    included, which no scanner emits and which the seam covers anyway.
+    """
+    report = core.scan(_hostile_service_dir_tree(tmp_path))
+    report["checks"].append({
+        "id": "t.hostile\x1b[2J", "tier": "advice",
+        "title": "t\x07itle", "detail": "de\x1btail", "fix_hint": "fi\x1bx",
+        "execution": "static", "refused_paths": ["p\x1ba.ts"]})
+    report["summary"]["advice"] = report["summary"].get("advice", 0) + 1
+    report["modules"] = [*report["modules"], "mod\x1bule"]
+
+    text = render_text(report)
+
+    assert not presentation._TEXT_CONTROL_RE.search(text), text[:400]
+    for named in ("t.hostile\\x1b[2J", "t\\x07itle", "de\\x1btail", "fi\\x1bx",
+                  "p\\x1ba.ts", "mod\\x1bule"):
+        assert named in text, named
+
+
+def test_issue_r16_sec_1_check_ids_are_scanner_authored_slugs(tmp_path):
+    """…and the other half of the id/tier question, answered rather than assumed.
+
+    The seam covers them, so nothing rests on this — but a check id is a scanner-authored
+    slug by construction (it keys supersession, the registry invariant and the demo
+    records), and saying so mechanically is cheaper than the next reader wondering whether
+    a repository can reach one.
+    """
+    import re as _re
+
+    for root in (_hostile_service_dir_tree(tmp_path), tmp_path / "empty"):
+        (tmp_path / "empty").mkdir(exist_ok=True)
+        for check in core.scan(root)["checks"]:
+            assert _re.fullmatch(r"[a-z0-9][a-z0-9.\-]*", check["id"]), check["id"]
+            assert check["tier"] in core.TIERS
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_f16_1_one_filename_reads_the_same_in_both_halves_of_a_check(tmp_path):
+    """F16-1, on the tree that produced it: a committed symlink named across two lines.
+
+    `core.symlinked-files` names it twice in one body — in the prose, quoted through the
+    scanner's `repr` because a name that occupies two lines would forge a report line
+    (R7-3), and in the refusal list, escaped by this module. Before the escape vocabulary
+    was Python's, the operator read `'src/two\\nlines.ts'` on one line and
+    `src/two\\x0alines.ts` three lines below it, and had to work out that those are the
+    same file.
+
+    The outer quotes stay, and they are not a second spelling: they BOUND a name inside a
+    sentence, and a list that gives each name its own line has nothing to bound.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    target = neighbour / "t.ts"
+    target.write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text(
+        'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
+    link = root / "src" / "two\nlines.ts"
+    os.symlink(os.path.relpath(target, link.parent), link)
+
+    check = next(c for c in core.scan(root)["checks"]
+                 if c["id"] == "core.symlinked-files")
+    prose = next(line for line in check["detail"].splitlines() if "lines.ts" in line)
+    listed = presentation.safe_path(check["refused_paths"][0])
+
+    assert prose == f"'{listed}'", (prose, listed)
+    assert "\\n" in listed and "\\x0a" not in listed
