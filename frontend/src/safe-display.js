@@ -35,10 +35,19 @@ import { CONTROL_CLASS, TEXT_CONTROL_CLASS } from "./api/presentation.js";
 const CONTROL_RE = new RegExp(`[${CONTROL_CLASS}]`, "g");
 const TEXT_CONTROL_RE = new RegExp(`[${TEXT_CONTROL_CLASS}]`, "g");
 
-// Mirror of `presentation._escaped`: `\xNN` below U+0100, `\uNNNN` at or above, lowercase
-// hex — which is `repr(char)[1:-1]` in Python, the spelling the other exits already use.
+// Mirror of `presentation._escaped`, which is `repr(char)[1:-1]` in Python — and that is
+// what the other four exits emit, so the DOM must match it exactly or one name has two
+// spellings (F20-BIDI-1). `repr` uses NAMED escapes for tab/newline/CR before falling
+// back to `\xNN` (< U+0100) / `\uNNNN` (>=). It does NOT name \v (U+000B) or \f (U+000C) —
+// those are `\x0b`/`\x0c` — so the named set is exactly these three. Only they can render
+// in a text node at all (the rest are invisible or reordering controls), which is why the
+// divergence was benign-but-real: a refused path with a literal newline read `…\x0a…` in
+// the DOM and `…\n…` everywhere else.
+const NAMED = { 0x09: "\\t", 0x0a: "\\n", 0x0d: "\\r" };
+
 function escapeMatch(ch) {
   const cp = ch.codePointAt(0);
+  if (cp in NAMED) return NAMED[cp];
   return cp < 0x100
     ? "\\x" + cp.toString(16).padStart(2, "0")
     : "\\u" + cp.toString(16).padStart(4, "0");

@@ -36,12 +36,18 @@ test("legit CJK and RTL-script letters are untouched", () => {
   assert.equal(safeText("דו”.md"), "דו”.md");    // Hebrew + a curly quote
 });
 
-test("safePath mirrors Python safe_path byte for byte, doubling included", () => {
+test("safePath mirrors Python safe_path byte for byte, named escapes included", () => {
   // The parity that makes 'one name, one rendering, across every exit' true rather than
   // asserted: these are the exact strings `scanner.presentation.safe_path` produces.
   assert.equal(safePath(`a\\b${RLO}c`), "a\\\\b\\u202ec");   // backslash doubled (F16-1)
   assert.equal(safePath(ESC), "\\x1b");                       // <0x100 -> \xNN
   assert.equal(safePath("\udc9b"), "\\udc9b");                // lone surrogate named
+  // F20-BIDI-1: the three points where `repr` uses a NAMED escape — the DOM emitted
+  // `\x09`/`\x0a`/`\x0d` here and every other exit emits these, so a refused path with a
+  // literal newline read two ways. `safe_path` escapes the newline (full class).
+  assert.equal(safePath("two\tlines\nand\rmore.ts"), "two\\tlines\\nand\\rmore.ts");
+  // …and NOT the near-neighbours `repr` does not name: \v and \f stay \x0b/\x0c.
+  assert.equal(safePath("a\vb\fc"), "a\\x0bb\\x0cc");
 });
 
 test("safeText keeps the server's newlines and does NOT double backslashes", () => {
@@ -51,6 +57,8 @@ test("safeText keeps the server's newlines and does NOT double backslashes", () 
   assert.equal(safeText(`line one\nline two${RLO}`), "line one\nline two\\u202e");
   assert.equal(safeText("a\\b"), "a\\b");                     // NOT doubled
   assert.equal(safeText(safeText(`x${RLO}`)), safeText(`x${RLO}`)); // idempotent
+  // F20-BIDI-1 for the text variant: tab and CR ARE escaped (named), only U+000A is kept.
+  assert.equal(safeText("a\tb\nc\rd"), "a\\tb\nc\\rd");
 });
 
 test("null/undefined pass through (a React child may be either)", () => {

@@ -808,3 +808,45 @@ test("dom-bidi: the check title is sanitized where the panel renders it", () => 
   assert.match(panel, /<summary>\{safePath\(c\.title\)\}<\/summary>/,
     "the check title reaches the DOM without the display sanitizer");
 });
+
+// ── F20-BIDI-1: the named-escape divergence, and the defense-in-depth sinks ───
+
+test("dom-bidi: a refused path with a real newline reads the same as the other exits", () => {
+  // The reviewer's exact demonstration: `escapeMatch` emitted `\x0a` where every other
+  // exit (repr-based) emits `\n`, so one filename had two spellings between the DOM and
+  // everything else — the F16-1 class reintroduced. `safePath` mirrors repr's named
+  // escapes now.
+  const markup = render(CheckBody, { check: {
+    tier: "warning", refused_paths: ["src/two\nlines.ts", "col\tumn.ts"] } });
+  const text = visibleText(markup);
+
+  assert.ok(text.includes("src/two\\nlines.ts"), text);   // \n, not \x0a
+  assert.ok(text.includes("col\\tumn.ts"), text);         // \t, not \x09
+  assert.ok(!text.includes("\\x0a") && !text.includes("\\x09"),
+    "the DOM still spells tab/newline differently from the CLI/JSON exits");
+});
+
+test("dom-bidi: a warning title carrying a bidi override is sanitized in WarningsAck", () => {
+  const markup = render(WarningsAck, {
+    warnings: [{ id: "core.symlinked-files", title: "refused invoice‮gpj.exe" }],
+    checked: false, onChange: () => {} });
+
+  assert.ok(!markup.includes("‮"), "a bidi override reached the ack label raw");
+  assert.ok(visibleText(markup).includes("invoice\\u202egpj.exe"), markup);
+});
+
+test("dom-bidi: the 409 refusal panel sanitizes detail and item titles, not slugs", () => {
+  const RLO = "‮";
+  const msg = { problems: [{
+    code: "warnings_unconfirmed",
+    detail: `the report warns about invoice${RLO}gpj.exe`,
+    items: [{ id: "core.symlinked-files", title: `bad${RLO}.ts` }],
+  }] };
+  const markup = render(OutcomeRegion, { msg });
+  const text = visibleText(markup);
+
+  assert.ok(!markup.includes(RLO), "a bidi override reached the refusal panel raw");
+  assert.ok(text.includes("invoice\\u202egpj.exe"), text);   // detail escaped
+  assert.ok(text.includes("bad\\u202e.ts"), text);           // item title escaped
+  assert.ok(text.includes("warnings_unconfirmed"), "the scanner slug code is intact");
+});

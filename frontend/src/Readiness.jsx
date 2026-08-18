@@ -451,7 +451,11 @@ export function WarningsAck({ warnings, checked, onChange }) {
       <input type="checkbox" checked={checked} onChange={onChange} />
       {" "}I have read {items.length === 1 ? "this warning" : `these ${items.length} warnings`}
       {" "}and accept {items.length === 1 ? "it" : "them"}:{" "}
-      <span style={{ color: "#e3b341" }}>{items.map((w) => w.title).join("; ")}</span>
+      {/* dom-bidi-display / F20-BIDI-1: a warning title can carry repo content too
+          (R16-SEC-1), so it goes through the display sanitizer like CheckBody's fields —
+          the coverage rests on "every repo-controlled-class field reaching the DOM is
+          escaped", not on this one happening to be ok-tier today. */}
+      <span style={{ color: "#e3b341" }}>{items.map((w) => safeText(w.title)).join("; ")}</span>
     </label>
   );
 }
@@ -481,10 +485,15 @@ export function OutcomeRegion({ msg }) {
       {msg?.problems && (
         <div style={{ color: "#e3b341" }}>
           <p>Materialization refused — every reason, not just the first:</p>
+          {/* dom-bidi-display / F20-BIDI-1: `p.detail` and an item's `title`/`prompt` are
+              server prose that can quote repo content (R16-SEC-1), so they go through
+              `safeText`. `p.code` and a bare `it.id` are scanner-authored slugs and stay
+              raw — and `safeText` of a slug is the slug, so wrapping the `||` picked value
+              is correct whichever arm wins. */}
           <ul>{msg.problems.map((p, i) => (
-            <li key={i}><strong>{p.code}</strong>: {p.detail}
+            <li key={i}><strong>{p.code}</strong>: {safeText(p.detail)}
               {!!p.items?.length && <ul>{p.items.map((it, j) =>
-                <li key={j}>{it.prompt || it.title || it.id}</li>)}</ul>}
+                <li key={j}>{safeText(it.prompt || it.title || it.id)}</li>)}</ul>}
             </li>))}
           </ul>
           {/* Said once, here, because the panel above visibly changes under the operator
