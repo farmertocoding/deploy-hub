@@ -112,13 +112,23 @@ def main(argv=None):
         from scanner.core import scan
 
         report = scan(args.path)
-        # R15-SEC-2: `ensure_ascii=False` keeps a Chinese path readable in `--json`, and
-        # it also emits an undecodable byte's lone surrogate as itself — which no UTF-8
-        # stream can encode and which is not valid JSON text. `escape_surrogates` spells
-        # exactly those code points the way `ensure_ascii` would have, and leaves every
-        # other character alone; the text renderer sanitizes its own output on the way
-        # out. Neither path can be taken down by a filename any more.
-        print(presentation.escape_surrogates(
+        # R17-SEC-1: ONE BOUNDARY, TWO EXITS, one class.
+        #
+        # Both of this command's outputs carry repo-controlled text to somebody's
+        # terminal — `--json` is piped into `jq`, `less` and CI logs as often as it is
+        # parsed — so both enforce `presentation.CONTROL_CLASS`. They differ only in the
+        # vocabulary the medium accepts: the text renderer escapes for DISPLAY (`\x1b`,
+        # what `repr` writes and a reader retypes), and JSON escapes for a PARSER
+        # (`\u001b`, the only escape JSON has for these). A consumer gets the identical
+        # code points back from `json.loads`.
+        #
+        # `ensure_ascii=False` stays: it is why a Chinese path is readable in `--json`,
+        # and it escapes U+0000-001F and nothing else — which is how U+009B (the 8-bit
+        # CSI), U+0085, the bidi overrides, the zero-width family and the BOM were all
+        # going out raw and valid. `json_safe` replaced the surrogate-only escaper rather
+        # than joining it, because a second range list beside the class is the defect the
+        # class exists to prevent.
+        print(presentation.json_safe(
                   json.dumps(report, indent=2, ensure_ascii=False)) if args.json
               else render_text(report))
         # Exit 1 on blockers — usable as a CI gate immediately.

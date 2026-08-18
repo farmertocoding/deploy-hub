@@ -8,6 +8,7 @@ screen.
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -18,6 +19,7 @@ from scanner import core, presentation
 from scanner.modules.fallbacks import _MAX_SKIPPED_REPORTED
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+BACKSLASH = chr(92)
 LINK_COUNT = _MAX_SKIPPED_REPORTED + 4
 
 
@@ -152,8 +154,11 @@ def test_issue_r15_sec_1_a_committed_name_cannot_drive_the_terminal(tmp_path):
     named = [line for line in text.splitlines() if "cleared.ts" in line]
     assert len(named) >= 2, named
 
-    # `--json` is untouched on purpose: `json.dumps` escapes control characters by
-    # construction and its consumer is a parser, not a screen.
+    # `--json` needs no DISPLAY escaping for this payload: `json.dumps` escapes
+    # U+0000-001F by construction, and ESC is one of them. R17-SEC-1 is what that
+    # sentence used to claim beyond its evidence — it said "escapes control characters",
+    # and C0 is not the class. Everything above U+001F in `CONTROL_CLASS` went out raw
+    # until `json_safe`; the pins for that are in the R17-SEC-1 section below.
     assert "\x1b" not in json.dumps(report)
     assert any("\x1b" in p for c in report["checks"]
                for p in (c.get("refused_paths") or [])), (
@@ -400,10 +405,11 @@ def test_issue_r15_sec_2_an_undecodable_filename_cannot_take_the_cli_down(
 def test_issue_r15_sec_2_the_json_body_is_still_what_the_scanner_found(tmp_path):
     """…and `--json`'s consumer receives the same report, not a sanitized one.
 
-    `escape_surrogates` spells those code points the way `ensure_ascii=True` would have
-    and touches nothing else, so the bytes on the wire are valid JSON and `json.loads`
-    reads the lone surrogate back. A scanner that quietly repaired the name would be
-    lying about what it found.
+    `json_safe` (R15-SEC-2 shipped it as `escape_surrogates`; R17-SEC-1 widened it to the
+    whole class) spells those code points the way `ensure_ascii=True` would have and
+    touches nothing else, so the bytes on the wire are valid JSON and `json.loads` reads
+    the lone surrogate back. A scanner that quietly repaired the name would be lying
+    about what it found.
     """
     root = _undecodable_name_tree(tmp_path)
 
@@ -418,26 +424,102 @@ def test_issue_r15_sec_2_the_json_body_is_still_what_the_scanner_found(tmp_path)
 
 
 @pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
-def test_issue_r15_sec_2_the_json_escaper_touches_only_the_undecodable_bytes():
-    """`escape_surrogates` in process, and this test exists because of how the gate found
-    it missing.
+def test_issue_r17_sec_1_the_json_escaper_covers_the_whole_class():
+    """`json_safe` in process, over every member of `CONTROL_CLASS`.
 
-    The end-to-end cases above drive it through a SUBPROCESS — they have to, because the
-    failure they pin is an encoder crash on the way to a device. `make mutation` reported
-    all four mutants of this function as `no tests`: mutmut narrows per mutant using the
-    coverage it records in THIS process, and a subprocess is invisible to it. An
-    end-to-end test can prove the behaviour and still leave the function unmutated, which
-    is a gap in the gate rather than in the code — so the unit is asserted here as well.
+    R15-SEC-2 shipped this as `escape_surrogates` — the same function with one range
+    instead of the class — and R17-SEC-1 is the rest of the class arriving raw and valid
+    in `--json`: U+009B (the 8-bit CSI), U+0085, the bidi overrides and isolates, the
+    zero-width family, the BOM. `json.dumps(ensure_ascii=False)` escapes U+0000-001F, the
+    quote and the backslash, and nothing else.
+
+    Asserted in process as well as end to end, and that is not belt-and-braces: `make
+    mutation` reported all four mutants of the old function as `no tests`, because mutmut
+    records coverage in ITS process and the end-to-end cases run a subprocess.
     """
-    assert presentation.escape_surrogates("plain") == "plain"
-    assert presentation.escape_surrogates("csi\udc9bmark.ts") == "csi\\udc9bmark.ts"
-    assert presentation.escape_surrogates("\udc80\udcff") == "\\udc80\\udcff"
-    # Everything else is left exactly as it is: the flag this repairs was chosen so a
-    # Chinese path stays readable in `--json`, and repairing more would undo that.
-    assert presentation.escape_surrogates("正體中文 · a\x1bb") == "正體中文 · a\x1bb"
-    assert json.loads(presentation.escape_surrogates(
-        json.dumps({"p": "csi\udc9bmark.ts"}, ensure_ascii=False))) == {
-            "p": "csi\udc9bmark.ts"}, "the consumer no longer receives what was found"
+    every = "".join(map(chr, range(0x110000)))
+    members = set(re.findall(f"[{presentation.CONTROL_CLASS}]", every))
+
+    for char in members:
+        dumped = json.dumps({"p": f"x{char}y"}, ensure_ascii=False)
+        escaped = presentation.json_safe(dumped)
+        assert char not in escaped, f"U+{ord(char):04X} survived into the JSON text"
+        # …and a parser gives the identical code point back. The scanner still reports
+        # what it found; only the spelling on the wire changed.
+        assert json.loads(escaped) == {"p": f"x{char}y"}, char
+
+    # JSON's vocabulary, not `repr`'s: `\x9b` is not a JSON escape and a parser rejects
+    # it, which is why display and serialization cannot share one escaper.
+    assert presentation.json_safe(json.dumps("x\x9by")) == '"x' + BACKSLASH + 'u009by"'
+    assert presentation.json_safe("plain") == "plain"
+
+    # Everything outside the class is left exactly as it is — the reason
+    # `ensure_ascii=False` was chosen in the first place.
+    assert presentation.json_safe("正體中文 · ok") == "正體中文 · ok"
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.parametrize("codepoint,label", [("\u009b", "C1 CSI"), ("\u202e", "RLO"),
+                                             ("\u2066", "bidi isolate"),
+                                             ("\u200b", "zero width"), ("\ufeff", "BOM")])
+def test_issue_r17_sec_1_a_hostile_name_is_escaped_in_json_end_to_end(
+        tmp_path, codepoint, label):
+    """The whole route: a committed symlink named with each class, through
+    `python -m hub scan --json`.
+
+    These names are VALID UTF-8 — unlike R15-SEC-2's bare byte — so nothing upstream
+    stumbles on them and they arrived in the output as themselves. `--json` is piped into
+    `jq`, `less` and CI logs at least as often as it is parsed, so U+009B reaching a
+    terminal that honours 8-bit C1 is the round-15 finding by the exit nobody guarded.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    target = neighbour / "t.ts"
+    target.write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text(
+        'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
+    link = root / "src" / f"na{codepoint}me.ts"
+    os.symlink(os.path.relpath(target, link.parent), link)
+
+    result = subprocess.run([sys.executable, "-m", "hub", "scan", str(root), "--json"],
+                            capture_output=True, cwd=str(REPO), timeout=180)
+    out = result.stdout.decode("utf-8")
+
+    assert codepoint not in out, f"{label} reached the output raw"
+    assert f"{BACKSLASH}u{ord(codepoint):04x}" in out, f"{label} is named nowhere"
+
+    # The report a consumer parses still carries the true code point.
+    report = json.loads(out)
+    refused = [p for c in report["checks"] for p in (c.get("refused_paths") or [])]
+    assert any(codepoint in p for p in refused), refused
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r17_sec_1_a_readable_path_stays_readable_in_json(tmp_path):
+    """The over-correction guard, which this fleet has needed twice before.
+
+    `ensure_ascii=False` exists so a Chinese path is legible in `--json`. An escaper that
+    reached beyond the class would undo the only reason the flag is there.
+    """
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    target = neighbour / "t.ts"
+    target.write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text(
+        'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
+    link = root / "src" / "報表·結算.ts"
+    os.symlink(os.path.relpath(target, link.parent), link)
+
+    result = subprocess.run([sys.executable, "-m", "hub", "scan", str(root), "--json"],
+                            capture_output=True, cwd=str(REPO), timeout=180)
+    out = result.stdout.decode("utf-8")
+
+    assert "報表·結算.ts" in out, "a legible path was escaped into hex"
+    assert BACKSLASH + "u5831" not in out
 
 
 # ── R16-SEC-1: the heading, which the boundary was not drawn around ──────────
@@ -576,3 +658,61 @@ def test_issue_f16_1_one_filename_reads_the_same_in_both_halves_of_a_check(tmp_p
 
     assert prose == f"'{listed}'", (prose, listed)
     assert "\\n" in listed and "\\x0a" not in listed
+
+
+# ── QUALITY F-1: an escape vocabulary that was not injective ─────────────────
+
+def test_issue_f16_1_quality_f1_the_path_encoding_is_injective():
+    """One escaped string, one file — which R16-SEC-1's vocabulary change did not give.
+
+    Taking `repr`'s spelling for the control class left `repr`'s other rule behind: the
+    literal backslash is doubled. Without that, two different names collapse onto one
+    string, and the operator reading a refusal list cannot tell which file to delete:
+
+        safe_path("two" + chr(92) + "nlines.ts")   ->  two\\nlines.ts
+        safe_path("two" + chr(10) + "lines.ts")    ->  two\\nlines.ts   (the same)
+
+    The compound name is the other half, and it is the one that showed in a panel: the
+    scanner's prose DOES double (it is `repr` of the whole string), so one filename read
+    `'src/a\\\\b\\nc.ts'` in the detail and `src/a\\b\\nc.ts` in the list.
+    """
+    literal = "two" + BACKSLASH + "nlines.ts"
+    newline = "two\nlines.ts"
+
+    assert presentation.safe_path(literal) != presentation.safe_path(newline)
+    assert presentation.safe_path(literal) == "two" + BACKSLASH * 2 + "nlines.ts"
+    assert presentation.safe_path(newline) == "two" + BACKSLASH + "nlines.ts"
+
+    # The compound name, against the prose spelling it has to agree with.
+    compound = "src/a" + BACKSLASH + "b\nc.ts"
+    assert presentation.safe_path(compound) == repr(compound)[1:-1]
+
+
+def test_issue_f16_1_quality_f1_safe_text_stays_idempotent():
+    """…and `safe_text` does NOT double, because it is applied twice by design.
+
+    R16-SEC-1's seam runs it over the whole assembled output, after `_render_fields` has
+    already run it per field. Doubling there would turn the `\x1b` the first pass wrote
+    into `\\x1b` — every escape in the report growing a backslash per pass.
+
+    So the two functions carry different properties on purpose: a path is a NAME (one
+    string, one file) and prose is TEXT for a device (neutralized, however many times it
+    crosses the boundary). The authoritative names are in `refused_paths`.
+    """
+    once = presentation.safe_text("a\x1bb" + BACKSLASH + "c")
+    assert presentation.safe_text(once) == once
+    assert once == "a" + BACKSLASH + "x1bb" + BACKSLASH + "c"
+
+
+def test_issue_f16_1_quality_f1_the_whole_class_walk_still_holds():
+    """The R16-F16-1 property, re-verified under the doubling: for every member of the
+    class the escape is still `repr`'s, and no escape is itself still in the class.
+
+    The doubling changes what happens to a character OUTSIDE the class (the backslash),
+    so this is the assertion that says it did not disturb the vocabulary inside it.
+    """
+    every = "".join(map(chr, range(0x110000)))
+    for char in re.findall(f"[{presentation.CONTROL_CLASS}]", every):
+        escaped = presentation.safe_path(char)
+        assert escaped == repr(char)[1:-1], (char, escaped)
+        assert not presentation._CONTROL_RE.search(escaped), escaped

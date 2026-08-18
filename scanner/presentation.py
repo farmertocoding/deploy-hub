@@ -59,6 +59,11 @@ this module is the treatment for.
 """
 import re
 
+# The one character both escape vocabularies are built out of, named because a literal
+# backslash inside a doubled-backslash expression is unreadable and the next edit to
+# these functions will be made by somebody counting them.
+BACKSLASH = chr(92)
+
 # ── the declared model ────────────────────────────────────────────────────────
 #
 # `title` is not here: both media render it as the check's own heading (a `<summary>`, a
@@ -182,12 +187,28 @@ def _escaped(match):
 
 
 def safe_path(value):
-    r"""A repo-controlled PATH, safe to print on a line of its own.
+    r"""A repo-controlled PATH, safe to print on a line of its own, and INJECTIVE.
 
     Every control code point is escaped, newline included: the refusal list is one path
     per line, so a newline in a filename would forge an entry.
+
+    QUALITY F-1: and the literal backslash is doubled FIRST, which is the rest of `repr`'s
+    rule and the half adopting its vocabulary left behind. Without it the encoding is not
+    injective — two different files produce one string:
+
+        safe_path("two\\nlines.ts")   # a name containing backslash, n
+        safe_path("two\nlines.ts")    # a name containing a newline
+        # both -> two\nlines.ts
+
+    An operator reading the refusal list cannot tell which file to go and delete, and the
+    prose beside it (through the scanner's `repr`, which DOES double) said something
+    different again: `'src/a\\b\nc.ts'` against `src/a\b\nc.ts` for one compound name.
+    Doubling closes both halves — the encoding round-trips, and the two spellings agree.
+
+    ORDER MATTERS: double, then escape. The other way round would double the backslashes
+    this function has just written.
     """
-    return _CONTROL_RE.sub(_escaped, value)
+    return _CONTROL_RE.sub(_escaped, value.replace(BACKSLASH, BACKSLASH * 2))
 
 
 def safe_text(value):
@@ -198,29 +219,57 @@ def safe_text(value):
     the file names inside them come from the repository, which is how R15-SEC-1's escape
     sequence arrived: a committed symlink named `\x1b]0;…\x07` reached the terminal raw,
     through the detail line and through the refusal list both.
+
+    NOT INJECTIVE, AND DELIBERATELY NOT (QUALITY F-1). `safe_path` doubles literal
+    backslashes so that one string names one file; this function must not, because it is
+    applied TWICE BY DESIGN — once per prose field and once over the whole assembled
+    output at `render_text`'s seam (R16-SEC-1) — and doubling is not idempotent: the
+    second pass would turn the `\x1b` the first pass wrote into `\\x1b`.
+
+    The two functions want different properties, and the difference is what each value IS.
+    A path is a NAME: one string, one file, or the operator cannot act on it. Prose is
+    TEXT for a device: it has to be neutralized, however many times it passes the
+    boundary. The authoritative names are in `refused_paths`, spelled by `safe_path`.
     """
     return _TEXT_CONTROL_RE.sub(_escaped, value)
 
 
-_SURROGATE_RE = re.compile(f"[{_SURROGATE_ESCAPES}]")
+def _json_escaped(match):
+    """One code point, as JSON's only escape for it: `\\uXXXX`, four hex digits.
 
-
-def escape_surrogates(value):
-    r"""Undecodable bytes, as the `\uXXXX` escape both JSON and a person can read.
-
-    R15-SEC-2's other half. `json.dumps(..., ensure_ascii=False)` is the CLI's choice so a
-    Chinese path stays readable in `--json` output, and it emits a lone surrogate as
-    itself — which no UTF-8 stream can encode and which is not valid JSON text either (a
-    lone surrogate is not a Unicode scalar value). So `--json` died on the same filename
-    the text renderer died on, with the same `UnicodeEncodeError`.
-
-    This escapes ONLY the surrogate range, which is exactly what `ensure_ascii=True` would
-    have done for those code points and nothing else — every other character stays as
-    itself. `json.loads` reads `\udc9b` back to the same lone surrogate, so a consumer
-    receives what the scanner found; what changed is that the bytes on the wire are now
-    valid JSON, and encodable.
+    NOT `_escaped`'s spelling, and the difference is not cosmetic: `repr` writes U+009B as
+    `\\x9b`, and `\\x` is not a JSON escape at all — a parser rejects it. Display and
+    serialization are two media with two vocabularies, over ONE class.
     """
-    return _SURROGATE_RE.sub(_escaped, value)
+    return f"{BACKSLASH}u{ord(match.group()):04x}"
+
+
+def json_safe(value):
+    r"""A `json.dumps(..., ensure_ascii=False)` result, with every class member escaped.
+
+    R17-SEC-1. `ensure_ascii=False` is the CLI's choice so a Chinese path stays readable
+    in `--json`, and what it escapes is U+0000-001F, the quote and the backslash — and
+    nothing else. So every OTHER member of `CONTROL_CLASS` went out raw and valid:
+    U+009B (the 8-bit CSI), U+0085, the bidi overrides and isolates, the zero-width
+    family, the BOM. `--json` is piped into terminals (`| jq`, `| less`, a CI log), and
+    the round-15 claim that it was "safe by construction" was a claim about C0 only.
+
+    R15-SEC-2's `escape_surrogates` was this function with one range instead of the class,
+    and it is replaced rather than extended: a second range list is exactly the thing
+    `CONTROL_CLASS` exists to prevent. What was true of the surrogates is true of all of
+    them — `\uXXXX` is what `ensure_ascii=True` would have written, `json.loads` returns
+    the identical code point, and everything outside the class (CJK included) stays
+    literal. The scanner still reports the true bytes; only their spelling on the wire
+    changes.
+
+    THE CLASS MINUS NEWLINE, for `safe_text`'s reason one layer over: the line breaks in
+    this string are `indent=2`'s, not the repository's. `json.dumps` has already escaped
+    every U+000A that is INSIDE a string as `\n`, so a raw newline here can only be the
+    pretty-printer's own — and escaping those writes `\u000a` where the document's
+    structure was, which is not valid JSON at all. Caught by the end-to-end test doing
+    what a consumer does: `json.loads` on the output.
+    """
+    return _TEXT_CONTROL_RE.sub(_json_escaped, value)
 
 
 def text_block(value, indent=TEXT_INDENT):
