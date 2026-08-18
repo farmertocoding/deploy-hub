@@ -185,3 +185,56 @@ async def test_issue_r4_11_ws_authenticates_from_the_http_login_session_cookie()
     close = await anon.receive_output()
     assert close["type"] == "websocket.close" and close["code"] == 4401
     await anon.disconnect()
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+async def test_issue_r19_arch_1_a_published_event_is_escaped_on_the_ws_wire():
+    """R19-ARCH-1: the WebSocket is a fourth device-reaching exit.
+
+    A DevTools frame inspector, a `wscat` session and a proxy log all render what crosses
+    the socket, so `event` — whatever `publish()` carried — is repo/operator-reachable
+    text meeting a device. The exit was outside the presentation authority, safe only
+    because stdlib `json.dumps` defaults `ensure_ascii=True`; routing it through
+    `json_safe` makes CONTROL_CLASS the rule rather than the default.
+
+    Asserted on the RAW wire frame, before `json.loads`: the point is what the byte
+    stream carries, which is what an inspector shows.
+    """
+    from scanner import presentation
+
+    hostile = "line\x1b]0;PWNED\x07 ‮ and ​ invisible"
+    comm = await _connected_communicator()
+    await comm.send_to(json.dumps({"action": "subscribe", "topics": ["demo.escwire.log"]}))
+    assert json.loads(await comm.receive_from()) == {"subscribed": "demo.escwire.log"}
+
+    await sync_to_async(publish)("demo.escwire.log", {"line": hostile})
+
+    frame = await comm.receive_from()
+    assert not presentation._TEXT_CONTROL_RE.search(frame), (
+        "a control code point crossed the socket raw")
+    assert "\\u001b" in frame and "\\u202e" in frame, frame
+    # …and a parser still gets the true string back — escaping is a spelling, not a repair.
+    assert json.loads(frame)["event"] == {"line": hostile}
+    await comm.disconnect()
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_arch_1_the_ws_exit_goes_through_the_one_authority():
+    """R10-A5-style sentinel, and it is what actually red-flags a regression here.
+
+    The behavioural test above passes TODAY WITHOUT the fix, because `json.dumps` defaults
+    `ensure_ascii=True` and escapes the class as a side effect — which is precisely the
+    accident the finding is about. What must not regress is that the WS frame is built
+    THROUGH `json_safe`, so a future `ensure_ascii=False` (for a legible CJK topic, say)
+    cannot silently reopen the class. Patching the authority is how a test asserts the
+    exit is wired to it rather than escaping by luck.
+    """
+    from realtime import consumers
+
+    original = consumers.presentation.json_safe
+    try:
+        consumers.presentation.json_safe = lambda text: '{"sentinel":true}'
+        assert consumers._ws_json({"denied": "demo.x"}) == '{"sentinel":true}', (
+            "the WS exit does not build its frame through presentation.json_safe")
+    finally:
+        consumers.presentation.json_safe = original

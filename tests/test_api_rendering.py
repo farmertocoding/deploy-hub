@@ -228,3 +228,219 @@ def test_issue_r18_sec_1_an_indented_response_stays_indented_and_valid(media_typ
     assert "\n" in rendered, "the indent was dropped on the way to super().render()"
     assert json.loads(rendered) == payload, "escaping broke the document's structure"
     assert not presentation._TEXT_CONTROL_RE.search(rendered)
+
+
+# ── R19-SEC-1: the surrogate that 500'd before json_safe could run ───────────
+
+SURROGATE_NAME = "csi\udc9bmark.ts"   # os.listdir(surrogateescape) of a bare 0x9b byte
+
+
+def _render(data, media_type=None, context=None):
+    """One check's Response body, through the configured renderer.
+
+    `api_settings.DEFAULT_RENDERER_CLASSES[0]` rather than `ContainedJSONRenderer`
+    imported directly, so the test breaks if the settings registration is removed — the
+    finding is about what the API actually uses, not about a class that exists.
+    """
+    from rest_framework.settings import api_settings
+
+    renderer = api_settings.DEFAULT_RENDERER_CLASSES[0]()
+    return renderer.render(data, media_type, context or {})
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_a_surrogate_does_not_raise_at_the_renderer():
+    """R19-SEC-1 (medium). `super().render()` `.encode()`s BEFORE `json_safe` runs, and a
+    lone surrogate cannot be UTF-8 encoded, so the renderer raised on the one class its
+    own escaper was written for. Measured before the fix:
+
+        RAISED: UnicodeEncodeError: 'utf-8' codec can't encode character '\\udc9b'
+
+    An exception at the renderer is a 500 after the view has already decided the response
+    — for a 400 error body, after the audited exception handler has already run.
+    """
+    body = _render({"refused_paths": [SURROGATE_NAME], "detail": f"1 file:\n{SURROGATE_NAME}"})
+
+    assert b"\\udc9b" in body, "the surrogate is named nowhere"
+    assert json.loads(body.decode("utf-8")) == {
+        "refused_paths": [SURROGATE_NAME], "detail": f"1 file:\n{SURROGATE_NAME}"}, (
+        "the parser does not get the true code point back")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_reach_a_a_choicefield_error_stays_a_400_with_an_escaped_body():
+    """REACH PATH (a): operator input echoed into a DRF error.
+
+    A `ChoiceField` renders `'"{input}" is not a valid choice.'` — the input VERBATIM,
+    unlike the wizard's own validation which uses `repr` and so was already safe. JSON
+    input carries a lone surrogate fine (`json.loads('"\\udc9b"')` is U+DC9B), so a POSTed
+    choice reaches the error body raw, and rendering it 500'd.
+
+    Driven through the real renderer on a real ChoiceField error rather than a
+    hand-built body, because the claim is that DRF composes this shape and the renderer
+    survives it — the product has no ChoiceField, so the field is the test's, the
+    renderer and the error machinery are DRF's.
+    """
+    from rest_framework import serializers
+
+    class _ChoiceSerializer(serializers.Serializer):
+        exposure = serializers.ChoiceField(choices=["public", "mesh_only"])
+
+    serializer = _ChoiceSerializer(data={"exposure": SURROGATE_NAME})
+    assert not serializer.is_valid()
+
+    # The 400 body DRF hands the renderer: `{"exposure": ['"csi\udc9bmark.ts" is not a
+    # valid choice.']}`, the surrogate verbatim.
+    detail = serializer.errors
+    assert SURROGATE_NAME in str(detail["exposure"][0]), "DRF stopped echoing the input"
+
+    body = _render(detail)
+
+    assert b"\\udc9b" in body
+    parsed = json.loads(body.decode("utf-8"))
+    assert SURROGATE_NAME in parsed["exposure"][0]
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_reach_b_a_committed_bare_byte_keeps_readiness_online(
+        auth_client, tmp_path):
+    """REACH PATH (b), the escalation: a committed file makes readiness a PERMANENT 500.
+
+    The whole route, real scanner included: a symlink named with a bare 0x9b byte —
+    invalid UTF-8, legal on the filesystem — is stored by `os.listdir`'s
+    `surrogateescape` into `scan_report.refused_paths`, and `GET …/readiness/` renders
+    that report on every request. Before the fix the render raised, so the project's
+    primary screen was down for as long as the file was committed, with zero interaction.
+
+    Built through `os.fsencode` because the point is that the name is BYTES, not text.
+    """
+    import os
+
+    from scanner import core as scanner_core
+
+    neighbour = tmp_path / "neighbour"
+    neighbour.mkdir()
+    (neighbour / "target.ts").write_text("export const x = 1;\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "Dockerfile").write_text(
+        'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
+    link = os.path.join(os.fsencode(str(root / "src")), b"csi\x9bmark.ts")
+    os.symlink(os.path.relpath(os.fsencode(str(neighbour / "target.ts")),
+                               os.fsencode(str(root / "src"))), link)
+
+    report = scanner_core.scan(str(root))
+    refused = [p for c in report["checks"] for p in (c.get("refused_paths") or [])]
+    assert any("\udc9b" in p for p in refused), (
+        "the scanner did not store the bare byte — the fixture is not exercising path b")
+
+    project = Project.objects.create(
+        name="bare-byte", slug="bare-byte", git_url="https://github.com/o/r.git",
+        scan_report=report, scanned_at="2026-08-18T00:00:00Z")
+
+    response = auth_client.get(f"/api/v1/projects/{project.pk}/readiness/")
+
+    assert response.status_code == 200, "readiness is a 500 — the report cannot be read"
+    assert b"\\udc9b" in response.content
+    parsed = json.loads(response.content.decode("utf-8"))
+    parsed_refused = [p for c in parsed["warnings"] for p in (c.get("refused_paths") or [])]
+    assert any("\udc9b" in p for p in parsed_refused), (
+        "the parsed report lost the byte the scanner found")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_every_class_member_round_trips_through_the_renderer():
+    """The R13-REM-1 gap this closes: the 230 lines of renderer/escaper tests had ZERO
+    surrogate coverage, which is how the encode-before-escape order survived.
+
+    Every member of `CONTROL_CLASS` — the surrogate range INCLUDED — through the renderer
+    and back: escaped on the wire, identical after a parse. The scanner still reports the
+    true bytes; only their spelling changes.
+    """
+    every = "".join(map(chr, range(0x110000)))
+    members = [c for c in every if presentation._CONTROL_RE.match(c)]
+    assert any(0xDC80 <= ord(c) <= 0xDCFF for c in members), "the surrogate range is gone"
+
+    for char in members:
+        payload = {"p": f"x{char}y"}
+        body = _render(payload)
+        text = body.decode("utf-8")
+        assert char not in text, f"U+{ord(char):04X} reached the wire raw"
+        assert json.loads(text) == payload, f"U+{ord(char):04X} did not round-trip"
+
+
+# ── R19-SEC-1: the replicated DRF render body, pinned line by line ───────────
+#
+# The renderer no longer calls `super().render()` (which encodes before json_safe can
+# run), so DRF's dump contract is this subclass's now — and `make mutation` mutated every
+# argument of it. These pin the ones that carry meaning; each names the mutant it kills.
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_none_data_renders_empty_bytes():
+    """A 204/None response is `b""` — DRF's contract, and the `if data is None` short
+    circuit `json_safe` must not be asked to escape."""
+    assert _render(None) == b""
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_compact_output_uses_drfs_short_separators():
+    """No spaces after `,` or `:` — DRF renders compact, and a consumer diffing API
+    output against a fixture depends on the exact bytes. Kills the separator mutants
+    (dropped, `None`, or the compact/indent branch flipped)."""
+    assert _render({"a": 1, "b": 2}) == b'{"a":1,"b":2}'
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_an_indented_response_is_valid_and_escaped():
+    """The indent branch: still valid JSON, still escaped, structure intact. Kills the
+    branch-condition and indent-separator mutants."""
+    body = _render({"detail": SURROGATE_NAME}, "application/json; indent=2", {})
+
+    assert b"\n" in body, "indent was dropped"
+    assert json.loads(body.decode("utf-8")) == {"detail": SURROGATE_NAME}
+    assert b"\\udc9b" in body
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_the_drf_encoder_renders_types_plain_json_cannot():
+    """`cls=self.encoder_class` — a Response may carry a `Decimal` or a `datetime`, which
+    DRF's encoder serializes and the stdlib encoder raises on. Kills the `cls=None` and
+    dropped-`cls` mutants."""
+    import datetime as dt
+    from decimal import Decimal
+
+    body = _render({"when": dt.datetime(2026, 8, 18, 12, 0), "amount": Decimal("1.5")})
+    parsed = json.loads(body.decode("utf-8"))
+
+    assert parsed["when"].startswith("2026-08-18")
+    assert parsed["amount"] == 1.5
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_a_non_finite_number_is_refused_not_emitted():
+    """A bare `NaN`/`Infinity` is invalid JSON for most parsers, and this renderer never
+    emits one. The refusal is DRF's `encoder_class`'s (it raises `ValueError` on a
+    non-finite float regardless of `allow_nan`), which is why the renderer does not
+    restate `allow_nan` — this pins that behaviour rather than an argument of ours."""
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        _render({"x": float("nan")})
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r19_sec_1_cjk_stays_legible_and_the_class_is_still_escaped():
+    """`ensure_ascii=self.ensure_ascii` is DRF's `UNICODE_JSON` (False here), which is why
+    a Chinese path is readable in the response — the whole reason this renderer replicates
+    DRF's body instead of forcing `ensure_ascii=True`. The class is escaped regardless,
+    because `json_safe` does not read this setting.
+
+    A PROPERTY PIN, not a mutant kill: `self.ensure_ascii` is a DRF class attribute frozen
+    at import to False, so `ensure_ascii=None` renders identically and no runtime setting
+    change can separate them — that mutant is recorded equivalent in WAIVERS.md.
+    """
+    body = _render({"p": "報表", "bad": SURROGATE_NAME})
+
+    assert "報表".encode() in body, "CJK was escaped — the renderer lost its whole point"
+    assert b"\\udc9b" in body, "…but the class is still escaped"
+    assert json.loads(body.decode("utf-8")) == {"p": "報表", "bad": SURROGATE_NAME}

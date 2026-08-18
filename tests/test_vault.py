@@ -420,15 +420,65 @@ def test_issue_r18_the_encrypt_and_decrypt_paths_build_one_aad(db):
 
 
 def test_issue_r18_an_integer_owner_id_binds_to_the_string_the_row_stores(db):
-    """`put` takes `owner_id=7` and the row stores `"7"`. If the AAD were built from the
-    raw argument on the way in and from the field on the way out, every secret created
-    with an int pk would be undecryptable — the mismatch appears at READ time, arbitrarily
-    later than the write that caused it."""
+    """`put` takes `owner_id=7`, the row stores `"7"`, and the secret still decrypts.
+
+    R19-QUAL corrects what this used to claim: there is NO behavioural divergence between
+    an int and its string here, because the AAD is built through an f-string and
+    `f"{7}"` == `f"{'7'}"`. The `str()` in `put` coerces at the call so the two sites
+    visibly build from one value; it is not preventing an int/str mismatch, because the
+    f-string never produced one. What this asserts is the honest property — an int
+    `owner_id` round-trips — not an averted bug that could not occur."""
     secret = service.put(kind=Secret.Kind.API_TOKEN, owner_type="site",
-                               owner_id=7, plaintext=b"int-owner")
+                         owner_id=7, plaintext=b"int-owner")
 
     assert secret.owner_id == "7"
     assert service.get(secret) == b"int-owner"
+    # The claim, made falsifiable: the string and the int build the identical AAD, so no
+    # divergence exists to guard against.
+    assert Secret.build_aad(Secret.Kind.API_TOKEN, "site", 7) == \
+        Secret.build_aad(Secret.Kind.API_TOKEN, "site", "7")
+
+
+def test_issue_r19_qual_put_binds_to_build_aad_not_an_inlined_copy(db, monkeypatch):
+    """R19-QUAL sentinel (R10-A5 shape). The round-18 pins compare `put`'s output to
+    `build_aad` for EQUALITY, which an inlined `f"{kind}|..."` in `put` satisfies just as
+    well — re-inlining the format string survives them. This patches `build_aad` and
+    proves `put` encrypted under WHATEVER it returns, which only a call can do.
+
+    Decrypts by hand with the sentinel AAD: if `put` used its own copy of the expression,
+    the ciphertext would be bound to the real AAD and this `decrypt` would raise
+    `InvalidTag`.
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    from vault.kek import get_backend
+
+    sentinel = b"SENTINEL-AAD-not-the-real-format"
+    # `monkeypatch.setattr` restores the STATICMETHOD DESCRIPTOR, not the underlying
+    # function — a hand-rolled try/finally that saved `Secret.build_aad` would save the
+    # unwrapped function and leave every later `self.build_aad(...)` passing `self` as a
+    # fourth argument, which is a state leak into every other vault test.
+    monkeypatch.setattr(Secret, "build_aad",
+                        staticmethod(lambda kind, owner_type, owner_id: sentinel))
+    secret = service.put(kind=Secret.Kind.API_TOKEN, owner_type="site",
+                         owner_id="9", plaintext=b"sentinel-marker")
+    monkeypatch.undo()
+    # Captured AFTER undo, or it is the sentinel too — the real AAD is what the restored
+    # function produces.
+    real_aad = Secret.build_aad(Secret.Kind.API_TOKEN, "site", "9")
+    assert real_aad != sentinel
+
+    dek = get_backend().unwrap(bytes(secret.wrapped_dek))
+    # Bound to the sentinel: decrypting under it succeeds…
+    assert AESGCM(dek).decrypt(bytes(secret.nonce), bytes(secret.ciphertext),
+                               sentinel) == b"sentinel-marker"
+    # …and NOT under the real AAD the row would otherwise produce, which is the half that
+    # fails if `put` ever stops calling `build_aad`.
+    import pytest
+    from cryptography.exceptions import InvalidTag
+
+    with pytest.raises(InvalidTag):
+        AESGCM(dek).decrypt(bytes(secret.nonce), bytes(secret.ciphertext), real_aad)
 
 
 def test_issue_r18_the_aad_delimiter_is_documented_where_it_is_built():

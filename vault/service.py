@@ -37,11 +37,15 @@ def put(*, kind, owner_type, owner_id, plaintext: bytes, actor=None) -> Secret:
     backend = get_backend()
     dek = os.urandom(DEK_BYTES)
     nonce = os.urandom(NONCE_BYTES)
-    # R18 folded note: the SAME function `Secret.aad` reads back with. `owner_id` goes
-    # through `str()` here exactly as the model field stores it, so what is encrypted
-    # under is what the row will produce — an `int` pk and its `"7"` would otherwise be
-    # two different AADs for one row, and the mismatch surfaces as `InvalidTag` at read
-    # time rather than as an error at write time.
+    # R18 folded note: the SAME function `Secret.aad` reads back with, so the encrypt and
+    # decrypt paths cannot spell the associated data two ways (R19-QUAL adds the sentinel
+    # that proves `put` uses it rather than an inlined copy).
+    #
+    # `str(owner_id)` coerces at the CALL, matching the always-string value the row stores
+    # in `owner_id=str(owner_id)` below and the string `Secret.aad` reads back. There is
+    # no behavioural divergence to prevent — `f"{7}"` and `f"{'7'}"` are both `"7"`, so an
+    # int argument would build the identical AAD — this keeps the two sites visibly
+    # building from one value rather than relying on the f-string to coerce twice.
     aad = Secret.build_aad(kind, owner_type, str(owner_id))
     ciphertext = AESGCM(dek).encrypt(nonce, plaintext, aad)
 

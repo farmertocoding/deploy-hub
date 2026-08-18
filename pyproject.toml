@@ -85,6 +85,11 @@ pytest_add_cli_args_test_selection = [
     "tests/test_scanner_declarations.py",
     "tests/test_wizard.py",
     "tests/test_wizard_round1.py",
+    # R19-ARCH-1: the WS escape test imports `scanner.presentation` (a mutated module),
+    # so the derivation reaches it — the same reason test_cli_render / test_api_rendering
+    # are here. Listed, not because it exercises a mutant of its own, but because the
+    # derived selection must equal what the walk finds.
+    "tests/test_ws_consumer.py",
 ]
 
 # ADAPTATION: spec §3 asks for a 60s per-mutant timeout. mutmut 3 has no absolute

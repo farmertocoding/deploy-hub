@@ -9,8 +9,23 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from core.audit import audit
+from scanner import presentation
 
 from .authorize import authorize_topic
+
+
+def _ws_json(payload):
+    """A WebSocket frame, escaped against `CONTROL_CLASS` (R19-ARCH-1).
+
+    The WS is a fourth device-reaching exit — a browser DevTools frame inspector, a `wscat`
+    session, a proxy log all render what crosses it — and it was outside the presentation
+    authority, safe only because stdlib `json.dumps` defaults `ensure_ascii=True` and so
+    escapes the whole class as a side effect. `json_safe` makes that a RULE rather than a
+    default: `topic` here is client-supplied and `event` is whatever `publish()` carried,
+    both untrusted, and a future `ensure_ascii=False` for a CJK topic name cannot reopen
+    the class. Idempotent over an already-ASCII-escaped string, so it costs nothing today.
+    """
+    return presentation.json_safe(json.dumps(payload))
 
 
 class EventsConsumer(AsyncWebsocketConsumer):
@@ -58,7 +73,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
             msg = json.loads(text_data)
             action, topics = msg["action"], msg["topics"]
         except (ValueError, KeyError, TypeError):
-            await self.send(json.dumps({"error": "bad message"}))
+            await self.send(_ws_json({"error": "bad message"}))
             return
 
         user = self.scope["user"]
@@ -67,23 +82,21 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 if authorize_topic(user, topic):
                     self.topics.add(topic)
                     await self.channel_layer.group_add(topic, self.channel_name)
-                    await self.send(json.dumps({"subscribed": topic}))
+                    await self.send(_ws_json({"subscribed": topic}))
                 else:
                     await database_sync_to_async(audit)(
                         "ws_topic_denied", source="ws", severity="security",
                         actor=user if user.is_authenticated else None, topic=topic)
-                    await self.send(json.dumps({"denied": topic}))
+                    await self.send(_ws_json({"denied": topic}))
         elif action == "unsubscribe":
             for topic in topics:
                 self.topics.discard(topic)
                 await self.channel_layer.group_discard(topic, self.channel_name)
 
     async def topic_event(self, message):
-        await self.send(
-            json.dumps(
-                {"topic": message["topic"], "seq": message["seq"], "event": message["event"]}
-            )
-        )
+        await self.send(_ws_json(
+            {"topic": message["topic"], "seq": message["seq"], "event": message["event"]}
+        ))
 
 
 def _enrolled(user):
