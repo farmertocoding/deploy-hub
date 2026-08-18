@@ -238,3 +238,57 @@ def test_issue_r19_arch_1_the_ws_exit_goes_through_the_one_authority():
             "the WS exit does not build its frame through presentation.json_safe")
     finally:
         consumers.presentation.json_safe = original
+
+
+def test_issue_r19_rem_1_every_ws_send_goes_through_the_authority():
+    """R19-REM-1: the send SITES call `_ws_json`, not `json.dumps`, and this is what the
+    previous sentinel did not enforce.
+
+    That sentinel proved `_ws_json` routes through `json_safe`. It said nothing about
+    whether `self.send(...)` calls `_ws_json` at all — so reverting `topic_event` to the
+    exact R19-ARCH-1 regression, `self.send(json.dumps(...))`, passed all nine WS tests.
+    The invariant the commit CLAIMS ("all four sends go through `_ws_json`") was
+    unenforced against its own regression vector — the same shape the build_aad
+    equality-not-sentinel had.
+
+    Checked over the AST rather than by grep, because the property is structural — "the
+    argument of `self.send(...)` is a call to `_ws_json`" — and a substring search cannot
+    tell `_ws_json(json.dumps(x))` (fine, that is inside the helper) from
+    `self.send(json.dumps(x))` (the regression). `json.dumps` is allowed to appear
+    exactly once, INSIDE `_ws_json`; anywhere else feeding a send is the finding.
+    """
+    import ast
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parent.parent
+              / "realtime" / "consumers.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    def _is_self_send(call):
+        return (isinstance(call.func, ast.Attribute) and call.func.attr == "send"
+                and isinstance(call.func.value, ast.Name) and call.func.value.id == "self")
+
+    def _is_ws_json(node):
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_ws_json")
+
+    sends = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_self_send(n)]
+    assert sends, "no self.send(...) calls found — the AST walk is not seeing the sends"
+    for send in sends:
+        assert send.args and _is_ws_json(send.args[0]), (
+            f"self.send at line {send.lineno} does not wrap its payload in _ws_json — a "
+            f"bare json.dumps here reaches the socket by luck of ensure_ascii=True")
+
+    # `json.dumps` appears exactly once in the module: inside `_ws_json`. Any second one is
+    # a payload being built for a device outside the one authority.
+    dumps_calls = [n for n in ast.walk(tree)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                   and n.func.attr == "dumps"
+                   and isinstance(n.func.value, ast.Name) and n.func.value.id == "json"]
+    ws_json_def = next(n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef) and n.name == "_ws_json")
+    inside_ws_json = {id(n) for n in ast.walk(ws_json_def)}
+    stray = [n for n in dumps_calls if id(n) not in inside_ws_json]
+    assert not stray, (
+        f"json.dumps outside _ws_json at line(s) {[n.lineno for n in stray]} — every "
+        f"frame this module sends must be built through the one authority")
