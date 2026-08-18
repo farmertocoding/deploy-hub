@@ -44,8 +44,18 @@ def render():
 
     fields = json.dumps([dict(f) for f in presentation.CHECK_FIELDS], indent=2)
     gates = json.dumps({k: list(v) for k, v in presentation.TIER_GATES.items()}, indent=2)
+    # R20 / dom-bidi-display: the SAME character class the CLI and the two JSON exits
+    # escape against, generated so the browser's display sanitizer is not a second
+    # hand-written copy of a security-relevant range list (the round-15 concern).
+    # `CONTROL_CLASS` is the regex char-class BODY (`json.dumps` doubles its backslashes
+    # into a JS string literal); `TEXT_CONTROL_CLASS` is the same minus U+000A, for prose
+    # that keeps the server's own line breaks — the `safe_path`/`safe_text` split.
+    control = json.dumps(presentation.CONTROL_CLASS)
+    text_control = json.dumps(presentation.TEXT_CONTROL_CLASS)
     return (f"{HEADER}\nexport const CHECK_FIELDS = {fields};\n\n"
-            f"export const TIER_GATES = {gates};\n")
+            f"export const TIER_GATES = {gates};\n\n"
+            f"export const CONTROL_CLASS = {control};\n\n"
+            f"export const TEXT_CONTROL_CLASS = {text_control};\n")
 
 
 def main(argv=None):

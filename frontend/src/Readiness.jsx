@@ -14,6 +14,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 import { CHECK_FIELDS, TIER_GATES } from "./api/presentation.js";
+import { safePath, safeText } from "./safe-display.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -307,13 +308,20 @@ export function CheckBody({ check }) {
         if ((TIER_GATES[field.key] || []).includes(check.tier)) return null;
         const value = check[field.key];
         if (!value || (Array.isArray(value) && !value.length)) return null;
+        // dom-bidi-display: the values here are REPO-CONTROLLED — a check's detail, fix
+        // hint and refused paths all quote filenames from the scanned tree. Rendered raw,
+        // a bidi override or zero-width code point in a name reorders or hides the display
+        // of what the operator is about to trust. `safeText`/`safePath` make the
+        // format/control class visible in the same spelling the CLI and JSON exits use,
+        // and leave legit CJK/RTL letters alone. Paths use `safePath` (injective,
+        // single-line); prose uses `safeText` (keeps the server's `\n`).
         if (field.kind === "paths") {
           return (
             <div key={field.key} style={{ margin: "6px 0", color: "#e3b341" }}>
               {field.label}
               <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em",
                   overflowWrap: "anywhere" }}>
-                {value.map((path) => <li key={path}>{path}</li>)}
+                {value.map((path) => <li key={path}>{safePath(path)}</li>)}
               </ul>
             </div>
           );
@@ -321,7 +329,7 @@ export function CheckBody({ check }) {
         return (
           <p key={field.key}
             style={field.key === "fix_hint" ? { ...PRE_LINE, color: "#8b949e" } : PRE_LINE}>
-            {field.label ? `${field.label} ` : ""}{value}</p>
+            {field.label ? `${field.label} ` : ""}{safeText(value)}</p>
         );
       })}
     </>
@@ -769,7 +777,9 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
           <h4><Badge tier={tier} n={checks.length} /></h4>
           {checks.map((c) => (
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
-              <summary>{c.title}</summary>
+              {/* dom-bidi-display: a title can carry repo-controlled text too —
+                  `node-ts.service-package` names the service directory (R16-SEC-1). */}
+              <summary>{safePath(c.title)}</summary>
               <CheckBody check={c} />
             </details>
           ))}

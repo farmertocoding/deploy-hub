@@ -38,9 +38,9 @@ thing the seam cannot: `safe_text` keeps `\n` because the renderer's own line br
 structure, so a path carrying a newline has to be escaped BEFORE it becomes a line of a
 list. Prose and paths are different policies; everything else is a backstop.
 
-WHERE THE AUTHORITY REACHES (R18-ARCH-1 / R19-ARCH-1), so the list is a fact rather than
-a memory. Four exits carry text to something that acts on it, and all four enforce
-`CONTROL_CLASS` from here:
+WHERE THE AUTHORITY REACHES (R18-ARCH-1 / R19-ARCH-1 / dom-bidi-display), so the list is a
+fact rather than a memory. Five exits carry text to something that acts on it, and all five
+enforce `CONTROL_CLASS` from here:
 
   * CLI TEXT — `hub/__main__.py::render_text`, escaped for DISPLAY at its seam;
   * CLI JSON — `--json`, through `json_safe`, escaped for a PARSER;
@@ -52,16 +52,26 @@ a memory. Four exits carry text to something that acts on it, and all four enfor
     encode, which is why that renderer replicates DRF's body instead of calling it;
   * WS JSON — `realtime/consumers.py::_ws_json`, through `json_safe`. A socket frame is
     read by a DevTools inspector and a proxy log; it was safe only by `json.dumps`'
-    `ensure_ascii=True` default until R19-ARCH-1 made the class a rule there too.
+    `ensure_ascii=True` default until R19-ARCH-1 made the class a rule there too;
+  * DOM DISPLAY — `frontend/src/safe-display.js::safePath`/`safeText`, run at render time
+    in `CheckBody` and on the check title. React escapes MARKUP, so a C0/C1 control is
+    inert in a text node — but the API's escaping is data-preserving, so `JSON.parse`
+    recovers a bidi override (U+202E, the isolates) or a zero-width code point and the
+    browser REORDERS or HIDES the display of a repo-controlled filename. That is the
+    fifth exit, closed on the `dom-bidi-display` branch (round 20). It makes the class
+    VISIBLE in the same spelling as the other exits — isolation (`unicode-bidi: isolate`)
+    was rejected because it does not neutralise an explicit RLO/isolate INSIDE the string
+    (CVE-2021-42574) — and its class comes from `CONTROL_CLASS`/`TEXT_CONTROL_CLASS`,
+    generated into `frontend/src/api/presentation.js`, so it is not a second hand-written
+    copy of the range list.
 
-A fifth exit is a fifth entry here, and the rule above says where its escaping goes.
+A sixth exit is a sixth entry here, and the rule above says where its escaping goes.
 
-WHAT THIS DOES NOT COVER, named rather than implied: the DOM. React escapes markup and a
-terminal escape is inert in a text node, so `CheckBody` needs no sanitizer for the C0/C1
-family. Bidi and zero-width display spoofing of a filename in a browser is real, is a
-different (lower) severity, and is not addressed here — see
-`scripts_dev/generate_presentation.py` for why it wants its own commit rather than a
-second implementation of this transform riding along.
+ALL FIVE EXITS ARE NOW COVERED. Ordinary CJK and RTL-SCRIPT letters are untouched at every
+one — the class is the format/control set, not scripts, so an Arabic or Chinese filename
+renders as its letters. The one thing this authority still does not do is anything about
+markup or scripting, which is not its job: React handles HTML escaping, and the scanner
+executes nothing.
 
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this

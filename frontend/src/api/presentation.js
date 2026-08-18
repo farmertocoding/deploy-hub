@@ -26,3 +26,7 @@ export const CHECK_FIELDS = [
 ];
 
 export const TIER_GATES = {};
+
+export const CONTROL_CLASS = "\\x00-\\x1f\\x7f\\x80-\\x9f\\u2028\\u2029\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\u061c\\u2060-\\u2064\\ufeff\\udc80-\\udcff";
+
+export const TEXT_CONTROL_CLASS = "\\x00-\\x09\\x0b-\\x1f\\x7f\\x80-\\x9f\\u2028\\u2029\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\u061c\\u2060-\\u2064\\ufeff\\udc80-\\udcff";

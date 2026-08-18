@@ -22,6 +22,7 @@ import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
   from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 import { CHECK_FIELDS, TIER_GATES } from "../src/api/presentation.js";
+import { safePath } from "../src/safe-display.js";
 
 (globalThis as any).window = { location: { search: "" } };
 
@@ -566,14 +567,17 @@ test("arch-1: a check with no refusals renders no list and no label", () => {
 });
 
 test("arch-1: the rendered list composes no copy beyond its label", () => {
-  // The F12-2 strip: everything on screen is a payload value or the one label this
-  // component owns.
+  // The F12-2 strip: everything on screen is a payload value — rendered through the DOM
+  // display sanitizer (dom-bidi-display), so `metri\cs.ts`'s backslash is doubled — or the
+  // one label this component owns. Stripping the SANITIZED form is what keeps the test
+  // honest after the escaping landed: a raw-string strip would false-fail on the doubling.
   const refused = ["packages/server/src/metrics.ts", "src/metri\\cs.ts"];
   const text = visibleText(render(CheckBody, { check: { refused_paths: refused } }));
 
   assert.ok(text.includes("Did not read:"), "nothing rendered — this strip is vacuous");
   let residue = text;
-  for (const word of [...refused, "Did not read:"]) residue = residue.split(word).join("");
+  for (const word of [...refused.map(safePath), "Did not read:"])
+    residue = residue.split(word).join("");
   assert.equal(residue.trim(), "", `the list says something the payload does not: ${text}`);
 });
 
@@ -758,4 +762,49 @@ test("arch-1r: a tier gate added to the model is honoured here too", () => {
     .map((f: any) => f.key);
   assert.deepEqual(shown, ["detail", "refused_paths"],
     "the component reads the gate the same way this expression does");
+});
+
+// ── dom-bidi-display: repo-controlled strings are made visible in the DOM ─────
+
+test("dom-bidi: a bidi/zero-width filename cannot spoof the check body", () => {
+  const RLO = "‮", ZWSP = "​";
+  const check = {
+    tier: "warning",
+    detail: `1 symlinked file resolves outside:\ninvoice${RLO}gpj.exe.ts`,
+    fix_hint: `commit the file itself`,
+    refused_paths: [`src/two${ZWSP}names.ts`, `bad${RLO}.ts`],
+  };
+
+  const markup = render(CheckBody, { check });
+
+  // No raw bidi/zero-width code point reaches the rendered node — that is the finding.
+  for (const cp of [RLO, ZWSP])
+    assert.ok(!markup.includes(cp),
+      `U+${cp.codePointAt(0)!.toString(16)} reached the DOM raw and would reorder/hide`);
+  // …and it is named in the CLI/JSON spelling, so the operator can still read the name,
+  // and the detail's real newline is preserved (pre-line).
+  const text = visibleText(markup);
+  assert.ok(text.includes("invoice\\u202egpj.exe.ts"), text);
+  assert.ok(text.includes("src/two\\u200bnames.ts"), text);
+  assert.ok(text.includes("resolves outside:\ninvoice"), "the server's newline was lost");
+});
+
+test("dom-bidi: a legit CJK/RTL filename in a check body is untouched", () => {
+  const check = { tier: "warning", detail: "1 file: 報表/結算.ts",
+                  refused_paths: ["مجلد/تقرير.ts"] };
+  const text = visibleText(render(CheckBody, { check }));
+
+  assert.ok(text.includes("報表/結算.ts"), text);
+  assert.ok(text.includes("مجلد/تقرير.ts"), text);
+});
+
+test("dom-bidi: the check title is sanitized where the panel renders it", () => {
+  // A title carries repo-controlled text too — `node-ts.service-package` names the service
+  // directory (R16-SEC-1). `ReadinessPanel` fetches, so the wiring is read from source the
+  // way the F12-1/F12-2 pins are: the boundary is not observable under renderToStaticMarkup.
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+  const panel = source.slice(source.indexOf("function ReadinessPanel("));
+
+  assert.match(panel, /<summary>\{safePath\(c\.title\)\}<\/summary>/,
+    "the check title reaches the DOM without the display sanitizer");
 });
