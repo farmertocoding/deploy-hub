@@ -432,9 +432,18 @@ def test_issue_vss_supplement_a_supplement_selector_is_a_surrogate_pair_in_json(
 #
 #   A code point is IN the class iff a conforming renderer displays it as NOTHING BY
 #   DESIGN (Default_Ignorable_Code_Point) AND it belongs to no script's or notation's own
-#   spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape byte range, which are
-#   in for STRUCTURAL reasons (they rewrite or forge the report's own lines) rather than
-#   because they are invisible.
+#   spelling — plus C0/C1/DEL, U+2028/2029, U+FFF9-FFFB and the surrogate-escape byte
+#   range, which are in for STRUCTURAL reasons (they rewrite or forge the report's own
+#   lines) rather than because they are invisible.
+#
+# VSS-R3b: the fourth item is U+FFF9-FFFB, and this comment is the fourth place the rule
+# is written — the previous commit fixed three of them and this one was the copy nobody
+# grepped for. Unicode withholds Default_Ignorable from the interlinear annotation marks,
+# so they are in on the structural argument (an annotation-aware renderer may hide or
+# restructure everything between an anchor and its terminator) rather than the invisible
+# one, which is how they keep falling out of a sentence about structure. The tuple below
+# has carried them since this test was written; a rule copied into four comments is
+# exactly what the computation under it exists to make harmless.
 #
 # The branch that added the variation selectors supplement disclosed the exclusions with
 # the word "exactly", and the word was false: U+034F COMBINING GRAPHEME JOINER and the
