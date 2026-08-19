@@ -387,15 +387,22 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
   // — the server said no, nothing is in flight, and it belongs out of the tab order. A
   // request in flight keeps the focus it was given and says `aria-disabled` instead.
   const waiting = isWaiting(busy, gate.disabled);
+  // R21-ARCH-1: `gate.title` is server PROSE — `materializeGate` composes it from the
+  // blocking preflight problems' `p.detail`, the same field the 409 panel routes through
+  // `safeText` because server prose quotes repo content (R16-SEC-1). Both sinks get it:
+  // React attribute-escapes MARKUP but not DISPLAY characters, so a bidi override in the
+  // `title=` tooltip would reorder it while the paragraph below read correctly — one
+  // reason, two spellings. Sanitized once, here, so the two cannot drift.
+  const reason = safeText(gate.title);
   return (
     <>
       <button style={disabledBox(waiting || gate.disabled)} disabled={gate.disabled}
         aria-disabled={waiting || undefined} aria-busy={!!busy}
-        onClick={busyClickGuard(waiting, onClick)} title={gate.title}
+        onClick={busyClickGuard(waiting, onClick)} title={reason}
         aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
       {shown &&
-        <p id={reasonId} style={{ color: "#e3b341", margin: "6px 0" }}>{gate.title}</p>}
+        <p id={reasonId} style={{ color: "#e3b341", margin: "6px 0" }}>{reason}</p>}
     </>
   );
 }

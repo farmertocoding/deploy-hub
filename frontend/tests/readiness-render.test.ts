@@ -884,6 +884,26 @@ test("dom-bidi: a warning title carrying a bidi override is sanitized in Warning
   assert.ok(visibleText(markup).includes("invoice\\u202egpj.exe"), markup);
 });
 
+test("R21-ARCH-1: the materialize refusal reason is sanitized in both its sinks", () => {
+  // `gate.title` is composed by `materializeGate` from the blocking preflight problems'
+  // `p.detail` strings — the same field family the 409 refusal panel routes through
+  // `safeText`, on the ground that server prose quotes repo content (R16-SEC-1). It
+  // reached the DOM raw in two places: the `title=` attribute and the visible reason
+  // paragraph the R10-UX-F7 `aria-describedby` points at. Static strings today; the rule
+  // is coverage on the SINK, not on what happens to flow into it this round.
+  const RLO = "‮";
+  const gate = { disabled: true, label: "⛔ Blocked",
+                 title: `the report blocks on invoice${RLO}gpj.exe` };
+
+  const markup = render(MaterializeControl, { gate, busy: false, onClick: () => {} });
+
+  assert.ok(!markup.includes(RLO), "the override reached the DOM raw");
+  assert.ok(visibleText(markup).includes("invoice\\u202egpj.exe"), markup);
+  // React attribute-escapes MARKUP, not DISPLAY characters — the tooltip needs the same
+  // spelling as the paragraph or one reason reads two ways.
+  assert.ok(markup.includes(`title="${safeText(gate.title)}"`), markup);
+});
+
 test("R21-SEC-2: a hostile workspace name cannot spoof the deploy-target select", () => {
   // The choices of `node-ts.service-package` are repo-controlled DIRECTORY NAMES:
   // `_Survey.workspace_names()` -> `wizard_questions` -> the wizard GET -> `json_safe`,
