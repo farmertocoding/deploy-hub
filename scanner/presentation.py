@@ -81,16 +81,24 @@ format controls, the interlinear annotation marks, the variation selectors and t
 characters — rendered as nothing at all five of them. Coverage is two claims, and this
 module makes both: every exit, and every code point that lies about what is on the screen.
 
-AND THAT ROUND LEFT ONE, disclosed rather than closed, which is what this paragraph is
-for: it added the variation selectors U+FE00-FE0F and not the variation selectors
-SUPPLEMENT U+E0100-E01EF, because its spec named exactly the ranges it named. Those are
-the same characters — same series, same category Mn, same default-ignorable property,
-240 instead of 16 — so the class had sixteen of one family and none of the other while
-claiming to be the set of code points that render as nothing. The supplement is in the
-class now, and the deliberate exclusions are unchanged and still argued in
-`declarations.py`: soft hyphen U+00AD, the Hangul fillers U+115F / U+3164 / U+FFA0, and
-the Mongolian free variation selectors U+180B-180D and U+180F. A blank-looking LETTER,
-or a code point that belongs to a script's own spelling, is not a forgery.
+AND THAT ROUND LEFT ONE, disclosed rather than closed: it added the variation selectors
+U+FE00-FE0F and not the variation selectors SUPPLEMENT U+E0100-E01EF, because its spec
+named exactly the ranges it named. Those are the same characters — same series, same
+category Mn, same default-ignorable property, 240 instead of 16 — so the class had sixteen
+of one family and none of the other while claiming to be the set of code points that
+render as nothing.
+
+AND CLOSING THAT ONE FOUND THE PATTERN (VSS-R1). Three rounds had now disclosed the
+exclusions in prose, and all three sentences were wrong in the same direction: they listed
+what somebody had thought of and read as if they listed everything. U+034F COMBINING
+GRAPHEME JOINER — sibling of the ZWJ this class has carried since round 15 — and every
+RESERVED default-ignorable code point were named in no direction at all. So the class no
+longer states a list. It states a RULE, at `CONTROL_CLASS` below, with the three excluded
+buckets named and a test that computes both directions of it over the whole code space:
+what is default-ignorable and outside the class must be exactly the script- and
+notation-bound spelling carriers, and what is in the class and not default-ignorable must
+be exactly the structural ranges. A sentence with "exactly" in it now has a computation
+under it, which is the only form of that word this module is entitled to use.
 
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
@@ -194,13 +202,39 @@ _BEYOND_C0 = (
 # `u` flag R21-SEC-1 put on those regexes. `generate_presentation.py` carries it across as
 # a `json.dumps` surrogate-pair escape, which is the same code point again.
 #
-# WHERE THE LINE IS (and it is the same line `declarations.py` drew): invisible non-letter
-# format / default-ignorable IN, everything else OUT. Soft hyphen U+00AD and the Hangul
-# fillers U+115F / U+3164 / U+FFA0 stay out — that exclusion is argued there and is not
-# disturbed here — and so do the neighbours of every range above and below: the Mongolian
-# free variation selectors U+180B-180D and U+180F, U+2070, U+FE10, U+FFFC, and the
-# unassigned code points beside the tag block and either side of the supplement (U+E00FF,
-# U+E01F0). `tests/test_cli_render.py` pins one neighbour per range as pass-through.
+# WHERE THE LINE IS — the rule, stated once, and machine-checked rather than promised
+# (VSS-R1, ruling of 2026-08-19). Every previous version of this paragraph named the
+# exclusions somebody had thought of and read as if it named them ALL; three rounds
+# running, the next reader found members that fitted the rule and were outside the class.
+# So the rule is now a property with a test behind it:
+#
+#   A CODE POINT IS IN THE CLASS IFF a conforming renderer displays it as NOTHING BY
+#   DESIGN (Unicode's Default_Ignorable_Code_Point) AND it belongs to no script's or
+#   notation's own spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape byte
+#   range, which are in for STRUCTURAL reasons: they rewrite or forge the report's own
+#   lines rather than lying about what is on the screen.
+#
+# THREE BUCKETS ARE OUT, and they are named so that "everything else" is a list:
+#
+#   (1) VISIBLE FORMAT CHARACTERS. Unicode deliberately withholds Default_Ignorable from
+#       them because a renderer must SHOW them: the Arabic and Syriac prepended
+#       concatenation marks (U+0600-0605, U+06DD, U+070F, U+0890-0891, U+08E2), the Kaithi
+#       number signs (U+110BD, U+110CD), the Egyptian hieroglyph format controls
+#       (U+13430-1343F). Round-6b's rule — refusing what lies about structure is not
+#       refusing a script — puts them out, and so does this one;
+#   (2) SPELLING CARRIERS THAT ARE DEFAULT-IGNORABLE, out as dated judgments rather than
+#       oversights: soft hyphen U+00AD, ALL FOUR Hangul fillers (U+115F, U+1160, U+3164,
+#       U+FFA0 — earlier versions of this note listed three), the Khmer inherent vowels
+#       U+17B4-17B5, the Mongolian free variation selectors U+180B-180D and U+180F,
+#       Duployan shorthand overlap U+1BCA0-1BCA3, the musical beam/slur/phrase controls
+#       U+1D173-1D17A. Each is part of how some script or notation spells itself;
+#   (3) nothing. The third bucket — invisible by design and bound to NOTHING — is IN, and
+#       `_UNBOUND_DEFAULT_IGNORABLE` below is what VSS-R1 found missing from it.
+#
+# `tests/test_cli_render.py::test_issue_vss_r1_the_class_is_exactly_the_rule_it_states`
+# computes both directions of that iff over the whole code space and names the buckets;
+# the pass-through neighbours pinned beside it are checked to be non-ignorable rather than
+# merely nearby, which is finding VSS-R2.
 _TAG_CHARS = chr(0xE0001) + chr(0xE0020) + "-" + chr(0xE007F)
 
 # …and the VARIATION SELECTORS SUPPLEMENT, which is the other astral family and the one
@@ -221,6 +255,44 @@ _TAG_CHARS = chr(0xE0001) + chr(0xE0020) + "-" + chr(0xE007F)
 # `ascii`'s spelling instead — a width is a fact about a plane, and this range is where
 # the hand-written one became wrong. See that function's docstring.
 _VARIATION_SELECTORS_SUPPLEMENT = chr(0xE0100) + "-" + chr(0xE01EF)
+
+# ── VSS-R1: invisible by design, and bound to nothing ─────────────────────────
+#
+# The ranges above are the families somebody could NAME. This is the bucket that was left
+# over when the rule was finally stated as a property and computed: code points that a
+# conforming renderer shows as nothing and that belong to no script's spelling, so no
+# exclusion argument is available for them.
+#
+#   * U+034F COMBINING GRAPHEME JOINER — category Mn, default-ignorable, cross-script, and
+#     the plainest miss of the three rounds: it is the sibling of the ZWJ/ZWNJ that have
+#     been in this class since round 15, it has no visible form anywhere, and no earlier
+#     disclosure mentioned it in either direction;
+#   * THE RESERVED DEFAULT-IGNORABLES. `Other_Default_Ignorable_Code_Point` exists to say
+#     that the UNASSIGNED parts of these blocks must also render as nothing, so that text
+#     using a future assignment degrades quietly on an old renderer. A reserved code point
+#     is therefore not a harmless one here: it is invisible on today's screens by the
+#     standard's instruction. U+2065 is the single gap in U+2060-206F, whose every other
+#     member this class already carried; U+FFF0-FFF8 sit immediately before the
+#     interlinear annotation marks; and in plane 14 the reserved parts are everything
+#     around the tags and the selectors — U+E0000, U+E0002-E001F, U+E0080-E00FF,
+#     U+E01F0-E0FFF — which is to say the whole of U+E0000-E0FFF is now in the class, one
+#     block, written here as the gaps between the two families that argued their own way
+#     in so that each keeps its own reasoning.
+#
+# Astral members are literal characters for the reason given at `_TAG_CHARS`; the BMP ones
+# are escape text, which crosses to JavaScript unchanged. Every one of them is category Cn
+# or Mn — `repr` escapes the Cn ones and declines the Mn one — and `_escaped` needs no
+# special case for either, which is what taking `ascii`'s spelling bought.
+_UNBOUND_DEFAULT_IGNORABLE = (
+    "\\u034f"            # COMBINING GRAPHEME JOINER
+    "\\u2065"            # reserved — the gap in U+2060-206F
+    "\\ufff0-\\ufff8"    # reserved, below the interlinear annotation marks
+) + (
+    chr(0xE0000)                             # reserved, before LANGUAGE TAG
+    + chr(0xE0002) + "-" + chr(0xE001F)      # reserved, between it and the tag block
+    + chr(0xE0080) + "-" + chr(0xE00FF)      # reserved, above the tag block
+    + chr(0xE01F0) + "-" + chr(0xE0FFF)      # reserved, above the selectors supplement
+)
 
 # R15-SEC-2: and the code points that are not characters at all.
 #
@@ -246,9 +318,10 @@ _VARIATION_SELECTORS_SUPPLEMENT = chr(0xE0100) + "-" + chr(0xE01EF)
 # still name the file, which is the whole rule: refusal, not repair.
 _SURROGATE_ESCAPES = "\\udc80-\\udcff"
 CONTROL_CLASS = (_C0 + _BEYOND_C0 + _TAG_CHARS + _VARIATION_SELECTORS_SUPPLEMENT
-                 + _SURROGATE_ESCAPES)
+                 + _UNBOUND_DEFAULT_IGNORABLE + _SURROGATE_ESCAPES)
 TEXT_CONTROL_CLASS = (_C0_EXCEPT_NEWLINE + _BEYOND_C0 + _TAG_CHARS
-                      + _VARIATION_SELECTORS_SUPPLEMENT + _SURROGATE_ESCAPES)
+                      + _VARIATION_SELECTORS_SUPPLEMENT + _UNBOUND_DEFAULT_IGNORABLE
+                      + _SURROGATE_ESCAPES)
 
 _CONTROL_RE = re.compile(f"[{CONTROL_CLASS}]")
 _TEXT_CONTROL_RE = re.compile(f"[{TEXT_CONTROL_CLASS}]")

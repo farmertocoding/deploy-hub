@@ -129,9 +129,14 @@ test("R21-ARCH-2: the invisible non-letters are named, byte for byte with Python
 
   // The other side of the line — one neighbour per range, left alone on purpose:
   // MONGOLIAN FREE VARIATION SELECTOR THREE, SUPERSCRIPT ZERO, the small-form comma,
-  // OBJECT REPLACEMENT CHARACTER, and the unassigned code points beside the tag block.
-  for (const near of ["\u{180D}", "\u{2070}", "\u{FE10}", "\u{FFFC}",
-                      "\u{E0002}", "\u{E0080}"]) {
+  // OBJECT REPLACEMENT CHARACTER, and the first code point past plane 14's
+  // default-ignorable block.
+  //
+  // VSS-R2: `\u{E0002}` and `\u{E0080}` used to stand in that list on the ground that
+  // they are unassigned. They are also Other_Default_Ignorable_Code_Point, so a
+  // conforming renderer shows nothing for them — the wrong side of this rule, pinned
+  // green. vss-r1 moved them into the class and they are asserted as members below.
+  for (const near of ["\u{180D}", "\u{2070}", "\u{FE10}", "\u{FFFC}", "\u{E1000}"]) {
     assert.equal(safePath(`a${near}b.ts`), `a${near}b.ts`);
     assert.equal(safeText(`a${near}b`), `a${near}b`);
   }
@@ -163,11 +168,62 @@ test("vss-supplement: the supplement variation selectors are named, byte for byt
     assert.ok(!LONE_SURROGATE.test(safePath(`a${char}b.ts`)));
   }
 
-  // The other side of THIS range: unassigned code points either side of the supplement,
-  // which are not invisible-by-design and stay out.
-  for (const near of ["\u{E00FF}", "\u{E01F0}"]) {
+  // VSS-R2, and this is the correction rather than a new pin: the two lines here used to
+  // assert `\u{E00FF}` and `\u{E01F0}` as PASS-THROUGH, justified with "unassigned is not
+  // invisible-by-design". That is backwards — both are Other_Default_Ignorable_Code_Point
+  // and a conforming renderer displays them as nothing, which is the entire subject of
+  // this file. They are in the class now (vss-r1) and they are asserted as members.
+  for (const [char, spelling] of [
+    ["\u{E00FF}", "\\U000e00ff"],
+    ["\u{E01F0}", "\\U000e01f0"],
+  ] as Array<[string, string]>) {
+    assert.equal(safePath(`a${char}b.ts`), `a${spelling}b.ts`);
+    assert.equal(safeText(`a${char}b`), `a${spelling}b`);
+  }
+  // The genuine other side of the range: past the end of plane 14's block.
+  assert.equal(safePath("a\u{E1000}b.ts"), "a\u{E1000}b.ts");
+  assert.equal(safeText("a\u{E1000}b"), "a\u{E1000}b");
+});
+
+test("vss-r1: the default-ignorables bound to nothing are named, byte for byte", () => {
+  // The disclosure finding (VSS-R1). Every version of this class named the exclusions
+  // somebody had thought of and read as if it named them all; U+034F COMBINING GRAPHEME
+  // JOINER and the RESERVED default-ignorables were named nowhere and were outside it.
+  // They render as nothing in a conforming renderer and belong to no script's spelling,
+  // so there is no exclusion argument available for them — the rule the class now states
+  // puts them in.
+  //
+  // The right-hand sides are the exact `scanner.presentation.safe_path`/`safe_text`
+  // output, which is what makes "one name, one rendering, across every exit" checked for
+  // this bucket too: `escapeMatch`'s three widths against Python's `ascii()`.
+  for (const [char, spelling] of [
+    ["\u{034F}", "\\u034f"],         // COMBINING GRAPHEME JOINER (Mn, DI, script-neutral)
+    ["\u{2065}", "\\u2065"],         // reserved — the one gap in U+2060-206F
+    ["\u{FFF3}", "\\ufff3"],         // reserved, middle of U+FFF0-FFF8
+    ["\u{E0002}", "\\U000e0002"],    // reserved, beside the tag block
+    ["\u{E0100}", "\\U000e0100"],    // …and the supplement selector, for the boundary
+  ] as Array<[string, string]>) {
+    assert.equal(safePath(`a${char}b.ts`), `a${spelling}b.ts`);
+    assert.equal(safeText(`a${char}b`), `a${spelling}b`);
+    assert.ok(!LONE_SURROGATE.test(safePath(`a${char}b.ts`)));
+  }
+
+  // The other side, and every one of these is checked to be NOT default-ignorable rather
+  // than merely nearby: a combining mark that renders (U+034E), the unassigned code point
+  // below U+FFF0 (U+FFEF), and the first code point past plane 14's block (U+E1000).
+  for (const near of ["\u{034E}", "\u{FFEF}", "\u{E1000}"]) {
     assert.equal(safePath(`a${near}b.ts`), `a${near}b.ts`);
     assert.equal(safeText(`a${near}b`), `a${near}b`);
+  }
+
+  // …and the buckets that stay OUT by the same rule, because they belong to a script or
+  // a notation: soft hyphen, all four Hangul fillers, the Khmer inherent vowels, the
+  // Mongolian free variation selectors, Duployan shorthand and the musical controls.
+  for (const bound of ["\u{00AD}", "\u{115F}", "\u{1160}", "\u{3164}", "\u{FFA0}",
+                       "\u{17B4}", "\u{17B5}", "\u{180B}", "\u{180F}",
+                       "\u{1BCA0}", "\u{1D173}"]) {
+    assert.equal(safePath(`a${bound}b.ts`), `a${bound}b.ts`);
+    assert.equal(safeText(`a${bound}b`), `a${bound}b`);
   }
 });
 

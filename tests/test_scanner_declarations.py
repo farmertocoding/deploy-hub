@@ -1364,8 +1364,15 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
     vss-supplement is the third, and it is the residual R21-ARCH-2 disclosed: the
     variation selectors SUPPLEMENT U+E0100-E01EF, the same characters as U+FE00-FE0F one
     plane up, left out only because that round's spec named exactly the other ranges.
-    Listed below with the rest; the expectation is strictly larger than it was, and the
-    exclusions at the bottom are untouched.
+    Listed below with the rest; the expectation is strictly larger than it was.
+
+    vss-r1 is the fourth and it is the same lesson once more: U+034F and the RESERVED
+    default-ignorables (U+2065, U+FFF0-FFF8, and everything in U+E0000-E0FFF that is not
+    a tag character or a selector) render as nothing by design and belong to no script, so
+    a `reason` could carry them and read as something it does not say. The exclusion
+    assertion at the bottom GREW with it — it now names all four Hangul fillers, the Khmer
+    inherent vowels and the two notation-bound families (Duployan, musical), which is the
+    bucket the ruling of 2026-08-19 puts out and the set this test may never see refused.
     """
     historical = declarations.re.compile(
         "["
@@ -1380,18 +1387,28 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
           [(0x206A, 0x2070), (0xFE00, 0xFE10), (0xFFF9, 0xFFFC),
            (0xE0020, 0xE0080),
            (0xE0100, 0xE01F0)]))                                        # vss-supplement
+    unbound_default_ignorables = {chr(0x034F), chr(0x2065)}.union(       # vss-r1
+        *({chr(cp) for cp in range(start, stop)} for start, stop in
+          [(0xFFF0, 0xFFF9), (0xE0000, 0xE0001), (0xE0002, 0xE0020),
+           (0xE0080, 0xE0100), (0xE01F0, 0xE1000)]))
 
     before = set(historical.findall(every))
     now = set(declarations._CONTROL_CHARS_RE.findall(every))
 
     assert before < now, "the refusal set shrank"
-    assert now - before == surrogateescape | invisible_non_letters, (
-        "the class grew by something other than the two widenings on record")
+    assert now - before == (surrogateescape | invisible_non_letters
+                            | unbound_default_ignorables), (
+        "the class grew by something other than the widenings on record")
 
-    # The exclusions this module ARGUED for, which neither widening disturbed: a
-    # blank-looking LETTER is a badly written reason, not a forgery (round-6b).
-    excluded = {chr(0x00AD), chr(0x115F), chr(0x3164), chr(0xFFA0)}     # hyphen, fillers
+    # The exclusions this module ARGUED for, which no widening has disturbed: a
+    # blank-looking LETTER is a badly written reason, not a forgery (round-6b), and a mark
+    # that is part of how a script or a notation spells itself is that script's business.
+    excluded = {chr(0x00AD)}                                            # soft hyphen
+    excluded |= {chr(cp) for cp in (0x115F, 0x1160, 0x3164, 0xFFA0)}    # Hangul fillers
+    excluded |= {chr(cp) for cp in (0x17B4, 0x17B5)}                    # Khmer vowels
     excluded |= {chr(cp) for cp in (0x180B, 0x180C, 0x180D, 0x180F)}    # Mongolian FVS
+    excluded |= {chr(cp) for cp in range(0x1BCA0, 0x1BCA4)}             # Duployan
+    excluded |= {chr(cp) for cp in range(0x1D173, 0x1D17B)}             # musical controls
     assert not (excluded & now), (
         f"a disclosed exclusion is now refused: {sorted(excluded & now)}")
 

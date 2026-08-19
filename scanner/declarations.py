@@ -110,7 +110,8 @@ DECLARATION_FILE = "deployhub.yaml"
 #
 # WHERE THE LINE IS DRAWN, and it is drawn deliberately short of "everything invisible":
 # some code points render as blank yet are LETTERS or format characters belonging to a
-# script — Hangul fillers U+115F, U+3164 and U+FFA0 (category Lo), soft hyphen U+00AD.
+# script — Hangul fillers U+115F, U+1160, U+3164 and U+FFA0 (category Lo), soft hyphen
+# U+00AD.
 # They are NOT refused here. "Renders as nothing" is not "is a control character", and a
 # rule built on the first phrasing ends up refusing scripts, which is round-6b's mistake
 # in a new costume. What is refused is the set that rewrites LINES (the report is built
@@ -125,21 +126,53 @@ DECLARATION_FILE = "deployhub.yaml"
 # came a round later — see below) and the tag characters U+E0001 /
 # U+E0020-E007F are all invisible and NONE of them is a letter — a tag character spells
 # ASCII that nobody can see — so two reasons differing only by one of them read the same
-# and are not the same text. They are refused now. What is still NOT refused is exactly
-# what this paragraph argued for: the Hangul fillers and the soft hyphen (letters, and a
-# hyphen a renderer may show), and the Mongolian free variation selectors U+180B-180D /
-# U+180F beside U+180E, which belong to a script's own spelling. The line is unchanged:
-# invisible NON-LETTER format and default-ignorable code points are refused; something
-# that belongs to a script is not.
+# and are not the same text. They are refused now.
 #
 # THE SUPPLEMENT (vss-supplement) is the same widening once more, and it is on this list
 # because R21-ARCH-2 disclosed it rather than closed it: U+E0100-E01EF are VARIATION
 # SELECTOR-17..256, the U+FE00-FE0F series continued into plane 14. Sixteen of that
 # series were refused and the other 240 were accepted, so a `reason` could still read one
 # way and say another — by the same mechanism, under a higher number. The rule did not
-# move; the range list caught up with it. The
-# exclusions in the paragraph above are untouched, and the only-grew test in
-# `tests/test_scanner_declarations.py` pins that.
+# move; the range list caught up with it.
+#
+# ── THE RULE, AS A PROPERTY (VSS-R1, ruling of 2026-08-19) ────────────────────
+#
+# Each of the three paragraphs above ended by saying what is "still NOT refused", and each
+# of those sentences was false in the same direction — it named the exclusions its author
+# had thought of. What was named in NEITHER direction: U+034F COMBINING GRAPHEME JOINER
+# (Mn, default-ignorable, belonging to no script, sibling of the ZWJ/ZWNJ refused since
+# round 15) and every RESERVED default-ignorable code point (U+2065 — the one gap in
+# U+2060-206F, whose every other member was refused — U+FFF0-FFF8, U+E0000,
+# U+E0002-E001F, U+E0080-E00FF, U+E01F0-E0FFF). `Other_Default_Ignorable_Code_Point` is
+# Unicode instructing renderers to show NOTHING for the reserved parts of those blocks, so
+# they are invisible on today's screens by the standard's own instruction, and a `reason`
+# could carry them. They are refused now.
+#
+# So the line stops being a list and becomes an iff, and `scanner/presentation.py` states
+# it where the set lives:
+#
+#   REFUSED iff a conforming renderer displays it as NOTHING BY DESIGN
+#   (Default_Ignorable_Code_Point) AND it belongs to no script's or notation's own
+#   spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape range, refused for
+#   STRUCTURAL reasons: they forge the report's own lines.
+#
+# WHAT IS NOT REFUSED is then two named buckets rather than an adjective, and round-6b's
+# argument is what puts both out:
+#
+#   (1) VISIBLE format characters, which Unicode excludes from Default_Ignorable precisely
+#       because a renderer must show them: U+0600-0605, U+06DD, U+070F, U+0890-0891,
+#       U+08E2 (Arabic/Syriac prepended concatenation marks), U+110BD and U+110CD (Kaithi
+#       number signs), U+13430-1343F (Egyptian hieroglyph format controls). A reason
+#       written in those scripts is a reason, not a forgery;
+#   (2) SPELLING CARRIERS that are default-ignorable, out as dated judgments: soft hyphen
+#       U+00AD, ALL FOUR Hangul fillers U+115F, U+1160, U+3164, U+FFA0 (this paragraph
+#       named three of them for three rounds), the Khmer inherent vowels U+17B4-17B5, the
+#       Mongolian FREE variation selectors U+180B-180D and U+180F, Duployan shorthand
+#       overlap U+1BCA0-1BCA3, and the musical beam/slur/phrase controls U+1D173-1D17A.
+#
+# Neither list is load-bearing prose any more: `tests/test_cli_render.py` computes the iff
+# in both directions over the whole code space and `tests/test_scanner_declarations.py`
+# pins that this rule's set only ever grew and that bucket (2) is never refused.
 #
 # R15-SEC-1 moved the SET to `scanner/presentation.py`, and left this comment where it
 # was written. The same class that refuses repo-controlled text here is the class a

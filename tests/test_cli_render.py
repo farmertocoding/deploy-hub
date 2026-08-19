@@ -12,6 +12,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import unicodedata
 
 import pytest
 
@@ -256,9 +257,10 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
             f"U+{ord(char):04X} is spelled {escaped!r}, which reads back as something else")
 
     assert fallbacks == [chr(cp) for cp in
-                         list(range(0xFE00, 0xFE10)) + list(range(0xE0100, 0xE01F0))], (
+                         [0x034F] + list(range(0xFE00, 0xFE10))
+                         + list(range(0xE0100, 0xE01F0))], (
         "the set `repr` will not escape moved; every one of them needs the escape width "
-        "its plane calls for, and the astral half is 240 of the 256")
+        "its plane calls for, and the astral half is 240 of the 257")
 
     # The ones the finding was about, spelled once and read twice.
     assert presentation.safe_path("two\nlines.ts") == "two\\nlines.ts"
@@ -276,10 +278,19 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
 #
 # The line is "invisible non-letter format/default-ignorable IN, everything else OUT", and
 # the neighbours below are the other side of it: the Mongolian free variation selectors,
-# a superscript digit, a presentation form, the object-replacement character and the
-# unassigned code points beside the tag block are all left alone. Soft hyphen U+00AD and
-# the Hangul fillers stay out too — that exclusion is argued in `declarations.py` and is
-# not disturbed here.
+# a superscript digit, a presentation form and the object-replacement character are all
+# left alone. Soft hyphen U+00AD and the Hangul fillers stay out too — that exclusion is
+# argued in `declarations.py` and is not disturbed here.
+#
+# VSS-R2 CORRECTED THE PLANE-14 NEIGHBOURS. Three of these rows used U+E0002 and U+E0080
+# as the out-of-class side, on the ground that they are unassigned. They are also
+# Other_Default_Ignorable_Code_Point — invisible by design is precisely what a reserved
+# code point in U+E0000-E0FFF is — so they were on the wrong side of the rule this file
+# claims to pin, and vss-r1 moved them INTO the class. The pass-through neighbour for the
+# whole of plane 14 is now U+E1000, the first code point past the block, which is not
+# default-ignorable at all.
+_PLANE_14_NEIGHBOUR = 0xE1000
+
 _INVISIBLE_NON_LETTERS = [
     (0x180E, "MONGOLIAN VOWEL SEPARATOR", "\\u180e", 0x180D),
     (0x206A, "INHIBIT SYMMETRIC SWAPPING", "\\u206a", 0x2070),
@@ -288,9 +299,9 @@ _INVISIBLE_NON_LETTERS = [
     (0xFE0F, "VARIATION SELECTOR-16", "\\ufe0f", 0xFE10),
     (0xFFF9, "INTERLINEAR ANNOTATION ANCHOR", "\\ufff9", 0xFFFC),
     (0xFFFB, "INTERLINEAR ANNOTATION TERMINATOR", "\\ufffb", 0xFFFC),
-    (0xE0001, "LANGUAGE TAG", "\\U000e0001", 0xE0002),
-    (0xE0041, "TAG LATIN CAPITAL LETTER A", "\\U000e0041", 0xE0080),
-    (0xE007F, "CANCEL TAG", "\\U000e007f", 0xE0080),
+    (0xE0001, "LANGUAGE TAG", "\\U000e0001", _PLANE_14_NEIGHBOUR),
+    (0xE0041, "TAG LATIN CAPITAL LETTER A", "\\U000e0041", _PLANE_14_NEIGHBOUR),
+    (0xE007F, "CANCEL TAG", "\\U000e007f", _PLANE_14_NEIGHBOUR),
 ]
 
 
@@ -352,12 +363,20 @@ def test_issue_r21_arch_2_an_astral_member_is_a_surrogate_pair_in_json():
 # for all 240, and `test_..._json` pins the surrogate pair the JSON exits owe them.
 #
 # The exclusions are unchanged and still argued in `declarations.py`: soft hyphen U+00AD,
-# the Hangul fillers, the Mongolian free variation selectors U+180B-180D / U+180F. The
-# neighbours below are the other side of THIS range: U+E00FF and U+E01F0 are unassigned,
-# and unassigned is not invisible-by-design.
+# the Hangul fillers, the Mongolian free variation selectors U+180B-180D / U+180F.
+#
+# VSS-R2: THE NEIGHBOURS THIS LIST FIRST USED WERE THE WRONG SIDE OF THE RULE. It pinned
+# U+E00FF and U+E01F0 as pass-through and justified them with "unassigned is not
+# invisible-by-design", which is exactly backwards: both are
+# Other_Default_Ignorable_Code_Point, so invisible-by-design is what they ARE — a
+# conforming renderer displays a reserved code point in U+E0000-E0FFF as nothing, which is
+# what the whole of this class is about. A false rationale on a green pin is worse than no
+# pin: it reads as the boundary having been checked. vss-r1 moved both INTO the class, and
+# the two rows below now assert that; the pass-through side moved to U+E1000, past the end
+# of the default-ignorable block.
 _VARIATION_SELECTORS_SUPPLEMENT = [
-    (0xE0100, "VARIATION SELECTOR-17", "\\U000e0100", 0xE00FF),
-    (0xE01EF, "VARIATION SELECTOR-256", "\\U000e01ef", 0xE01F0),
+    (0xE0100, "VARIATION SELECTOR-17", "\\U000e0100", _PLANE_14_NEIGHBOUR),
+    (0xE01EF, "VARIATION SELECTOR-256", "\\U000e01ef", _PLANE_14_NEIGHBOUR),
 ]
 
 
@@ -405,6 +424,165 @@ def test_issue_vss_supplement_a_supplement_selector_is_a_surrogate_pair_in_json(
     assert "\U000e0100" not in escaped, "the supplement selector went out raw"
     assert BACKSLASH + "udb40" + BACKSLASH + "udd00" in escaped
     assert json.loads(escaped) == payload, "the round trip lost the code point"
+
+
+# ── vss-r1: the code points that are invisible and bound to nothing ──────────
+#
+# THE RULE, which the class now states and this file checks rather than trusts:
+#
+#   A code point is IN the class iff a conforming renderer displays it as NOTHING BY
+#   DESIGN (Default_Ignorable_Code_Point) AND it belongs to no script's or notation's own
+#   spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape byte range, which are
+#   in for STRUCTURAL reasons (they rewrite or forge the report's own lines) rather than
+#   because they are invisible.
+#
+# The branch that added the variation selectors supplement disclosed the exclusions with
+# the word "exactly", and the word was false: U+034F COMBINING GRAPHEME JOINER and the
+# RESERVED default-ignorables (U+2065 — the one gap in an otherwise fully-in-class
+# U+2060-206F — U+FFF0-FFF8, and the parts of U+E0000-E0FFF that are not tags or
+# selectors) are default-ignorable, belong to no script, and were named nowhere. They are
+# in the class now, and the three OUT buckets are named below so the next reader gets a
+# list rather than an adjective:
+#
+#   (1) VISIBLE format characters. Unicode deliberately excludes them from
+#       Default_Ignorable_Code_Point because a renderer must SHOW them: the Arabic and
+#       Syriac prepended concatenation marks, the Kaithi number signs, the Egyptian
+#       hieroglyph format controls. Round-6b's rule — refusing what lies about structure
+#       is not refusing a script — puts them out, and so does the rule above;
+#   (2) SCRIPT- OR NOTATION-BOUND spelling carriers that ARE default-ignorable: soft
+#       hyphen, all four Hangul fillers, the Khmer inherent vowels, the Mongolian free
+#       variation selectors, Duployan shorthand overlap controls, the musical
+#       beam/slur/phrase controls. These are dated judgments, not oversights — each is
+#       part of how some script or notation spells itself;
+#   (3) BOUND TO NOTHING and invisible by design — U+034F and the reserved
+#       default-ignorables. There is no exclusion argument available for these, which is
+#       why they are in.
+#
+# Ruling recorded 2026-08-19 (vss-supplement review, findings VSS-R1 / VSS-R2).
+_DEFAULT_IGNORABLE = (
+    # Default_Ignorable_Code_Point, frozen from DerivedCoreProperties.txt at the Unicode
+    # version this tree's interpreter carries (14.0.0 on Python 3.11). `unicodedata`
+    # exposes no DI property, so a literal is the only honest option — and a literal
+    # rots. What stops it rotting silently is the Cf walk in the test below, which is
+    # derived from the RUNNING interpreter: the one movement between 14.0.0 and 15.1.0
+    # anywhere near this class is U+13439-1343F becoming assigned Egyptian format
+    # controls, which bucket (1) already covers by range.
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
+    (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
+    (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+_VISIBLE_FORMAT_CHARACTERS = (           # bucket (1)
+    (0x0600, 0x0605), (0x06DD, 0x06DD), (0x070F, 0x070F), (0x0890, 0x0891),
+    (0x08E2, 0x08E2), (0x110BD, 0x110BD), (0x110CD, 0x110CD), (0x13430, 0x1343F),
+)
+_SPELLING_BOUND_DEFAULT_IGNORABLE = (    # bucket (2)
+    (0x00AD, 0x00AD),                    # SOFT HYPHEN — a renderer may show it
+    (0x115F, 0x1160), (0x3164, 0x3164), (0xFFA0, 0xFFA0),   # all four Hangul fillers
+    (0x17B4, 0x17B5),                    # Khmer inherent vowels
+    (0x180B, 0x180D), (0x180F, 0x180F),  # Mongolian FREE variation selectors
+    (0x1BCA0, 0x1BCA3),                  # Duployan shorthand overlap controls
+    (0x1D173, 0x1D17A),                  # musical beam / slur / phrase controls
+)
+_STRUCTURAL_MEMBERS = (                  # in the class, and NOT default-ignorable
+    (0x0000, 0x001F), (0x007F, 0x007F), (0x0080, 0x009F),   # C0, DEL, C1
+    (0x2028, 0x2029),                    # LINE / PARAGRAPH SEPARATOR
+    (0xFFF9, 0xFFFB),                    # interlinear annotation marks
+    (0xDC80, 0xDCFF),                    # R15-SEC-2, a byte that is not a character
+)
+
+
+def _chars(ranges):
+    return {chr(cp) for low, high in ranges for cp in range(low, high + 1)}
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_vss_r1_the_class_is_exactly_the_rule_it_states():
+    """The disclosure, checked by machine — which is the whole of finding VSS-R1.
+
+    Every version of this class has come with a prose sentence about what it leaves out,
+    and every one of those sentences has been wrong in the same direction: it named the
+    exclusions somebody had thought of and read as if it named them all. R21-ARCH-2 said
+    "soft hyphen and the Hangul fillers"; vss-supplement said "exactly" and still missed
+    U+034F and every reserved default-ignorable. Prose cannot carry that claim. A set
+    computation can, and this is it — in BOTH directions, because a rule stated in one
+    direction is half a rule:
+
+      * default-ignorable MINUS the class is exactly bucket (2), the spelling carriers;
+      * the class MINUS default-ignorable is exactly the structural members, so nothing
+        has slipped in on some other argument;
+      * and every FORMAT character the running interpreter knows about (`Cf`, so this
+        half tracks whatever Unicode version is under it rather than the frozen list
+        above) is either in the class or in a named, dated bucket. A future Unicode that
+        assigns a new format character makes this red, which is the point.
+    """
+    every = "".join(map(chr, range(0x110000)))
+    members = set(re.findall(f"[{presentation.CONTROL_CLASS}]", every))
+    ignorable = _chars(_DEFAULT_IGNORABLE)
+    excluded = _chars(_VISIBLE_FORMAT_CHARACTERS) | _chars(_SPELLING_BOUND_DEFAULT_IGNORABLE)
+
+    assert ignorable - members == _chars(_SPELLING_BOUND_DEFAULT_IGNORABLE), (
+        "a code point that renders as nothing by design is outside the class, and it is "
+        "not one of the script/notation-bound exclusions this rule allows")
+    assert members - ignorable == _chars(_STRUCTURAL_MEMBERS), (
+        "the class carries a code point that is neither default-ignorable nor one of the "
+        "structural ranges — it is in on an argument nobody wrote down")
+
+    formats = {chr(cp) for cp in range(0x110000)
+               if unicodedata.category(chr(cp)) == "Cf"}
+    assert formats - members <= excluded, (
+        f"a format character is outside the class and outside every named bucket: "
+        f"{sorted(f'U+{ord(c):04X}' for c in (formats - members) - excluded)}")
+    assert not (excluded & members), (
+        f"a disclosed exclusion is now in the class: "
+        f"{sorted(f'U+{ord(c):04X}' for c in excluded & members)}")
+
+
+# The bucket-(3) members themselves, one row per edge of each range, with the neighbour
+# that must stay out. U+E00FF and U+E01F0 are here because VSS-R2 found them pinned as
+# pass-through with a false rationale; they are reserved default-ignorables and they are
+# in. U+2065 has no out-of-class neighbour inside its block — U+2060-206F is now wholly
+# in the class — so its neighbour is the code point past the end of it.
+_UNBOUND_DEFAULT_IGNORABLE = [
+    (0x034F, "COMBINING GRAPHEME JOINER", "\\u034f", 0x034E),
+    (0x2065, "reserved, the one gap in U+2060-206F", "\\u2065", 0x2070),
+    (0xFFF0, "reserved", "\\ufff0", 0xFFEF),
+    (0xFFF3, "reserved", "\\ufff3", 0xFFEF),
+    (0xFFF8, "reserved", "\\ufff8", 0xFFEF),
+    (0xE0000, "reserved, first of plane 14's block", "\\U000e0000", _PLANE_14_NEIGHBOUR),
+    (0xE0002, "reserved, beside the tag block", "\\U000e0002", _PLANE_14_NEIGHBOUR),
+    (0xE0080, "reserved, after the tag block", "\\U000e0080", _PLANE_14_NEIGHBOUR),
+    (0xE00FF, "reserved, before the supplement", "\\U000e00ff", _PLANE_14_NEIGHBOUR),
+    (0xE01F0, "reserved, after the supplement", "\\U000e01f0", _PLANE_14_NEIGHBOUR),
+    (0xE0FFF, "reserved, last of plane 14's block", "\\U000e0fff", _PLANE_14_NEIGHBOUR),
+]
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.parametrize("codepoint,name,spelling,neighbour", _UNBOUND_DEFAULT_IGNORABLE)
+def test_issue_vss_r1_an_unbound_default_ignorable_is_named(
+        codepoint, name, spelling, neighbour):
+    """Both sanitizers, on each edge of bucket (3), and the neighbour that stays out.
+
+    A reserved code point is not a harmless one: `Other_Default_Ignorable_Code_Point`
+    exists so that a renderer shows NOTHING for the reserved parts of these blocks, which
+    is the same two-names-one-display threat as U+200B and not a smaller one. U+034F is
+    the assigned member of the bucket and the plainest case — Mn, default-ignorable, part
+    of no script's spelling, sibling of the ZWJ/ZWNJ that have been in the class since
+    round 15.
+    """
+    char = chr(codepoint)
+
+    assert presentation.safe_path(f"a{char}b.ts") == f"a{spelling}b.ts"
+    assert presentation.safe_text(f"a{char}b") == f"a{spelling}b"
+    assert presentation.safe_path(f"a{char}b.ts") != presentation.safe_path("ab.ts")
+    assert ast.literal_eval(f"'{spelling}'") == char
+
+    other = chr(neighbour)
+    assert presentation.safe_path(f"a{other}b.ts") == f"a{other}b.ts", (
+        f"U+{neighbour:04X} is not default-ignorable and must pass through")
+    assert presentation.safe_text(f"a{other}b") == f"a{other}b"
 
 
 # ── R15-ARCH-1: one presentation model, two renderers ────────────────────────
