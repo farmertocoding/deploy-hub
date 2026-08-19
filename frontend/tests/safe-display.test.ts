@@ -137,6 +137,40 @@ test("R21-ARCH-2: the invisible non-letters are named, byte for byte with Python
   }
 });
 
+test("vss-supplement: the supplement variation selectors are named, byte for byte", () => {
+  // The residual R21-ARCH-2 disclosed. U+FE00-FE0F went into the class because a
+  // variation selector is invisible — two names differing only by one of them are one
+  // string on screen — and U+E0100-E01EF are the same characters one plane up, category
+  // Mn, default-ignorable, 240 of them. They were outside the class only because that
+  // round's spec named exactly the other ranges.
+  //
+  // The right-hand sides are the exact `scanner.presentation.safe_path`/`safe_text`
+  // output: ten characters, `\U` and eight hex digits, which is what `escapeMatch`
+  // already computed for a code point above U+FFFF and what Python's fallback had to
+  // learn here (`repr` declines an Mn character, so these never reach repr's own
+  // `\U000eXXXX` the way the tag characters do).
+  //
+  // Written as `\u{…}` escapes rather than as themselves, for the R21-ARCH-2 reason: a
+  // test whose subject is invisible in its own source is the defect it is testing for.
+  for (const [char, spelling] of [
+    ["\u{E0100}", "\\U000e0100"],    // VARIATION SELECTOR-17, first of the supplement
+    ["\u{E01EF}", "\\U000e01ef"],    // VARIATION SELECTOR-256, last of it
+  ] as Array<[string, string]>) {
+    assert.equal(safePath(`a${char}b.ts`), `a${spelling}b.ts`);
+    assert.equal(safeText(`a${char}b`), `a${spelling}b`);
+    // …and the escape is well-formed: the pair went in as one code point and came out
+    // as ASCII, so nothing was torn (the R21-SEC-1 failure mode on an astral member).
+    assert.ok(!LONE_SURROGATE.test(safePath(`a${char}b.ts`)));
+  }
+
+  // The other side of THIS range: unassigned code points either side of the supplement,
+  // which are not invisible-by-design and stay out.
+  for (const near of ["\u{E00FF}", "\u{E01F0}"]) {
+    assert.equal(safePath(`a${near}b.ts`), `a${near}b.ts`);
+    assert.equal(safeText(`a${near}b`), `a${near}b`);
+  }
+});
+
 test("null/undefined pass through (a React child may be either)", () => {
   assert.equal(safePath(undefined), undefined);
   assert.equal(safeText(null), null);

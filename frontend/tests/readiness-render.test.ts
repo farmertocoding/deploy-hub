@@ -875,6 +875,24 @@ test("R21-SEC-1: an astral filename reaches the check body whole", () => {
     .test(markup), "a lone surrogate reached the DOM");
 });
 
+test("vss-supplement: a refused path carrying U+E0100 renders its escape, not nothing", () => {
+  // The rendered end of the residual R21-ARCH-2 disclosed. A variation selector is
+  // invisible, so `src/report.ts` with a U+E0100 in it and `src/report.ts` without one
+  // are two files that painted the same pixels in the panel whose job is to show the
+  // operator the truth about a repository — the same defect U+FE00-FE0F is in the class
+  // for, and U+E0100-E01EF is the same series one plane up.
+  const VSS = "\u{E0100}";
+  const markup = render(CheckBody, { check: {
+    tier: "warning", refused_paths: [`src/re${VSS}port.ts`, "src/report.ts"] } });
+  const text = visibleText(markup);
+
+  assert.ok(!text.includes(VSS), "the supplement selector reached the text node raw");
+  assert.ok(text.includes("src/re\\U000e0100port.ts"), text);
+  assert.ok(text.includes("src/report.ts"), text);
+  // Two entries in the list, and they no longer read alike.
+  assert.notEqual(safePath(`src/re${VSS}port.ts`), safePath("src/report.ts"));
+});
+
 test("dom-bidi: a warning title carrying a bidi override is sanitized in WarningsAck", () => {
   const markup = render(WarningsAck, {
     warnings: [{ id: "core.symlinked-files", title: "refused invoice‮gpj.exe" }],

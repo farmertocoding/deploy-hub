@@ -121,7 +121,8 @@ DECLARATION_FILE = "deployhub.yaml"
 # rather than a list. This paragraph disclosed two exclusions and read as if they were the
 # only invisible code points outside the class; they were not. The Mongolian vowel
 # separator U+180E, the deprecated format controls U+206A-206F, the interlinear annotation
-# marks U+FFF9-FFFB, the variation selectors U+FE00-FE0F and the tag characters U+E0001 /
+# marks U+FFF9-FFFB, the variation selectors U+FE00-FE0F and U+E0100-E01EF (the supplement
+# came a round later — see below) and the tag characters U+E0001 /
 # U+E0020-E007F are all invisible and NONE of them is a letter — a tag character spells
 # ASCII that nobody can see — so two reasons differing only by one of them read the same
 # and are not the same text. They are refused now. What is still NOT refused is exactly
@@ -130,6 +131,15 @@ DECLARATION_FILE = "deployhub.yaml"
 # U+180F beside U+180E, which belong to a script's own spelling. The line is unchanged:
 # invisible NON-LETTER format and default-ignorable code points are refused; something
 # that belongs to a script is not.
+#
+# THE SUPPLEMENT (vss-supplement) is the same widening once more, and it is on this list
+# because R21-ARCH-2 disclosed it rather than closed it: U+E0100-E01EF are VARIATION
+# SELECTOR-17..256, the U+FE00-FE0F series continued into plane 14. Sixteen of that
+# series were refused and the other 240 were accepted, so a `reason` could still read one
+# way and say another — by the same mechanism, under a higher number. The rule did not
+# move; the range list caught up with it. The
+# exclusions in the paragraph above are untouched, and the only-grew test in
+# `tests/test_scanner_declarations.py` pins that.
 #
 # R15-SEC-1 moved the SET to `scanner/presentation.py`, and left this comment where it
 # was written. The same class that refuses repo-controlled text here is the class a

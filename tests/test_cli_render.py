@@ -229,6 +229,13 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
     escape, `repr`'s or the fallback's, DECODES BACK to the code point it names. A
     ten-character `\\U000e0041` mis-spelled as `\\ue0041` names another character and
     fails there.
+
+    vss-supplement: the fallback set is no longer all-BMP. U+E0100-E01EF, the variation
+    selectors supplement, is Mn like U+FE00-FE0F and ASTRAL like the tag characters, so
+    it is the first member to hit both — `repr` declines it AND `\\uXXXX` cannot name it.
+    `expected_fallback` below states the two widths from the outside (the same two
+    `escapeMatch` computes in `frontend/src/safe-display.js`), so an implementation that
+    spelled U+E0100 `\\ue0100` fails here on the width and again on the decode-back.
     """
     import re as _re
 
@@ -238,7 +245,9 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
         escaped = presentation.safe_path(char)
         if repr(char)[1:-1] == char:
             fallbacks.append(char)
-            assert escaped == f"{BACKSLASH}u{ord(char):04x}", (char, escaped)
+            expected_fallback = (f"{BACKSLASH}u{ord(char):04x}" if ord(char) <= 0xFFFF
+                                 else f"{BACKSLASH}U{ord(char):08x}")
+            assert escaped == expected_fallback, (char, escaped)
         else:
             assert escaped == repr(char)[1:-1], (char, escaped)
         assert not presentation._CONTROL_RE.search(escaped), (
@@ -246,9 +255,10 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
         assert ast.literal_eval(f"'{escaped}'") == char, (
             f"U+{ord(char):04X} is spelled {escaped!r}, which reads back as something else")
 
-    assert fallbacks == [chr(cp) for cp in range(0xFE00, 0xFE10)], (
-        "the set `repr` will not escape moved; the fallback's `\\uXXXX` width is only "
-        "right while every one of them is BMP")
+    assert fallbacks == [chr(cp) for cp in
+                         list(range(0xFE00, 0xFE10)) + list(range(0xE0100, 0xE01F0))], (
+        "the set `repr` will not escape moved; every one of them needs the escape width "
+        "its plane calls for, and the astral half is 240 of the 256")
 
     # The ones the finding was about, spelled once and read twice.
     assert presentation.safe_path("two\nlines.ts") == "two\\nlines.ts"
@@ -323,6 +333,77 @@ def test_issue_r21_arch_2_an_astral_member_is_a_surrogate_pair_in_json():
 
     assert "\U000e0041" not in escaped, "the tag character went out raw"
     assert BACKSLASH + "udb40" + BACKSLASH + "udc41" in escaped
+    assert json.loads(escaped) == payload, "the round trip lost the code point"
+
+
+# ── vss-supplement: the variation selectors, one plane up ────────────────────
+#
+# The residual R21-ARCH-2 disclosed and did not close. U+FE00-FE0F went into the class
+# because a variation selector is invisible, so `a️b.ts` and `ab.ts` are two files
+# and one string on screen. U+E0100-E01EF are THE SAME CHARACTERS — the supplement
+# continues the same series, category Mn, default-ignorable, invisible at every one of
+# the five exits — and they were left out only because the R21 spec said "exactly these
+# ranges". A name can carry 240 of them where it could carry 16.
+#
+# They are also the first members that are Mn AND astral at once, which is why this is
+# not a one-line range addition: `repr` declines to escape them (Mn is "printable"), so
+# they fall through to `_escaped`'s fallback, and that fallback could only spell BMP code
+# points. The parametrized case below pins the spelling, the walk above pins the width
+# for all 240, and `test_..._json` pins the surrogate pair the JSON exits owe them.
+#
+# The exclusions are unchanged and still argued in `declarations.py`: soft hyphen U+00AD,
+# the Hangul fillers, the Mongolian free variation selectors U+180B-180D / U+180F. The
+# neighbours below are the other side of THIS range: U+E00FF and U+E01F0 are unassigned,
+# and unassigned is not invisible-by-design.
+_VARIATION_SELECTORS_SUPPLEMENT = [
+    (0xE0100, "VARIATION SELECTOR-17", "\\U000e0100", 0xE00FF),
+    (0xE01EF, "VARIATION SELECTOR-256", "\\U000e01ef", 0xE01F0),
+]
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.parametrize("codepoint,name,spelling,neighbour",
+                         _VARIATION_SELECTORS_SUPPLEMENT)
+def test_issue_vss_supplement_a_supplement_selector_is_named(
+        codepoint, name, spelling, neighbour):
+    """Both sanitizers, on each end of the supplement and on the neighbour outside it.
+
+    The spelling is ten characters, not six: `\\U000e0100` is the code point, `\\ue0100`
+    is U+E010 followed by the digit 0 — a different name for a different file, which is
+    the R21-ARCH-2 finding about the tag characters arriving in the display vocabulary
+    instead of the JSON one.
+    """
+    char = chr(codepoint)
+
+    assert presentation.safe_path(f"a{char}b.ts") == f"a{spelling}b.ts"
+    assert presentation.safe_text(f"a{char}b") == f"a{spelling}b"
+    # …and it is no longer invisible: two names that differed by nothing readable differ.
+    assert presentation.safe_path(f"a{char}b.ts") != presentation.safe_path("ab.ts")
+    # The spelling reads back as the code point it names, and not as some other one.
+    assert ast.literal_eval(f"'{spelling}'") == char
+
+    # The other side of the line, pinned so the boundary is a decision and not a guess.
+    other = chr(neighbour)
+    assert presentation.safe_path(f"a{other}b.ts") == f"a{other}b.ts", (
+        f"U+{neighbour:04X} is outside the rule and must pass through")
+    assert presentation.safe_text(f"a{other}b") == f"a{other}b"
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_vss_supplement_a_supplement_selector_is_a_surrogate_pair_in_json():
+    """The JSON exits, for the second astral family in the class.
+
+    `_json_escaped` is `json.dumps`-derived since R21-ARCH-2, so this is a PIN rather
+    than a fix: the surrogate pair for U+E0100 is `\\udb40\\udd00`, and a consumer's
+    `json.loads` gets the one code point back. It is here because the property is a
+    consequence of that derivation, and the derivation is one edit away from being a
+    hand-written `\\uXXXX` again.
+    """
+    payload = {"p": "x\U000e0100y"}
+    escaped = presentation.json_safe(json.dumps(payload, ensure_ascii=False))
+
+    assert "\U000e0100" not in escaped, "the supplement selector went out raw"
+    assert BACKSLASH + "udb40" + BACKSLASH + "udd00" in escaped
     assert json.loads(escaped) == payload, "the round trip lost the code point"
 
 
@@ -804,14 +885,19 @@ def test_issue_f16_1_quality_f1_the_whole_class_walk_still_holds():
 
     R21-ARCH-2: `repr` has no escape for the variation selectors (category Mn is
     "printable"), so the vocabulary is "repr's spelling wherever repr has one, repr's own
-    `\\uXXXX` where it has none" — and the escape still round-trips to the code point it
-    names, which is the property the doubling could break and does not.
+    `\\uXXXX`/`\\UXXXXXXXX` where it has none" — and the escape still round-trips to the
+    code point it names, which is the property the doubling could break and does not.
+
+    vss-supplement: `\\UXXXXXXXX` in that sentence is this branch's addition. The
+    supplement selectors U+E0100-E01EF are Mn AND astral, so the fallback width is the
+    plane's, not a constant.
     """
     every = "".join(map(chr, range(0x110000)))
     for char in re.findall(f"[{presentation.CONTROL_CLASS}]", every):
         escaped = presentation.safe_path(char)
         expected = repr(char)[1:-1]
-        assert escaped == (expected if expected != char
-                           else f"{BACKSLASH}u{ord(char):04x}"), (char, escaped)
+        fallback = (f"{BACKSLASH}u{ord(char):04x}" if ord(char) <= 0xFFFF
+                    else f"{BACKSLASH}U{ord(char):08x}")
+        assert escaped == (expected if expected != char else fallback), (char, escaped)
         assert not presentation._CONTROL_RE.search(escaped), escaped
         assert ast.literal_eval(f"'{escaped}'") == char, escaped

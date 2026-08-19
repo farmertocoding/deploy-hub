@@ -81,6 +81,17 @@ format controls, the interlinear annotation marks, the variation selectors and t
 characters — rendered as nothing at all five of them. Coverage is two claims, and this
 module makes both: every exit, and every code point that lies about what is on the screen.
 
+AND THAT ROUND LEFT ONE, disclosed rather than closed, which is what this paragraph is
+for: it added the variation selectors U+FE00-FE0F and not the variation selectors
+SUPPLEMENT U+E0100-E01EF, because its spec named exactly the ranges it named. Those are
+the same characters — same series, same category Mn, same default-ignorable property,
+240 instead of 16 — so the class had sixteen of one family and none of the other while
+claiming to be the set of code points that render as nothing. The supplement is in the
+class now, and the deliberate exclusions are unchanged and still argued in
+`declarations.py`: soft hyphen U+00AD, the Hangul fillers U+115F / U+3164 / U+FFA0, and
+the Mongolian free variation selectors U+180B-180D and U+180F. A blank-looking LETTER,
+or a code point that belongs to a script's own spelling, is not a forgery.
+
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
 file. It imports nothing but `re` and `json` — stdlib both, so the CLI stays Django-free
@@ -169,7 +180,7 @@ _BEYOND_C0 = (
     # U+200B is in this class for, arriving under other numbers.
     "\\u180e"            # MONGOLIAN VOWEL SEPARATOR (Cf since Unicode 6.3)
     "\\u206a-\\u206f"    # deprecated format controls (shaping / digit shapes)
-    "\\ufe00-\\ufe0f"    # VARIATION SELECTOR-1..16
+    "\\ufe00-\\ufe0f"    # VARIATION SELECTOR-1..16 (…-17..256 are astral, below)
     "\\ufff9-\\ufffb"    # interlinear annotation anchor / separator / terminator
 )
 
@@ -185,11 +196,31 @@ _BEYOND_C0 = (
 #
 # WHERE THE LINE IS (and it is the same line `declarations.py` drew): invisible non-letter
 # format / default-ignorable IN, everything else OUT. Soft hyphen U+00AD and the Hangul
-# fillers stay out — that exclusion is argued there and is not disturbed here — and so do
-# the neighbours of every range above: the Mongolian free variation selectors U+180B-180D
-# and U+180F, U+2070, U+FE10, U+FFFC, and the unassigned code points beside the tag block.
-# `tests/test_cli_render.py` pins one neighbour per range as pass-through.
+# fillers U+115F / U+3164 / U+FFA0 stay out — that exclusion is argued there and is not
+# disturbed here — and so do the neighbours of every range above and below: the Mongolian
+# free variation selectors U+180B-180D and U+180F, U+2070, U+FE10, U+FFFC, and the
+# unassigned code points beside the tag block and either side of the supplement (U+E00FF,
+# U+E01F0). `tests/test_cli_render.py` pins one neighbour per range as pass-through.
 _TAG_CHARS = chr(0xE0001) + chr(0xE0020) + "-" + chr(0xE007F)
+
+# …and the VARIATION SELECTORS SUPPLEMENT, which is the other astral family and the one
+# R21-ARCH-2 disclosed and did not close. U+FE00-FE0F is in the class above because a
+# variation selector is invisible: `a️b.ts` and `ab.ts` are two files and one string
+# on a screen. U+E0100-E01EF ARE THOSE CHARACTERS — VARIATION SELECTOR-17 through -256,
+# the same series continued one plane up, the same category Mn, the same
+# Default_Ignorable_Code_Point — and 240 of them, so a name can carry more hidden state
+# up here than down there. They were outside the class for one reason: the round that
+# added U+FE00-FE0F was scoped to exactly the ranges it named.
+#
+# Literal characters rather than `\U000e0100` escape text, for the reason stated above
+# the tag characters: this string is the JavaScript class too, and `\U` is not a JS
+# RegExp escape.
+#
+# They are also the first members that are BOTH repr-declining (Mn is "printable") and
+# astral, which is why `_escaped` stopped hand-writing a `\uXXXX` fallback and takes
+# `ascii`'s spelling instead — a width is a fact about a plane, and this range is where
+# the hand-written one became wrong. See that function's docstring.
+_VARIATION_SELECTORS_SUPPLEMENT = chr(0xE0100) + "-" + chr(0xE01EF)
 
 # R15-SEC-2: and the code points that are not characters at all.
 #
@@ -214,8 +245,10 @@ _TAG_CHARS = chr(0xE0001) + chr(0xE0020) + "-" + chr(0xE007F)
 # decoded spelling and maps back to the byte by subtracting 0xDC00 — so the operator can
 # still name the file, which is the whole rule: refusal, not repair.
 _SURROGATE_ESCAPES = "\\udc80-\\udcff"
-CONTROL_CLASS = _C0 + _BEYOND_C0 + _TAG_CHARS + _SURROGATE_ESCAPES
-TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0 + _TAG_CHARS + _SURROGATE_ESCAPES
+CONTROL_CLASS = (_C0 + _BEYOND_C0 + _TAG_CHARS + _VARIATION_SELECTORS_SUPPLEMENT
+                 + _SURROGATE_ESCAPES)
+TEXT_CONTROL_CLASS = (_C0_EXCEPT_NEWLINE + _BEYOND_C0 + _TAG_CHARS
+                      + _VARIATION_SELECTORS_SUPPLEMENT + _SURROGATE_ESCAPES)
 
 _CONTROL_RE = re.compile(f"[{CONTROL_CLASS}]")
 _TEXT_CONTROL_RE = re.compile(f"[{TEXT_CONTROL_CLASS}]")
@@ -250,19 +283,34 @@ def _escaped(match):
     `str.isprintable()` is a CATEGORY question rather than a visibility one: the variation
     selectors U+FE00-FE0F are category Mn, a mark, so they are "printable" and `repr`
     hands the character straight back. An escape that returns the character escapes
-    nothing — the class member would go out to the terminal it was added to stop. So when
-    `repr` declines, this falls through to `repr`'s OWN spelling for an unprintable BMP
-    code point, `\\uXXXX`, which is also what the DOM exit's `escapeMatch` emits: one
-    vocabulary still, one fallback inside it.
+    nothing — the class member would go out to the terminal it was added to stop. R21
+    handled that with an `if`: `repr`'s spelling, or a hand-written `\\uXXXX` when `repr`
+    declined.
 
-    Every member `repr` declines to escape is BMP (they are the variation selectors), so
-    `\\uXXXX` is the whole of the fallback. An astral one arriving later would need the
-    `\\UXXXXXXXX` form, and it cannot arrive silently: the class walk in
-    `tests/test_cli_render.py` decodes every escape back to its code point.
+    THE FALLBACK IS GONE, and `ascii` is why (vss-supplement). That hand-written spelling
+    was right only while every code point `repr` declines is BMP, and this branch adds the
+    variation selectors SUPPLEMENT U+E0100-E01EF — the same characters as U+FE00-FE0F one
+    plane up, the residual R21-ARCH-2 disclosed — which are category Mn AND astral. `repr`
+    declines them, and `\\ue0100` names U+E010 followed by the digit `0`: a different
+    file, silently, in the refusal list. The same code-unit-for-code-point confusion
+    `_json_escaped` was fixed for, in the display vocabulary instead of JSON's.
+
+    `ascii(char)` is `repr(char)` with every non-ASCII code point escaped as well — the
+    SAME builtin vocabulary, one rule wider, and the width is Python's business rather
+    than this module's: `\\xNN` below U+0100, `\\uXXXX` through U+FFFF, `\\UXXXXXXXX`
+    above it. Over this class the two builtins are not merely compatible but identical
+    wherever `repr` escapes at all (the class walk in `tests/test_cli_render.py` asserts
+    that member by member, all 579 of them), so F16-1's agreement with the scanner's prose
+    is unchanged and the 256 `repr` declines now get a spelling instead of a branch.
+
+    A branch here was also the wrong shape for the problem: it made the code point's PLANE
+    a fact this function had to know, which is exactly the fact that was wrong when the
+    supplement arrived. `\\U000e0100` is byte-identical to what the DOM exit's
+    `escapeMatch` computes, which `frontend/tests/safe-display.test.ts` pins from the other
+    side, and every escape decodes back to the code point it names — the class walk does
+    that too, so a mis-spelling cannot arrive silently.
     """
-    char = match.group()
-    spelled = repr(char)[1:-1]
-    return spelled if spelled != char else f"{BACKSLASH}u{ord(char):04x}"
+    return ascii(match.group())[1:-1]
 
 
 def safe_path(value):

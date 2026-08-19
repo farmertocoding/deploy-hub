@@ -1360,6 +1360,12 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
     R21-ARCH-2 is the second widening, and it is listed here in the same shape: the
     invisible NON-LETTERS the class had missed. The direction of this test is what
     matters — the set may only grow, and it may only grow by ranges written down.
+
+    vss-supplement is the third, and it is the residual R21-ARCH-2 disclosed: the
+    variation selectors SUPPLEMENT U+E0100-E01EF, the same characters as U+FE00-FE0F one
+    plane up, left out only because that round's spec named exactly the other ranges.
+    Listed below with the rest; the expectation is strictly larger than it was, and the
+    exclusions at the bottom are untouched.
     """
     historical = declarations.re.compile(
         "["
@@ -1372,7 +1378,8 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
     invisible_non_letters = {chr(0x180E), chr(0xE0001)}.union(           # R21-ARCH-2
         *({chr(cp) for cp in range(start, stop)} for start, stop in
           [(0x206A, 0x2070), (0xFE00, 0xFE10), (0xFFF9, 0xFFFC),
-           (0xE0020, 0xE0080)]))
+           (0xE0020, 0xE0080),
+           (0xE0100, 0xE01F0)]))                                        # vss-supplement
 
     before = set(historical.findall(every))
     now = set(declarations._CONTROL_CHARS_RE.findall(every))
