@@ -97,8 +97,9 @@ longer states a list. It states a RULE, at `CONTROL_CLASS` below, with the three
 buckets named and a test that computes both directions of it over the whole code space:
 what is default-ignorable and outside the class must be exactly the script- and
 notation-bound spelling carriers, and what is in the class and not default-ignorable must
-be exactly the structural ranges. A sentence with "exactly" in it now has a computation
-under it, which is the only form of that word this module is entitled to use.
+be exactly the structural ranges — C0/C1/DEL, U+2028/2029, U+FFF9-FFFB and the
+surrogate-escape byte range. A sentence with "exactly" in it now has a computation under
+it, which is the only form of that word this module is entitled to use.
 
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
@@ -210,9 +211,19 @@ _BEYOND_C0 = (
 #
 #   A CODE POINT IS IN THE CLASS IFF a conforming renderer displays it as NOTHING BY
 #   DESIGN (Unicode's Default_Ignorable_Code_Point) AND it belongs to no script's or
-#   notation's own spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape byte
-#   range, which are in for STRUCTURAL reasons: they rewrite or forge the report's own
-#   lines rather than lying about what is on the screen.
+#   notation's own spelling — plus C0/C1/DEL, U+2028/2029, U+FFF9-FFFB and the
+#   surrogate-escape byte range, which are in for STRUCTURAL reasons: they rewrite or
+#   forge the report's own lines rather than lying about what is on the screen.
+#
+# THE STRUCTURAL REMAINDER IS FOUR THINGS, NOT THREE (VSS-R3). The interlinear annotation
+# marks U+FFF9-FFFB are in the class from R21-ARCH-2 and Unicode explicitly withholds
+# Default_Ignorable from them, so they are in on the structural argument rather than the
+# invisibility one and every earlier statement of this rule left them off its list: an
+# annotation-aware renderer may HIDE or RESTRUCTURE the text between an anchor and its
+# terminator, which is a forgery of the report's display in the same sense that a newline
+# in a path forges a line of it. They stay in under the only-grew rule either way; what
+# was wrong was the enumeration, and `_STRUCTURAL_MEMBERS` in `tests/test_cli_render.py`
+# has carried them correctly since the computation replaced the prose.
 #
 # THREE BUCKETS ARE OUT, and they are named so that "everything else" is a list:
 #

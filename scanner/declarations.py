@@ -153,8 +153,16 @@ DECLARATION_FILE = "deployhub.yaml"
 #
 #   REFUSED iff a conforming renderer displays it as NOTHING BY DESIGN
 #   (Default_Ignorable_Code_Point) AND it belongs to no script's or notation's own
-#   spelling — plus C0/C1/DEL, U+2028/2029 and the surrogate-escape range, refused for
-#   STRUCTURAL reasons: they forge the report's own lines.
+#   spelling — plus C0/C1/DEL, U+2028/2029, U+FFF9-FFFB and the surrogate-escape range,
+#   refused for STRUCTURAL reasons: they forge the report's own lines.
+#
+# U+FFF9-FFFB is the fourth item and VSS-R3 is why it is written down here: the interlinear
+# annotation marks have been refused since R21-ARCH-2, Unicode withholds Default_Ignorable
+# from them, and so they sit on the structural side of this iff rather than the invisible
+# side — an annotation-aware renderer may hide or restructure everything between an anchor
+# and its terminator, which forges the display of a `reason` the way a newline forges a
+# line of it. Every earlier prose statement of the remainder listed three things and the
+# set has been four since that round.
 #
 # WHAT IS NOT REFUSED is then two named buckets rather than an adjective, and round-6b's
 # argument is what puts both out:

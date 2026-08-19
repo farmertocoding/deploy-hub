@@ -467,6 +467,11 @@ _DEFAULT_IGNORABLE = (
     # derived from the RUNNING interpreter: the one movement between 14.0.0 and 15.1.0
     # anywhere near this class is U+13439-1343F becoming assigned Egyptian format
     # controls, which bucket (1) already covers by range.
+    #
+    # VSS-OBS-1, the limit of that alarm: the Cf walk fires on a new FORMAT character, and
+    # a hypothetical future non-Cf default-ignorable outside today's blocks would not trip
+    # it. A round that bumps the CI interpreter past a major Unicode version should
+    # re-derive this literal from that version's DerivedCoreProperties.txt.
     (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
     (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
     (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
