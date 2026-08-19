@@ -106,6 +106,37 @@ test("R21-SEC-1: an astral character is not torn in half by the surrogate range"
   assert.notEqual(safePath("x\u{1F480}.ts"), safePath("x\u{20080}.ts"));
 });
 
+test("R21-ARCH-2: the invisible non-letters are named, byte for byte with Python", () => {
+  // The class grew by the assigned, invisible, NON-LETTER format and default-ignorable
+  // code points it had missed — they render as nothing, so two names differing only by
+  // one of them displayed identically, which is the threat U+200B is in the class for.
+  // The right-hand sides are the exact `scanner.presentation.safe_path`/`safe_text`
+  // output, and the astral ones are `repr`'s ten-character `\U000eXXXX` spelling, which
+  // is why `escapeMatch` had to learn about code points above U+FFFF.
+  //
+  // Written as `\u{…}` escapes rather than as themselves: every one of these is
+  // INVISIBLE, and a test whose subject cannot be seen in its own source is the defect
+  // it is testing for.
+  for (const [char, spelling] of [
+    ["\u{180E}", "\\u180e"],         // MONGOLIAN VOWEL SEPARATOR
+    ["\u{FE0F}", "\\ufe0f"],         // VARIATION SELECTOR-16
+    ["\u{FFF9}", "\\ufff9"],         // INTERLINEAR ANNOTATION ANCHOR
+    ["\u{E0041}", "\\U000e0041"],    // TAG LATIN CAPITAL LETTER A
+  ] as Array<[string, string]>) {
+    assert.equal(safePath(`a${char}b.ts`), `a${spelling}b.ts`);
+    assert.equal(safeText(`a${char}b`), `a${spelling}b`);
+  }
+
+  // The other side of the line — one neighbour per range, left alone on purpose:
+  // MONGOLIAN FREE VARIATION SELECTOR THREE, SUPERSCRIPT ZERO, the small-form comma,
+  // OBJECT REPLACEMENT CHARACTER, and the unassigned code points beside the tag block.
+  for (const near of ["\u{180D}", "\u{2070}", "\u{FE10}", "\u{FFFC}",
+                      "\u{E0002}", "\u{E0080}"]) {
+    assert.equal(safePath(`a${near}b.ts`), `a${near}b.ts`);
+    assert.equal(safeText(`a${near}b`), `a${near}b`);
+  }
+});
+
 test("null/undefined pass through (a React child may be either)", () => {
   assert.equal(safePath(undefined), undefined);
   assert.equal(safeText(null), null);

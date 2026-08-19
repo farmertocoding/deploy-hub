@@ -1352,10 +1352,14 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
     for the CLI's sake — and a shared constant is exactly where a security rule gets
     narrowed by somebody solving a different problem.
 
-    So: every code point this module refused before still is refused, the addition is
-    precisely U+DC80-DCFF, and nothing else moved. Computed over the whole code space
-    rather than sampled, because "which characters does this regex match" is a question
-    with an exact answer and a sample is how a range goes missing from the middle.
+    So: every code point this module refused before still is refused, and every addition
+    is one somebody argued for. Computed over the whole code space rather than sampled,
+    because "which characters does this regex match" is a question with an exact answer
+    and a sample is how a range goes missing from the middle.
+
+    R21-ARCH-2 is the second widening, and it is listed here in the same shape: the
+    invisible NON-LETTERS the class had missed. The direction of this test is what
+    matters — the set may only grow, and it may only grow by ranges written down.
     """
     historical = declarations.re.compile(
         "["
@@ -1364,13 +1368,25 @@ def test_issue_r15_sec_2_the_refusal_set_only_grew():
         "\\u061c\\u2060-\\u2064\\ufeff"
         "]")
     every = "".join(map(chr, range(0x110000)))
+    surrogateescape = {chr(cp) for cp in range(0xDC80, 0xDD00)}          # R15-SEC-2
+    invisible_non_letters = {chr(0x180E), chr(0xE0001)}.union(           # R21-ARCH-2
+        *({chr(cp) for cp in range(start, stop)} for start, stop in
+          [(0x206A, 0x2070), (0xFE00, 0xFE10), (0xFFF9, 0xFFFC),
+           (0xE0020, 0xE0080)]))
 
     before = set(historical.findall(every))
     now = set(declarations._CONTROL_CHARS_RE.findall(every))
 
     assert before < now, "the refusal set shrank"
-    assert now - before == {chr(cp) for cp in range(0xDC80, 0xDD00)}, (
-        "the class grew by something other than the surrogateescape range")
+    assert now - before == surrogateescape | invisible_non_letters, (
+        "the class grew by something other than the two widenings on record")
+
+    # The exclusions this module ARGUED for, which neither widening disturbed: a
+    # blank-looking LETTER is a badly written reason, not a forgery (round-6b).
+    excluded = {chr(0x00AD), chr(0x115F), chr(0x3164), chr(0xFFA0)}     # hyphen, fillers
+    excluded |= {chr(cp) for cp in (0x180B, 0x180C, 0x180D, 0x180F)}    # Mongolian FVS
+    assert not (excluded & now), (
+        f"a disclosed exclusion is now refused: {sorted(excluded & now)}")
 
 
 def test_issue_r15_sec_2_a_declaration_carrying_an_undecodable_byte_is_still_refused():

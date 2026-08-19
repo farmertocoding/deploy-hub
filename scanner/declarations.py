@@ -117,6 +117,20 @@ DECLARATION_FILE = "deployhub.yaml"
 # line by line) or reorders them (bidi), because those forge the scanner's own output;
 # a blank-looking letter in a reason is only a badly written reason.
 #
+# R21-ARCH-2 WIDENED THE SET ALONG THAT SAME LINE, which is the point of stating a rule
+# rather than a list. This paragraph disclosed two exclusions and read as if they were the
+# only invisible code points outside the class; they were not. The Mongolian vowel
+# separator U+180E, the deprecated format controls U+206A-206F, the interlinear annotation
+# marks U+FFF9-FFFB, the variation selectors U+FE00-FE0F and the tag characters U+E0001 /
+# U+E0020-E007F are all invisible and NONE of them is a letter — a tag character spells
+# ASCII that nobody can see — so two reasons differing only by one of them read the same
+# and are not the same text. They are refused now. What is still NOT refused is exactly
+# what this paragraph argued for: the Hangul fillers and the soft hyphen (letters, and a
+# hyphen a renderer may show), and the Mongolian free variation selectors U+180B-180D /
+# U+180F beside U+180E, which belong to a script's own spelling. The line is unchanged:
+# invisible NON-LETTER format and default-ignorable code points are refused; something
+# that belongs to a script is not.
+#
 # R15-SEC-1 moved the SET to `scanner/presentation.py`, and left this comment where it
 # was written. The same class that refuses repo-controlled text here is the class a
 # presentation layer must escape before handing repo-controlled text to a terminal — one

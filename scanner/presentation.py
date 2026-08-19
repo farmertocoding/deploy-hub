@@ -73,11 +73,19 @@ renders as its letters. The one thing this authority still does not do is anythi
 markup or scripting, which is not its job: React handles HTML escaping, and the scanner
 executes nothing.
 
+WHAT THE CLASS CONTAINS is stated at the constant below, and R21-ARCH-2 is why that
+sentence is worth reading twice: "all five exits are covered" says nothing about WHICH
+code points, and the class had the bidi and zero-width families and stopped there while
+a second set of invisible non-letters — the Mongolian vowel separator, the deprecated
+format controls, the interlinear annotation marks, the variation selectors and the tag
+characters — rendered as nothing at all five of them. Coverage is two claims, and this
+module makes both: every exit, and every code point that lies about what is on the screen.
+
 WHY HERE. `scanner` owns `CheckResult`, and both consumers already depend on this package
 — `hub/__main__` imports `scanner.core.scan`, the frontend's copy is generated from this
-file. It imports nothing but `re`, so the CLI stays Django-free (that module's own
-docstring promises it), and nothing in the live scan path imports it: a report is data,
-and a medium is a medium.
+file. It imports nothing but `re` and `json` — stdlib both, so the CLI stays Django-free
+(that module's own docstring promises it), and nothing in the live scan path imports it:
+a report is data, and a medium is a medium.
 
 THE FRONTEND DOES NOT RETYPE THIS. `scripts_dev/generate_presentation.py` writes
 `frontend/src/api/presentation.js` from the declarations below, `make generate-client`
@@ -85,6 +93,7 @@ runs it, and `make check-generated` fails on a stale copy — the same mechanism
 gate and the same directory as the zod mirror. A hand-typed second copy is the disease
 this module is the treatment for.
 """
+import json
 import re
 
 # The one character both escape vocabularies are built out of, named because a literal
@@ -154,7 +163,33 @@ _BEYOND_C0 = (
     "\\u061c"            # ARABIC LETTER MARK
     "\\u2060-\\u2064"    # word joiner + invisible operators
     "\\ufeff"            # BOM / zero-width no-break space
+    # R21-ARCH-2: the rest of the INVISIBLE NON-LETTERS, which the list above missed
+    # while claiming completeness. Every one of these renders as nothing, so two names
+    # differing only by one of them are one string on the screen — the exact defect
+    # U+200B is in this class for, arriving under other numbers.
+    "\\u180e"            # MONGOLIAN VOWEL SEPARATOR (Cf since Unicode 6.3)
+    "\\u206a-\\u206f"    # deprecated format controls (shaping / digit shapes)
+    "\\ufe00-\\ufe0f"    # VARIATION SELECTOR-1..16
+    "\\ufff9-\\ufffb"    # interlinear annotation anchor / separator / terminator
 )
+
+# …and the TAG characters, the same rule one plane up: U+E0020-E007F mirror ASCII
+# invisibly, so a filename can carry a whole second word nobody can see, and U+E0001
+# LANGUAGE TAG is the deprecated introducer for them.
+#
+# Written with `chr` rather than as `\U000e0001` ESCAPE TEXT because this string is also
+# the JavaScript class: `\U` is not a JS RegExp escape at all, while a literal character
+# is one code point in both engines — Python's `re` natively, and the browser under the
+# `u` flag R21-SEC-1 put on those regexes. `generate_presentation.py` carries it across as
+# a `json.dumps` surrogate-pair escape, which is the same code point again.
+#
+# WHERE THE LINE IS (and it is the same line `declarations.py` drew): invisible non-letter
+# format / default-ignorable IN, everything else OUT. Soft hyphen U+00AD and the Hangul
+# fillers stay out — that exclusion is argued there and is not disturbed here — and so do
+# the neighbours of every range above: the Mongolian free variation selectors U+180B-180D
+# and U+180F, U+2070, U+FE10, U+FFFC, and the unassigned code points beside the tag block.
+# `tests/test_cli_render.py` pins one neighbour per range as pass-through.
+_TAG_CHARS = chr(0xE0001) + chr(0xE0020) + "-" + chr(0xE007F)
 
 # R15-SEC-2: and the code points that are not characters at all.
 #
@@ -179,8 +214,8 @@ _BEYOND_C0 = (
 # decoded spelling and maps back to the byte by subtracting 0xDC00 — so the operator can
 # still name the file, which is the whole rule: refusal, not repair.
 _SURROGATE_ESCAPES = "\\udc80-\\udcff"
-CONTROL_CLASS = _C0 + _BEYOND_C0 + _SURROGATE_ESCAPES
-TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0 + _SURROGATE_ESCAPES
+CONTROL_CLASS = _C0 + _BEYOND_C0 + _TAG_CHARS + _SURROGATE_ESCAPES
+TEXT_CONTROL_CLASS = _C0_EXCEPT_NEWLINE + _BEYOND_C0 + _TAG_CHARS + _SURROGATE_ESCAPES
 
 _CONTROL_RE = re.compile(f"[{CONTROL_CLASS}]")
 _TEXT_CONTROL_RE = re.compile(f"[{TEXT_CONTROL_CLASS}]")
@@ -205,13 +240,29 @@ def _escaped(match):
     module's list. One name, two escapes, in one panel.
 
     `repr` of a single character is exactly the escape a Python reader already knows, and
-    for every code point in the class above it is an escape rather than the character
-    itself — so taking it verbatim makes the two agree BY CONSTRUCTION rather than by two
-    tables that match today. The outer quotes stay the scanner's business: they bound a
-    name inside a sentence (R7-3), and a list that gives each name its own line or `<li>`
-    has nothing to bound.
+    for almost every code point in the class above it is an escape rather than the
+    character itself — so taking it verbatim makes the two agree BY CONSTRUCTION rather
+    than by two tables that match today. The outer quotes stay the scanner's business:
+    they bound a name inside a sentence (R7-3), and a list that gives each name its own
+    line or `<li>` has nothing to bound.
+
+    ALMOST EVERY, and R21-ARCH-2 is the exception. `repr` escapes by PRINTABILITY, and
+    `str.isprintable()` is a CATEGORY question rather than a visibility one: the variation
+    selectors U+FE00-FE0F are category Mn, a mark, so they are "printable" and `repr`
+    hands the character straight back. An escape that returns the character escapes
+    nothing — the class member would go out to the terminal it was added to stop. So when
+    `repr` declines, this falls through to `repr`'s OWN spelling for an unprintable BMP
+    code point, `\\uXXXX`, which is also what the DOM exit's `escapeMatch` emits: one
+    vocabulary still, one fallback inside it.
+
+    Every member `repr` declines to escape is BMP (they are the variation selectors), so
+    `\\uXXXX` is the whole of the fallback. An astral one arriving later would need the
+    `\\UXXXXXXXX` form, and it cannot arrive silently: the class walk in
+    `tests/test_cli_render.py` decodes every escape back to its code point.
     """
-    return repr(match.group())[1:-1]
+    char = match.group()
+    spelled = repr(char)[1:-1]
+    return spelled if spelled != char else f"{BACKSLASH}u{ord(char):04x}"
 
 
 def safe_path(value):
@@ -268,8 +319,23 @@ def _json_escaped(match):
     NOT `_escaped`'s spelling, and the difference is not cosmetic: `repr` writes U+009B as
     `\\x9b`, and `\\x` is not a JSON escape at all — a parser rejects it. Display and
     serialization are two media with two vocabularies, over ONE class.
+
+    AND `\\uXXXX` NAMES A CODE UNIT, NOT A CODE POINT (R21-ARCH-2). The tag characters
+    U+E0001/U+E0020-E007F are the first members of the class above U+FFFF, and the
+    hand-written `f"{BACKSLASH}u{ord(char):04x}"` that used to stand here spelled U+E0041
+    `\\ue0041` — which a parser reads as U+E004 followed by the digit `1`. A different
+    string, silently, in `--json`, in the API body and in every WS frame.
+
+    So the spelling is JSON'S OWN, taken verbatim, exactly the way `_escaped` takes
+    `repr`'s: `json.dumps` of one character with `ensure_ascii=True` (the default) IS the
+    escape this function wants — the surrogate pair for an astral member, `\\uXXXX` for
+    every other one, and the same lone surrogate R15-SEC-2 needs it to pass through. The
+    docstring below already said "`\\uXXXX` is what `ensure_ascii=True` would have
+    written"; this makes that a fact rather than a second implementation of it. The outer
+    quotes `dumps` adds are the caller's business, and stripped for the same reason
+    `_escaped` strips `repr`'s.
     """
-    return f"{BACKSLASH}u{ord(match.group()):04x}"
+    return json.dumps(match.group())[1:-1]
 
 
 def json_safe(value):

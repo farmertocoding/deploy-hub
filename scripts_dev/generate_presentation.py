@@ -50,6 +50,14 @@ def render():
     # `CONTROL_CLASS` is the regex char-class BODY (`json.dumps` doubles its backslashes
     # into a JS string literal); `TEXT_CONTROL_CLASS` is the same minus U+000A, for prose
     # that keeps the server's own line breaks — the `safe_path`/`safe_text` split.
+    #
+    # R21-ARCH-2: the class now has ASTRAL members (the tag characters), and they are
+    # LITERAL CHARACTERS in the Python string rather than `\U000e0001` escape text —
+    # `\U` is not a JavaScript RegExp escape at all, so an escape spelling could not
+    # cross. `json.dumps` writes them as a surrogate-pair escape, which a JS string
+    # literal reads back as the same one code point, and the browser's regex reads it as
+    # one code point because R21-SEC-1 put the `u` flag on it. Same set, each language's
+    # own spelling of it, still one authority.
     control = json.dumps(presentation.CONTROL_CLASS)
     text_control = json.dumps(presentation.TEXT_CONTROL_CLASS)
     return (f"{HEADER}\nexport const CHECK_FIELDS = {fields};\n\n"

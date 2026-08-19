@@ -60,12 +60,17 @@ const TEXT_CONTROL_RE = new RegExp(`[${TEXT_CONTROL_CLASS}]`, "gu");
 // the DOM and `…\n…` everywhere else.
 const NAMED = { 0x09: "\\t", 0x0a: "\\n", 0x0d: "\\r" };
 
+// R21-ARCH-2 added the first class members above U+FFFF (the tag characters), and `repr`
+// spells one of those `\U000e0041` — a capital `U` and EIGHT hex digits, which is the
+// third width in Python's vocabulary and the one this function did not have. `codePointAt`
+// reads the whole pair (the `u` flag is what hands it a whole pair to read).
 function escapeMatch(ch) {
   const cp = ch.codePointAt(0);
   if (cp in NAMED) return NAMED[cp];
-  return cp < 0x100
-    ? "\\x" + cp.toString(16).padStart(2, "0")
-    : "\\u" + cp.toString(16).padStart(4, "0");
+  if (cp < 0x100) return "\\x" + cp.toString(16).padStart(2, "0");
+  return cp <= 0xffff
+    ? "\\u" + cp.toString(16).padStart(4, "0")
+    : "\\U" + cp.toString(16).padStart(8, "0");
 }
 
 // `safePath`/`safeText` mirror the Python pair EXACTLY, asymmetry included:

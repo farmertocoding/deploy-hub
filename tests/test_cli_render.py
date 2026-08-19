@@ -5,6 +5,7 @@ code path (scanner.core.scan), two presentations". That is a claim about the ren
 much as about the scan, and nothing had ever compared what the two presentations put on a
 screen.
 """
+import ast
 import json
 import os
 import pathlib
@@ -219,20 +220,110 @@ def test_issue_f16_1_the_escape_vocabulary_is_pythons_own_for_every_code_point()
     than a list of expected strings — a list of expected strings IS the second table.
     This replaces the `< 0x100` boundary test the mutation gate asked for in R15: that
     branch is gone, because there is no branch left.
+
+    R21-ARCH-2: except where `repr` HAS no escape. It escapes by printability, and the
+    variation selectors this round added to the class are category Mn — "printable" —
+    so `repr` returns the character itself, which would escape nothing. The property
+    holds in the form "repr's spelling wherever repr has one", and the third assertion
+    below is the one that makes the fallback safe rather than merely different: every
+    escape, `repr`'s or the fallback's, DECODES BACK to the code point it names. A
+    ten-character `\\U000e0041` mis-spelled as `\\ue0041` names another character and
+    fails there.
     """
     import re as _re
 
     every = "".join(map(chr, range(0x110000)))
+    fallbacks = []
     for char in _re.findall(f"[{presentation.CONTROL_CLASS}]", every):
         escaped = presentation.safe_path(char)
-        assert escaped == repr(char)[1:-1], (char, escaped)
+        if repr(char)[1:-1] == char:
+            fallbacks.append(char)
+            assert escaped == f"{BACKSLASH}u{ord(char):04x}", (char, escaped)
+        else:
+            assert escaped == repr(char)[1:-1], (char, escaped)
         assert not presentation._CONTROL_RE.search(escaped), (
             f"U+{ord(char):04X} escaped to something still in the class: {escaped!r}")
+        assert ast.literal_eval(f"'{escaped}'") == char, (
+            f"U+{ord(char):04X} is spelled {escaped!r}, which reads back as something else")
+
+    assert fallbacks == [chr(cp) for cp in range(0xFE00, 0xFE10)], (
+        "the set `repr` will not escape moved; the fallback's `\\uXXXX` width is only "
+        "right while every one of them is BMP")
 
     # The ones the finding was about, spelled once and read twice.
     assert presentation.safe_path("two\nlines.ts") == "two\\nlines.ts"
     assert repr("two\nlines.ts")[1:-1] == "two\\nlines.ts"
     assert presentation.safe_path("\x1b\t\udc9b\u200b") == "\\x1b\\t\\udc9b\\u200b"
+
+
+# ── R21-ARCH-2: the invisible NON-LETTERS the class did not name ─────────────
+#
+# The class covered the bidi family and the zero-width family and stopped there, and the
+# Phase-1 exit statement claims it is complete. It was not: a handful of assigned,
+# invisible, non-letter format and default-ignorable code points rendered as nothing at
+# all five exits, so two names differing only by one of them displayed identically — the
+# same threat U+200B is in the class for.
+#
+# The line is "invisible non-letter format/default-ignorable IN, everything else OUT", and
+# the neighbours below are the other side of it: the Mongolian free variation selectors,
+# a superscript digit, a presentation form, the object-replacement character and the
+# unassigned code points beside the tag block are all left alone. Soft hyphen U+00AD and
+# the Hangul fillers stay out too — that exclusion is argued in `declarations.py` and is
+# not disturbed here.
+_INVISIBLE_NON_LETTERS = [
+    (0x180E, "MONGOLIAN VOWEL SEPARATOR", "\\u180e", 0x180D),
+    (0x206A, "INHIBIT SYMMETRIC SWAPPING", "\\u206a", 0x2070),
+    (0x206F, "NOMINAL DIGIT SHAPES", "\\u206f", 0x2070),
+    (0xFE00, "VARIATION SELECTOR-1", "\\ufe00", 0xFE10),
+    (0xFE0F, "VARIATION SELECTOR-16", "\\ufe0f", 0xFE10),
+    (0xFFF9, "INTERLINEAR ANNOTATION ANCHOR", "\\ufff9", 0xFFFC),
+    (0xFFFB, "INTERLINEAR ANNOTATION TERMINATOR", "\\ufffb", 0xFFFC),
+    (0xE0001, "LANGUAGE TAG", "\\U000e0001", 0xE0002),
+    (0xE0041, "TAG LATIN CAPITAL LETTER A", "\\U000e0041", 0xE0080),
+    (0xE007F, "CANCEL TAG", "\\U000e007f", 0xE0080),
+]
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+@pytest.mark.parametrize("codepoint,name,spelling,neighbour", _INVISIBLE_NON_LETTERS)
+def test_issue_r21_arch_2_an_invisible_non_letter_is_named(
+        codepoint, name, spelling, neighbour):
+    """Both sanitizers, on each new member and on the neighbour that stays out.
+
+    `a\\ufe0fb.ts` and `ab.ts` are two files and were one string on screen; a tag
+    character can carry a whole hidden word through a filename. The escape is the same
+    vocabulary as every other member — `repr`'s, except where `repr` has none (the
+    variation selectors are category Mn, so `str.isprintable()` says True and `repr`
+    hands the character back unchanged; the fallback is `repr`'s own `\\uXXXX`).
+    """
+    char = chr(codepoint)
+
+    assert presentation.safe_path(f"a{char}b.ts") == f"a{spelling}b.ts"
+    assert presentation.safe_text(f"a{char}b") == f"a{spelling}b"
+    # …and it is no longer invisible: two names that differed by nothing readable differ.
+    assert presentation.safe_path(f"a{char}b.ts") != presentation.safe_path("ab.ts")
+
+    # The other side of the line, pinned so the boundary is a decision and not a guess.
+    other = chr(neighbour)
+    assert presentation.safe_path(f"a{other}b.ts") == f"a{other}b.ts", (
+        f"U+{neighbour:04X} is outside the rule and must pass through")
+
+
+@pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
+def test_issue_r21_arch_2_an_astral_member_is_a_surrogate_pair_in_json():
+    """The JSON exits, where `\\uXXXX` names a code UNIT and not a code point.
+
+    The tag characters are the first astral members of the class, and
+    `f"{BACKSLASH}u{ord(char):04x}"` would have spelled U+E0041 `\\ue0041` — which a
+    parser reads as U+E004 followed by the digit `1`. A different string, silently, in
+    `--json`, the API body and every WS frame.
+    """
+    payload = {"p": "x\U000e0041y"}
+    escaped = presentation.json_safe(json.dumps(payload, ensure_ascii=False))
+
+    assert "\U000e0041" not in escaped, "the tag character went out raw"
+    assert BACKSLASH + "udb40" + BACKSLASH + "udc41" in escaped
+    assert json.loads(escaped) == payload, "the round trip lost the code point"
 
 
 # ── R15-ARCH-1: one presentation model, two renderers ────────────────────────
@@ -710,9 +801,17 @@ def test_issue_f16_1_quality_f1_the_whole_class_walk_still_holds():
 
     The doubling changes what happens to a character OUTSIDE the class (the backslash),
     so this is the assertion that says it did not disturb the vocabulary inside it.
+
+    R21-ARCH-2: `repr` has no escape for the variation selectors (category Mn is
+    "printable"), so the vocabulary is "repr's spelling wherever repr has one, repr's own
+    `\\uXXXX` where it has none" — and the escape still round-trips to the code point it
+    names, which is the property the doubling could break and does not.
     """
     every = "".join(map(chr, range(0x110000)))
     for char in re.findall(f"[{presentation.CONTROL_CLASS}]", every):
         escaped = presentation.safe_path(char)
-        assert escaped == repr(char)[1:-1], (char, escaped)
+        expected = repr(char)[1:-1]
+        assert escaped == (expected if expected != char
+                           else f"{BACKSLASH}u{ord(char):04x}"), (char, escaped)
         assert not presentation._CONTROL_RE.search(escaped), escaped
+        assert ast.literal_eval(f"'{escaped}'") == char, escaped
