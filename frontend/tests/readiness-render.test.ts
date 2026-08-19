@@ -22,7 +22,7 @@ import { Badge, CheckBody, MaterializeControl, OutcomeRegion, ProjectRow,
   from "../src/Readiness.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 import { CHECK_FIELDS, TIER_GATES } from "../src/api/presentation.js";
-import { safePath } from "../src/safe-display.js";
+import { safePath, safeText } from "../src/safe-display.js";
 
 (globalThis as any).window = { location: { search: "" } };
 
@@ -802,11 +802,41 @@ test("dom-bidi: the check title is sanitized where the panel renders it", () => 
   // A title carries repo-controlled text too — `node-ts.service-package` names the service
   // directory (R16-SEC-1). `ReadinessPanel` fetches, so the wiring is read from source the
   // way the F12-1/F12-2 pins are: the boundary is not observable under renderToStaticMarkup.
+  //
+  // R21-UX-1 moved this pin from `safePath` to `safeText` DELIBERATELY, and it still
+  // proves the title is sanitized — the sanitizer named here is the one the other two
+  // renderings of the same title use (WarningsAck, and `render_text`'s seam in
+  // `hub/__main__.py`). A title is PROSE, not a path.
   const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
   const panel = source.slice(source.indexOf("function ReadinessPanel("));
 
-  assert.match(panel, /<summary>\{safePath\(c\.title\)\}<\/summary>/,
+  assert.match(panel, /<summary>\{safeText\(c\.title\)\}<\/summary>/,
     "the check title reaches the DOM without the display sanitizer");
+});
+
+test("R21-UX-1: one check title, one spelling, in all three places it is rendered", () => {
+  // One title, two sanitizers on one screen: the `<summary>` doubled a literal backslash
+  // (safePath is injective, which a PATH needs) while the WarningsAck label did not, and
+  // the CLI's title line gets only `render_text`'s `safe_text` seam. So `svc a\b` read
+  // three ways for one check — the F16-1 defect, between renderings of one string.
+  const title = "svc a\\b";
+
+  // `scanner.presentation.safe_text("svc a\\b")` is the input unchanged; `safe_path`
+  // doubles, which is right for a name in a refusal list and wrong for a heading.
+  assert.equal(safeText(title), "svc a\\b");
+  assert.equal(safePath(title), "svc a\\\\b");
+
+  const ack = visibleText(render(WarningsAck, {
+    warnings: [{ id: "node-ts.service-package", title }],
+    checked: false, onChange: () => {} }));
+  assert.ok(ack.includes(safeText(title)), ack);
+  assert.ok(!ack.includes(safePath(title)), `the ack label doubled the backslash: ${ack}`);
+
+  // …and the summary is the same call, read from source for the reason above.
+  const source = readFileSync(new URL("../src/Readiness.jsx", import.meta.url), "utf-8");
+  const panel = source.slice(source.indexOf("function ReadinessPanel("));
+  assert.match(panel, /<summary>\{safeText\(c\.title\)\}<\/summary>/,
+    "the summary spells the title differently from the ack label and the CLI");
 });
 
 // ── F20-BIDI-1: the named-escape divergence, and the defense-in-depth sinks ───

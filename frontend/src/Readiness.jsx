@@ -787,8 +787,15 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
           {checks.map((c) => (
             <details key={c.id} style={{ ...box, marginBottom: 6 }}>
               {/* dom-bidi-display: a title can carry repo-controlled text too —
-                  `node-ts.service-package` names the service directory (R16-SEC-1). */}
-              <summary>{safePath(c.title)}</summary>
+                  `node-ts.service-package` names the service directory (R16-SEC-1).
+                  R21-UX-1: through `safeText`, not `safePath`. A TITLE IS PROSE. It is
+                  rendered in three places — here, in `WarningsAck`'s label, and on the
+                  CLI's heading line through `render_text`'s `safe_text` seam — and
+                  `safePath`'s backslash doubling (which one string, one FILE needs) made
+                  this one of them spell `svc a\b` differently from the other two. The
+                  raw newline `safe_text` keeps collapses in a `<summary>` under the
+                  default white-space, the same as it does in the CLI's line. */}
+              <summary>{safeText(c.title)}</summary>
               <CheckBody check={c} />
             </details>
           ))}
