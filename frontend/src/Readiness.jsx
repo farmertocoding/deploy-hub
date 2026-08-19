@@ -833,7 +833,14 @@ export function QuestionField({ siteId, question: q, prior, drafted, onChange })
         ? <select id={id} style={box} value={drafted ?? priorText}
             onChange={(e) => onChange(e.target.value)}>
             <option value="" disabled>choose…</option>
-            {q.choices.map((c) => <option key={c} value={c}>{c}</option>)}
+            {/* R21-SEC-2: a choice is REPO-CONTROLLED — `node-ts.service-package`'s are
+                workspace DIRECTORY NAMES, straight from `_Survey.workspace_names()`
+                through the wizard payload. So the display text goes through the same
+                sanitizer every other repo-controlled string in this file does, or a bidi
+                override in a directory name reorders the control that says what gets
+                deployed. The VALUE stays raw: it is the answer, it round-trips to the
+                server, and it has to keep naming the directory that exists. */}
+            {q.choices.map((c) => <option key={c} value={c}>{safePath(c)}</option>)}
           </select>
         : q.kind === "bool"
         ? <input id={id} type="checkbox" checked={drafted ?? prior ?? false}

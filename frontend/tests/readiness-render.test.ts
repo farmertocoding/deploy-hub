@@ -854,6 +854,30 @@ test("dom-bidi: a warning title carrying a bidi override is sanitized in Warning
   assert.ok(visibleText(markup).includes("invoice\\u202egpj.exe"), markup);
 });
 
+test("R21-SEC-2: a hostile workspace name cannot spoof the deploy-target select", () => {
+  // The choices of `node-ts.service-package` are repo-controlled DIRECTORY NAMES:
+  // `_Survey.workspace_names()` -> `wizard_questions` -> the wizard GET -> `json_safe`,
+  // which is data-preserving -> `JSON.parse` -> this <option>'s text. Rendered raw, a
+  // bidi override in a directory name reorders the one control that says WHAT GETS
+  // DEPLOYED, so the operator picks a target whose name is not what they read.
+  const RLO = "‮";
+  const hostile = `packages/${RLO}gpj.exe`;
+  const question = { id: "node-ts.service-package",
+                     prompt: "Which workspace package is the deployable service?",
+                     kind: "choice", default: null, choices: [hostile, "packages/api"],
+                     secret: false };
+
+  const markup = render(QuestionField, { siteId: 1, question, prior: undefined,
+                                         drafted: undefined, onChange: () => {} });
+  const text = visibleText(markup);
+
+  assert.ok(!text.includes(RLO), "the override reached the option's visible text raw");
+  assert.ok(text.includes("packages/\\u202egpj.exe"), text);
+  // …and the ANSWER is still the true name: this value round-trips to the server and
+  // names a directory on disk, so it is the one place the escaping must NOT reach.
+  assert.ok(markup.includes(`value="${hostile}"`), markup);
+});
+
 test("dom-bidi: the 409 refusal panel sanitizes detail and item titles, not slugs", () => {
   const RLO = "‮";
   const msg = { problems: [{
