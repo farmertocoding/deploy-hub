@@ -826,6 +826,25 @@ test("dom-bidi: a refused path with a real newline reads the same as the other e
     "the DOM still spells tab/newline differently from the CLI/JSON exits");
 });
 
+test("R21-SEC-1: an astral filename reaches the check body whole", () => {
+  // The refused path the CLI prints as `src/💀-report.ts` was rendered here as a bare
+  // high surrogate (U+FFFD on screen) followed by `\udc80`: the class's lone-surrogate
+  // range, matched by code unit, cut a well-formed pair in half. Two different files —
+  // U+1F480 and U+20080 — came out looking the same, in the panel whose job is to show
+  // the operator the truth about a repository.
+  const markup = render(CheckBody, { check: {
+    tier: "warning", refused_paths: ["src/\u{1F480}-report.ts", "src/\u{20080}.ts"] } });
+  const text = visibleText(markup);
+
+  assert.ok(text.includes("src/\u{1F480}-report.ts"), text);
+  assert.ok(text.includes("src/\u{20080}.ts"), text);
+  assert.ok(!text.includes("\\udc80"), `the pair was torn into an escape: ${text}`);
+  // A surrogate with no partner, which is what tearing the pair leaves — not any
+  // surrogate code unit, since a well-formed pair is made of two of them.
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+    .test(markup), "a lone surrogate reached the DOM");
+});
+
 test("dom-bidi: a warning title carrying a bidi override is sanitized in WarningsAck", () => {
   const markup = render(WarningsAck, {
     warnings: [{ id: "core.symlinked-files", title: "refused invoice‮gpj.exe" }],

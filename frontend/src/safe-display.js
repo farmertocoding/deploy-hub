@@ -28,12 +28,27 @@
 // not scripts), so an Arabic or Hebrew or Chinese filename renders as its letters.
 import { CONTROL_CLASS, TEXT_CONTROL_CLASS } from "./api/presentation.js";
 
-// No `u` flag: the class includes the lone-surrogate range U+DC80-DCFF (a bare
-// undecodable byte, R15-SEC-2), which is matched by code unit; `u` would reject a lone
-// surrogate in the pattern. Nothing in the class is above U+FFFF, so code-unit matching
-// is exact.
-const CONTROL_RE = new RegExp(`[${CONTROL_CLASS}]`, "g");
-const TEXT_CONTROL_RE = new RegExp(`[${TEXT_CONTROL_CLASS}]`, "g");
+// THE `u` FLAG IS LOAD-BEARING (R21-SEC-1), and the comment that stood here said the
+// opposite for two reasons, both false.
+//
+// Without `u` the pattern matches by CODE UNIT, so the class's lone-surrogate range
+// U+DC80-DCFF — a byte that is not a character, R15-SEC-2 — also matched the TRAIL
+// surrogate INSIDE a well-formed astral pair. That is every astral code point whose low
+// ten bits are 0x080-0x0FF: U+1F480 💀 and its neighbours, CJK Ext-B, about an eighth of
+// the astral planes. The pair came apart — a bare high surrogate emitted into the text
+// node (a browser paints it U+FFFD) followed by a spurious `\udcNN` — while Python's
+// `safe_path` passed the same name through untouched, so the DOM spelled a name the
+// other four exits do not. And the two halves collided: `x💀.ts` and `x𠂀.ts` rendered
+// identically, which is the two-names-one-display defect the zero-width members of this
+// class are here for.
+//
+// With `u` the pattern and the subject are both read as CODE POINTS: a well-formed pair
+// is ONE code point, and no range in the class contains it. The range still matches an
+// actually-lone surrogate, because a `surrogateescape` byte has no partner and so is its
+// own code point — and `u` does not reject one in the pattern either: `\udc80` is a
+// HexTrailSurrogate, a legal RegExpUnicodeEscapeSequence in Unicode mode.
+const CONTROL_RE = new RegExp(`[${CONTROL_CLASS}]`, "gu");
+const TEXT_CONTROL_RE = new RegExp(`[${TEXT_CONTROL_CLASS}]`, "gu");
 
 // Mirror of `presentation._escaped`, which is `repr(char)[1:-1]` in Python — and that is
 // what the other four exits emit, so the DOM must match it exactly or one name has two
