@@ -21,12 +21,21 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - name: install shell linters
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          sudo curl -fsSL -o /usr/local/bin/shfmt \
+            https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+          sudo chmod +x /usr/local/bin/shfmt
       # Static analysis + dependency audit. The audit is advisory until Phase 1 and the
       # Makefile keeps it that way; do not re-declare it here to change that.
       - name: lint gate
         run: make lint
       - name: log scrub
         run: make log-scrub
+      - name: scripts lint
+        run: make scripts-lint
       - name: T1 unit tests
         run: make test
       # The mutation gate (spec-mutation-gate.md §4). Bare `make mutation`, same as the

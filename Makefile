@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-frontend test-t2 lint conformance review-round generate-client \
-	check-generated log-scrub py-roots mutation
+	check-generated log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -64,6 +64,10 @@ endif
 # tests/test_gate_parity.py::test_issue_r4_12_scan_scope_is_derived_from_the_package_roots
 # asserts this list still equals the tree's packages. Import it from there once it lands.
 PY_ROOTS := $(shell python3 -c "import pathlib; print(' '.join(sorted(p.name for p in pathlib.Path('.').iterdir() if p.is_dir() and (p / '__init__.py').exists() and p.name != 'tests')))")
+
+# Host scripts (review3 §Q8). Derived from the tree, not a typed list — a new
+# `scripts/*.sh` that nobody added here would otherwise skip shellcheck.
+SCRIPTS := $(shell find scripts -name '*.sh' -print 2>/dev/null | sort)
 
 # Printed so a test can check the scan scope without re-implementing the derivation.
 py-roots:
@@ -123,6 +127,16 @@ lint:
 	ruff check .
 	bandit -q -c pyproject.toml -r $(PY_ROOTS)
 	pip-audit -r requirements.txt || true   # advisory until Phase 1; blocking after
+
+# shellcheck + shfmt -d + bash -n over scripts/** (HARD-Q8). Tools must be on
+# PATH; CI installs them as setup, then calls this target bare.
+scripts-lint:
+	@test -n "$(SCRIPTS)" || (echo "scripts-lint: no scripts/**/*.sh to check" && exit 1)
+	@command -v shellcheck >/dev/null || (echo "scripts-lint: shellcheck is not on PATH" && exit 1)
+	@command -v shfmt >/dev/null || (echo "scripts-lint: shfmt is not on PATH" && exit 1)
+	shellcheck $(SCRIPTS)
+	shfmt -d -i 4 -ci $(SCRIPTS)
+	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
 conformance:
 	python conformance/check.py --phase 1
@@ -186,5 +200,5 @@ log-scrub:
 # `mutation` sits after `test` and before `conformance` (spec-mutation-gate.md §4): a red
 # suite makes every mutant "survive" meaninglessly, so mutmut needs a green baseline in
 # front of it, and the conformance read is the last thing that happens either way.
-review-round: lint log-scrub test test-frontend mutation check-generated conformance
+review-round: lint log-scrub scripts-lint test test-frontend mutation check-generated conformance
 	@echo "mechanical gates green — run the agent review sweep against REVIEW_CHECKLIST.md"

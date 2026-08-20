@@ -24,25 +24,37 @@ NTP_CHRONY = CatalogEntry(
 
 LOG_ROTATION = CatalogEntry(
     id="log-rotation",
-    version=1,
+    version=2,
     check=["test", "-f", "/etc/logrotate.d/caddy"],
-    fix=["logrotate", "-d", "/etc/logrotate.d/caddy"],
+    fix=[
+        "install", "-m", "0644",
+        "/usr/local/share/hub-catalog/logrotate-caddy",
+        "/etc/logrotate.d/caddy",
+    ],
     rollback=["rm", "-f", "/etc/logrotate.d/caddy"],
 )
 
 DOCKER_DAEMON_JSON = CatalogEntry(
     id="docker-daemon-json",
-    version=1,
+    version=2,
     check=["test", "-f", "/etc/docker/daemon.json"],
-    fix=["test", "-f", "/etc/docker/daemon.json"],
+    fix=[
+        "install", "-m", "0644",
+        "/usr/local/share/hub-catalog/docker-daemon.json",
+        "/etc/docker/daemon.json",
+    ],
     rollback=["rm", "-f", "/etc/docker/daemon.json"],
 )
 
 SSHD_DROPIN = CatalogEntry(
     id="sshd-dropin",
-    version=1,
+    version=2,
     check=["test", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
-    fix=["sshd", "-t"],
+    fix=[
+        "install", "-m", "0644",
+        "/usr/local/share/hub-catalog/99-hub-hardening.conf",
+        "/etc/ssh/sshd_config.d/99-hub-hardening.conf",
+    ],
     rollback=["rm", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
 )
 
@@ -78,10 +90,10 @@ UFW_POSTURE_INTAKE = CatalogEntry(
 
 FAIL2BAN_IGNOREIP = CatalogEntry(
     id="fail2ban-ignoreip",
-    version=1,
+    version=2,
     check=["fail2ban-client", "get", "sshd", "ignoreip"],
-    fix=["fail2ban-client", "set", "sshd", "addignoreip"],
-    rollback=["fail2ban-client", "set", "sshd", "delignoreip"],
+    fix=["systemctl", "enable", "--now", "fail2ban"],
+    rollback=["systemctl", "disable", "--now", "fail2ban"],
 )
 
 CADDY = CatalogEntry(

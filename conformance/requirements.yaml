@@ -23,17 +23,10 @@
 #   text_hash: sha256 of the source section body in docs/plan/ (rule 6). Recomputed
 #              on every run; a doc edit goes red until the req is re-reviewed and the
 #              hash re-pinned from `python conformance/check.py --print-text-hashes`.
-#              Five reqs carry no text_hash. Four cite a doc that is not a frozen copy
+#              Four reqs carry no text_hash. They cite a doc that is not a frozen copy
 #              under docs/plan/ (claude/project-inventory.md, DECISIONS.md), so there is
-#              nothing to hash. The fifth, HARD-V2-MESH-BEFORE-FIREWALL, is different and
-#              the note here used to be wrong (round-5 F5): the cited text *does* exist,
-#              at docs/plan/server-hardening.md:17 — "Quick start on a fresh Ubuntu
-#              server:" — but as a prose lead-in inside `## The scripts`, not as a heading
-#              or a bold-lead, which are the only two section shapes check.py can anchor
-#              to. So it is unanchorable, not missing: pin it by promoting that line to a
-#              heading in the frozen copy, or by re-citing §V2 of the review3 addendum.
-#              check.py now warns, per requirement, for every one of these five instead of
-#              covering them in silence.
+#              nothing to hash. HARD-V2-MESH-BEFORE-FIREWALL was the fifth: it is now
+#              pinned to `### Quick start` in server-hardening.md plus review3 §V2.
 schema_version: 1
 requirements:
   - id: P0-LOGIN
@@ -522,6 +515,7 @@ requirements:
     phase: 2
     verify: test
     source: server-hardening.md Quick start / review3 §V2
+    text_hash: sha256:7b77d0b22e61ffc709c0dc5a454008ec9af7e719d03f122e5d7a34a3f0f19148
     text: harden-ubuntu.sh refuses the tailscale0-only firewall posture unless the mesh is up and the current session rides it.
 
   # — Provisioner & targets (Phase 2)
