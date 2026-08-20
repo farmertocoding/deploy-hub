@@ -413,3 +413,26 @@ from §12. After merge: F-1–F-5 named tests 8/8 python, 52 frontend including
 the save-body spy.
 
 Silent drop: none. No WAIVERS.md lines.
+
+## 14. 2026-08-20 — §J7 inventory complete (ecommerce + fb-group-poster)
+
+Not a numbered review round. The folders named in §8 were connected; Joseph's
+2026-08-09 ruling still holds (neither is a deploy candidate), so this is
+§V12 clause (a) only.
+
+| folder | framework | serving | scanner module |
+|---|---|---|---|
+| `ecommerce` | none — leftover Python 3.10.6 venv with Django 4.2.2 in site-packages, no `manage.py` | none | none (`detect_modules == []`) |
+| `fb-group-poster` | Django 4.2.2 startproject (`fbposter` + `posts`), sqlite, templates | WSGI (`manage.py runserver` locally; unused startproject `asgi.py`) | `django` (gunicorn / `fbposter.wsgi`) |
+
+**No third framework lurks.** Module list stays django + node-ts + fallbacks.
+Phase 2 deploy-target pool unchanged: TAKKO, SATURDAYS_site, hr-saas-starter.
+
+Pins (failing-first on a tree that already behaved this way — characterization
+of the live folders, not a scanner-module edit; `scanner/modules/**` untouched):
+
+- `tests/test_scanner_django.py::test_j7_a_venv_with_django_installed_is_not_a_django_project`
+- `tests/test_scanner_django.py::test_j7_startproject_asgi_py_without_channels_stays_wsgi`
+
+Full tables: `project-inventory.md`. **Still open for Phase 1 exit:** two
+consecutive clean `make review-round`s (not claimable on this Mac host).

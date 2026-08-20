@@ -216,6 +216,69 @@ def test_detect_is_false_on_an_empty_tree(tmp_path):
     assert "django" not in [m.name for m in core.detect_modules(tmp_path)]
 
 
+# ── J7 remaining shape checks (ecommerce + fb-group-poster, 2026-08-20) ────────
+#
+# Joseph 2026-08-09: both are not deploy candidates, so §V12 clause (a) only —
+# framework, serving process, which scanner module. The folders were not
+# connected when the first four inventory rows were written. Connected, they
+# are: a leftover venv, and a startproject WSGI app. Neither is a third
+# framework. These tests pin that the module list still matches that reality.
+
+
+def test_j7_a_venv_with_django_installed_is_not_a_django_project(tmp_path):
+    """ecommerce: pyvenv.cfg + site-packages/django, no manage.py, no
+    dependency manifest. Installed Django is not a project — detect must
+    stay false even though the skip set names `.venv`/`venv`, not this
+    directory, and the walk is free to open `lib/`."""
+    root = tmp_path / "ecommerce"
+    (root / "bin").mkdir(parents=True)
+    (root / "include").mkdir()
+    sp = root / "lib" / "python3.10" / "site-packages" / "django"
+    sp.mkdir(parents=True)
+    (sp / "__init__.py").write_text("# installed Django, not a project\n")
+    (root / "pyvenv.cfg").write_text(
+        "home = /usr/bin\ninclude-system-site-packages = false\nversion = 3.10.6\n"
+    )
+    (root / "bin" / "django-admin").write_text("")
+    assert dj.module.detect(root) is False
+    assert core.detect_modules(root) == []
+
+
+@pytest.mark.req("SCAN-DJANGO-ASGI")
+def test_j7_startproject_asgi_py_without_channels_stays_wsgi(tmp_path):
+    """fb-group-poster: `django-admin startproject` writes asgi.py with
+    `get_asgi_application()` and no ProtocolTypeRouter, no Channels, no
+    requirements.txt, no compose. That is WSGI. The existing negative
+    case lists gunicorn in requirements and ships a compose file — this
+    one does not, so a "gunicorn in deps ⇒ WSGI" rewrite cannot hide
+    here."""
+    root = tmp_path / "fbposter"
+    (root / "fbposter").mkdir(parents=True)
+    (root / "manage.py").write_text("#!/usr/bin/env python\n")
+    (root / "fbposter" / "__init__.py").write_text("")
+    (root / "fbposter" / "asgi.py").write_text(
+        "import os\nfrom django.core.asgi import get_asgi_application\n"
+        "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fbposter.settings')\n"
+        "application = get_asgi_application()\n"
+    )
+    (root / "fbposter" / "wsgi.py").write_text(
+        "import os\nfrom django.core.wsgi import get_wsgi_application\n"
+        "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fbposter.settings')\n"
+        "application = get_wsgi_application()\n"
+    )
+    (root / "fbposter" / "settings.py").write_text(
+        "SECRET_KEY = 'x'\nDEBUG = True\n"
+        "WSGI_APPLICATION = 'fbposter.wsgi.application'\n"
+    )
+    assert dj.module.detect(root) is True
+    command = dj.module.manifest_fragment(root)["components"]["service"]["command"]
+    assert command[0] == "gunicorn", command
+    assert "fbposter.wsgi:application" in command
+    assert "gunicorn" in " ".join(command)
+    mode = _by_id(dj.module.checks(root))["django.server-mode"]
+    assert "WSGI" in mode.detail, mode.detail
+
+
 @pytest.mark.req("SEC-SCAN-NOEXEC")
 def test_sandbox_checks_are_emitted_as_specs_not_run():
     specs = {s.id: s for s in dj.module.sandbox_checks(UV_ASGI)}
