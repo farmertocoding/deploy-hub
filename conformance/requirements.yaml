@@ -595,13 +595,13 @@ requirements:
     phase: 0
     verify: checklist
     source: build-process.md §5
-    text_hash: sha256:2e85ab216c0ad6d710030b129bec95c1031224df23804a559f72ce6cfa6ed6bc
+    text_hash: sha256:850ccce623854a3a5f7755ebde8ce647906d98a76a366b879223c5b6c9efd6a5
     text: No bug fix merges without its named regression test.
   - id: PROC-SENSITIVE-HUMAN-MERGE
     phase: 0
     verify: checklist
     source: build-process.md §5 / conformance/paths.yaml
-    text_hash: sha256:2e85ab216c0ad6d710030b129bec95c1031224df23804a559f72ce6cfa6ed6bc
+    text_hash: sha256:850ccce623854a3a5f7755ebde8ce647906d98a76a366b879223c5b6c9efd6a5
     text: Diffs touching sensitive-path globs are always human-merged; the glob list includes scripts/**, intake/**, and the requirements registry.
   - id: PROC-GENERATED-NOT-STALE
     phase: 0
