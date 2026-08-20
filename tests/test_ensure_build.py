@@ -71,9 +71,13 @@ def _put_bytes(transport):
     return Path(payload).read_bytes()
 
 
+def _tar_member_name(name):
+    return name[2:] if name.startswith("./") else name
+
+
 def _tar_names(payload):
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r") as tf:
-        return [m.name.lstrip("./") for m in tf.getmembers() if m.isfile()]
+        return [_tar_member_name(m.name) for m in tf.getmembers() if m.isfile()]
 
 
 def _tar_text(payload, name):
@@ -135,17 +139,21 @@ def test_docker_build_argv_runs_on_target_not_hub(tmp_path, monkeypatch):
 def test_build_context_contains_no_env_file_or_vault_material(tmp_path):
     """Env files and planted vault markers never enter the shipped context.
 
-    What would make this fail: putting .env, *.env, or a file whose bytes equal
-    a vault-looking marker the test planted.
+    What would make this fail: putting .env, .env.*, *.env, following a
+    file symlink to vault/env bytes, or shipping a planted vault marker.
     """
     from deploys.steps import ensure_build
 
     root = _source_tree(tmp_path)
     (root / ".env").write_text("SECRET=should-not-ship\n")
     (root / "prod.env").write_text("TOKEN=nope\n")
+    (root / ".env.local").write_text("LOCAL=must-not-ship\n")
+    (root / ".env.production").write_text("PROD=must-not-ship\n")
     (root / "nested").mkdir()
     (root / "nested" / ".env").write_text("NESTED=no\n")
     (root / "leaked.bin").write_bytes(VAULT_MARKER)
+    (root / "looks-safe.js").symlink_to(root / ".env")
+    (root / "also-safe.txt").symlink_to(root / "leaked.bin")
 
     transport = StepTransport()
     ensure_build(_desired(root, transport))
@@ -153,8 +161,14 @@ def test_build_context_contains_no_env_file_or_vault_material(tmp_path):
     payload = _put_bytes(transport)
     names = _tar_names(payload)
     assert "app.js" in names
-    assert all(not Path(n).name.endswith(".env") for n in names)
+    assert ".env" not in names
+    assert "prod.env" not in names
+    assert ".env.local" not in names
+    assert ".env.production" not in names
+    assert "nested/.env" not in names
     assert "leaked.bin" not in names
+    assert "looks-safe.js" not in names
+    assert "also-safe.txt" not in names
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r") as tf:
         for member in tf.getmembers():
             if not member.isfile():
@@ -162,6 +176,8 @@ def test_build_context_contains_no_env_file_or_vault_material(tmp_path):
             data = tf.extractfile(member).read()
             assert data != VAULT_MARKER
             assert b"SECRET=should-not-ship" not in data
+            assert b"LOCAL=must-not-ship" not in data
+            assert b"PROD=must-not-ship" not in data
 
 
 @pytest.mark.req("SEC-B1-BUILD-OFFHUB")

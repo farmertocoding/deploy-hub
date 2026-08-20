@@ -125,6 +125,8 @@ def _context_tar(source_dir, dockerfile_text):
                 if filename == "Dockerfile" or _is_env_filename(filename):
                     continue
                 path = Path(dirpath) / filename
+                if path.is_symlink():
+                    continue
                 try:
                     data = path.read_bytes()
                 except OSError:
@@ -137,7 +139,7 @@ def _context_tar(source_dir, dockerfile_text):
 
 
 def _is_env_filename(name):
-    return name == ".env" or name.endswith(".env")
+    return name == ".env" or name.startswith(".env.") or name.endswith(".env")
 
 
 def _add_bytes(tf, name, data):
