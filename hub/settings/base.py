@@ -177,6 +177,12 @@ CELERY_TASK_ROUTES = {
     "reconcile.*": {"queue": "probes"},
     "scaling.*": {"queue": "control"},
 }
+CELERY_BEAT_SCHEDULE = {
+    "sweep-stale-deployments": {
+        "task": "deploys.tasks.sweep_stale_deployments",
+        "schedule": 30.0,
+    },
+}
 
 LOGGING = {
     "version": 1,
