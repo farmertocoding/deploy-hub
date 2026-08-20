@@ -198,6 +198,66 @@ def test_db_constraint_refuses_a_secret_answer_with_a_plaintext_value(site):
                                     value="plaintext", secret_ref=None)
 
 
+def _second_secret_question(project, qid="django.env.SECRET_KEY"):
+    report = dict(project.scan_report)
+    report["wizard_questions"] = list(report["wizard_questions"]) + [
+        {"id": qid, "prompt": f"Value for {qid}", "kind": "secret",
+         "default": None, "choices": []},
+    ]
+    project.scan_report = report
+    project.save(update_fields=["scan_report"])
+    return qid
+
+
+def _copy_crypto_columns(src, dest_pk):
+    Secret.objects.filter(pk=dest_pk).update(
+        ciphertext=bytes(src.ciphertext),
+        wrapped_dek=bytes(src.wrapped_dek),
+        nonce=bytes(src.nonce),
+    )
+    return Secret.objects.get(pk=dest_pk)
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_aad_prevents_cut_and_paste_between_wizard_secrets_on_one_site(site, project):
+    """Two env secrets on one site must not share AAD.
+
+    The attack is DB write: copy ciphertext/wrapped_dek/nonce from qid A's vault
+    row onto qid B's. WizardAnswer.secret_ref is left pointing at the same pks —
+    the FK staying put is not the defence. Owner-only AAD (`env_bundle|site|{pk}`)
+    decrypts the moved bytes; binding the question must not.
+    """
+    q_a = "django.env.DATABASE_PASSWORD"
+    q_b = _second_secret_question(project)
+    service.set_answers(site, {q_a: "DATABASE-PASSWORD", q_b: "DJANGO-SECRET-KEY"})
+    victim = WizardAnswer.objects.get(site=site, question_id=q_a).secret_ref
+    target = WizardAnswer.objects.get(site=site, question_id=q_b).secret_ref
+    moved = _copy_crypto_columns(victim, target.pk)
+    with pytest.raises(vault_service.VaultDecryptError):
+        vault_service.get(moved)
+    # Unmoved row still decrypts — the raise is AAD, not a broken KEK.
+    assert vault_service.get(
+        Secret.objects.get(pk=victim.pk)
+    ).decode() == "DATABASE-PASSWORD"
+
+
+@pytest.mark.req("SEC-69-ENVELOPE-ENCRYPTION")
+def test_wizard_secret_cut_and_paste_across_sites_still_fails(site, project):
+    """Re-prove the existing cross-site swap: different sites, same qid, copy
+    crypto columns, get raises. Binding AAD to the question must not flatten
+    this (site pk stays in owner_id).
+    """
+    other = Site.objects.create(project=project, name="other")
+    qid = "django.env.DATABASE_PASSWORD"
+    service.set_answers(site, {qid: "SITE-A-PASSWORD"})
+    service.set_answers(other, {qid: "SITE-B-PASSWORD"})
+    victim = WizardAnswer.objects.get(site=site, question_id=qid).secret_ref
+    target = WizardAnswer.objects.get(site=other, question_id=qid).secret_ref
+    moved = _copy_crypto_columns(victim, target.pk)
+    with pytest.raises(vault_service.VaultDecryptError):
+        vault_service.get(moved)
+
+
 # ── materialization refusals ──────────────────────────────────────────────────
 
 @pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")

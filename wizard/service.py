@@ -57,10 +57,14 @@ def set_answers(site, incoming: dict, *, actor=None):
 
     for qid, (question, value) in cleaned.items():
         if question.kind == "secret":
+            # AAD is kind|owner_type|owner_id. Two env secrets on one site sharing
+            # owner_id=site.pk meant copying crypto columns between those vault
+            # rows decrypted — the WizardAnswer.secret_ref FK is a separate
+            # pointer and is not what authenticates the ciphertext.
             secret = vault_service.put(
                 kind=Secret.Kind.ENV_BUNDLE,
                 owner_type="site",
-                owner_id=site.pk,
+                owner_id=f"{site.pk}:{qid}",
                 plaintext=value.encode("utf-8"),
                 actor=actor,
             )
