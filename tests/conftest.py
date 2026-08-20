@@ -34,6 +34,22 @@ django.setup()
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
+
+def pytest_ignore_collect(collection_path, config):
+    """T2 live image tests are collected only when explicitly targeted.
+
+    `make test` / lint-and-unit stay the T1 suite. `make test-t2` and
+    `pytest tests/test_hub_test_target.py` still collect them. This is
+    collection, not a skip: when docker is present and the file is targeted,
+    the live tests run.
+    """
+    path = pathlib.Path(collection_path)
+    if path.name != "test_hub_test_target.py":
+        return None
+    args = [str(a) for a in config.invocation_params.args]
+    targeted = any("test_hub_test_target" in pathlib.Path(a).as_posix() for a in args)
+    return not targeted
+
 # conformance/gates.py owns the gate machinery this plugin and the gate tests both read
 # (N1). `conformance/` deliberately has no __init__.py — it is not an importable package,
 # and giving it one would silently add it to the Makefile's $(PY_ROOTS) and so to the

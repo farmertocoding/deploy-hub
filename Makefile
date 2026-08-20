@@ -52,8 +52,8 @@ GNUMAKEFLAGS and MAKEFILES, and drop dry-run/ignore-errors/question/touch flags 
 any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the Makefile.)
 endif
 
-.PHONY: dev test test-frontend lint conformance review-round generate-client check-generated \
-	log-scrub py-roots mutation
+.PHONY: dev test test-frontend test-t2 lint conformance review-round generate-client \
+	check-generated log-scrub py-roots mutation
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -110,6 +110,16 @@ dev:
 
 test:
 	pytest -q
+
+# T2 live image tests (D-015). Named tests in tests/test_hub_test_target.py.
+# Not a review-round prerequisite: T1 must stay runnable without a VM/container.
+test-t2:
+	pytest -q tests/test_hub_test_target.py::test_sshd_banner \
+		tests/test_hub_test_target.py::test_systemd_is_pid1_running \
+		tests/test_hub_test_target.py::test_sshd_t_and_dropin \
+		tests/test_hub_test_target.py::test_inner_docker_vfs_builds \
+		tests/test_hub_test_target.py::test_hub_docker_sock_not_bound \
+		tests/test_hub_test_target.py::test_ssh_transport_run_and_put_roundtrip
 
 test-frontend:
 	cd frontend && node --import tsx --test "tests/*.test.ts"
