@@ -6,14 +6,15 @@
 # fail2ban-ignoreip, caddy.
 set -euo pipefail
 
-SCRIPT_VERSION="2026-08-20"
+SCRIPT_VERSION="2026-08-21"
 STAMP_DIR="${HUB_STAMP_DIR:-/var/lib/hub-harden}"
 PROFILE="${PROFILE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 HUB_MESH_IP="${HUB_MESH_IP:-}"
+HUB_CONFIRM_LOCAL="${HUB_CONFIRM_LOCAL:-0}"
 
-SSHD_DROPIN="/etc/ssh/sshd_config.d/99-hub-hardening.conf"
-JAIL_LOCAL="/etc/fail2ban/jail.local"
+SSHD_DROPIN="${HUB_SSHD_DROPIN:-/etc/ssh/sshd_config.d/99-hub-hardening.conf}"
+JAIL_LOCAL="${HUB_JAIL_LOCAL:-/etc/fail2ban/jail.local}"
 SYSCTL_DROPIN="/etc/sysctl.d/99-hub-hardening.conf"
 DOCKER_DAEMON="/etc/docker/daemon.json"
 LOGROTATE_CADDY="/etc/logrotate.d/caddy"
@@ -133,13 +134,30 @@ mesh_is_up() {
     tailscale status >/dev/null 2>&1
 }
 
-session_rides_mesh() {
-    # Local console (no SSH_CONNECTION) is the verified second path.
-    if [[ -z "${SSH_CONNECTION:-}" ]]; then
+session_peer_ip() {
+    # SSH_CONNECTION is "client_ip client_port server_ip server_port".
+    # sudo env_reset drops it; SSH_CLIENT ("client_ip client_port server_port")
+    # survives only if sudoers env_keep lists it.
+    if [[ -n "${SSH_CONNECTION:-}" ]]; then
+        printf '%s\n' "${SSH_CONNECTION%% *}"
         return 0
     fi
-    local client="${SSH_CONNECTION%% *}"
-    in_tailnet_cgnat "${client}"
+    if [[ -n "${SSH_CLIENT:-}" ]]; then
+        printf '%s\n' "${SSH_CLIENT%% *}"
+        return 0
+    fi
+    return 1
+}
+
+session_rides_mesh() {
+    local peer
+    if peer="$(session_peer_ip)"; then
+        in_tailnet_cgnat "${peer}"
+        return $?
+    fi
+    # Unset SSH_* is sudo env_reset *or* a real console. Do not treat silence
+    # as a verified second path — public SSH + sudo would lock the operator out.
+    [[ "${HUB_CONFIRM_LOCAL}" == "1" ]]
 }
 
 require_profile() {
@@ -220,21 +238,58 @@ EOF
 }
 
 apply_sshd() {
-    local changed=0
-    if ! write_file "${SSHD_DROPIN}" "$(sshd_dropin_content | sed 's/[[:space:]]*$//')"; then
-        changed=1
+    local content dest snippet trial
+    content="$(sshd_dropin_content | sed 's/[[:space:]]*$//')"
+    dest="${SSHD_DROPIN}"
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        # Validate a temp drop-in before touching the live path (R2).
+        printf 'DRY_RUN: sshd -t -f <temp-dropin>\n'
+        printf 'DRY_RUN: write %s\n' "${dest}"
+        printf '%s\n' "${content}"
+        return 0
     fi
-    # sshd -t FIRST: a typo + reload = locked out (R2).
-    run sshd -t
-    if [[ "${changed}" == "1" ]]; then
-        run systemctl reload ssh
+    if [[ -f "${dest}" ]] && printf '%s\n' "${content}" | cmp -s - "${dest}"; then
+        run sshd -t
+        return 0
     fi
+    snippet="$(mktemp "${TMPDIR:-/tmp}/hub-sshd-dropin.XXXXXX")"
+    trial="$(mktemp "${TMPDIR:-/tmp}/hub-sshd-trial.XXXXXX")"
+    printf '%s\n' "${content}" >"${snippet}"
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        printf 'Include /etc/ssh/sshd_config\n' >"${trial}"
+        cat "${snippet}" >>"${trial}"
+    else
+        cat "${snippet}" >"${trial}"
+    fi
+    if ! sshd -t -f "${trial}"; then
+        rm -f "${snippet}" "${trial}"
+        die "sshd -t failed; live drop-in ${dest} left untouched"
+    fi
+    rm -f "${trial}"
+    local dir
+    dir="$(dirname "${dest}")"
+    mkdir -p "${dir}"
+    install -m 0644 "${snippet}" "${dest}"
+    rm -f "${snippet}"
+    run systemctl reload ssh
 }
 
 apply_fail2ban() {
+    local changed=0
     ensure_pkg fail2ban
-    write_file "${JAIL_LOCAL}" "$(jail_local_content | sed 's/[[:space:]]*$//')" || true
+    if ! write_file "${JAIL_LOCAL}" "$(jail_local_content | sed 's/[[:space:]]*$//')"; then
+        changed=1
+    fi
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        # Install starts fail2ban before jail.local exists; reload is required
+        # so the new ignoreip is loaded (HARD-R3).
+        printf 'DRY_RUN: systemctl reload fail2ban\n'
+        return 0
+    fi
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet fail2ban 2>/dev/null; then
+        if [[ "${changed}" == "1" ]]; then
+            run systemctl reload fail2ban
+        fi
         return 0
     fi
     run systemctl enable --now fail2ban

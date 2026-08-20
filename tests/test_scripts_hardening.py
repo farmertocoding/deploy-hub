@@ -279,6 +279,117 @@ def test_refuses_tailscale0_posture_off_mesh(tmp_path):
     assert "tailscale0" not in log or "enable" not in log
 
 
+@pytest.mark.req("HARD-V2-MESH-BEFORE-FIREWALL")
+def test_refuses_tailscale0_when_sudo_drops_ssh_connection(tmp_path):
+    """sudo env_reset drops SSH_CONNECTION; that is not a verified console.
+
+    What would make this fail: treating unset SSH_CONNECTION as local console
+    and enabling tailscale0-only ufw after `sudo ./harden-ubuntu.sh`.
+    """
+    env, mutate = _stub_env(tmp_path, mesh_up=True)
+    env["DRY_RUN"] = "0"
+    env["PROFILE"] = "hub"
+    env["SUDO_USER"] = "deploy"
+    env["HUB_STAMP_DIR"] = str(tmp_path / "stamps")
+    env.pop("SSH_CONNECTION", None)
+    env.pop("SSH_CLIENT", None)
+    env.pop("SSH_TTY", None)
+    env.pop("HUB_CONFIRM_LOCAL", None)
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode != 0
+    text = (result.stdout + result.stderr).lower()
+    assert "mesh" in text or "session" in text
+    log = mutate.read_text(encoding="utf-8")
+    assert "MUTATE ufw" not in log
+
+
+@pytest.mark.req("HARD-V2-MESH-BEFORE-FIREWALL")
+def test_mesh_session_via_ssh_client_survives_sudo_env_reset(tmp_path):
+    """SSH_CLIENT kept through sudoers env_keep still proves a mesh session.
+
+    What would make this fail: requiring SSH_CONNECTION only, so env_keep of
+    SSH_CLIENT cannot save a mesh sudo.
+    """
+    env, mutate = _stub_env(tmp_path, mesh_up=True)
+    env["DRY_RUN"] = "1"
+    env["PROFILE"] = "hub"
+    env["SUDO_USER"] = "deploy"
+    env.pop("SSH_CONNECTION", None)
+    env["SSH_CLIENT"] = f"{HUB_MESH_IP} 54321 22"
+    env.pop("HUB_CONFIRM_LOCAL", None)
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode == 0, result.stderr
+    assert "DRY_RUN" in result.stdout + result.stderr
+    assert "MUTATE ufw" not in mutate.read_text(encoding="utf-8")
+
+
+@pytest.mark.req("HARD-V2-MESH-BEFORE-FIREWALL")
+def test_explicit_hub_confirm_local_allows_console(tmp_path):
+    """A real console must set HUB_CONFIRM_LOCAL=1; silence is not enough.
+
+    What would make this fail: allowing an unset SSH_* session without the flag.
+    """
+    env, _mutate = _stub_env(tmp_path, mesh_up=True)
+    env["DRY_RUN"] = "1"
+    env["PROFILE"] = "hub"
+    env.pop("SSH_CONNECTION", None)
+    env.pop("SSH_CLIENT", None)
+    env["HUB_CONFIRM_LOCAL"] = "1"
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.req("HARD-R3-IGNOREIP")
+def test_reloads_fail2ban_after_writing_ignoreip(tmp_path):
+    """Writing jail.local must reload fail2ban when the unit is already active.
+
+    What would make this fail: returning early on is-active and leaving the
+    default ignoreip loaded.
+    """
+    env, _mutate = _stub_env(tmp_path, mesh_up=True)
+    env["DRY_RUN"] = "1"
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert "reload" in combined and "fail2ban" in combined
+    assert HUB_MESH_IP in combined
+    assert f"ignoreip = 127.0.0.1/8 {HUB_MESH_IP}" in combined
+
+
+@pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
+def test_failed_sshd_t_leaves_live_dropin_untouched(tmp_path):
+    """sshd -t -f a temp drop-in; on failure the live file is not replaced.
+
+    What would make this fail: installing the drop-in first, then sshd -t.
+    """
+    bindir = tmp_path / "bin"
+    live = tmp_path / "99-hub-hardening.conf"
+    live.write_text("KEEPME\n", encoding="utf-8")
+    env, mutate = _stub_env(tmp_path, mesh_up=True)
+    env["DRY_RUN"] = "0"
+    env["HUB_SSHD_DROPIN"] = str(live)
+    env["HUB_JAIL_LOCAL"] = str(tmp_path / "jail.local")
+    env["HUB_STAMP_DIR"] = str(tmp_path / "stamps")
+    _write_stub(
+        bindir,
+        "sshd",
+        f"""
+printf 'sshd %s\\n' "$*" >> "{mutate}"
+case " $* " in
+  *" -t "*) echo "bad drop-in" >&2; exit 1 ;;
+esac
+exit 0
+""",
+    )
+    env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode != 0
+    assert live.read_text(encoding="utf-8") == "KEEPME\n"
+    log = mutate.read_text(encoding="utf-8")
+    assert "sshd" in log and "-t" in log and "-f" in log
+    assert "MUTATE systemctl reload" not in log
+
+
 @pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
 def test_update_cloudflare_ufw_aborts_on_bad_fetch(tmp_path):
     """Bad Cloudflare list (empty, HTML, non-CIDR) must abort before ufw changes.

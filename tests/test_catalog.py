@@ -33,12 +33,11 @@ RELEASED = {
         "rollback": ["rm", "-f", "/etc/docker/daemon.json"],
     },
     "sshd-dropin": {
-        "version": 2,
+        "version": 3,
         "check": ["test", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
         "fix": [
-            "install", "-m", "0644",
+            "sshd", "-t", "-f",
             "/usr/local/share/hub-catalog/99-hub-hardening.conf",
-            "/etc/ssh/sshd_config.d/99-hub-hardening.conf",
         ],
         "rollback": ["rm", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
     },
@@ -67,10 +66,18 @@ RELEASED = {
         "rollback": ["ufw", "delete", "allow", "in", "on", "tailscale0"],
     },
     "fail2ban-ignoreip": {
-        "version": 2,
-        "check": ["fail2ban-client", "get", "sshd", "ignoreip"],
-        "fix": ["systemctl", "enable", "--now", "fail2ban"],
-        "rollback": ["systemctl", "disable", "--now", "fail2ban"],
+        "version": 3,
+        "check": [
+            "grep", "-E",
+            "^ignoreip = 127.0.0.1/8 [^[:space:]]+",
+            "/etc/fail2ban/jail.local",
+        ],
+        "fix": [
+            "install", "-m", "0644",
+            "/usr/local/share/hub-catalog/jail.local",
+            "/etc/fail2ban/jail.local",
+        ],
+        "rollback": ["fail2ban-client", "set", "sshd", "delignoreip"],
     },
     "caddy": {
         "version": 1,
@@ -204,6 +211,39 @@ def test_intake_posture_is_tunnel_no_public_inbound():
     target = ENTRIES["ufw-posture-target"]
     assert (intake.check, intake.fix) != (hub.check, hub.fix)
     assert (intake.check, intake.fix) != (target.check, target.fix)
+
+
+@pytest.mark.req("HARD-R3-IGNOREIP")
+def test_fail2ban_ignoreip_argv_sets_ignoreip():
+    """fail2ban-ignoreip fix must set ignoreip; rollback must not stop the jail.
+
+    What would make this fail: fix/rollback as systemctl enable/disable fail2ban,
+    or argv that mention the tailnet /10.
+    """
+    from catalog.entries import ENTRIES
+
+    entry = ENTRIES["fail2ban-ignoreip"]
+    blob = " ".join(entry.check + entry.fix + entry.rollback)
+    assert "ignoreip" in blob or "jail.local" in blob
+    assert "addignoreip" in entry.fix or any("jail.local" in part for part in entry.fix)
+    assert "disable" not in entry.rollback
+    assert "100.64.0.0/10" not in blob
+    assert entry.fix != ["systemctl", "enable", "--now", "fail2ban"]
+
+
+@pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
+def test_sshd_dropin_fix_validates_with_sshd_t():
+    """sshd-dropin fix must validate with sshd -t before touching the live path.
+
+    What would make this fail: install-only fix argv with no sshd -t.
+    """
+    from catalog.entries import ENTRIES
+
+    entry = ENTRIES["sshd-dropin"]
+    assert "sshd" in entry.fix
+    assert "-t" in entry.fix
+    assert "-f" in entry.fix
+    assert entry.fix[0] == "sshd"
 
 
 def test_fix_and_check_are_argv_lists():

@@ -1,0 +1,8 @@
+[sshd]
+enabled = true
+maxretry = 4
+findtime = 10m
+bantime = 1h
+ignoreip = 127.0.0.1/8 100.64.1.1
+# ignoreip = 127.0.0.1/8 100.64.0.0/10   # only after tailnet ACLs restrict target↔target
+# 100.64.1.1 is replaced by the Hub mesh IP at put() time; never the tailnet /10.

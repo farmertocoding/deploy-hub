@@ -2,7 +2,7 @@
 
 For the Ubuntu servers in the **web deploy automation & monitor** fleet. Derived from the reviewed plan (`deploy-system-plan.md` §6.5/§6.6/§7.1) and the 2026-07-30 security round (`plan-addendum-2026-07-30.md` §B/§C). Every rule below is also implemented by the scripts, so you can read-and-type or run — same commands either way (the plan's one-catalog principle).
 
-**UPDATE 2026-08-20 (Task 6):** Script provenance & custody (per review3 §Q8). The canonical location of every script below is the **Hub repo under `scripts/`** — `scripts/**` is on the always-human-merged sensitive-path list (build-process §5). Versions as of this update: `harden-ubuntu.sh` v2026-08-20 · `update-cloudflare-ufw.sh` v2026-08-20 · `verify-hardening.sh` v2026-08-20 · `hub-upgrade.sh` v2026-08-20 (Task 19 stub: `# Task 19 fills C6`) · `server-watch.sh` v2026-08-20. **Rule: any script change updates this doc in the same change.** These scripts are the **pre-Hub interim implementation of specific catalog entry IDs**: script versions map to catalog entry versions, and each script is retired when the corresponding Hub Beat/provisioner machinery goes live — at which point the provisioner **removes the script cron jobs** so there is no double execution and no double paging.
+**UPDATE 2026-08-21 (Task 6 fix):** Script provenance & custody (per review3 §Q8). The canonical location of every script below is the **Hub repo under `scripts/`** — `scripts/**` is on the always-human-merged sensitive-path list (build-process §5). Versions as of this update: `harden-ubuntu.sh` v2026-08-21 · `update-cloudflare-ufw.sh` v2026-08-20 · `verify-hardening.sh` v2026-08-20 · `hub-upgrade.sh` v2026-08-20 (Task 19 stub: `# Task 19 fills C6`) · `server-watch.sh` v2026-08-20. **Rule: any script change updates this doc in the same change.** These scripts are the **pre-Hub interim implementation of specific catalog entry IDs**: script versions map to catalog entry versions, and each script is retired when the corresponding Hub Beat/provisioner machinery goes live — at which point the provisioner **removes the script cron jobs** so there is no double execution and no double paging.
 
 ## The scripts
 
@@ -39,7 +39,11 @@ ssh-copy-id you@server
 sudo tailscale up --ssh=false                      # join your mesh (your own auth key)
 ssh you@<tailscale-ip>                             # verify mesh SSH works FIRST
 
-# 3. now harden (the script refuses the tailscale0-only posture off-mesh):
+# 3. now harden from a mesh SSH session (the script refuses the
+#    tailscale0-only posture unless this session rides the mesh).
+#    Ubuntu sudo env_reset drops SSH_CONNECTION — keep the proof:
+#      Defaults env_keep += "SSH_CONNECTION SSH_CLIENT SSH_TTY"
+#    A real local console (no SSH_*) must set HUB_CONFIRM_LOCAL=1.
 sudo PROFILE=target DRY_RUN=1 ./harden-ubuntu.sh   # read what it will do
 sudo PROFILE=target ./harden-ubuntu.sh             # do it     (hub host: PROFILE=hub)
 sudo PROFILE=target ./verify-hardening.sh          # prove it held

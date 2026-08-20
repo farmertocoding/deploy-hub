@@ -48,12 +48,11 @@ DOCKER_DAEMON_JSON = CatalogEntry(
 
 SSHD_DROPIN = CatalogEntry(
     id="sshd-dropin",
-    version=2,
+    version=3,
     check=["test", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
     fix=[
-        "install", "-m", "0644",
+        "sshd", "-t", "-f",
         "/usr/local/share/hub-catalog/99-hub-hardening.conf",
-        "/etc/ssh/sshd_config.d/99-hub-hardening.conf",
     ],
     rollback=["rm", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
 )
@@ -90,10 +89,18 @@ UFW_POSTURE_INTAKE = CatalogEntry(
 
 FAIL2BAN_IGNOREIP = CatalogEntry(
     id="fail2ban-ignoreip",
-    version=2,
-    check=["fail2ban-client", "get", "sshd", "ignoreip"],
-    fix=["systemctl", "enable", "--now", "fail2ban"],
-    rollback=["systemctl", "disable", "--now", "fail2ban"],
+    version=3,
+    check=[
+        "grep", "-E",
+        "^ignoreip = 127.0.0.1/8 [^[:space:]]+",
+        "/etc/fail2ban/jail.local",
+    ],
+    fix=[
+        "install", "-m", "0644",
+        "/usr/local/share/hub-catalog/jail.local",
+        "/etc/fail2ban/jail.local",
+    ],
+    rollback=["fail2ban-client", "set", "sshd", "delignoreip"],
 )
 
 CADDY = CatalogEntry(
