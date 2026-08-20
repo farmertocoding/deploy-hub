@@ -512,6 +512,11 @@ def test_n7_a_url_format_comment_is_not_a_connection_string_credential(tmp_path)
     # A real one, in the same file: the template is still scanned, and a key pasted
     # into it is still a key.
     ("REDIS_URL=redis://:realS3cretPass@redis:6379/0", True),
+    # Hub settings and the fleet: an f-string / env interpolation is a template,
+    # not a committed password. `{REDIS_PASSWORD}` matched the userinfo group.
+    ('REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0"', False),
+    ("redis://:${REDIS_PASSWORD}@redis:6379/0", False),
+    ("redis://:$REDIS_PASSWORD@redis:6379/0", False),
     # A password with percent-ENCODED angle brackets is a valid URI and a working
     # credential — `%3C` contains no bare `<`, so the rule does not reach it.
     ("DATABASE_URL=postgres://app:S3cret%3CPass%3E@db:5432/app", True),

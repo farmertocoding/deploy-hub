@@ -666,6 +666,45 @@ def test_n5_dotted_path_settings_lists_are_not_secret_material(tmp_path):
 
 
 @pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_a_weak_secret_keys_denylist_is_not_committed_material(tmp_path):
+    """E-invoice prod.py, verbatim shape: `_WEAK_SECRET_KEYS = {"dev-insecure-
+    key-change-me", "change-me", ""}` is a membership denylist of known-weak
+    placeholders, not a credential. N5's neighbouring test named the identifier
+    in a docstring and assigned PASSWORD_HASHERS instead; the 2026-08-20 demo
+    still blocked because SECRET is a substring and the name axis accepted any
+    non-empty literal."""
+    root = _proj(
+        tmp_path,
+        base_body="import os\nSECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n",
+        prod_body=(
+            "import os\nfrom .base import *  # noqa\n"
+            "SECRET_KEY = os.environ['DJANGO_SECRET_KEY']\n"
+            "_WEAK_SECRET_KEYS = {'dev-insecure-key-change-me', 'change-me', ''}\n"
+        ),
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "ok", \
+        checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_a_high_entropy_literal_on_a_weak_named_setting_still_blocks(tmp_path):
+    """The denylist skip is not a free pass: a WEAK_* name holding a Fernet
+    string is committed key material."""
+    root = _proj(
+        tmp_path,
+        base_body=(
+            "_WEAK_SECRET_KEYS = "
+            "['aXb9Qz3kLm8Rt2Yw6Fh1Jd4Ns7Pv0Cg5Ke9Ub3Xq2Wz8Ma6=']\n"
+        ),
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "_WEAK_SECRET_KEYS" in checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_n5_pass_and_secret_named_settings_are_judged_on_their_value(tmp_path):
     """`PASSWORD_HASHERS` matches the `PASS` substring and `_WEAK_SECRET_KEYS`
     matches `SECRET`, but neither holds credential material. The name axis must

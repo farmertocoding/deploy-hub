@@ -793,6 +793,22 @@ def _shannon_entropy(value):
     return -sum((c / n) * math.log2(c / n) for c in counts.values())
 
 
+def _looks_interpolation(value):
+    """True when userinfo is a variable reference, not a literal password.
+
+    `redis://:{REDIS_PASSWORD}@host` (Python f-string) and `${VAR}` / `$VAR`
+    (shell) put the variable's name in source. A committed credential is the
+    bytes themselves.
+    """
+    if value.startswith("${") and value.endswith("}") and value[2:-1].isidentifier():
+        return True
+    if value.startswith("{") and value.endswith("}") and value[1:-1].isidentifier():
+        return True
+    if value.startswith("$") and value[1:].isidentifier():
+        return True
+    return False
+
+
 def _looks_placeholder(value):
     """True when a marker word excuses this value as documentation, not a key.
 
@@ -877,7 +893,9 @@ def _credential_format_in(line):
         # A percent-encoded real password (`S3cret%3CPass%3E`) carries no bare bracket
         # and still fires.
         documented = "<" in password or ">" in password
-        if len(password) >= 6 and not documented and not _looks_placeholder(password):
+        if (len(password) >= 6 and not documented
+                and not _looks_placeholder(password)
+                and not _looks_interpolation(password)):
             return "connection string with an embedded password"
     match = _DOCKER_AUTH_RE.search(line)
     if match:
