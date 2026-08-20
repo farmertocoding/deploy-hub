@@ -68,19 +68,35 @@ def test_stale_running_is_resumed_or_aborted():
             "ship": DeploymentStep.Status.PENDING,
         },
     )
-    abortable = _running_deployment(
-        slug="stale-abort",
+    finished = _running_deployment(
+        slug="stale-finished",
         heartbeat=stale_at,
         step_statuses={
             name: DeploymentStep.Status.SUCCEEDED
             for name in DeploymentStep.Name.values
         },
     )
+    abortable = _running_deployment(
+        slug="stale-abort",
+        heartbeat=stale_at,
+        step_statuses={
+            **{
+                name: DeploymentStep.Status.SKIPPED
+                for name in DeploymentStep.Name.values
+            },
+            "build": DeploymentStep.Status.SUCCEEDED,
+            "ship": DeploymentStep.Status.FAILED,
+        },
+    )
 
     result = sweep()
     resumable.refresh_from_db()
+    finished.refresh_from_db()
     abortable.refresh_from_db()
 
+    assert finished.status == Deployment.Status.SUCCEEDED
+    assert finished.pk not in result["aborted"]
+    assert finished.pk not in result["resumed"]
     assert abortable.status == Deployment.Status.FAILED
     assert abortable.pk in result["aborted"]
     assert resumable.pk in result["resumed"]
@@ -110,3 +126,39 @@ def test_fresh_heartbeat_is_left_alone():
     assert fresh.pk not in result["resumed"]
     assert fresh.pk not in result["aborted"]
     assert fresh.steps.filter(status=DeploymentStep.Status.SUCCEEDED).count() == 0
+
+
+@pytest.mark.req("REL-C1-HEARTBEAT-SWEEP")
+@pytest.mark.req("REL-P3-RESUMABLE-DEPLOYS")
+def test_sweep_stamps_heartbeat_before_requeue(monkeypatch):
+    """Claim the stale row before delay so the next Beat tick does not enqueue again.
+
+    What would make this fail: delay() with last_heartbeat still stale, so a
+    second sweep (real broker, 30s Beat) queues a second worker.
+    """
+    from deploys.heartbeat import sweep
+    from deploys.tasks import run_deploy
+
+    queued = []
+    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+
+    stale_at = timezone.now() - STALE_AFTER - timedelta(seconds=1)
+    deployment = _running_deployment(
+        slug="claim",
+        heartbeat=stale_at,
+        step_statuses={"build": DeploymentStep.Status.PENDING},
+    )
+
+    first = sweep()
+    deployment.refresh_from_db()
+    assert first["resumed"] == [deployment.pk]
+    assert queued == [deployment.pk]
+    assert deployment.status == Deployment.Status.RUNNING
+    assert deployment.last_heartbeat is not None
+    assert deployment.last_heartbeat > stale_at
+    assert timezone.now() - deployment.last_heartbeat < STALE_AFTER
+
+    queued.clear()
+    second = sweep()
+    assert deployment.pk not in second["resumed"]
+    assert queued == []

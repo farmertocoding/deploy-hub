@@ -117,6 +117,9 @@ def execute(deployment_id):
     touch_heartbeat(deployment)
 
     for step in deployment.steps.order_by("seq"):
+        deployment.refresh_from_db()
+        if deployment.status != Deployment.Status.RUNNING:
+            return {"started": True, "status": deployment.status}
         if step.status in (
             DeploymentStep.Status.SUCCEEDED,
             DeploymentStep.Status.SKIPPED,
@@ -124,6 +127,9 @@ def execute(deployment_id):
             continue
         _run_step(deployment, step)
 
+    deployment.refresh_from_db()
+    if deployment.status != Deployment.Status.RUNNING:
+        return {"started": True, "status": deployment.status}
     deployment.status = Deployment.Status.SUCCEEDED
     deployment.save(update_fields=["status"])
     release_deploy_locks(deployment)

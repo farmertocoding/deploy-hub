@@ -238,3 +238,36 @@ def test_lock_serializes_two_deploys_same_site():
         object_id=str(target.pk),
         kind=OperationLock.Kind.DEPLOY,
     ).holder == str(second.pk)
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+@pytest.mark.req("REL-P3-RESUMABLE-DEPLOYS")
+def test_execute_stops_when_superseded(monkeypatch):
+    """An in-flight worker must not overwrite SUPERSEDED with SUCCEEDED.
+
+    What would make this fail: execute finishing the remaining steps and
+    writing succeeded after another deploy marked this row superseded.
+    """
+    from deploys import pipeline
+
+    site, _ = _site_with_target(slug="exec-supersede")
+    deployment = _queued_deployment(site)
+    assert pipeline.begin_deploy(deployment) is True
+
+    real_run = pipeline._run_step
+
+    def run_then_supersede(dep, step):
+        real_run(dep, step)
+        Deployment.objects.filter(pk=dep.pk).update(
+            status=Deployment.Status.SUPERSEDED,
+        )
+
+    monkeypatch.setattr(pipeline, "_run_step", run_then_supersede)
+    result = pipeline.execute(deployment.pk)
+    deployment.refresh_from_db()
+    assert deployment.status == Deployment.Status.SUPERSEDED
+    assert result["status"] == Deployment.Status.SUPERSEDED
+    assert deployment.steps.filter(
+        status=DeploymentStep.Status.PENDING,
+    ).count() == 8
+    assert deployment.steps.get(name="build").status == DeploymentStep.Status.SUCCEEDED
