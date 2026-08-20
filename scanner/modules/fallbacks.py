@@ -1237,10 +1237,44 @@ def _check_lockfile(root, files=None):
                             title="Dependency manifests are locked")
 
 
+def _project_gitignore(root):
+    """The `.gitignore` this check reads.
+
+    Scan-root wins. If the operator pointed at a tree whose Django project is
+    nested (`app/manage.py`, every J7 repo), a `.gitignore` sitting next to
+    that manage.py is the project file — E-invoice's is `app/.gitignore`, and
+    treating its absence at the tarball root as "no .gitignore" was a lie
+    about a repo that has one. A `.gitignore` under a frontend/ package is
+    not a substitute.
+    """
+    root = Path(root)
+    at_root = root / ".gitignore"
+    if at_root.is_file():
+        return at_root
+    skip = {".git", ".hg", ".venv", "venv", "node_modules", "__pycache__",
+            "dist", "build"}
+    candidates = []
+    for path in _iter_files(root, prune=skip, max_depth=4):
+        if path.name != "manage.py":
+            continue
+        cur = path.parent
+        while True:
+            gi = cur / ".gitignore"
+            if gi.is_file():
+                candidates.append(gi)
+                break
+            if cur == root or cur.parent == cur:
+                break
+            cur = cur.parent
+    if not candidates:
+        return None
+    return min(candidates, key=lambda p: len(p.relative_to(root).parts))
+
+
 def _check_gitignore(root, texts, files=None):
     root = Path(root)
-    gitignore = root / ".gitignore"
-    if not gitignore.is_file():
+    gitignore = _project_gitignore(root)
+    if gitignore is None:
         return core.CheckResult(
             id="core.gitignore", tier="warning",
             title="No .gitignore",

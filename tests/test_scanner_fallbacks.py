@@ -645,6 +645,36 @@ def test_healthz_detected_when_route_is_greppable(tmp_path):
     assert by_id(fallbacks.common_checks(tmp_path), "core.healthz").tier == "ok"
 
 
+def test_issue_einvoice_gitignore_next_to_manage_py_counts(tmp_path):
+    """E-invoice's real layout: operator points at the repo, manage.py is
+    `app/backend/manage.py`, `.gitignore` is `app/.gitignore` — one directory
+    above manage.py, not beside it. A sibling-only lookup still warns.
+    """
+    backend = tmp_path / "app" / "backend"
+    backend.mkdir(parents=True)
+    (backend / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "app" / ".gitignore").write_text(".env\nnode_modules/\n")
+    (tmp_path / "app" / "frontend").mkdir()
+    (tmp_path / "app" / "frontend" / ".gitignore").write_text("dist/\n")
+    res = by_id(fallbacks.common_checks(tmp_path), "core.gitignore")
+    assert res.title != "No .gitignore"
+    assert res.tier == "ok"
+
+
+def test_issue_einvoice_a_frontend_gitignore_is_not_the_project_one(tmp_path):
+    """A nested frontend/.gitignore is not a substitute for the project file.
+    E-invoice has both; only app/.gitignore is the one that covers the Django
+    tree. With neither a scan-root file nor one next to manage.py, the warning
+    still fires.
+    """
+    (tmp_path / "app" / "frontend").mkdir(parents=True)
+    (tmp_path / "app" / "frontend" / ".gitignore").write_text("node_modules/\n")
+    (tmp_path / "app" / "manage.py").write_text("#!/usr/bin/env python\n")
+    res = by_id(fallbacks.common_checks(tmp_path), "core.gitignore")
+    assert res.tier == "warning"
+    assert res.title == "No .gitignore"
+
+
 def test_gitignore_gap_checks(tmp_path):
     (tmp_path / "package.json").write_text("{\"name\": \"a\"}\n")
     (tmp_path / ".gitignore").write_text("*.pyc\n")

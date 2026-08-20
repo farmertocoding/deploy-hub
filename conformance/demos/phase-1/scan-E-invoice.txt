@@ -1,5 +1,5 @@
 modules: django
-summary: ✖ blocker:2  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ ok:18
+summary: ✖ blocker:2  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ ok:19
 
 ── BLOCKER (2)
   ✖ core.secret-scan: Secrets detected in the scanned tree
@@ -16,11 +16,6 @@ summary: ✖ blocker:2  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ 
       config/settings/base.py: DEV_FALLBACK_ENCRYPTION_KEY; config/settings/prod.py: _WEAK_SECRET_KEYS
       Fix: A secret in source sits in git history forever and in every clone. Read it from the environment instead — os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
 
-── WARNING (1)
-  ⚠ core.gitignore: No .gitignore
-      The project has no .gitignore at its root.
-      Fix: Add a .gitignore covering at least .env and (for node projects) node_modules, so secrets and dependency trees never enter the repo.
-
 ── PENDING_SANDBOX (3)
   ▸ django.check-deploy: [sandbox] django.check-deploy
       Runs off-Hub (review3 §M1): python manage.py check --deploy
@@ -32,8 +27,9 @@ summary: ✖ blocker:2  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ 
       Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
       Fix: Proves static collection succeeds before a deploy depends on it.
 
-── OK (18)
+── OK (19)
   ✓ core.lockfile: Dependency manifests are locked
+  ✓ core.gitignore: .gitignore covers the basics
   ✓ core.tests-exist: Test files found
   ✓ core.healthz: Health endpoint detected
   ✓ core.digest-pins: All base images digest-pinned

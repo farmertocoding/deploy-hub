@@ -40,7 +40,7 @@ not new findings about the repos.
 
 | Artifact | Source | Result |
 |---|---|---|
-| `phase-1/scan-E-invoice.txt` | staged tree of `~/E-invoice` (Django, uv, ASGI) | exit 1 — 2 blockers, 1 warning (`core.gitignore` at the scan root; the project lives under `app/`) |
+| `phase-1/scan-E-invoice.txt` | staged tree of `~/E-invoice` (Django, uv, ASGI) | exit 1 — 2 blockers, **0 warnings** (`app/.gitignore` is now the file this check reads) |
 | `phase-1/scan-hr-saas-starter.txt` | staged tree of `~/hr-saas-starter` (Django + React) | exit 1 — 1 blocker, 1 warning (unpinned `FROM`) |
 | `phase-1/scan-SATURDAYS_site.txt` | staged tree of `~/SATURDAYS_site` @ working tree with `deployhub.yaml` | exit 1 — 1 blocker (15 heuristic/`.env` lines, of which 10 are the drill tree that used to be a declaration), 2 warnings (`core.digest-pins` + `core.declaration-file`) |
 | `phase-1/scan-TAKKO.txt` | staged tree of `~/TAKKO` (Django + Vite monorepo) | exit 1 — 2 blockers, **0 warnings** (the false `django.allowed-hosts` warning is gone) |
@@ -71,7 +71,8 @@ in a comment.
    SATURDAYS_site's file is ignored and announced.
 3. `_WEAK_SECRET_KEYS`-shaped values — unchanged, waiver-shaped.
 4. **E-invoice `core.gitignore` warns at scan root** (project lives at `app/`)
-   — unchanged, still a real gap, still open.
+   — **CLOSED.** The check walks up from `manage.py` toward the scan root and
+   reads `app/.gitignore`. A `frontend/.gitignore` is not a substitute.
 5. Self-scan flags the scanner's own detector vectors — unchanged, recorded.
 6. **`django.allowed-hosts` vs `env.list` / annotated assignment** — **CLOSED**.
    TAKKO is ok. An empty annotated list with no override still warns.
@@ -80,6 +81,5 @@ in a comment.
 
 ## Open, still
 
-- E-invoice gitignore-at-scan-root (item 4).
 - J-1 T2 fidelity spike (addendum §J.1), still the half-day it was budgeted.
 - Two consecutive clean review rounds to close Phase 1.
