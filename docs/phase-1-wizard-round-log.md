@@ -454,3 +454,18 @@ empty red line. `materializeOutcome` already kept the detail. Failing-first:
 non-empty, else `data.detail || HTTP ${status}`. Ordinary path (`frontend/`).
 
 Silent drop: none. No WAIVERS.md lines. Not a clean Phase 1 round.
+
+## 16. 2026-08-20 — demo follow-ups 3 and 5 (N5 leftover + self-scan)
+
+The 2026-08-20 demo record left two items "waiver-shaped" / "recorded" with
+no `WAIVERS.md` line. That is silent drop. Closed as:
+
+| id | fingerprint | outcome |
+|---|---|---|
+| F-7 | django.secret-key-literal + `_WEAK_SECRET_KEYS` denylist | **fix on branch** `p1-scan-fp-denylist-and-url-interp` (`dabf998`). E-invoice `prod.py` assigns a membership denylist of placeholders; N5's test named the identifier in a docstring and never assigned it. Failing-first, then skip WEAK_* names unless a literal is high-entropy. **Not merged:** `scanner/modules/**` is human-merge-only. Live check after the fix: E-invoice blocker is only `DEV_FALLBACK_ENCRYPTION_KEY` (a real Fernet in base.py). |
+| F-8 | core.secret-scan + `redis://:{VAR}@` f-string | **same branch.** Hub `hub/settings/base.py` interpolates `REDIS_PASSWORD` into `redis://:{var}@host`; proof-axis userinfo treated `{REDIS_PASSWORD}` as a password. `_looks_interpolation` vetoes `{ident}` / `${ident}` / `$ident`. Real `redis://:realS3cretPass@` still blocks. **Not merged** (same glob). |
+| F-9 | core.secret-scan + self-scan detector vectors | **waived** `WAIVERS.md` 2026-08-20. Scanning this repo flags comment examples in `fallbacks.py` and fixture values under `tests/` / `scripts_dev/`. Not a customer-tree finding. D-012 parked. |
+
+Silent drop: none. **Still open for Phase 1 exit:** two consecutive clean
+rounds; Joseph merge of `p1-scan-fp-denylist-and-url-interp`. Not a clean
+round. Phase 2 not started.

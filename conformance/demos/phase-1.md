@@ -69,11 +69,18 @@ in a comment.
 1. Generated-artifact directories — closed by N6.
 2. Declared drill/QA trees — **parked out of Phase 1** (D-012 cap decision).
    SATURDAYS_site's file is ignored and announced.
-3. `_WEAK_SECRET_KEYS`-shaped values — unchanged, waiver-shaped.
+3. `_WEAK_SECRET_KEYS`-shaped values — **fix on `p1-scan-fp-denylist-and-url-interp`**
+   (`dabf998`), unmerged (`scanner/modules/**`). N5 leftover: the name axis
+   matched SECRET and accepted any non-empty literal. Live E-invoice after the
+   fix: denylist gone; `DEV_FALLBACK_ENCRYPTION_KEY` (a real Fernet) remains.
 4. **E-invoice `core.gitignore` warns at scan root** (project lives at `app/`)
    — **CLOSED.** The check walks up from `manage.py` toward the scan root and
    reads `app/.gitignore`. A `frontend/.gitignore` is not a substitute.
-5. Self-scan flags the scanner's own detector vectors — unchanged, recorded.
+5. Self-scan flags the scanner's own detector vectors — **waived**
+   (`WAIVERS.md` 2026-08-20, fingerprint `core.secret-scan+self-scan-detector-vectors`).
+   The Hub tree's comment examples and test fixtures are the detector, not a
+   leak. A related live miss — `redis://:{VAR}@` f-strings — is on the same
+   unmerged branch as item 3.
 6. **`django.allowed-hosts` vs `env.list` / annotated assignment** — **CLOSED**.
    TAKKO is ok. An empty annotated list with no override still warns.
 7. **The blocker title "Committed secrets detected"** — **CLOSED**. The title

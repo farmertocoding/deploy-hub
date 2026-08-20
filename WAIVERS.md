@@ -29,6 +29,11 @@ WAIVED: SCAN-M4-EXPOSURE-AUTH — blocker-escalation clause unimplemented: "Bloc
 
 WAIVED: conformance/demos/phase-1+unchecked-by-any-requirement — no phase-1 requirement is `verify: demo`, so the four artifacts under conformance/demos/phase-1/ are read by nothing: check.py only opens the paths a `demo:` key names (or the phase-N.md fallback), and the sole demo req is P0-WS-DEMO at phase 0. This is why R4-10 (the stale E-invoice scan record) did not surface when SPEC-gate-integrity.md §3.4 predicted it would — the content check landed, but no requirement points it at that tree. Retire by adding a phase-1 `verify: demo` requirement whose `demo:` names conformance/demos/phase-1/ in the registry PR (2026-08-11)
 
+# Phase-1 demo follow-up 5 (2026-08-20): pointing the scanner at this repo is not
+# a customer scan. The findings are the detector's own examples and the suite's
+# fixtures. D-012, which would have labelled test material, is parked.
+WAIVED: core.secret-scan+self-scan-detector-vectors — a scan of the Hub tree flags published-format examples in `scanner/modules/fallbacks.py` comments (`postgres://user:REALPASSWORD@host`) and fixture values under `tests/` and `scripts_dev/`. Those are the detector and its proofs, not leaked credentials. Phase 1's surface is customer django/node trees. Retire with D-012's return (declared test material) or a Hub-tree exclusion (2026-08-20)
+
 # spec-mutation-gate.md §4: the mutation gate's ONLY escape hatch. There is no baseline
 # file and no allowlist — a surviving mutant is a finding, fixed with a failing-first
 # test, or it is one line here with its own justification. Fingerprint =
