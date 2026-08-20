@@ -132,3 +132,26 @@ def test_site_volume_is_per_site_not_per_deployment():
             container_path="/elsewhere",
             backup_policy=SiteVolume.BackupPolicy.NONE,
         )
+
+
+def test_applied_catalog_entry_keeps_version_history():
+    """§D8: every execution writes a row; current version is latest applied_at.
+
+    What would make this fail: a unique (target, entry_id) constraint that
+    refuses version 2 after version 1, so drift cannot see applied history.
+    """
+    from catalog.models import AppliedCatalogEntry
+
+    target = _target()
+    AppliedCatalogEntry.objects.create(
+        target=target, entry_id="harden-ubuntu", version=1, mode="apply",
+    )
+    AppliedCatalogEntry.objects.create(
+        target=target, entry_id="harden-ubuntu", version=2, mode="apply",
+    )
+    rows = list(
+        AppliedCatalogEntry.objects.filter(
+            target=target, entry_id="harden-ubuntu",
+        ).order_by("applied_at", "pk")
+    )
+    assert [row.version for row in rows] == [1, 2]
