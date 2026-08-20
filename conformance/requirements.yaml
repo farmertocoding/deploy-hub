@@ -251,14 +251,15 @@ requirements:
   # it re-schedules these and rewrites them alongside its threat model. Their marked
   # tests are the parked module's unit tests in tests/test_scanner_declarations.py —
   # what the parser accepts and what it refuses — and nothing in Phase 1 reads them.
+  # D-017 (2026-08-20): phase bumped 2 → 4 so check.py --phase 2 is not blocked by this parked work.
   - id: SCAN-DECLARED-TEST-MATERIAL
-    phase: 2
+    phase: 4
     verify: test
     source: spec-declared-test-material.md §What a declaration does — and does not — change / spec-r7-enforce-declaration-acceptance.md §1
     text_hash: sha256:bcc41115c45d7795a069fb9c38e7cdf4a7bb948c553e95cd49e8dc5edd3ae036
     text: A repo declares drill/QA trees in deployhub.yaml (scanner.test_material, each entry a path plus a mandatory reason); only core.secret-scan's heuristic findings under a declared path move to a third bucket labelled with the path and the verbatim reason, never merged with auto-detected test material; those findings still block until the operator accepts that declaration in the wizard, and the report always shows the claim in a header line naming the declaration and its finding count — even when that count is zero.
   - id: SCAN-DECLARED-GUARDS
-    phase: 2
+    phase: 4
     verify: test
     source: spec-declared-test-material.md §The file
     text_hash: sha256:a31ff57851385b2f617bf9ef9d680784019118ea910e218097bc7f0a732d0ea1
