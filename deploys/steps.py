@@ -67,8 +67,118 @@ def ensure_ship(desired):
     return {"status": "shipped", "tag": tag}
 
 
+def ensure_volume(desired):
+    """Create per-Site docker volumes on miss; never delete."""
+    transport = desired["transport"]
+    slug = desired["site_slug"]
+    body = desired.get("manifest_body") or {}
+    heartbeat = desired.get("heartbeat")
+    specs = _volume_specs(slug, body)
+    for spec in specs:
+        name = spec["name"]
+        if _volume_present(transport, name):
+            continue
+        result = _run(transport, ["docker", "volume", "create", name], heartbeat)
+        if not result.ok:
+            raise RuntimeError(f"docker volume create failed: {result.stderr}")
+
+    site = desired.get("site")
+    if site is not None:
+        from core.models import SiteVolume
+
+        for spec in specs:
+            SiteVolume.objects.update_or_create(
+                site=site,
+                name=spec["name"],
+                defaults={
+                    "container_path": spec["container_path"],
+                    "backup_policy": spec["backup_policy"],
+                },
+            )
+    return {"status": "ensured", "names": [spec["name"] for spec in specs]}
+
+
+def ensure_volume_rollback(desired):
+    """T1 refuse: rollback must not docker volume rm. Volumes are per-Site."""
+    return {
+        "status": "refused",
+        "reason": "docker volume rm is not permitted",
+        "site_slug": desired.get("site_slug"),
+    }
+
+
+def ensure_migrate(desired):
+    """Backup then migrate/pre-cutover unless the step already succeeded."""
+    from deploys.models import DeploymentStep
+
+    transport = desired["transport"]
+    body = desired.get("manifest_body") or {}
+    heartbeat = desired.get("heartbeat")
+    step = desired.get("step")
+    if step is not None and step.status == DeploymentStep.Status.SUCCEEDED:
+        return {"status": "skipped"}
+
+    backup_argv = desired.get("backup_argv")
+    if backup_argv is None:
+        backup_argv = body.get("backup_argv")
+    migrate_argv = desired.get("migrate_argv")
+    if migrate_argv is None:
+        migrate_argv = body.get("migrate_argv") or body.get("pre_cutover")
+
+    if backup_argv:
+        result = _run(transport, list(backup_argv), heartbeat)
+        if not result.ok:
+            raise RuntimeError(f"backup failed: {result.stderr}")
+    if migrate_argv:
+        result = _run(transport, list(migrate_argv), heartbeat)
+        if not result.ok:
+            raise RuntimeError(f"migrate failed: {result.stderr}")
+
+    if step is not None:
+        step.status = DeploymentStep.Status.SUCCEEDED
+        step.save(update_fields=["status"])
+    return {"status": "migrated"}
+
+
 def _image_present(transport, tag):
     return transport.probe(["docker", "image", "inspect", tag]).ok
+
+
+def _volume_present(transport, name):
+    return transport.probe(["docker", "volume", "inspect", name]).ok
+
+
+def _volume_specs(slug, body):
+    """Always site-{slug}-data, then further Manifest volumes; names deduped."""
+    default_name = f"site-{slug}-data"
+    specs = []
+    seen = set()
+
+    def add(name, container_path, backup_policy):
+        if name in seen:
+            return
+        seen.add(name)
+        specs.append({
+            "name": name,
+            "container_path": container_path or "/data",
+            "backup_policy": backup_policy or "none",
+        })
+
+    listed = body.get("volumes") or []
+    match = next(
+        (item for item in listed if isinstance(item, dict) and item.get("name") == default_name),
+        {},
+    )
+    add(
+        default_name,
+        match.get("container_path"),
+        match.get("backup_policy"),
+    )
+    for item in listed:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        add(item.get("name"), item.get("container_path"), item.get("backup_policy"))
+    return specs
 
 
 def _run(transport, argv, heartbeat=None, timeout=3600):
