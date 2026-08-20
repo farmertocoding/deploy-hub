@@ -99,6 +99,23 @@ def test_unknown_question_is_rejected_not_ignored(site):
 
 
 @pytest.mark.req("WIZ-ANSWER-VALIDATION")
+@pytest.mark.req("P0-VALIDATION")
+def test_an_unknown_question_400_carries_the_unknown_question_code(auth_client, site):
+    """§4.5's code is the machine id. The message test next door cannot see it, so
+    `code=` could become None / omitted / `UNKNOWN_QUESTION` with the suite green.
+    The PATCH 400 is the contract the UI reads."""
+    response = auth_client.patch(
+        reverse("wizard", args=[site.pk]),
+        data={"answers": {"not.a.question": "x"}},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    field = response.json()["errors"]["not.a.question"]
+    assert field[0]["code"] == "unknown_question"
+    assert field[0]["message"] == "no such question for this project"
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
 def test_choice_outside_choices_is_rejected(site):
     with pytest.raises(ValidationError):
         service.set_answers(site, {"django.db": "oracle"})
