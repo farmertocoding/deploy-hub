@@ -398,6 +398,56 @@ def test_issue_r10_a2_the_gate_covers_every_report_payload_sim_js_carries(tmp_pa
     assert set(harness.payloads(tmp_path)) == set(harness.SIM_REPORT_TREES)
 
 
+def _secret_scan_titles(obj):
+    """Every `core.secret-scan` title nested in a sim.js / readiness payload."""
+    found = []
+    if isinstance(obj, dict):
+        if obj.get("id") == "core.secret-scan" and "title" in obj:
+            found.append(obj["title"])
+        for value in obj.values():
+            found.extend(_secret_scan_titles(value))
+    elif isinstance(obj, list):
+        for value in obj:
+            found.extend(_secret_scan_titles(value))
+    return found
+
+
+def test_sim_js_secret_scan_titles_match_the_scanner(tmp_path):
+    """§F8 copies of `core.secret-scan` must use the scanner's current blocker title.
+
+    The wording itself is closed (`cbe040d`); this pins that sim.js did not keep the
+    pre-change string after the scanner moved.
+    """
+    harness = _harness()
+    live = harness.payloads(tmp_path)
+    shipped = []
+    for name in ("MESSY_REPORT", "RESCANNED_REPORT"):
+        shipped.extend(_secret_scan_titles(live[name]))
+    assert shipped, "the messy/rescanned trees must still emit core.secret-scan"
+    expected = shipped[0]
+    assert all(title == expected for title in shipped), shipped
+
+    text = SIM_JS.read_text(encoding="utf-8")
+    names = re.findall(r"^const ([A-Z0-9_]+) = \{", text, re.M)
+    shown = []
+    for name in names:
+        body = _sim_object_literal(text, name)
+        if not body:
+            continue
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            continue
+        for title in _secret_scan_titles(payload):
+            shown.append((name, title))
+    assert shown, "sim.js carries no core.secret-scan title to pin"
+    drifted = [(name, title) for name, title in shown if title != expected]
+    assert not drifted, (
+        f"core.secret-scan title drifted from the scanner's {expected!r}: {drifted}\n"
+        f"Regenerate it: {REGENERATE}"
+    )
+
+
 def test_issue_r10_a2_the_scan_stamp_is_spelled_once(tmp_path):
     """The harness carried ISO strings restating `CLEAN_AT`/`MESSY_AT`, three lines
     below their own definitions. It now passes the datetimes and the serializer renders

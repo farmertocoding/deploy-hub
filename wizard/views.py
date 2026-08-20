@@ -8,6 +8,7 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.exception_handlers import django_validation_to_drf_detail
 from core.models import Project, Site
 
 from . import service
@@ -37,6 +38,16 @@ class AnswersSerializer(serializers.Serializer):
         help_text="question id -> answer. Partial sets are fine; the wizard saves "
                   "as you go."
     )
+
+
+def pin_patched_answers_required(result, generator, request, public):
+    """spectacular marks PATCH bodies partial, so `{}` would parse as valid."""
+    schema = (result.get("components") or {}).get("schemas", {}).get("PatchedAnswers")
+    if schema is not None and "answers" in schema.get("properties", {}):
+        required = schema.setdefault("required", [])
+        if "answers" not in required:
+            required.append("answers")
+    return result
 
 
 class MaterializeSerializer(serializers.Serializer):
@@ -81,12 +92,9 @@ class WizardView(APIView):
         try:
             service.set_answers(site, payload.validated_data["answers"], actor=request.user)
         except DjangoValidationError as exc:
-            # Re-raised as DRF's type so the §4.5 error shape and the audited
-            # exception handler both apply — one error contract, not two.
-            raise ValidationError({
-                "answers": exc.message_dict if hasattr(exc, "message_dict")
-                else exc.messages
-            }) from exc
+            # Per-question field map (not nested under `answers`) so the §4.5
+            # contract names the qid; re-raised so the audited handler fires.
+            raise ValidationError(django_validation_to_drf_detail(exc)) from exc
         return Response(WizardStateSerializer(_state(site)).data)
 
 

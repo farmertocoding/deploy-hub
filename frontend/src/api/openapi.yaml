@@ -368,6 +368,8 @@ components:
           additionalProperties: {}
           description: question id -> answer. Partial sets are fine; the wizard saves
             as you go.
+      required:
+      - answers
     ProjectSummary:
       type: object
       properties:

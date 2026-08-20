@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { makeWizardHandlers, materializeGate, materializeOutcome }
   from "../src/Readiness.jsx";
+import { schemas } from "../src/api/zod.ts";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 (globalThis as any).window = { location: { search: "" } };
@@ -130,7 +131,7 @@ test("r10-ux-f4: typing the domain and saving clears Answers needed", async () =
 
   // What `save()` sends, and what it does with the answer: PATCH, then re-read.
   const patched = await live("v1/sites/4/wizard/",
-    { "site.domain": "staging.takko.market" }, "PATCH");
+    { answers: { "site.domain": "staging.takko.market" } }, "PATCH");
   assert.equal(patched.status, 200);
 
   const { data: after } = await live("v1/sites/4/wizard/");
@@ -143,14 +144,15 @@ test("r10-ux-f4: typing the domain and saving clears Answers needed", async () =
 test("r10-ux-f4: the PATCH is body-driven, not a counter", async () => {
   reset();
   // A PATCH carrying some other answer does not clear the refusal the domain clears.
-  await live("v1/sites/4/wizard/", { "site.exposure": "public" }, "PATCH");
+  await live("v1/sites/4/wizard/", { answers: { "site.exposure": "public" } }, "PATCH");
   const { data } = await live("v1/sites/4/wizard/");
   assert.deepEqual(data.blocking.map((p: any) => p.code), ["answers_missing"]);
 });
 
 test("r10-ux-f4: an answered site's POST is not refused for the answer it has", async () => {
   reset();
-  await live("v1/sites/4/wizard/", { "site.domain": "staging.takko.market" }, "PATCH");
+  await live("v1/sites/4/wizard/",
+    { answers: { "site.domain": "staging.takko.market" } }, "PATCH");
 
   const { status, data } = await live("v1/sites/4/manifest/", {});
   assert.equal(status, 201, "a wizard saying can_materialize must not meet answers_missing");
@@ -161,7 +163,8 @@ test("r10-ux-f4: an answered site's POST is not refused for the answer it has", 
 
 test("r10-ux-f4: reset forgets the answer too", async () => {
   reset();
-  await live("v1/sites/4/wizard/", { "site.domain": "staging.takko.market" }, "PATCH");
+  await live("v1/sites/4/wizard/",
+    { answers: { "site.domain": "staging.takko.market" } }, "PATCH");
   (SIM_FIXTURES.live as any).reset();
 
   const { data } = await live("v1/sites/4/wizard/");
@@ -292,16 +295,25 @@ test("r11-q1: save PATCHes the draft, clears it on 200, and re-reads", async () 
   let h = harness(NO_WARNINGS, false, [{ status: 200, data: {} }], draft);
   await h.handlers.save();
 
-  assert.deepEqual(h.calls, [{ path: "v1/sites/7/wizard/", body: draft,
+  const body = h.calls[0].body;
+  // AnswersSerializer requires `{answers: {qid: value}}`; a qid map 400s.
+  const parsed = schemas.PatchedAnswers.safeParse(body);
+  assert.ok(parsed.success, JSON.stringify((parsed as any).error?.issues));
+  assert.deepEqual(parsed.data.answers, draft);
+  assert.equal("site.domain" in body, false);
+  assert.deepEqual(h.calls, [{ path: "v1/sites/7/wizard/", body,
                                method: "PATCH" }]);
   assert.deepEqual(h.drafts, [{}], "the typed answers are the server's now");
   assert.deepEqual(h.events, ["load"], "…and the form shows what the server kept");
   assert.deepEqual(h.msgs[1], { ok: true, text: "Saved." });
 
   // A rejected answer keeps the draft — retyping a domain because the server said it was
-  // malformed is the round-1 error-proofing property.
+  // malformed is the round-1 error-proofing property. P0-VALIDATION shape:
+  // `{errors: {field: [{code, message, hint}]}}`.
   h = harness(NO_WARNINGS, false,
-              [{ status: 400, data: { "site.domain": [{ message: "not a domain" }] } }],
+              [{ status: 400, data: { errors: {
+                  "site.domain": [{ code: "invalid", message: "not a domain", hint: "" }],
+                } } }],
               draft);
   await h.handlers.save();
   assert.deepEqual(h.drafts, []);

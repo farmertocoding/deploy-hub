@@ -887,15 +887,26 @@ export function QuestionField({ siteId, question: q, prior, drafted, onChange })
 // what they are asked and never see what the client failed to ask for. So the handlers
 // take their collaborators as arguments and the test drives them with a spy in `api`'s
 // place. `SiteWizard` stays thin — it owns the state hooks and hands them over.
+export function wizardSaveBody(draft) {
+  return { answers: draft };
+}
+
+export function wizard400Text(data) {
+  const fields = (data && data.errors) || {};
+  return Object.entries(fields).map(([f, e]) =>
+    `${f}: ${Array.isArray(e) ? e.map((x) => x.message || x).join(", ") : e}`
+  ).join(" · ");
+}
+
 export function makeWizardHandlers({ siteId, state, draft, ack, load, onChanged,
                                      setBusy, setMsg, setDraft, api: call = api }) {
   async function save() {
     setBusy(true); setMsg(null);
-    const { status, data } = await call(`v1/sites/${siteId}/wizard/`, draft, "PATCH");
+    const { status, data } = await call(
+      `v1/sites/${siteId}/wizard/`, wizardSaveBody(draft), "PATCH");
     setBusy(false);
     if (status === 200) { setDraft({}); load(); setMsg({ ok: true, text: "Saved." }); }
-    else setMsg({ ok: false, text: Object.entries(data).map(([f, e]) =>
-      `${f}: ${Array.isArray(e) ? e.map((x) => x.message || x).join(", ") : e}`).join(" · ") });
+    else setMsg({ ok: false, text: wizard400Text(data) });
   }
 
   async function materialize() {

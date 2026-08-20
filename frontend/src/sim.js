@@ -448,8 +448,8 @@ const STAGING_MANIFEST = {
     },
     "env_bundle_ref": null
   },
-  "scan_report_hash": "aaa0a81571255525bba22cdb761a72acc51fa08e89b8146d91220e37c28ee1ea",
-  "created_at": "2026-08-17T05:40:45.058368Z"
+  "scan_report_hash": "a4119c6e9b10e802b8924d9e3ef24c60db415dd063fc93992cf401ce86ebb253",
+  "created_at": "2026-08-20T07:51:23.205571Z"
 };
 
 // The 4th materialize of the prod site — the site row above says it is on v3, so this is
@@ -487,8 +487,8 @@ const CLEAN_MANIFEST = {
     },
     "env_bundle_ref": null
   },
-  "scan_report_hash": "aaa0a81571255525bba22cdb761a72acc51fa08e89b8146d91220e37c28ee1ea",
-  "created_at": "2026-08-17T05:39:02.269437Z"
+  "scan_report_hash": "a4119c6e9b10e802b8924d9e3ef24c60db415dd063fc93992cf401ce86ebb253",
+  "created_at": "2026-08-20T07:51:23.172755Z"
 };
 
 // ── project 2: legacy-shop, the mixed case ────────────────────────────────────
@@ -535,7 +535,7 @@ const MESSY_REPORT = {
     {
       "id": "core.secret-scan",
       "tier": "blocker",
-      "title": "Committed secrets detected",
+      "title": "Secrets detected in the scanned tree",
       "detail": ".env: .env file present in the scan tree\nfrontend/scripts/drill/README.md:7: [heuristic] hardcoded django_superuser_password value\nfrontend/scripts/drill/redteam/01_rbac_money.mjs:2: [heuristic] hardcoded admin_password value\nfrontend/scripts/drill/qa/03_regressions.mjs:2: [heuristic] hardcoded staff_password value\nfrontend/scripts/drill/qa/05_archive_results.mjs:2: [heuristic] hardcoded staff_password value\nfrontend/scripts/drill/qa/06_admin_shell.mjs:2: [heuristic] hardcoded staff_password value\nfrontend/scripts/drill/qa/08_redis_outage.mjs:2: [heuristic] hardcoded customer_password value\nfrontend/scripts/drill/qa/08_redis_outage.mjs:3: [heuristic] hardcoded password value\nfrontend/scripts/drill/qa/08_redis_outage.mjs:4: [heuristic] hardcoded fallback_password value\nfrontend/scripts/drill/qa/09_consent_and_lifecycle.mjs:2: [heuristic] hardcoded customer_password value\nfrontend/scripts/drill/qa/10_destinations_and_reconciliation.mjs:2: [heuristic] hardcoded customer_password value\nconfig/settings/base.py:7: [heuristic] hardcoded secret_key value\n.github/workflows/ci.yml:10: [heuristic] hardcoded secret_key value\n.github/workflows/ci.yml:11: [heuristic] hardcoded db_password value\n.github/workflows/ci.yml:12: [heuristic] hardcoded django_superuser_password value",
       "fix_hint": "Move secrets to the vault / environment injection. A .env file in this tree ships with a deploy of it, and is a leak as well if it is committed — check `git status`, add .env to .gitignore, and rotate anything that was committed: it stays in git history until you do.\n\n[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.",
       "execution": "static"
@@ -679,7 +679,7 @@ const MESSY_WIZARD = {
     "django.env.FIELD_ENCRYPTION_KEYS": {
       "answered": true,
       "is_secret": true,
-      "changed_at": "2026-08-17T05:39:02.228063+00:00"
+      "changed_at": "2026-08-20T07:51:23.151198+00:00"
     }
   },
   "blocking": [
@@ -689,7 +689,7 @@ const MESSY_WIZARD = {
       "items": [
         {
           "id": "core.secret-scan",
-          "title": "Committed secrets detected"
+          "title": "Secrets detected in the scanned tree"
         },
         {
           "id": "django.debug-hardcoded",
@@ -737,7 +737,7 @@ const REFUSAL_409 = {
   "items": [
     {
       "id": "core.secret-scan",
-      "title": "Committed secrets detected"
+      "title": "Secrets detected in the scanned tree"
     },
     {
       "id": "django.debug-hardcoded",
@@ -755,7 +755,7 @@ const REFUSAL_409 = {
       "items": [
         {
           "id": "core.secret-scan",
-          "title": "Committed secrets detected"
+          "title": "Secrets detected in the scanned tree"
         },
         {
           "id": "django.debug-hardcoded",
@@ -1066,8 +1066,8 @@ const EDGE_MANIFEST = {
     },
     "env_bundle_ref": null
   },
-  "scan_report_hash": "8158c227a249f0bc2a854264cf36f3ca0ee4ec812b6792687de095775238f6a1",
-  "created_at": "2026-08-17T05:39:02.278683Z"
+  "scan_report_hash": "eb8aa141ec882dc108e3ed661382d8cfbacf8c58c1e85c440c6a64716eaecb7a",
+  "created_at": "2026-08-20T07:51:23.176304Z"
 };
 
 // ── takko, re-scanned underneath the operator (the `stale` state) ─────────────
@@ -1084,7 +1084,7 @@ const STALE_REFUSAL_409 = {
   "items": [
     {
       "id": "core.secret-scan",
-      "title": "Committed secrets detected"
+      "title": "Secrets detected in the scanned tree"
     }
   ],
   "problems": [
@@ -1094,7 +1094,7 @@ const STALE_REFUSAL_409 = {
       "items": [
         {
           "id": "core.secret-scan",
-          "title": "Committed secrets detected"
+          "title": "Secrets detected in the scanned tree"
         }
       ]
     }
@@ -1146,7 +1146,7 @@ const RESCANNED_REPORT = {
     {
       "id": "core.secret-scan",
       "tier": "blocker",
-      "title": "Committed secrets detected",
+      "title": "Secrets detected in the scanned tree",
       "detail": "payments.py:4: [proof] Stripe live key",
       "fix_hint": "Move secrets to the vault / environment injection. A .env file in this tree ships with a deploy of it, and is a leak as well if it is committed — check `git status`, add .env to .gitignore, and rotate anything that was committed: it stays in git history until you do.\n\n[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.",
       "execution": "static"
@@ -1216,7 +1216,7 @@ const RESCANNED_WIZARD = {
       "items": [
         {
           "id": "core.secret-scan",
-          "title": "Committed secrets detected"
+          "title": "Secrets detected in the scanned tree"
         }
       ]
     }
@@ -1294,7 +1294,7 @@ const RESCANNED_STAGING_WIZARD = {
       "items": [
         {
           "id": "core.secret-scan",
-          "title": "Committed secrets detected"
+          "title": "Secrets detected in the scanned tree"
         }
       ]
     },
@@ -1508,10 +1508,11 @@ export const SIM_FIXTURES = {
     // came straight back out. It now answers with what a PATCH answers with (§4.5: the
     // full state, same serializer as the GET), and the state it answers with is the one
     // captured after a real `set_answers`. Body-driven: only a PATCH actually carrying
-    // `site.domain` moves it, exactly as atlas-edge's 201 is driven by
-    // `confirm_warnings`.
+    // `answers["site.domain"]` moves it, exactly as atlas-edge's 201 is driven by
+    // `confirm_warnings`. The client wraps the draft; an unwrapped qid map is not a
+    // valid AnswersSerializer body.
     if (path.endsWith("/wizard/") && method === "PATCH") {
-      if (idOf(path) === 4 && body?.["site.domain"]) liveStagingAnswered = true;
+      if (idOf(path) === 4 && body?.answers?.["site.domain"]) liveStagingAnswered = true;
       return { status: 200, data: SIM_FIXTURES.live(path, null, "GET").data };
     }
     if (path.endsWith("/wizard/")) {

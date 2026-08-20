@@ -12,13 +12,14 @@ FORBIDDEN = re.compile(r"^\s*(import|from)\s+(boto3|botocore|azure|cloudflare|Cl
 # tests/, scripts_dev/ and conformance/ are scanned too (round-1 finding): an SDK
 # import hiding in test or process code still violates the seam.
 APPS = ["core", "vault", "catalog", "scanner", "provision", "deploys",
-        "reconcile", "monitor", "scaling", "realtime", "hub",
+        "reconcile", "monitor", "scaling", "realtime", "hub", "wizard",
         "tests", "scripts_dev", "conformance"]
 
 
 @pytest.mark.req("P0-IMPORT-RULE")
 @pytest.mark.req("ARCH-D4-IMPORT-RULE")
 def test_cloud_sdk_imports_only_under_providers():
+    assert "wizard" in APPS, "wizard/ is a first-party app; an SDK import there is the seam"
     violations = []
     for app in APPS:
         for py in (REPO / app).rglob("*.py"):

@@ -389,7 +389,7 @@ test("r11-q2: live — every payload each transition produces parses against its
     // The PATCH. §4.5: a PATCH answers with the full wizard state, same serializer as
     // the GET — so the response itself is a payload, not only the re-read behind it.
     const patched = await live("v1/sites/4/wizard/",
-                               { "site.domain": "staging.takko.market" }, "PATCH");
+                               { answers: { "site.domain": "staging.takko.market" } }, "PATCH");
     assert.equal(patched.status, 200);
     let parsed = schemas.WizardState.safeParse(patched.data);
     assert.ok(parsed.success,
@@ -452,7 +452,8 @@ test("r11-q2: the walk covers every constant a transition can produce", async ()
   const record = (label: string, data: any) => seen.add(label + JSON.stringify(data));
 
   record("list", (await live("v1/projects/")).data);          // CLEAN_PROJECT + EDGE
-  await live("v1/sites/4/wizard/", { "site.domain": "staging.takko.market" }, "PATCH");
+  await live("v1/sites/4/wizard/",
+             { answers: { "site.domain": "staging.takko.market" } }, "PATCH");
   record("wizard4", (await live("v1/sites/4/wizard/")).data);  // STAGING_WIZARD_ANSWERED
   await live("v1/sites/1/manifest/", {});
   record("list", (await live("v1/projects/")).data);           // CLEAN_PROJECT_AFTER
@@ -494,7 +495,8 @@ test("r11-ux-f1: no takko site can materialize under the converged blocking repo
       // What the operator does next, on the site whose only refusal LOOKS answerable:
       // type the domain and press Save.
       const patched = await stale(`v1/sites/${site}/wizard/`,
-                                  { "site.domain": "staging.takko.market" }, "PATCH");
+                                  { answers: { "site.domain": "staging.takko.market" } },
+                                  "PATCH");
       if (patched.status === 200) {
         // A state may answer this — but then what it answers with has to be a capture
         // taken against the moved report, not the live state's memory.
@@ -578,7 +580,8 @@ test("r11-ux-f1: every refusal this simulation authors says it is the simulation
 
     const authored = [
       await stale("v1/sites/4/manifest/", {}),
-      await stale("v1/sites/1/wizard/", { "site.domain": "x.example.com" }, "PATCH"),
+      await stale("v1/sites/1/wizard/",
+                  { answers: { "site.domain": "x.example.com" } }, "PATCH"),
       await (SIM_FIXTURES.degraded as any)("v1/sites/5/manifest/", {}),
     ];
     for (const { status, data } of authored) {

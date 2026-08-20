@@ -142,21 +142,10 @@ def validate_answers(project, incoming: dict):
     All-or-nothing: one bad field rejects the whole PATCH, so the client never ends up
     with half its answers persisted and no clear signal about which half.
 
-    ROUND 9, and the mutation gate is what named it: `errors[qid]` used to be a two-slot
-    list, `[message, code]`, and the raise below took `v[0]` — so the second slot was
-    written on both branches and read on neither. Two mutants proved it (waived as
-    equivalent in the gate's first run, `wizard.questions.x_validate_answers__mutmut_10`
-    and `_11`, both rewriting the string `"unknown_question"` with the suite green,
-    because nothing could observe it). That is R7-15's dead-field finding one level in:
-    a dead SLOT rather than a dead dataclass field, and it costs the same thing — the
-    next reader sees a code beside a message and assumes a client branches on it.
-
-    The choice was to surface the code or to delete it, and deleting is right for this
-    phase: `wizard/views.py` renders `exc.message_dict`, which is `{field: [messages]}`
-    by Django's own contract and has no room for a per-field code; giving it one would
-    be an API change with a client change behind it, not a cleanup. The `code` on each
-    individual `ValidationError` from `coerce_answer` is untouched and still asserted —
-    it is only this aggregate that never carried it.
+    The aggregate used to drop `coerce_answer`'s per-field `code` (a string in
+    `message_dict` cannot carry one). The PATCH 400 is now the §4.5
+    `{field: [{code, message, hint}]}` map, so the code is kept on the
+    ValidationError object the raise below receives.
     """
     known = question_map(project)
     errors, cleaned = {}, {}
@@ -164,15 +153,16 @@ def validate_answers(project, incoming: dict):
     for qid, value in incoming.items():
         question = known.get(qid)
         if question is None:
-            errors[qid] = "no such question for this project"
+            errors[qid] = ValidationError("no such question for this project",
+                                          code="unknown_question")
             continue
         try:
             cleaned[qid] = (question, coerce_answer(question, value))
         except ValidationError as exc:
-            errors[qid] = exc.message
+            errors[qid] = exc
 
     if errors:
-        raise ValidationError({k: [v] for k, v in errors.items()})
+        raise ValidationError(errors)
     return cleaned
 
 

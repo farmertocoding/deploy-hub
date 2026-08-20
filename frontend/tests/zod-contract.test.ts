@@ -33,3 +33,11 @@ test("zod.ts is schemas-only (no zodios client import — D-002)", () => {
   const src = readFileSync(fileURLToPath(new URL("../src/api/zod.ts", import.meta.url)), "utf8");
   assert.ok(!src.includes("@zodios/core"), "generated file must not depend on @zodios/core");
 });
+
+test("PatchedAnswers: answers is required — {} is not a valid PATCH", () => {
+  assert.equal(schemas.PatchedAnswers.safeParse({}).success, false);
+  assert.equal(
+    schemas.PatchedAnswers.safeParse({ answers: { "site.domain": "app.example.com" } }).success,
+    true,
+  );
+});

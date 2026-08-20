@@ -246,7 +246,7 @@ export interface components {
         };
         PatchedAnswers: {
             /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
-            answers?: {
+            answers: {
                 [key: string]: unknown;
             };
         };

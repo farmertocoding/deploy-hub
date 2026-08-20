@@ -471,8 +471,46 @@ def test_get_wizard_returns_questions_and_state(auth_client, site):
 
 
 @pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_patch_save_body_persists_site_domain(auth_client, site):
+    """The body `makeWizardHandlers.save` sends must persist against the live API.
+
+    Save wraps the draft as `{answers: {qid: value}}`; AnswersSerializer requires
+    that envelope. The answered domain is what the operator typed.
+    """
+    response = auth_client.patch(
+        reverse("wizard", args=[site.pk]),
+        data={"answers": {"site.domain": "app.example.com"}},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    answered = response.json()["answered"]
+    assert answered["site.domain"] == "app.example.com"
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+def test_patch_empty_object_is_not_a_valid_save(auth_client, site):
+    """`{}` is not a partial answer set — the `answers` key is required."""
+    response = auth_client.patch(
+        reverse("wizard", args=[site.pk]),
+        data={},
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    body = response.json()
+    errors = body.get("errors", body)
+    assert "answers" in errors
+
+
+@pytest.mark.req("WIZ-ANSWER-VALIDATION")
+@pytest.mark.req("P0-VALIDATION")
+@pytest.mark.req("VAL-45-REJECTED-INPUT-AUDITED")
 def test_patch_bad_answer_returns_400_and_audits(auth_client, site):
     from core.models import AuditEvent
+    from wizard.questions import coerce_answer, question_map
+
+    question = question_map(site.project)["django.db"]
+    with pytest.raises(ValidationError) as coerced:
+        coerce_answer(question, "oracle")
 
     response = auth_client.patch(
         reverse("wizard", args=[site.pk]),
@@ -480,6 +518,10 @@ def test_patch_bad_answer_returns_400_and_audits(auth_client, site):
         content_type="application/json",
     )
     assert response.status_code == 400
+    field = response.json()["errors"]["django.db"]
+    assert {"code", "message", "hint"} <= set(field[0])
+    assert field[0]["code"] == coerced.value.code
+    assert field[0]["message"] == coerced.value.message
     assert AuditEvent.objects.filter(action="input_rejected").exists()
 
 

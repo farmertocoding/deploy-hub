@@ -81,7 +81,6 @@ const WizardState = z
   .passthrough();
 const PatchedAnswers = z
   .object({ answers: z.object({}).partial().passthrough() })
-  .partial()
   .passthrough();
 
 export const schemas = {

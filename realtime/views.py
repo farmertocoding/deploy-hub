@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.audit import audit
+from core.exception_handlers import drf_errors_to_contract
 
 from .authorize import authorize_topic
 from .publish import current_seq, topic_history
@@ -39,16 +40,6 @@ class DemoJobSerializer(serializers.Serializer):
                 }
             )
         return out
-
-
-def drf_errors_to_contract(errors):
-    """DRF error dict → the §4.5 shape: {field: [{code, message, hint}]}."""
-    out = {}
-    for field, msgs in errors.items():
-        out[field] = [
-            {"code": getattr(m, "code", "invalid"), "message": str(m), "hint": ""} for m in msgs
-        ]
-    return out
 
 
 class DemoJobView(APIView):

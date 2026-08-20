@@ -129,6 +129,10 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Deploy Hub API",
     "VERSION": "0.0.1",
     "SERVE_INCLUDE_SCHEMA": False,
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+        "wizard.views.pin_patched_answers_required",
+    ],
 }
 
 # How many proxies sit in front of the Hub (Caddy = 1; Cloudflare + Caddy = 2).

@@ -360,7 +360,8 @@ def test_aead_primitives_used_only_under_vault():
     there are two implementations of the same guarantee and only one is tested."""
     repo = pathlib.Path(__file__).resolve().parent.parent
     apps = ["core", "catalog", "scanner", "provision", "deploys", "reconcile",
-            "providers", "monitor", "scaling", "realtime", "hub"]
+            "providers", "monitor", "scaling", "realtime", "hub", "wizard"]
+    assert "wizard" in apps, "wizard/ must stay crypto-free; AESGCM belongs under vault/"
     offenders = []
     for app in apps:
         for py in (repo / app).rglob("*.py"):

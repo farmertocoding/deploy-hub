@@ -5,7 +5,7 @@ a stream of malformed requests from one source is an attack in progress. These r
 feed the Hub's own throttle/fail2ban machinery in Phase 3 (§6.5 Layer 4 turned on the
 Hub itself), so the row shape here must already carry what that will need.
 """
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ErrorDetail, ValidationError
 from rest_framework.views import exception_handler as drf_exception_handler
 
 from .audit import audit
@@ -64,6 +64,35 @@ def _codes(detail):
     return codes
 
 
+def drf_errors_to_contract(errors):
+    """DRF error dict → the §4.5 shape: {field: [{code, message, hint}]}."""
+    if isinstance(errors, list):
+        errors = {"non_field_errors": errors}
+    out = {}
+    for field, msgs in errors.items():
+        if not isinstance(msgs, list):
+            msgs = [msgs]
+        out[field] = [
+            {"code": getattr(m, "code", None) or "invalid", "message": str(m), "hint": ""}
+            for m in msgs
+        ]
+    return out
+
+
+def django_validation_to_drf_detail(exc):
+    """Django ValidationError → DRF detail map, keeping per-field codes."""
+    if getattr(exc, "error_dict", None):
+        return {
+            field: [
+                ErrorDetail(str(list(err)[0]), code=getattr(err, "code", None) or "invalid")
+                for err in errs
+            ]
+            for field, errs in exc.error_dict.items()
+        }
+    code = getattr(exc, "code", None) or "invalid"
+    return {"non_field_errors": [ErrorDetail(str(m), code=code) for m in exc.messages]}
+
+
 def audited_exception_handler(exc, context):
     response = drf_exception_handler(exc, context)
 
@@ -85,5 +114,8 @@ def audited_exception_handler(exc, context):
             fields=sorted(set(_field_names(exc.detail))),
             codes=sorted(_codes(exc.detail)),
         )
+        if response is not None:
+            # DemoJobView already returns this wrap; raise_exception paths must too.
+            response.data = {"errors": drf_errors_to_contract(exc.detail)}
 
     return response
