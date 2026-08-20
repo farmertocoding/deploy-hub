@@ -27,17 +27,26 @@ def sweep():
     resumed, aborted = [], []
     for pk in stale_ids:
         deployment = Deployment.objects.select_related("manifest__site").get(pk=pk)
+        if deployment.status != Deployment.Status.RUNNING:
+            continue
         pointer = resume_step(deployment)
         if pointer is None:
-            deployment.status = Deployment.Status.SUCCEEDED
-            deployment.save(update_fields=["status"])
-            release_deploy_locks(deployment)
+            updated = Deployment.objects.filter(
+                pk=pk, status=Deployment.Status.RUNNING,
+            ).update(status=Deployment.Status.SUCCEEDED)
+            if updated:
+                release_deploy_locks(deployment)
             continue
         if pointer.status == DeploymentStep.Status.FAILED:
-            deployment.status = Deployment.Status.FAILED
-            deployment.save(update_fields=["status"])
-            release_deploy_locks(deployment)
-            aborted.append(pk)
+            updated = Deployment.objects.filter(
+                pk=pk, status=Deployment.Status.RUNNING,
+            ).update(status=Deployment.Status.FAILED)
+            if updated:
+                release_deploy_locks(deployment)
+                aborted.append(pk)
+            continue
+        deployment.refresh_from_db()
+        if deployment.status != Deployment.Status.RUNNING:
             continue
         touch_heartbeat(deployment)
         from deploys.tasks import run_deploy

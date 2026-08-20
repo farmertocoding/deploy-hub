@@ -162,3 +162,73 @@ def test_sweep_stamps_heartbeat_before_requeue(monkeypatch):
     second = sweep()
     assert deployment.pk not in second["resumed"]
     assert queued == []
+
+
+@pytest.mark.req("REL-C1-HEARTBEAT-SWEEP")
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_sweep_does_not_clobber_superseded(monkeypatch):
+    """A stale row superseded after the snapshot must stay superseded.
+
+    What would make this fail: sweep writing succeeded/failed, or claiming
+    heartbeat and delay(), after another deploy marked the row superseded.
+    """
+    from deploys import heartbeat
+    from deploys.tasks import run_deploy
+
+    queued = []
+    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+
+    stale_at = timezone.now() - STALE_AFTER - timedelta(seconds=1)
+    finished = _running_deployment(
+        slug="sup-finished",
+        heartbeat=stale_at,
+        step_statuses={
+            name: DeploymentStep.Status.SUCCEEDED
+            for name in DeploymentStep.Name.values
+        },
+    )
+    abortable = _running_deployment(
+        slug="sup-abort",
+        heartbeat=stale_at,
+        step_statuses={
+            **{
+                name: DeploymentStep.Status.SKIPPED
+                for name in DeploymentStep.Name.values
+            },
+            "build": DeploymentStep.Status.SUCCEEDED,
+            "ship": DeploymentStep.Status.FAILED,
+        },
+    )
+    resumable = _running_deployment(
+        slug="sup-resume",
+        heartbeat=stale_at,
+        step_statuses={"build": DeploymentStep.Status.PENDING},
+    )
+
+    real_sr = heartbeat.Deployment.objects.select_related
+
+    def select_related_then_supersede(*args, **kwargs):
+        qs = real_sr(*args, **kwargs)
+        orig_get = qs.get
+
+        def get(*a, **kw):
+            Deployment.objects.filter(pk=kw["pk"]).update(
+                status=Deployment.Status.SUPERSEDED,
+            )
+            return orig_get(*a, **kw)
+
+        qs.get = get
+        return qs
+
+    monkeypatch.setattr(
+        heartbeat.Deployment.objects, "select_related", select_related_then_supersede,
+    )
+
+    result = heartbeat.sweep()
+    for row in (finished, abortable, resumable):
+        row.refresh_from_db()
+        assert row.status == Deployment.Status.SUPERSEDED
+        assert row.pk not in result["resumed"]
+        assert row.pk not in result["aborted"]
+    assert queued == []
+    assert resumable.last_heartbeat == stale_at
