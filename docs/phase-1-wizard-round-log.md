@@ -469,3 +469,10 @@ no `WAIVERS.md` line. That is silent drop. Closed as:
 Silent drop: none. **Still open for Phase 1 exit:** two consecutive clean
 rounds; Joseph merge of `p1-scan-fp-denylist-and-url-interp`. Not a clean
 round. Phase 2 not started.
+
+## 17. 2026-08-20 — D-016: demos are SATURDAYS_site and TAKKO only
+
+Joseph: only those two real repos for the Phase 1 demo. E-invoice and
+hr-saas-starter remain inventoried; their `scan-*.txt` records are removed
+from `conformance/demos/phase-1/`. `sample-node-site.json` stays as the Q7
+fixture recording, not a fleet demo. P1-SCAN-DEMO restatement updated.

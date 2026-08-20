@@ -51,6 +51,9 @@ report on the real repos ships even if wizard polish slips.
 10. **Milestone demos (verify: demo):** readiness report on the real trading repo AND
     on TAKKO/E-invoice/hr-saas/SATURDAYS (the J7 four validate the django module
     against reality; records in conformance/demos/phase-1.md).
+    **UPDATE 2026-08-20 (D-016):** real-repo demos are **SATURDAYS_site and TAKKO
+    only.** J7 inventory of the other two stands; they are not demo artifacts.
+    `sample-node-site/` remains the Q7 in-repo fixture.
 
 ## 2. Interfaces / tables that change
 

@@ -3,6 +3,10 @@
 **Date:** 2026-08-20 · **Branch:** `phase-1-continue` · **Recorded by:** Grok 4.6
 session, `python -m hub scan <path>` — the same CLI entry point a user runs.
 
+**D-016 (2026-08-20):** real-repo demos are **SATURDAYS_site and TAKKO only.**
+E-invoice and hr-saas-starter are inventoried, not demo targets. The in-repo
+`sample-node-site/` JSON is the Q7 fixture recording, not a fleet demo.
+
 This re-record is required for three independent reasons, each of which would
 have made the previous artifacts a lie:
 
@@ -40,11 +44,9 @@ not new findings about the repos.
 
 | Artifact | Source | Result |
 |---|---|---|
-| `phase-1/scan-E-invoice.txt` | staged tree of `~/E-invoice` (Django, uv, ASGI) | exit 1 — 2 blockers, **0 warnings** (`app/.gitignore` is now the file this check reads) |
-| `phase-1/scan-hr-saas-starter.txt` | staged tree of `~/hr-saas-starter` (Django + React) | exit 1 — 1 blocker, 1 warning (unpinned `FROM`) |
 | `phase-1/scan-SATURDAYS_site.txt` | staged tree of `~/SATURDAYS_site` @ working tree with `deployhub.yaml` | exit 1 — 1 blocker (15 heuristic/`.env` lines, of which 10 are the drill tree that used to be a declaration), 2 warnings (`core.digest-pins` + `core.declaration-file`) |
 | `phase-1/scan-TAKKO.txt` | staged tree of `~/TAKKO` (Django + Vite monorepo) | exit 1 — 2 blockers, **0 warnings** (the false `django.allowed-hosts` warning is gone) |
-| `phase-1/scan-sample-node-site.json` | in-repo `sample-node-site/` fixture | exit 0 — same 30 checks as the prior recording; `schema_version` 1 → 2; `core.secret-scan` ok title no longer says "committed" |
+| `phase-1/scan-sample-node-site.json` | in-repo `sample-node-site/` fixture (Q7, not a fleet demo) | exit 0 — same 30 checks as the prior recording; `schema_version` 1 → 2; `core.secret-scan` ok title no longer says "committed" |
 
 Real-repo copies were the working-tree tarballs under `.stage-tmp/` (minus
 `.git`, `node_modules`, `.venv`, `__pycache__` and tool caches), the same
@@ -69,13 +71,11 @@ in a comment.
 1. Generated-artifact directories — closed by N6.
 2. Declared drill/QA trees — **parked out of Phase 1** (D-012 cap decision).
    SATURDAYS_site's file is ignored and announced.
-3. `_WEAK_SECRET_KEYS`-shaped values — **fix on `p1-scan-fp-denylist-and-url-interp`**
-   (`dabf998`), unmerged (`scanner/modules/**`). N5 leftover: the name axis
-   matched SECRET and accepted any non-empty literal. Live E-invoice after the
-   fix: denylist gone; `DEV_FALLBACK_ENCRYPTION_KEY` (a real Fernet) remains.
+3. `_WEAK_SECRET_KEYS`-shaped values — found on E-invoice during inventory, **not
+   a D-016 demo target.** Fix on `p1-scan-fp-denylist-and-url-interp` (`dabf998`),
+   unmerged (`scanner/modules/**`).
 4. **E-invoice `core.gitignore` warns at scan root** (project lives at `app/`)
-   — **CLOSED.** The check walks up from `manage.py` toward the scan root and
-   reads `app/.gitignore`. A `frontend/.gitignore` is not a substitute.
+   — **CLOSED** as a scanner check (walks up from `manage.py`). Not a D-016 demo.
 5. Self-scan flags the scanner's own detector vectors — **waived**
    (`WAIVERS.md` 2026-08-20, fingerprint `core.secret-scan+self-scan-detector-vectors`).
    The Hub tree's comment examples and test fixtures are the detector, not a
