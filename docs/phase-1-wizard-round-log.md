@@ -436,3 +436,21 @@ of the live folders, not a scanner-module edit; `scanner/modules/**` untouched):
 
 Full tables: `project-inventory.md`. **Still open for Phase 1 exit:** two
 consecutive clean `make review-round`s (not claimable on this Mac host).
+
+## 15. 2026-08-20 — re-review of F-1..F-5 landing (reviewer ≠ implementer)
+
+Reviewer session against `b8b4565..c3d0ef4` vs REVIEW_CHECKLIST.md. F-1 through
+F-5 held. One residual on the F-2 renderer.
+
+| id | sev | fingerprint | outcome |
+|---|---|---|---|
+| F-6 | bug | Readiness.jsx wizard400Text ignores data.detail | **fixed** — status 0 / 501 Save now show `data.detail`; 400 field map unchanged |
+
+`save()` used the §4.5 field-map renderer for every non-200. Dead socket
+(status 0, `data.detail` from `api.js`) and sim `notCovered` 501 rendered an
+empty red line. `materializeOutcome` already kept the detail. Failing-first:
+`wizard-flow.test.ts` harness of `save()` with those two payloads; then
+`wizard400Text(data, status)` returns the field map when `data.errors` is
+non-empty, else `data.detail || HTTP ${status}`. Ordinary path (`frontend/`).
+
+Silent drop: none. No WAIVERS.md lines. Not a clean Phase 1 round.

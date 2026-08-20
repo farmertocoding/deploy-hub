@@ -333,6 +333,26 @@ test("r11-q1: save PATCHes the draft, clears it on 200, and re-reads", async () 
   assert.deepEqual(h.drafts, []);
   assert.deepEqual(h.events, []);
   assert.deepEqual(h.msgs[1], { ok: false, text: "site.domain: not a domain" });
+
+  // F-2 pointed save() at the field-map renderer for every non-200. Status 0
+  // (api.js dead-socket) and sim 501 only carry `data.detail`. An empty red
+  // line is not an error — materializeOutcome already keeps the detail.
+  h = harness(NO_WARNINGS, false,
+              [{ status: 0, data: { detail:
+                  "Cannot reach server — check your connection and retry." } }],
+              draft);
+  await h.handlers.save();
+  assert.deepEqual(h.drafts, []);
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.msgs[1], { ok: false, text:
+    "Cannot reach server — check your connection and retry." });
+
+  h = harness(NO_WARNINGS, false,
+              [{ status: 501, data: { detail: "[sim] NOT COVERED: PATCH /wizard/" } }],
+              draft);
+  await h.handlers.save();
+  assert.deepEqual(h.msgs[1],
+    { ok: false, text: "[sim] NOT COVERED: PATCH /wizard/" });
 });
 
 // ── R11-UX-F3: the sibling wizard that never re-read ─────────────────────────

@@ -891,11 +891,13 @@ export function wizardSaveBody(draft) {
   return { answers: draft };
 }
 
-export function wizard400Text(data) {
+export function wizard400Text(data, status) {
   const fields = (data && data.errors) || {};
-  return Object.entries(fields).map(([f, e]) =>
+  const fromFields = Object.entries(fields).map(([f, e]) =>
     `${f}: ${Array.isArray(e) ? e.map((x) => x.message || x).join(", ") : e}`
   ).join(" · ");
+  if (fromFields) return fromFields;
+  return (data && data.detail) || `HTTP ${status}`;
 }
 
 export function makeWizardHandlers({ siteId, state, draft, ack, load, onChanged,
@@ -906,7 +908,7 @@ export function makeWizardHandlers({ siteId, state, draft, ack, load, onChanged,
       `v1/sites/${siteId}/wizard/`, wizardSaveBody(draft), "PATCH");
     setBusy(false);
     if (status === 200) { setDraft({}); load(); setMsg({ ok: true, text: "Saved." }); }
-    else setMsg({ ok: false, text: wizard400Text(data) });
+    else setMsg({ ok: false, text: wizard400Text(data, status) });
   }
 
   async function materialize() {
