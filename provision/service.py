@@ -20,6 +20,13 @@ CRONTAB_INSTALL_ARGV = ["crontab", CRONTAB_PATH]
 # :80 / :443, but not :8080 / :4430.
 _HTTP_PORT = re.compile(r":(80|443)(?!\d)")
 
+UFW_BY_PROFILE = {
+    "hub": "ufw-posture-hub",
+    "target": "ufw-posture-target",
+    "intake": "ufw-posture-intake",
+}
+UFW_IDS = frozenset(UFW_BY_PROFILE.values())
+
 
 @dataclass(frozen=True)
 class ProvisionResult:
@@ -30,6 +37,11 @@ class ProvisionResult:
 def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
     """Guard, then import pre-hardened catalog versions. Never a shell string."""
     listeners = transport.probe(LISTENERS_ARGV)
+    if not listeners.ok:
+        return ProvisionResult(
+            allowed=False,
+            explanation=_refuse(target, "could not inspect listening ports (ss probe failed)"),
+        )
     occupied = {int(m.group(1)) for m in _HTTP_PORT.finditer(listeners.stdout or "")}
     if 80 in occupied:
         return ProvisionResult(
@@ -43,6 +55,11 @@ def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
         )
 
     listed = transport.probe(CONTAINERS_ARGV)
+    if not listed.ok:
+        return ProvisionResult(
+            allowed=False,
+            explanation=_refuse(target, "could not inspect site containers (docker probe failed)"),
+        )
     names = [name for name in (listed.stdout or "").split() if name]
     if names:
         return ProvisionResult(
@@ -66,13 +83,18 @@ def _refuse(target, reason):
 
 
 def _import_catalog_versions(target, transport, *, profile):
-    """Probe verify-hardening.sh, then record current catalog versions as import history."""
-    transport.probe(
+    """Record catalog versions only when verify and that entry's check both succeeded."""
+    verify = transport.probe(
         ["env", f"PROFILE={profile}", "/usr/local/sbin/verify-hardening.sh"],
     )
+    if not verify.ok:
+        return
+    wanted_ufw = UFW_BY_PROFILE.get(profile)
     for entry in CATALOG:
-        for step in argv_steps(entry.check):
-            transport.probe(step)
+        if entry.id in UFW_IDS and entry.id != wanted_ufw:
+            continue
+        if not _checks_ok(transport, entry):
+            continue
         AppliedCatalogEntry.objects.create(
             target=target,
             entry_id=entry.id,
@@ -80,6 +102,14 @@ def _import_catalog_versions(target, transport, *, profile):
             mode="import",
             result={"ok": True, "source": "verify-hardening.sh"},
         )
+
+
+def _checks_ok(transport, entry):
+    """True only if every check step's probe returned ok. A red step is not imported."""
+    for step in argv_steps(entry.check):
+        if not transport.probe(step).ok:
+            return False
+    return True
 
 
 def _delete_script_crons(transport, live_beat_jobs):

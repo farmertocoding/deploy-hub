@@ -102,12 +102,12 @@ def test_pre_hardened_empty_host_is_allowed_and_imports_catalog_versions():
         "log-rotation": 2,
         "docker-daemon-json": 2,
         "sshd-dropin": 4,
-        "ufw-posture-hub": 1,
         "ufw-posture-target": 1,
-        "ufw-posture-intake": 1,
         "fail2ban-ignoreip": 4,
         "caddy": 1,
     }
+    assert "ufw-posture-hub" not in rows
+    assert "ufw-posture-intake" not in rows
     assert all(row.mode == "import" for row in AppliedCatalogEntry.objects.all())
     runs = [payload for kind, payload in transport.calls if kind == "run"]
     assert ["crontab", "/tmp/hub-crontab"] in runs
@@ -130,3 +130,94 @@ def test_does_not_proceed_on_refuse():
     assert transport.mutating_calls() == []
     assert AppliedCatalogEntry.objects.count() == 0
     assert all(kind == "probe" for kind, _ in transport.calls)
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_failed_ss_probe_refuses():
+    """A red ss probe is not “ports free”; refuse and do not mutate.
+
+    What would make this fail: treating exit_code != 0 + empty stdout as vacant 80/443.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    transport = FakeTransport(responses={"ss": {"exit_code": 1, "stderr": "ss: not found"}})
+    result = provision_host(_target(), transport)
+    assert result.allowed is False
+    assert "ss" in result.explanation.lower() or "port" in result.explanation.lower()
+    assert transport.mutating_calls() == []
+    assert AppliedCatalogEntry.objects.count() == 0
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_failed_docker_probe_refuses():
+    """A red docker probe is not “no site containers”; refuse and do not mutate.
+
+    What would make this fail: proceeding to import after docker ps fails.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    transport = FakeTransport(responses={"docker": {"exit_code": 1, "stderr": "cannot connect"}})
+    result = provision_host(_target(), transport)
+    assert result.allowed is False
+    assert "container" in result.explanation.lower() or "docker" in result.explanation.lower()
+    assert transport.mutating_calls() == []
+    assert AppliedCatalogEntry.objects.count() == 0
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_failed_verify_imports_nothing():
+    """verify-hardening.sh not ok must not stamp the host as fully applied.
+
+    What would make this fail: writing AppliedCatalogEntry after a red verify probe.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    target = _target()
+    transport = FakeTransport(responses={"env": {"exit_code": 1}})
+    result = provision_host(target, transport)
+    assert result.allowed is True
+    assert AppliedCatalogEntry.objects.filter(target=target).count() == 0
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_failed_check_is_not_imported():
+    """A red catalog check must not write that id (and never as ok: True).
+
+    grep is unique to fail2ban-ignoreip. What would make this fail: importing it
+    anyway, or writing result.ok True for the failed probe.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    target = _target()
+    transport = FakeTransport(responses={"grep": {"exit_code": 1}})
+    result = provision_host(target, transport)
+    assert result.allowed is True
+    rows = list(AppliedCatalogEntry.objects.filter(target=target))
+    ids = {row.entry_id for row in rows}
+    assert "fail2ban-ignoreip" not in ids
+    assert "ntp-chrony" in ids
+    assert all(row.result.get("ok") is True for row in rows)
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_hub_profile_imports_only_hub_ufw():
+    """Only this host’s ufw posture id is imported.
+
+    What would make this fail: writing target/intake ufw rows on a hub profile.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    target = _target()
+    result = provision_host(target, FakeTransport(), profile="hub")
+    assert result.allowed is True
+    ids = set(
+        AppliedCatalogEntry.objects.filter(target=target).values_list("entry_id", flat=True)
+    )
+    assert "ufw-posture-hub" in ids
+    assert "ufw-posture-target" not in ids
+    assert "ufw-posture-intake" not in ids
