@@ -355,3 +355,39 @@ and touches nothing else: `Makefile` + `tests/test_gate_followup.py` + this entr
 Working-environment note recorded alongside: the Mac's PATH now fronts Homebrew make
 via gnubin in `~/.zshrc`, but any tool that constructs its own PATH may still find 3.81
 — after this fix, that is fine.
+
+## 12. 2026-08-20 — Grok 4.6 session (model assignment, three scanner follow-ups, J-1)
+
+Not a numbered review round: the loop has been in finding-fix mode since round 7, the
+round-6 cap already spent D-012, and this session did not re-derive the whole Phase 1
+diff from a clean checkout. Recorded so the next session does not re-do it.
+
+**Model assignment (D-014, `b5dfac5`).** fable/opus replaced with grok 4.6. Delegation
+rule is a session split. Hashes for PROC-REGRESSION-TEST and PROC-SENSITIVE-HUMAN-MERGE
+re-pinned.
+
+**Scanner follow-ups, both listed open on the 2026-08-12 demo record:**
+
+- `cbe040d` — `_top_assigns` sees `AnnAssign` (TAKKO's `env.list` line); empty base +
+  prod override is configured, not a warning; secret-scan titles no longer say
+  "committed". P1-SCAN-DEMO re-recorded (schema_version 2; SATURDAYS_site shows
+  `core.declaration-file`, not an acceptance bucket).
+- `95e803b` — `core.gitignore` walks up from `manage.py` when the scan root has no
+  file. E-invoice 0 warnings.
+
+**J-1 (D-015, `42ee231`).** T2 = sshd+systemd container, inner docker on vfs.
+Multipass is not needed sooner. Probe record `docs/j1-t2-fidelity-spike.md`.
+
+**Mechanical gates this session (venv on PATH):** ruff clean, log-scrub green,
+`make test-frontend` 140/140, `make check-generated` green. `pytest` 946 passed with
+the APFS-illegal-byte tests deselected; 8 failures remain, all host-environment
+(GNUMAKEFLAGS on this make, N4 3.81 shim, `.DS_Store` in the mutation cache watch
+list, macOS symlink loops). None of them moved with the scanner diffs. Mutation gate
+not re-run.
+
+**Not a clean round.** The 8 Mac failures predate this session; mutation was skipped;
+no full adversarial re-derivation of Phase 1. Next session that wants a convergence
+counter to advance runs `make review-round` on a Linux/cgroup runner (or with Homebrew
+make on PATH the way N4 recorded) and a fresh checkout.
+
+**Still open for Phase 1 exit:** two consecutive clean rounds.

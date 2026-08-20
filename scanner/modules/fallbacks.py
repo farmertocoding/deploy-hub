@@ -1240,12 +1240,10 @@ def _check_lockfile(root, files=None):
 def _project_gitignore(root):
     """The `.gitignore` this check reads.
 
-    Scan-root wins. If the operator pointed at a tree whose Django project is
-    nested (`app/manage.py`, every J7 repo), a `.gitignore` sitting next to
-    that manage.py is the project file — E-invoice's is `app/.gitignore`, and
-    treating its absence at the tarball root as "no .gitignore" was a lie
-    about a repo that has one. A `.gitignore` under a frontend/ package is
-    not a substitute.
+    Scan-root wins. If none is there, walk up from each `manage.py` toward
+    the scan root and take the nearest file — E-invoice's is `app/.gitignore`
+    above `app/backend/manage.py`. A `.gitignore` under a frontend/ package
+    is not on that walk, so it is not a substitute.
     """
     root = Path(root)
     at_root = root / ".gitignore"
@@ -1278,7 +1276,7 @@ def _check_gitignore(root, texts, files=None):
         return core.CheckResult(
             id="core.gitignore", tier="warning",
             title="No .gitignore",
-            detail="The project has no .gitignore at its root.",
+            detail="The project has no .gitignore at the scan root or above a nested manage.py.",
             fix_hint="Add a .gitignore covering at least .env and (for node "
                      "projects) node_modules, so secrets and dependency trees "
                      "never enter the repo.",

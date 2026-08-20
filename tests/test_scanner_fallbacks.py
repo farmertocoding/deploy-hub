@@ -661,6 +661,19 @@ def test_issue_einvoice_gitignore_next_to_manage_py_counts(tmp_path):
     assert res.tier == "ok"
 
 
+def test_issue_einvoice_scan_root_gitignore_wins_over_the_nested_one(tmp_path):
+    """Scan-root still wins, even when a nested file would cover more."""
+    (tmp_path / ".gitignore").write_text("*.pyc\n")
+    backend = tmp_path / "app" / "backend"
+    backend.mkdir(parents=True)
+    (backend / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "app" / ".gitignore").write_text(".env\nnode_modules/\n")
+    (tmp_path / "package.json").write_text('{"name": "web"}\n')
+    res = by_id(fallbacks.common_checks(tmp_path), "core.gitignore")
+    assert res.tier == "warning"
+    assert "node_modules" in res.detail
+
+
 def test_issue_einvoice_a_frontend_gitignore_is_not_the_project_one(tmp_path):
     """A nested frontend/.gitignore is not a substitute for the project file.
     E-invoice has both; only app/.gitignore is the one that covers the Django
