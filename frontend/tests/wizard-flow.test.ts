@@ -15,7 +15,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { makeWizardHandlers, materializeGate, materializeOutcome }
+import { makeWizardHandlers, materializeGate, materializeOutcome,
+  wizardSaveBody }
   from "../src/Readiness.jsx";
 import { schemas } from "../src/api/zod.ts";
 import { SIM_FIXTURES } from "../src/sim.js";
@@ -235,6 +236,19 @@ const WITH_WARNINGS = { warnings: [{ id: "node-ts.symlinked-files", title: "w" }
                         blocking: [], can_materialize: true, questions: [] };
 const NO_WARNINGS = { warnings: [], blocking: [], can_materialize: true, questions: [] };
 const CREATED = { status: 201, data: { version: 4 } };
+
+test("f1: save PATCHes {answers: draft}, not a qid map", async () => {
+  const draft = { "site.domain": "app.example.com" };
+  assert.deepEqual(wizardSaveBody(draft), { answers: draft });
+  const h = harness(NO_WARNINGS, false, [{ status: 200, data: { answered: draft } }], draft);
+  await h.handlers.save();
+  assert.deepEqual(h.calls, [{
+    path: "v1/sites/7/wizard/",
+    body: { answers: draft },
+    method: "PATCH",
+  }]);
+  assert.equal(schemas.PatchedAnswers.safeParse(h.calls[0].body).success, true);
+});
 
 test("r11-q1: the ack reaches the server as confirm_warnings, and only when it applies",
   async () => {

@@ -391,3 +391,25 @@ counter to advance runs `make review-round` on a Linux/cgroup runner (or with Ho
 make on PATH the way N4 recorded) and a fresh checkout.
 
 **Still open for Phase 1 exit:** two consecutive clean rounds.
+
+## 13. 2026-08-20 — goal review sweep (reviewer ≠ implementer)
+
+Reviewer session against HEAD `b8b4565` vs REVIEW_CHECKLIST.md. Queue in the
+goal scratch (`finding-queue.md`). Five findings; all addressed. **Not a
+clean Phase 1 round** (host pytest fingerprints unchanged; mutation not
+re-run). Ordinary-path work merged to master.
+
+| id | sev | fingerprint | outcome |
+|---|---|---|---|
+| F-1 | bug | Readiness.jsx PATCH unwrapped qid map | **fixed** `fb5d5b0` — `{answers: draft}`; Django PATCH of that body 200; `wizardSaveBody` spy pin |
+| F-2 | bug | wizard 400 nested strings not `{field:[{code,message,hint}]}` | **fixed** `fb5d5b0` — `{errors: …}` via `audited_exception_handler`; codes from `coerce_answer` kept |
+| F-3 | bug | wizard env secrets share site AAD | **fixed** `9d1b0f2` — `owner_id=f"{pk}:{qid}"`; same-site crypto copy raises `VaultDecryptError`. Files were `wizard/service.py` + tests (not `vault/**`); merged as ordinary |
+| F-4 | bug | sim.js still `Committed secrets detected` | **fixed** `fb5d5b0` — regenerated; `test_sim_js_secret_scan_titles_match_the_scanner` |
+| F-5 | suggestion | wizard omitted from import-rule APPS | **fixed** `fb5d5b0` — `"wizard"` on both APPS lists |
+
+Mechanical (venv on PATH): ruff, log-scrub, frontend, check-generated green at
+the start of the sweep. Pytest 947 passed / 15 failed, all 15 host fingerprints
+from §12. After merge: F-1–F-5 named tests 8/8 python, 52 frontend including
+the save-body spy.
+
+Silent drop: none. No WAIVERS.md lines.
