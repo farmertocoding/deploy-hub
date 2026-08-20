@@ -476,3 +476,36 @@ Joseph: only those two real repos for the Phase 1 demo. E-invoice and
 hr-saas-starter remain inventoried; their `scan-*.txt` records are removed
 from `conformance/demos/phase-1/`. `sample-node-site.json` stays as the Q7
 fixture recording, not a fleet demo. P1-SCAN-DEMO restatement updated.
+
+## 18. 2026-08-20 — Phase 1 exit: merge, skip-width, Darwin fail-closed, two clean rounds
+
+Joseph: do the remaining Phase 1 work. HEAD at close: `cf9f200`.
+
+**Merge.** `p1-scan-fp-denylist-and-url-interp` (`dabf998`) → `4e321c1` on master.
+Sensitive glob `scanner/modules/**`; Joseph's "do it" was the merge click.
+
+**Round 1 (not clean).** Reviewer [Review](66b771d9-2e0d-4df1-b9a2-da831396e355)
+found two Important skip-width holes on the merge. Darwin `Path.resolve()` without
+`strict` fail-opened symlink loops on Python 3.13 (R10-Q1 tests red on this Mac).
+Four unwaived `unknown_question` `code=` mutants survived (`make mutation` had not
+been runnable here: mutmut was missing from the venv). Fixed failing-first:
+
+| id | fingerprint | outcome |
+|---|---|---|
+| F-10 | django.secret-key-literal + `"WEAK" in name` substring | **fixed** `16fabae` — skip is List/Set/Tuple only |
+| F-11 | `_looks_interpolation` + `$IDENT` with no env-var shape | **fixed** `16fabae` — `$IDENT` needs `_` or `isupper()` |
+| F-12 | `escapes_root` + Darwin non-strict resolve | **fixed** `16fabae` — `resolve(strict=True)` |
+| F-13 | mutation + `validate_answers` `code=` | **fixed** `cf9f200` — PATCH 400 pins `unknown_question` |
+| host | APFS 0x9b filename + `.DS_Store` watch | **test skip / ignore** — Linux CI still runs the 0x9b tests |
+
+`make review-round` at `cf9f200`: ruff/bandit green, 974 passed / 6 skipped, mutation
+767 killed + 9 waived, frontend 142, `check.py --phase 1` ok.
+
+**Rounds 2–3 (clean).** Independent reviewers, zero new Critical/Important.
+Adversarial verifier SIGN OFF: acceptance 5/5, phase-due 33 verified / 5 uncovered
+all waived, skip-width probes held, in-repo fixture JSON matches live scan.
+
+**Minors parked (not blocking):** `$PASSWORD` arm untested; `{ident}` any identifier;
+`UNWEAKENED_SECRETS = ['admin123']` still skipped; APFS `except OSError` is broad.
+
+**Still not Phase 2.** D-012 stays parked.

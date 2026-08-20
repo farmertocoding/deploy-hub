@@ -75,11 +75,11 @@ SEC-69-NO-SECRETS-IN-EXHAUST (static-gate).
 
 ## 4. Exit demo
 
-`python -m hub scan` against sample-node-site → report fires every check; against the
-four inventoried real repos → honest reports (uv/ASGI/sidecars recognized, no false
-Blockers); wizard walk on sample-node-site → manifest stored with recreate strategy,
-volumes, warmup fields; conformance `check.py --phase 1` green; review rounds to
-convergence per §4.
+`python -m hub scan` against sample-node-site → report fires every check; against
+the D-016 demo repos (SATURDAYS_site and TAKKO) → honest reports (uv/ASGI/sidecars
+recognized, no false Blockers); wizard walk on sample-node-site → manifest stored
+with recreate strategy, volumes, warmup fields; conformance `check.py --phase 1`
+green; review rounds to convergence per §4.
 
 ## 5. DECISION markers opened
 

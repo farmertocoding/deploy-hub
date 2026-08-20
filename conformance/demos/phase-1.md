@@ -72,15 +72,16 @@ in a comment.
 2. Declared drill/QA trees — **parked out of Phase 1** (D-012 cap decision).
    SATURDAYS_site's file is ignored and announced.
 3. `_WEAK_SECRET_KEYS`-shaped values — found on E-invoice during inventory, **not
-   a D-016 demo target.** Fix on `p1-scan-fp-denylist-and-url-interp` (`dabf998`),
-   unmerged (`scanner/modules/**`).
+   a D-016 demo target.** Merged `4e321c1` (`dabf998`): a WEAK_* denylist is a
+   list/set/tuple of low-entropy placeholders; a scalar `WEAK_PASSWORD` still
+   blocks.
 4. **E-invoice `core.gitignore` warns at scan root** (project lives at `app/`)
    — **CLOSED** as a scanner check (walks up from `manage.py`). Not a D-016 demo.
 5. Self-scan flags the scanner's own detector vectors — **waived**
    (`WAIVERS.md` 2026-08-20, fingerprint `core.secret-scan+self-scan-detector-vectors`).
    The Hub tree's comment examples and test fixtures are the detector, not a
-   leak. A related live miss — `redis://:{VAR}@` f-strings — is on the same
-   unmerged branch as item 3.
+   leak. `redis://:{VAR}@` interpolation is merged in the same `4e321c1` (`$IDENT`
+   requires env-var shape; `$SecurePass` still blocks).
 6. **`django.allowed-hosts` vs `env.list` / annotated assignment** — **CLOSED**.
    TAKKO is ok. An empty annotated list with no override still warns.
 7. **The blocker title "Committed secrets detected"** — **CLOSED**. The title
@@ -88,6 +89,9 @@ in a comment.
 
 ## Open, still
 
-- Two consecutive clean review rounds to close Phase 1.
+None for Phase 1 exit. Two consecutive clean review rounds landed 2026-08-20
+at `cf9f200` (rounds 2–3 of that session; round 1 had findings that were fixed).
+Adversarial verifier SIGN OFF on the phase-1 acceptance module and `check.py
+--phase 1`. D-012 remains parked.
 
 J-1 (T2 fidelity) closed 2026-08-20, D-015 — `docs/j1-t2-fidelity-spike.md`.
