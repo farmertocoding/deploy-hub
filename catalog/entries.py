@@ -8,9 +8,9 @@ class CatalogEntry:
 
     id: str
     version: int
-    check: list[str]
-    fix: list[str]
-    rollback: list[str]
+    check: list[str] | list[list[str]]
+    fix: list[str] | list[list[str]]
+    rollback: list[str] | list[list[str]]
     os_variant: str = "ubuntu"
 
 
@@ -48,11 +48,15 @@ DOCKER_DAEMON_JSON = CatalogEntry(
 
 SSHD_DROPIN = CatalogEntry(
     id="sshd-dropin",
-    version=3,
+    version=4,
     check=["test", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
     fix=[
-        "sshd", "-t", "-f",
-        "/usr/local/share/hub-catalog/99-hub-hardening.conf",
+        ["sshd", "-t", "-f", "/usr/local/share/hub-catalog/99-hub-hardening.conf"],
+        [
+            "install", "-m", "0644",
+            "/usr/local/share/hub-catalog/99-hub-hardening.conf",
+            "/etc/ssh/sshd_config.d/99-hub-hardening.conf",
+        ],
     ],
     rollback=["rm", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
 )
@@ -89,18 +93,21 @@ UFW_POSTURE_INTAKE = CatalogEntry(
 
 FAIL2BAN_IGNOREIP = CatalogEntry(
     id="fail2ban-ignoreip",
-    version=3,
+    version=4,
     check=[
         "grep", "-E",
         "^ignoreip = 127.0.0.1/8 [^[:space:]]+",
         "/etc/fail2ban/jail.local",
     ],
     fix=[
-        "install", "-m", "0644",
-        "/usr/local/share/hub-catalog/jail.local",
-        "/etc/fail2ban/jail.local",
+        [
+            "install", "-m", "0644",
+            "/usr/local/share/hub-catalog/jail.local",
+            "/etc/fail2ban/jail.local",
+        ],
+        ["systemctl", "reload", "fail2ban"],
     ],
-    rollback=["fail2ban-client", "set", "sshd", "delignoreip"],
+    rollback=["fail2ban-client", "set", "sshd", "delignoreip", "100.64.1.1"],
 )
 
 CADDY = CatalogEntry(

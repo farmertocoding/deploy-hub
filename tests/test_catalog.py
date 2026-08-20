@@ -33,11 +33,15 @@ RELEASED = {
         "rollback": ["rm", "-f", "/etc/docker/daemon.json"],
     },
     "sshd-dropin": {
-        "version": 3,
+        "version": 4,
         "check": ["test", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
         "fix": [
-            "sshd", "-t", "-f",
-            "/usr/local/share/hub-catalog/99-hub-hardening.conf",
+            ["sshd", "-t", "-f", "/usr/local/share/hub-catalog/99-hub-hardening.conf"],
+            [
+                "install", "-m", "0644",
+                "/usr/local/share/hub-catalog/99-hub-hardening.conf",
+                "/etc/ssh/sshd_config.d/99-hub-hardening.conf",
+            ],
         ],
         "rollback": ["rm", "-f", "/etc/ssh/sshd_config.d/99-hub-hardening.conf"],
     },
@@ -66,18 +70,21 @@ RELEASED = {
         "rollback": ["ufw", "delete", "allow", "in", "on", "tailscale0"],
     },
     "fail2ban-ignoreip": {
-        "version": 3,
+        "version": 4,
         "check": [
             "grep", "-E",
             "^ignoreip = 127.0.0.1/8 [^[:space:]]+",
             "/etc/fail2ban/jail.local",
         ],
         "fix": [
-            "install", "-m", "0644",
-            "/usr/local/share/hub-catalog/jail.local",
-            "/etc/fail2ban/jail.local",
+            [
+                "install", "-m", "0644",
+                "/usr/local/share/hub-catalog/jail.local",
+                "/etc/fail2ban/jail.local",
+            ],
+            ["systemctl", "reload", "fail2ban"],
         ],
-        "rollback": ["fail2ban-client", "set", "sshd", "delignoreip"],
+        "rollback": ["fail2ban-client", "set", "sshd", "delignoreip", "100.64.1.1"],
     },
     "caddy": {
         "version": 1,
@@ -213,6 +220,12 @@ def test_intake_posture_is_tunnel_no_public_inbound():
     assert (intake.check, intake.fix) != (target.check, target.fix)
 
 
+def _tokens(field):
+    from catalog.apply import argv_steps
+
+    return [part for step in argv_steps(field) for part in step]
+
+
 @pytest.mark.req("HARD-R3-IGNOREIP")
 def test_fail2ban_ignoreip_argv_sets_ignoreip():
     """fail2ban-ignoreip fix must set ignoreip; rollback must not stop the jail.
@@ -223,40 +236,107 @@ def test_fail2ban_ignoreip_argv_sets_ignoreip():
     from catalog.entries import ENTRIES
 
     entry = ENTRIES["fail2ban-ignoreip"]
-    blob = " ".join(entry.check + entry.fix + entry.rollback)
+    blob = " ".join(_tokens(entry.check) + _tokens(entry.fix) + _tokens(entry.rollback))
     assert "ignoreip" in blob or "jail.local" in blob
-    assert "addignoreip" in entry.fix or any("jail.local" in part for part in entry.fix)
-    assert "disable" not in entry.rollback
+    assert any("jail.local" in part for part in _tokens(entry.fix))
+    assert "disable" not in _tokens(entry.rollback)
     assert "100.64.0.0/10" not in blob
     assert entry.fix != ["systemctl", "enable", "--now", "fail2ban"]
 
 
+@pytest.mark.req("HARD-R3-IGNOREIP")
+def test_fail2ban_ignoreip_fix_reloads_after_install():
+    """Installing jail.local must be followed by a fail2ban reload.
+
+    What would make this fail: install-only fix, or rollback without an IP.
+    """
+    from catalog.apply import argv_steps
+    from catalog.entries import ENTRIES
+
+    entry = ENTRIES["fail2ban-ignoreip"]
+    steps = argv_steps(entry.fix)
+    assert any("jail.local" in part for part in _tokens(entry.fix))
+    assert any(step[0] == "systemctl" and "reload" in step for step in steps)
+    rollback = _tokens(entry.rollback)
+    assert "disable" not in rollback
+    if "delignoreip" in rollback:
+        idx = rollback.index("delignoreip")
+        assert idx + 1 < len(rollback)
+        assert rollback[idx + 1] == "100.64.1.1"
+
+
 @pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
 def test_sshd_dropin_fix_validates_with_sshd_t():
-    """sshd-dropin fix must validate with sshd -t before touching the live path.
+    """sshd-dropin fix must validate with sshd -t before installing the live path.
 
-    What would make this fail: install-only fix argv with no sshd -t.
+    What would make this fail: install-only, or -t without a following install.
     """
+    from catalog.apply import argv_steps
     from catalog.entries import ENTRIES
 
     entry = ENTRIES["sshd-dropin"]
-    assert "sshd" in entry.fix
-    assert "-t" in entry.fix
-    assert "-f" in entry.fix
-    assert entry.fix[0] == "sshd"
+    steps = argv_steps(entry.fix)
+    t_i = next(i for i, step in enumerate(steps) if step[:1] == ["sshd"] and "-t" in step)
+    inst_i = next(i for i, step in enumerate(steps) if step[:1] == ["install"])
+    assert t_i < inst_i
+    assert "-f" in steps[t_i]
+    assert any("99-hub-hardening.conf" in part for part in steps[inst_i])
+
+
+@pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
+@pytest.mark.django_db
+def test_sshd_dropin_apply_runs_t_then_install():
+    """apply_entry runs sshd -t -f, then install. Flat argv stays one run.
+
+    What would make this fail: a single run of the whole nested list, or install first.
+    """
+    from catalog.apply import apply_entry
+    from catalog.entries import ENTRIES
+
+    target = _target()
+    entry = ENTRIES["sshd-dropin"]
+    transport = FakeTransport()
+    apply_entry(target, entry, transport)
+    runs = [payload for kind, payload in transport.mutating_calls() if kind == "run"]
+    assert runs[0][:3] == ["sshd", "-t", "-f"]
+    assert runs[1][0] == "install"
+    assert runs[0] != runs[1]
+
+
+@pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
+@pytest.mark.django_db
+def test_sshd_dropin_failed_t_does_not_install():
+    """A failing sshd -t must not run install (live drop-in stays untouched).
+
+    What would make this fail: apply_entry continuing the sequence after a red -t.
+    """
+    from catalog.apply import apply_entry
+    from catalog.entries import ENTRIES
+    from catalog.models import AppliedCatalogEntry
+
+    target = _target()
+    entry = ENTRIES["sshd-dropin"]
+    transport = FakeTransport(responses={"sshd": {"exit_code": 1}})
+    apply_entry(target, entry, transport)
+    runs = [payload for kind, payload in transport.mutating_calls() if kind == "run"]
+    assert runs == [["sshd", "-t", "-f", "/usr/local/share/hub-catalog/99-hub-hardening.conf"]]
+    assert AppliedCatalogEntry.objects.filter(target=target, entry_id=entry.id).count() == 0
 
 
 def test_fix_and_check_are_argv_lists():
-    """check/fix/rollback are argv lists, never interpolated shell strings.
+    """check/fix/rollback are argv lists, or a sequence of argv lists.
 
-    What would make this fail: a string command, or a one-element list whose
-    only item is a spaced shell string.
+    What would make this fail: a string command, a nested non-list, or a
+    one-element list whose only item is a spaced shell string.
     """
+    from catalog.apply import argv_steps
     from catalog.entries import CATALOG
 
     for entry in CATALOG:
         for field in (entry.check, entry.fix, entry.rollback):
             assert isinstance(field, list)
             assert field
-            assert all(isinstance(part, str) for part in field)
-            assert not (len(field) == 1 and " " in field[0])
+            for step in argv_steps(field):
+                assert step
+                assert all(isinstance(part, str) for part in step)
+                assert not (len(step) == 1 and " " in step[0])
