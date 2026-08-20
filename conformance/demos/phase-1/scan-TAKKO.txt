@@ -1,38 +1,36 @@
 modules: django
-summary: ✖ blocker:2  ⚠ warning:1  • advice:0  ▸ pending_sandbox:3  ✓ ok:17
+summary: ✖ blocker:2  ⚠ warning:0  • advice:0  ▸ pending_sandbox:3  ✓ ok:18
 
 ── BLOCKER (2)
-  ✖ core.secret-scan: Committed secrets detected
+  ✖ core.secret-scan: Secrets detected in the scanned tree
       docker/.env.prod: .env file present in the scan tree
-backend/.env: .env file present in the scan tree
-
-Also in test material (not blocking):
-backend/takko/marketplace/tests/test_preorders.py:236: [heuristic] hardcoded manage_token value
-backend/takko/accounts/tests/test_auth.py:7: [heuristic] hardcoded password value
-backend/takko/accounts/tests/test_demerits.py:16: [heuristic] hardcoded password value
-backend/takko/accounts/tests/test_passwords.py:14: [heuristic] hardcoded password value
-backend/takko/accounts/tests/test_passwords.py:15: [heuristic] hardcoded new_password value
-      fix: Move secrets to the vault / environment injection. A .env file in this tree ships with a deploy of it, and is a leak as well if it is committed — check `git status`, add .env to .gitignore, and rotate anything that was committed: it stays in git history until you do.
-
-[proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.
+      backend/.env: .env file present in the scan tree
+      
+      Also in test material (not blocking):
+      backend/takko/marketplace/tests/test_preorders.py:236: [heuristic] hardcoded manage_token value
+      backend/takko/accounts/tests/test_auth.py:7: [heuristic] hardcoded password value
+      backend/takko/accounts/tests/test_demerits.py:16: [heuristic] hardcoded password value
+      backend/takko/accounts/tests/test_passwords.py:14: [heuristic] hardcoded password value
+      backend/takko/accounts/tests/test_passwords.py:15: [heuristic] hardcoded new_password value
+      Fix: Move secrets to the vault / environment injection. A .env file in this tree ships with a deploy of it, and is a leak as well if it is committed — check `git status`, add .env to .gitignore, and rotate anything that was committed: it stays in git history until you do.
+      
+      [proof] lines matched a published credential format — a GitHub token, a PEM block, an AWS key id — and are not guesses. [heuristic] lines are a secret-shaped name assigned a high-entropy literal: real most of the time, and worth a look before you decide.
   ✖ django.secret-key-literal: Secret material is a literal in source
       config/settings/base.py: DEV_SECRET_KEY
-      fix: A secret in source sits in git history forever and in every clone. Read it from the environment instead — os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
-
-── WARNING (1)
-  ⚠ django.allowed-hosts: ALLOWED_HOSTS is empty or absent
-      No prod-reachable settings file sets ALLOWED_HOSTS.
-      fix: With DEBUG off, Django refuses every request when ALLOWED_HOSTS is empty — the site 500s the moment it goes live. Set ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',') and supply the domain via the wizard.
+      Fix: A secret in source sits in git history forever and in every clone. Read it from the environment instead — os.environ['DJANGO_SECRET_KEY'] — rotate the leaked value, and store the new one through the Hub vault.
 
 ── PENDING_SANDBOX (3)
   ▸ django.check-deploy: [sandbox] django.check-deploy
       Runs off-Hub (review3 §M1): python manage.py check --deploy
+      Fix: Django's own deploy checklist; needs the app importable, so sandbox.
   ▸ django.migrations-check: [sandbox] django.migrations-check
       Runs off-Hub (review3 §M1): python manage.py makemigrations --check --dry-run
+      Fix: Detects model changes missing a migration; imports the app, so sandbox.
   ▸ django.collectstatic: [sandbox] django.collectstatic
       Runs off-Hub (review3 §M1): python manage.py collectstatic --noinput --dry-run
+      Fix: Proves static collection succeeds before a deploy depends on it.
 
-── OK (17)
+── OK (18)
   ✓ core.lockfile: Dependency manifests are locked
   ✓ core.gitignore: .gitignore covers the basics
   ✓ core.tests-exist: Test files found
@@ -44,6 +42,8 @@ backend/takko/accounts/tests/test_passwords.py:15: [heuristic] hardcoded new_pas
       Found a settings/ package (base + per-environment modules).
   ✓ django.debug-hardcoded: DEBUG is not hardcoded True
       No prod-reachable settings file pins DEBUG = True.
+  ✓ django.allowed-hosts: ALLOWED_HOSTS is configured
+      Set (literal hosts or env-driven) in prod settings.
   ✓ django.db-engine: Database engine
       Engine: not declared in settings.
   ✓ django.static-root: STATIC_ROOT is set

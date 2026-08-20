@@ -935,6 +935,68 @@ def test_issue_r10_q1_a_looping_requirements_link_does_not_take_detection_down(t
     assert dj._read_contained(root, root / "requirements.txt") == ""
 
 
+def test_issue_takko_annotated_env_list_is_an_allowed_hosts_setting(tmp_path):
+    """TAKKO's real line, verbatim: `ALLOWED_HOSTS: list[str] = env.list(...)`.
+
+    `_top_assigns` walked only `ast.Assign`, so an annotated assignment was invisible
+    and django.allowed-hosts warned "empty or absent" about a site that sets hosts
+    from the environment — the check's own fix_hint. The warning trained operators
+    to ignore it on the one repo that already does what the hint asks.
+    """
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2.4\ndjango-environ==0.11.2\n")
+    (tmp_path / "settings.py").write_text(
+        "import environ\n"
+        "env = environ.Env()\n"
+        'ALLOWED_HOSTS: list[str] = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])\n'
+        "SECRET_KEY = env.str('DJANGO_SECRET_KEY')\n"
+        "STATIC_ROOT = '/srv/static'\n"
+    )
+    checks = _by_id(dj.module.checks(tmp_path))
+    assert checks["django.allowed-hosts"].tier == "ok"
+
+
+def test_issue_hrsaas_empty_base_overridden_in_prod_is_configured(tmp_path):
+    """hr-saas-starter: `ALLOWED_HOSTS: list[str] = []` in base.py and
+    `ALLOWED_HOSTS = os.environ["DJANGO_ALLOWED_HOSTS"].split(",")` in prod.py.
+
+    AnnAssign made the empty base visible; the check then warned on it even
+    though a prod-reachable file supplies the real value. An empty default that
+    prod overrides is the Django split-settings pattern, not an empty deploy.
+    """
+    cfg = tmp_path / "config" / "settings"
+    cfg.mkdir(parents=True)
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2.4\n")
+    (cfg / "__init__.py").write_text("")
+    (cfg / "base.py").write_text(
+        "ALLOWED_HOSTS: list[str] = []\n"
+        "SECRET_KEY = 'x'\n"
+        "STATIC_ROOT = '/srv/static'\n"
+    )
+    (cfg / "prod.py").write_text(
+        "from .base import *  # noqa\n"
+        'ALLOWED_HOSTS = os.environ["DJANGO_ALLOWED_HOSTS"].split(",")\n'
+    )
+    checks = _by_id(dj.module.checks(tmp_path))
+    assert checks["django.allowed-hosts"].tier == "ok"
+
+
+def test_issue_takko_an_empty_annotated_list_is_still_empty(tmp_path):
+    """The AnnAssign path is not a free pass: `ALLOWED_HOSTS: list[str] = []`
+    is still the empty-list warning the check exists for."""
+    (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
+    (tmp_path / "requirements.txt").write_text("Django==5.2.4\n")
+    (tmp_path / "settings.py").write_text(
+        "ALLOWED_HOSTS: list[str] = []\n"
+        "SECRET_KEY = 'x'\n"
+        "STATIC_ROOT = '/srv/static'\n"
+    )
+    checks = _by_id(dj.module.checks(tmp_path))
+    assert checks["django.allowed-hosts"].tier == "warning"
+    assert "ALLOWED_HOSTS = []" in checks["django.allowed-hosts"].detail
+
+
 def test_issue_r10_q1_the_looping_link_cannot_pin_or_version_the_repo(tmp_path):
     """…and the two verdicts those globs feed say what a repo with no readable
     requirements file says, rather than raising: `django.deps-pinned` reports the

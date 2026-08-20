@@ -203,7 +203,12 @@ def _prod_hard_fails_for(name, prod_union):
 
 
 def _top_assigns(text):
-    """Top-level `NAME = <value>` assignments of a settings file, via AST."""
+    """Top-level `NAME = <value>` assignments of a settings file, via AST.
+
+    Includes annotated assignments (`NAME: T = <value>`). TAKKO writes
+    `ALLOWED_HOSTS: list[str] = env.list(...)`; walking only `ast.Assign`
+    treated that as absent.
+    """
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -214,6 +219,10 @@ def _top_assigns(text):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     out[target.id] = node.value
+        elif (isinstance(node, ast.AnnAssign)
+              and isinstance(node.target, ast.Name)
+              and node.value is not None):
+            out[node.target.id] = node.value
     return out
 
 
@@ -591,15 +600,16 @@ class DjangoScannerModule:
         return results
 
     def _check_allowed_hosts(self, root, prod_texts):
-        seen, blank = False, []
+        blank, configured = [], False
         for path, text in prod_texts.items():
             val = _top_assigns(text).get("ALLOWED_HOSTS")
             if val is None:
                 continue
-            seen = True
             if isinstance(val, (ast.List, ast.Tuple)) and not val.elts:
                 blank.append(str(path.relative_to(root)))
-        if seen and not blank:
+            else:
+                configured = True
+        if configured:
             return CheckResult(id="django.allowed-hosts", tier="ok",
                                title="ALLOWED_HOSTS is configured",
                                detail="Set (literal hosts or env-driven) in prod settings.")

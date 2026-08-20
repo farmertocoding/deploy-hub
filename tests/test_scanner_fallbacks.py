@@ -122,6 +122,25 @@ def test_env_example_alone_is_clean():
     assert res.tier == "ok"
 
 
+def test_issue_n7_followup_the_blocker_title_does_not_claim_the_tree_is_git(tmp_path):
+    """N7 reworded the evidence lines so they no longer say 'committed'; the
+    blocker title still does. The scanner reads a tree and cannot see git — the
+    same fact the evidence-line test already pins. A title that overclaims
+    trains the operator the way a false evidence line does."""
+    (tmp_path / "settings.py").write_text(
+        "DEBUG = False\nAPI_KEY = \"9fj39fJ2kd93jdkQpz81\"\n")
+    res = by_id(fallbacks.common_checks(tmp_path), "core.secret-scan")
+    assert res.tier == "blocker"
+    assert "committed" not in res.title.lower()
+
+
+def test_issue_n7_followup_the_ok_title_does_not_claim_the_tree_is_git(tmp_path):
+    (tmp_path / "readme.txt").write_text("hello\n")
+    res = by_id(fallbacks.common_checks(tmp_path), "core.secret-scan")
+    assert res.tier == "ok"
+    assert "committed" not in res.title.lower()
+
+
 def test_high_entropy_assignment_is_a_blocker_with_file_and_line(tmp_path):
     (tmp_path / "settings.py").write_text(
         "DEBUG = False\nAPI_KEY = \"9fj39fJ2kd93jdkQpz81\"\n")

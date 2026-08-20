@@ -981,7 +981,7 @@ def _check_secret_scan(root, texts, skipped=()):
         )
         return core.CheckResult(
             id="core.secret-scan", tier="blocker",
-            title="Committed secrets detected",
+            title="Secrets detected in the scanned tree",
             detail=detail,
             fix_hint=_blocker_fix_hint(),
         )
@@ -1023,7 +1023,7 @@ def _check_secret_scan(root, texts, skipped=()):
                      "own account, since it is unusual in a repository.",
         )
     return core.CheckResult(id="core.secret-scan", tier="ok",
-                            title="No committed secrets found")
+                            title="No secrets found in the scanned tree")
 
 
 def _join_sections(*sections):

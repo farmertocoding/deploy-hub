@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "modules": [
     "node-ts"
   ],
@@ -7,7 +7,7 @@
     {
       "id": "core.secret-scan",
       "tier": "ok",
-      "title": "No committed secrets found",
+      "title": "No secrets found in the scanned tree",
       "detail": "",
       "fix_hint": "",
       "execution": "static"
@@ -330,7 +330,7 @@
     }
   ],
   "manifest_draft": {
-    "schema_version": 1,
+    "schema_version": 2,
     "components": {
       "service": {
         "kind": "node-ts",
