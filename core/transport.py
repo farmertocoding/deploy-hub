@@ -13,6 +13,10 @@ class Transport:
         """Run a command. argv is a list — never a shell string."""
         raise NotImplementedError
 
+    def probe(self, argv, *, timeout=60):
+        """Read-only inspect. argv is a list — never a shell string."""
+        raise NotImplementedError
+
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         """Deliver file content via SFTP-equivalent — never heredocs."""
         raise NotImplementedError
@@ -50,6 +54,15 @@ class FakeTransport(Transport):
             return CommandResult(argv)
         return CommandResult(argv, **canned)
 
+    def probe(self, argv, *, timeout=60):
+        if not isinstance(argv, (list, tuple)):
+            raise TypeError("argv must be a list — never a shell string (§4.5)")
+        self.calls.append(("probe", list(argv)))
+        canned = self.responses.get(argv[0])
+        if canned is None:
+            return CommandResult(argv)
+        return CommandResult(argv, **canned)
+
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         self.calls.append(("put", remote_path))
         self.files[remote_path] = local_path_or_bytes
@@ -73,6 +86,10 @@ class RecordingTransport(Transport):
     def run(self, argv, *, timeout=60):
         self.calls.append(("run", list(argv)))
         return self.inner.run(argv, timeout=timeout)
+
+    def probe(self, argv, *, timeout=60):
+        self.calls.append(("probe", list(argv)))
+        return self.inner.probe(argv, timeout=timeout)
 
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         self.calls.append(("put", remote_path))
