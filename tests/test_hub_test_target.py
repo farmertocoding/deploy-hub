@@ -1,8 +1,7 @@
 """T2: hub-test-target — real sshd, systemd PID 1, inner docker on vfs, no Hub sock.
 
-Live tests skip only when docker is missing. `make test` does not collect this
-file (see pytest_ignore_collect in conftest); `make test-t2` and an explicit
-path do.
+`make test` is `-m "not t2"` (T1-fast). The run-report records these nodeids as
+skipped. `make test-t2` runs the t2 mark. Live bodies skip only if docker is missing.
 """
 from __future__ import annotations
 
@@ -38,6 +37,12 @@ def _docker_available():
         timeout=15,
     )
     return probe.returncode == 0
+
+
+pytestmark = [
+    pytest.mark.t2,
+    pytest.mark.skipif(not _docker_available(), reason="docker is not available"),
+]
 
 
 def _docker(argv, *, stdin=None, timeout=60, check=False):
@@ -104,9 +109,6 @@ class HubTarget:
 @pytest.fixture(scope="session")
 def hub_target(tmp_path_factory):
     """One privileged systemd container. Does not bind the Hub docker.sock."""
-    if not _docker_available():
-        pytest.skip("docker is not available")
-
     home = tmp_path_factory.mktemp("t2-home")
     (home / ".ssh").mkdir()
     previous_home = os.environ.get("HOME")

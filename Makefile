@@ -109,17 +109,12 @@ dev:
 	docker compose up --build
 
 test:
-	pytest -q
+	pytest -q -m "not t2"
 
-# T2 live image tests (D-015). Named tests in tests/test_hub_test_target.py.
-# Not a review-round prerequisite: T1 must stay runnable without a VM/container.
+# T2 live image tests (D-015). Not a review-round prerequisite: T1 must stay
+# runnable without waiting on a container. Default `test` is `-m "not t2"`.
 test-t2:
-	pytest -q tests/test_hub_test_target.py::test_sshd_banner \
-		tests/test_hub_test_target.py::test_systemd_is_pid1_running \
-		tests/test_hub_test_target.py::test_sshd_t_and_dropin \
-		tests/test_hub_test_target.py::test_inner_docker_vfs_builds \
-		tests/test_hub_test_target.py::test_hub_docker_sock_not_bound \
-		tests/test_hub_test_target.py::test_ssh_transport_run_and_put_roundtrip
+	pytest -q -m t2
 
 test-frontend:
 	cd frontend && node --import tsx --test "tests/*.test.ts"

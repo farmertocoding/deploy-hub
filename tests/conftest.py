@@ -34,21 +34,11 @@ django.setup()
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-
-def pytest_ignore_collect(collection_path, config):
-    """T2 live image tests are collected only when explicitly targeted.
-
-    `make test` / lint-and-unit stay the T1 suite. `make test-t2` and
-    `pytest tests/test_hub_test_target.py` still collect them. This is
-    collection, not a skip: when docker is present and the file is targeted,
-    the live tests run.
-    """
-    path = pathlib.Path(collection_path)
-    if path.name != "test_hub_test_target.py":
-        return None
-    args = [str(a) for a in config.invocation_params.args]
-    targeted = any("test_hub_test_target" in pathlib.Path(a).as_posix() for a in args)
-    return not targeted
+# `make test` is `pytest -q -m "not t2"`. That deselects live-container tests so
+# lint-and-unit stays T1-fast, but the nodeids still exist in the suite: the
+# plugin records them as skipped so check.py never sees `not-collected` (R4-9).
+# The filter is the default T1 gate, not a narrowed run.
+_T2_DEFAULT_MARKEXPR = "not t2"
 
 # conformance/gates.py owns the gate machinery this plugin and the gate tests both read
 # (N1). `conformance/` deliberately has no __init__.py — it is not an importable package,
@@ -108,12 +98,21 @@ def pytest_runtest_logreport(report):
 # collection, so ini `addopts`, PYTEST_ADDOPTS, a plugin and a conftest hook are all
 # caught by the same rule.
 _DESELECTED = 0
+_DESELECTED_T2 = 0
 
 
 def pytest_deselected(items):
-    """Anything removed during collection narrows the run, whoever removed it."""
-    global _DESELECTED
+    """Record not-run collected items as skipped; count leftover narrowing."""
+    global _DESELECTED, _DESELECTED_T2
     _DESELECTED += len(items)
+    for item in items:
+        _OUTCOMES.setdefault(item.nodeid, "skipped")
+        if item.get_closest_marker("t2"):
+            _DESELECTED_T2 += 1
+
+
+def _normalized_markexpr(option):
+    return " ".join((getattr(option, "markexpr", "") or "").split())
 
 
 def _narrowing_reasons(config, exitstatus):
@@ -127,8 +126,9 @@ def _narrowing_reasons(config, exitstatus):
 
     if (getattr(option, "keyword", "") or "").strip():
         reasons.append(f"-k {option.keyword!r}")
-    if (getattr(option, "markexpr", "") or "").strip():
-        reasons.append(f"-m {option.markexpr!r}")
+    markexpr = _normalized_markexpr(option)
+    if markexpr and markexpr != _T2_DEFAULT_MARKEXPR:
+        reasons.append(f"-m {markexpr!r}")
     if getattr(option, "deselect", None):
         reasons.append(f"--deselect {list(option.deselect)}")
     if getattr(option, "file_or_dir", None):
@@ -142,8 +142,11 @@ def _narrowing_reasons(config, exitstatus):
     flag("collectonly", "--collect-only")
     if int(getattr(option, "maxfail", 0) or 0):
         reasons.append(f"--maxfail={option.maxfail}")
-    if _DESELECTED:
-        reasons.append(f"{_DESELECTED} test(s) deselected during collection")
+    extra_deselected = _DESELECTED
+    if markexpr == _T2_DEFAULT_MARKEXPR:
+        extra_deselected -= _DESELECTED_T2
+    if extra_deselected:
+        reasons.append(f"{extra_deselected} test(s) deselected during collection")
     # 0 = all passed, 1 = tests failed; anything else means the session was cut short.
     if int(exitstatus) not in (0, 1):
         reasons.append(f"session ended with exitstatus {int(exitstatus)}")

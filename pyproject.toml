@@ -10,6 +10,7 @@ testpaths = ["tests"]
 markers = [
     "acceptance(phase): phase acceptance test (review3 §Q4)",
     "req(id): ties a test to a conformance requirement id (review3 §Q2)",
+    "t2: live hub-test-target / sshd container tests (D-015)",
     "demo: clause verified by a recorded demo, not this test body",
     "flaky_quarantine: quarantined flaky test (cap: 5 — PROC-FLAKE-CAP)",
 ]

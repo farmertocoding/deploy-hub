@@ -770,12 +770,12 @@ def test_gamma():
 '''
 
 
-def run_child_pytest(tmp_path, *args, addopts=None):
+def run_child_pytest(tmp_path, *args, addopts=None, tests=None):
     """Run a pytest session in a scratch dir under the repo's run-report plugin."""
     tmp_path = pathlib.Path(tmp_path)
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "conftest.py").write_text(CHILD_CONFTEST.format(repo=str(REPO)))
-    (tmp_path / "test_child.py").write_text(CHILD_TESTS)
+    (tmp_path / "test_child.py").write_text(tests if tests is not None else CHILD_TESTS)
     report = tmp_path / "child-report.json"
     env = dict(os.environ, CONFORMANCE_RUN_REPORT=str(report), PYTHONPATH=str(REPO))
     env.pop("PYTEST_ADDOPTS", None)
@@ -803,8 +803,9 @@ def test_issue_f7_pytest_addopts_cannot_forge_a_full_run(tmp_path):
     assert len(full["outcomes"]) == 3, full["outcomes"]
 
     narrowed, proc2 = run_child_pytest(tmp_path / "k", addopts="-k alpha")
-    assert len(narrowed["outcomes"]) == 1, (
-        f"the fixture did not actually narrow the run:\n{proc2.stdout}")
+    assert narrowed["outcomes"]["test_child.py::test_alpha"] == "passed"
+    assert narrowed["outcomes"]["test_child.py::test_beta"] == "skipped"
+    assert narrowed["outcomes"]["test_child.py::test_gamma"] == "skipped"
     assert narrowed["full_run"] is False, (
         f'PYTEST_ADDOPTS="-k alpha" produced full_run={narrowed["full_run"]!r} over '
         f'{len(narrowed["outcomes"])} of 3 tests:\n{proc2.stdout}')
@@ -822,6 +823,89 @@ def test_issue_f7_pytest_addopts_cannot_forge_a_full_run(tmp_path):
     # A positional target on the command line was already caught; keep it caught.
     positional, _ = run_child_pytest(tmp_path / "pos", "test_child.py")
     assert positional["full_run"] is False
+
+
+CHILD_T2_TESTS = '''\
+import pytest
+
+
+def test_t1_unit():
+    assert True
+
+
+@pytest.mark.t2
+@pytest.mark.req("FIX-T2-LIVE")
+def test_t2_live():
+    assert True
+'''
+
+
+def test_t2_deselect_is_skipped_and_full_run(tmp_path):
+    """`make test` is `pytest -q -m "not t2"`. Deselected T2 nodeids must be skipped.
+
+    Uncollected req markers are red regardless of phase (R4-9). Recording the
+    T2 tests as skipped keeps SEC-68/SEC-B1 out of `not-collected`, and the
+    default T1 filter is not a narrowed run.
+    """
+    report, proc = run_child_pytest(
+        tmp_path / "not-t2", addopts='-m "not t2"', tests=CHILD_T2_TESTS)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert report["outcomes"]["test_child.py::test_t1_unit"] == "passed"
+    assert report["outcomes"]["test_child.py::test_t2_live"] == "skipped", (
+        f"T2 nodeid missing or not skipped (would be not-collected):\n{report}"
+    )
+    assert report["full_run"] is True, (
+        f"-m 'not t2' must still be a full T1 gating run:\n"
+        f"full_run={report['full_run']!r} narrowed_by={report.get('narrowed_by')}\n"
+        f"{proc.stdout}{proc.stderr}"
+    )
+
+
+def test_issue_r4_9_t2_skipped_sibling_does_not_uncollect(tmp_path):
+    """T1 pass + T2 skip on the same req is verified, not not-collected (SEC-68)."""
+    t2_src = (
+        "import pytest\n\n\n"
+        "@pytest.mark.t2\n"
+        '@pytest.mark.req("FIX-HOSTKEY")\n'
+        "def test_live():\n"
+        "    assert True\n"
+    )
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-HOSTKEY")],
+        tests_src={
+            "tests/test_unit.py": MARKED_TEST.format(rid="FIX-HOSTKEY", name="test_unit"),
+            "tests/test_live.py": t2_src,
+        },
+        outcomes={
+            "tests/test_unit.py::test_unit": "passed",
+            "tests/test_live.py::test_live": "skipped",
+        },
+    )
+    res = run_check(root)
+    assert res.returncode == 0, res.stdout
+    assert status_of(root, "FIX-HOSTKEY") == "verified"
+    assert "not-collected" not in res.stdout
+
+
+def test_issue_r4_9_t2_only_skipped_is_skipped_only_not_uncollected(tmp_path):
+    """A T2-only req recorded as skipped is skipped-only, never not-collected (SEC-B1)."""
+    t2_src = (
+        "import pytest\n\n\n"
+        "@pytest.mark.t2\n"
+        '@pytest.mark.req("FIX-OFFHUB")\n'
+        "def test_live():\n"
+        "    assert True\n"
+    )
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-OFFHUB")],
+        tests_src={"tests/test_live.py": t2_src},
+        outcomes={"tests/test_live.py::test_live": "skipped"},
+    )
+    res = run_check(root)
+    assert status_of(root, "FIX-OFFHUB") == "skipped-only"
+    assert "not-collected" not in res.stdout
 
 
 def test_issue_r7_registry_text_matches_what_the_declaration_tests_prove():
