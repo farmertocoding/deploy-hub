@@ -552,7 +552,7 @@ def _resolves_outside(root, path):
     reachable only for a symlink to a directory, which every reader in this repo then
     fails to read anyway. One answer, and it is the defensible one.
     """
-    resolved, root_resolved = Path(path).resolve(), Path(root).resolve()
+    resolved, root_resolved = Path(path).resolve(strict=True), Path(root).resolve()
     return resolved != root_resolved and root_resolved not in resolved.parents
 
 
@@ -796,16 +796,19 @@ def _shannon_entropy(value):
 def _looks_interpolation(value):
     """True when userinfo is a variable reference, not a literal password.
 
-    `redis://:{REDIS_PASSWORD}@host` (Python f-string) and `${VAR}` / `$VAR`
+    `redis://:{REDIS_PASSWORD}@host` (Python f-string) and `${VAR}` / `$ENV_NAME`
     (shell) put the variable's name in source. A committed credential is the
-    bytes themselves.
+    bytes themselves. `$SecurePass` is a working password: `$IDENT` without
+    env-var shape (underscore or all-caps) is not a template.
     """
     if value.startswith("${") and value.endswith("}") and value[2:-1].isidentifier():
         return True
     if value.startswith("{") and value.endswith("}") and value[1:-1].isidentifier():
         return True
-    if value.startswith("$") and value[1:].isidentifier():
-        return True
+    if value.startswith("$") and not value.startswith("${"):
+        ident = value[1:]
+        if ident.isidentifier() and ("_" in ident or ident.isupper()):
+            return True
     return False
 
 

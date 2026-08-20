@@ -721,8 +721,11 @@ def _undecodable_name_tree(tmp_path):
     (root / "Dockerfile").write_text(
         'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
     link = os.path.join(os.fsencode(str(root / "src")), CSI_BYTE_NAME)
-    os.symlink(os.path.relpath(os.fsencode(str(target)),
-                               os.fsencode(str(root / "src"))), link)
+    try:
+        os.symlink(os.path.relpath(os.fsencode(str(target)),
+                                   os.fsencode(str(root / "src"))), link)
+    except OSError as exc:
+        pytest.skip(f"this filesystem refuses a 0x9b filename: {exc}")
     assert any("\udc9b" in name for name in os.listdir(root / "src"))
     return root
 

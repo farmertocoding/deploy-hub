@@ -326,8 +326,11 @@ def test_issue_r19_sec_1_reach_b_a_committed_bare_byte_keeps_readiness_online(
     (root / "Dockerfile").write_text(
         'FROM python:3.12\nUSER app\nEXPOSE 8000\nCMD ["app"]\n', encoding="utf-8")
     link = os.path.join(os.fsencode(str(root / "src")), b"csi\x9bmark.ts")
-    os.symlink(os.path.relpath(os.fsencode(str(neighbour / "target.ts")),
-                               os.fsencode(str(root / "src"))), link)
+    try:
+        os.symlink(os.path.relpath(os.fsencode(str(neighbour / "target.ts")),
+                                   os.fsencode(str(root / "src"))), link)
+    except OSError as exc:
+        pytest.skip(f"this filesystem refuses a 0x9b filename: {exc}")
 
     report = scanner_core.scan(str(root))
     refused = [p for c in report["checks"] for p in (c.get("refused_paths") or [])]

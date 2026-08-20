@@ -512,11 +512,6 @@ def test_n7_a_url_format_comment_is_not_a_connection_string_credential(tmp_path)
     # A real one, in the same file: the template is still scanned, and a key pasted
     # into it is still a key.
     ("REDIS_URL=redis://:realS3cretPass@redis:6379/0", True),
-    # Hub settings and the fleet: an f-string / env interpolation is a template,
-    # not a committed password. `{REDIS_PASSWORD}` matched the userinfo group.
-    ('REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0"', False),
-    ("redis://:${REDIS_PASSWORD}@redis:6379/0", False),
-    ("redis://:$REDIS_PASSWORD@redis:6379/0", False),
     # A password with percent-ENCODED angle brackets is a valid URI and a working
     # credential — `%3C` contains no bare `<`, so the rule does not reach it.
     ("DATABASE_URL=postgres://app:S3cret%3CPass%3E@db:5432/app", True),
@@ -557,6 +552,25 @@ def test_n7_guard_the_angle_bracket_rule_is_an_rfc_3986_validity_test(
 # 6-character floor and `_looks_placeholder` — so both had the same shadowing behaviour;
 # only `finditer` makes any of them safe.
 
+@pytest.mark.parametrize("line,blocks", [
+    # Hub settings: an f-string / env interpolation is a template, not a password.
+    ('REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0"', False),
+    ("redis://:${REDIS_PASSWORD}@redis:6379/0", False),
+    ("redis://:$REDIS_PASSWORD@redis:6379/0", False),
+    # `$IDENT` without env-var shape is a working credential, not a template.
+    ("redis://:$SecurePass@redis:6379/0", True),
+    ("postgres://app:$Admin2024@db:5432/app", True),
+])
+def test_interpolation_userinfo_is_a_template_not_a_password(tmp_path, line, blocks):
+    """Braces and `$ENV_NAME` are variable references. `$SecurePass` is a password."""
+    root = _n7_tree(tmp_path, {"app/.env.prod.example": line + "\n"},
+                    name=str(abs(hash(line))))
+    result = _n7_secret_scan(root)
+    assert (result.tier == "blocker") is blocks, f"{line!r} -> {result.tier}"
+    if blocks:
+        assert "[proof] connection string" in result.detail
+
+
 @pytest.mark.parametrize("line", [
     # The demonstrated case: an angle-bracket documentation URL, then a real one.
     "DB=postgres://app:<REPLACE_ME>@db1 REAL=postgres://app:Tr0ub4dor3xK9@db2",
@@ -564,6 +578,8 @@ def test_n7_guard_the_angle_bracket_rule_is_an_rfc_3986_validity_test(
     "DB=postgres://app:changeme@db1 REAL=postgres://app:Tr0ub4dor3xK9@db2",
     # …and through the length floor.
     "DB=redis://:short@cache REAL=postgres://app:Tr0ub4dor3xK9@db2",
+    # A new veto must not end the search (N8, interpolation edition).
+    "DB=redis://:{REDIS_PASSWORD}@cache REAL=postgres://app:Tr0ub4dor3xK9@db2",
 ])
 def test_n8_a_vetoed_connection_string_does_not_shadow_a_real_one(tmp_path, line):
     """A veto excuses one match, not the rest of the line."""

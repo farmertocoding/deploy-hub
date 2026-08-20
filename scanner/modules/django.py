@@ -566,10 +566,14 @@ class DjangoScannerModule:
                 if not (name == "SECRET_KEY" or secretish or high_entropy):
                     continue
                 # N5 leftover: `_WEAK_SECRET_KEYS` matches SECRET and the name
-                # axis accepted any non-empty literal. A WEAK_* denylist of
-                # low-entropy placeholders is not a credential slot; a Fernet
-                # string on that name still has high_entropy and still blocks.
-                if "WEAK" in name and secretish and not high_entropy:
+                # axis accepted any non-empty literal. A WEAK_* denylist is a
+                # list/set/tuple of low-entropy placeholders, not a scalar
+                # credential slot (`WEAK_PASSWORD = "hunter2"`) and not a name
+                # that merely contains the letters WEAK (`UNWEAKENED_SECRET`).
+                # A Fernet string in the collection still has high_entropy
+                # and still blocks.
+                if (isinstance(val, (ast.List, ast.Set, ast.Tuple))
+                        and "WEAK" in name and secretish and not high_entropy):
                     continue
                 label = f"{path.relative_to(root)}: {name}"
                 if high_entropy and not secretish and name != "SECRET_KEY":

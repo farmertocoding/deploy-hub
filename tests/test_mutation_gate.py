@@ -309,6 +309,8 @@ def test_the_cache_watches_every_file_the_sandbox_can_read():
     # The fixture repo the phase-1 acceptance tier scans off disk, which is not Python at
     # all — the reason the watch set is "files in the sandbox" rather than "modules".
     for path in sorted((REPO / "sample-node-site").rglob("*")):
+        if path.name == ".DS_Store":
+            continue
         if path.is_file():
             assert path.relative_to(REPO).as_posix() in watched, path
 

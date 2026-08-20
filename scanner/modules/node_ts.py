@@ -285,7 +285,7 @@ def _symlink_escape_problem(root, path, kind):
     except ValueError:                                            # pragma: no cover
         rel = _quote_pattern(str(path))
     try:
-        path.resolve()
+        path.resolve(strict=True)
         Path(root).resolve()
     except (OSError, RuntimeError) as exc:
         return (f"symlinked {kind} {rel} could not be resolved "

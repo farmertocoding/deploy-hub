@@ -688,6 +688,37 @@ def test_n5_a_weak_secret_keys_denylist_is_not_committed_material(tmp_path):
 
 
 @pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_a_weak_named_scalar_password_still_blocks(tmp_path):
+    """The denylist skip is the collection shape, not the substring `WEAK`.
+
+    `WEAK_PASSWORD = "hunter2"` is a credential slot the name axis exists to
+    catch. `"WEAK" in name` excused it because the skip did not require a
+    list/set/tuple of low-entropy members.
+    """
+    root = _proj(
+        tmp_path,
+        base_body="WEAK_PASSWORD = 'hunter2'\n",
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "WEAK_PASSWORD" in checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
+def test_n5_weak_as_a_substring_of_a_real_secret_name_still_blocks(tmp_path):
+    """`UNWEAKENED_SECRET` contains the letters WEAK and the token SECRET."""
+    root = _proj(
+        tmp_path,
+        base_body="UNWEAKENED_SECRET = 'admin123'\n",
+        prod_body="from .base import *  # noqa\nDEBUG = False\n",
+    )
+    checks = _tiers(root)
+    assert checks["django.secret-key-literal"].tier == "blocker"
+    assert "UNWEAKENED_SECRET" in checks["django.secret-key-literal"].detail
+
+
+@pytest.mark.req("SCAN-D008-DEV-FALLBACK-TIER")
 def test_n5_a_high_entropy_literal_on_a_weak_named_setting_still_blocks(tmp_path):
     """The denylist skip is not a free pass: a WEAK_* name holding a Fernet
     string is committed key material."""
