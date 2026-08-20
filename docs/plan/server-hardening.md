@@ -14,6 +14,18 @@ For the Ubuntu servers in the **web deploy automation & monitor** fleet. Derived
 | `hub-upgrade.sh` | the Hub host only | Safe upgrade of the Hub itself: drain-check → DB backup → build → migrate → warm restart → smoke test, with `--rollback`. |
 | `server-watch.sh` | every server, cron | Interim fleet alerting (pre-Hub): publishes failures to the ntfy pager channel — delivered with a **distinct per-server ntfy publish token** (review3 §V8/§M3), so a compromised host is identifiable and revocable. |
 
+### Script ↔ catalog id
+
+Scripts are the pre-Hub interim of these catalog ids (Task 5). Script files land in Task 6.
+
+| Script | Catalog ids |
+|---|---|
+| `scripts/harden-ubuntu.sh` | ntp-chrony, log-rotation, docker-daemon-json, sshd-dropin, ufw-posture-hub, ufw-posture-target, ufw-posture-intake, fail2ban-ignoreip, caddy |
+| `scripts/update-cloudflare-ufw.sh` | ufw-posture-target |
+| `scripts/verify-hardening.sh` | check argv of every id above |
+| `scripts/hub-upgrade.sh` | (Task 19) |
+| `scripts/server-watch.sh` | — |
+
 Quick start on a fresh Ubuntu server:
 
 **UPDATE 2026-08-02 (review3): run order reordered per §V2 — join the mesh FIRST, then harden.** The previous order ran `harden-ubuntu.sh` (default-deny; hub profile allows only `tailscale0`) before `tailscale up` — on a remote fresh server reached over public SSH, enabling that firewall off-mesh cuts the only access path: the §6.6 "sshd -t first" failure class at the firewall layer. So: install + `tailscale up` + verify mesh SSH **first**, then run hardening. `harden-ubuntu.sh` now also encodes this as a guard (mirroring the authorized_keys one): it **refuses the tailscale0-only firewall posture unless `tailscale status` shows the mesh up and the current session (or a verified second path) rides it.**
