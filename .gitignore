@@ -14,3 +14,29 @@ dump.rdb
 # the mutation gate's working copy of the tree (spec-mutation-gate.md); mutmut writes
 # the mutated sources and its per-mutant results here, and it is a cache, not evidence.
 mutants/
+
+.DS_Store
+.stage-tmp/
+_to_delete/
+*.bundle
+*.bundle.*
+
+# Unpacked Project-knowledge export left at repo root. Canonical plan docs are
+# docs/plan/; these copies are not the source of truth.
+/MANIFEST.md
+/SHA256SUMS
+/sync-plan-docs.sh
+/alert-protocol.md
+/build-process.md
+/cloudflare-setup.md
+/deploy-system-plan.md
+/phase-0-build-record.md
+/phase-0-design-note.md
+/phase-0_5-spike-record.md
+/phase-1-build-record.md
+/plan-addendum-2026-07-30.md
+/plan-addendum-2026-08-02-review3.md
+/plan-addendum-2026-08-02-scanner-node-ts.md
+/research-control-plane-security.md
+/server-hardening.md
+/spec-gate-integrity-r4-8-r4-9.md
