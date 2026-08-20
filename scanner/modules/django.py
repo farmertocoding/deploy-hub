@@ -565,6 +565,12 @@ class DjangoScannerModule:
                 high_entropy = any(len(s) >= 24 and _shannon(s) > 4.0 for s in literals)
                 if not (name == "SECRET_KEY" or secretish or high_entropy):
                     continue
+                # N5 leftover: `_WEAK_SECRET_KEYS` matches SECRET and the name
+                # axis accepted any non-empty literal. A WEAK_* denylist of
+                # low-entropy placeholders is not a credential slot; a Fernet
+                # string on that name still has high_entropy and still blocks.
+                if "WEAK" in name and secretish and not high_entropy:
+                    continue
                 label = f"{path.relative_to(root)}: {name}"
                 if high_entropy and not secretish and name != "SECRET_KEY":
                     label += " (high-entropy literal)"
