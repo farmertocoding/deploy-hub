@@ -85,8 +85,9 @@ convergence per §4.
 - **D-005** manifest storage: JSONField on Project vs dedicated Manifest model —
   Architect leans JSONField (pydantic-validated, schema_version'd) until Phase 2
   tables exist; revisit at Phase 2 design note.
-- **J-1** (carried from Phase 0, still open): T2 integration-tier fidelity spike —
-  schedule inside Phase 1 week as the half-day it was always budgeted.
+- **J-1** (carried from Phase 0): **closed 2026-08-20, D-015.** T2 = sshd+systemd
+  container with inner docker on vfs; Multipass is not needed sooner. Record:
+  `docs/j1-t2-fidelity-spike.md`.
 
 ## 6. Out of scope (explicitly)
 

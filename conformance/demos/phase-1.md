@@ -81,5 +81,6 @@ in a comment.
 
 ## Open, still
 
-- J-1 T2 fidelity spike (addendum §J.1), still the half-day it was budgeted.
 - Two consecutive clean review rounds to close Phase 1.
+
+J-1 (T2 fidelity) closed 2026-08-20, D-015 — `docs/j1-t2-fidelity-spike.md`.
