@@ -87,3 +87,10 @@ def test_core_stays_free_of_scanner():
     dependency in every app, which is the exact mechanism the test above guards."""
     path = _reaches("core", "scanner")
     assert path is None, "core reaches scanner via: " + " -> ".join(path or [])
+
+
+@pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
+def test_reconcile_never_imports_scanner():
+    """Reconciler shares deploys.steps; it must not grow a scanner edge either."""
+    path = _reaches("reconcile", "scanner")
+    assert path is None, "reconcile reaches scanner via: " + " -> ".join(path or [])

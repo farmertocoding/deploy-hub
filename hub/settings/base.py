@@ -187,6 +187,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "deploys.tasks.poll_git",
         "schedule": 120.0,
     },
+    "reconcile-tick-all": {
+        "task": "reconcile.tasks.tick_all",
+        "schedule": 90.0,
+    },
 }
 
 LOGGING = {
