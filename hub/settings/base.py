@@ -176,11 +176,16 @@ CELERY_TASK_ROUTES = {
     "monitor.*": {"queue": "probes"},
     "reconcile.*": {"queue": "probes"},
     "scaling.*": {"queue": "control"},
+    "deploys.tasks.poll_git": {"queue": "probes"},
 }
 CELERY_BEAT_SCHEDULE = {
     "sweep-stale-deployments": {
         "task": "deploys.tasks.sweep_stale_deployments",
         "schedule": 30.0,
+    },
+    "poll-git-heads": {
+        "task": "deploys.tasks.poll_git",
+        "schedule": 120.0,
     },
 }
 
