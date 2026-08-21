@@ -52,6 +52,11 @@ class PipelineTransport(FakeTransport):
             return self._inspect_container(argv)
         if argv and argv[0] == "curl":
             return self._curl_probe(argv)
+        if argv[:2] == ["test", "-f"] and len(argv) >= 3:
+            path = argv[2]
+            if path in self.files:
+                return CommandResult(argv, exit_code=0)
+            return CommandResult(argv, exit_code=1, stderr="No such file")
         return CommandResult(argv)
 
     def run(self, argv, *, timeout=60):

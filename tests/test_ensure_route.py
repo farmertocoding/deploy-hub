@@ -165,3 +165,28 @@ def test_second_route_zero_mutating_calls():
     probes = [(kind, argv) for kind, argv in transport.calls if kind == "probe"]
     assert probes
     assert all(kind == "probe" for kind, argv in probes)
+
+
+@pytest.mark.req("REL-P4-ARTIFACT-SNAPSHOTS")
+def test_overlay_caddy_route_is_put_not_derived():
+    """desired['caddy_route'] is PUT even when it differs from _caddy_route(body).
+
+    What would make this fail: ensure_route_tls re-deriving listen/upstreams from
+    the current body and ignoring the overlay JSON.
+    """
+    from deploys.steps import _caddy_route, ensure_route_tls
+
+    transport = RouteTransport()
+    desired = _desired(transport)
+    derived = _caddy_route(desired, ROUTE_ID)
+    overlay = dict(derived)
+    overlay["listen"] = ["127.0.0.1:9999"]
+    desired["caddy_route"] = json.dumps(
+        overlay, sort_keys=True, separators=(",", ":"),
+    )
+    assert overlay != derived
+
+    ensure_route_tls(desired)
+    put = _put_json(transport)
+    assert put["listen"] == ["127.0.0.1:9999"]
+    assert put["listen"] != derived.get("listen")

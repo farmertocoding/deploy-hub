@@ -37,7 +37,7 @@ def ensure_build(desired):
     if _image_present(transport, tag):
         return {"status": "skipped", "tag": tag}
 
-    archive = _context_tar(desired["source_dir"], _dockerfile_from_body(body))
+    archive = _context_tar(desired["source_dir"], _applied_dockerfile(desired))
     remote = desired.get("remote_context") or f"/tmp/hub-build/{tag}"
     tar_remote = f"{remote}.tar"
     heartbeat = desired.get("heartbeat")
@@ -296,6 +296,9 @@ def _exposure(desired):
 
 
 def _desired_dns_records(desired):
+    overlay = _overlay_json(desired.get("dns_set"))
+    if isinstance(overlay, list) and overlay:
+        return overlay
     domain = desired.get("domain")
     site = desired.get("site")
     if not domain and site is not None:
@@ -326,6 +329,9 @@ def _persist_dns_rows(desired, records):
 
 
 def _caddy_route(desired, route_id):
+    overlay = _overlay_json(desired.get("caddy_route"))
+    if isinstance(overlay, dict) and overlay:
+        return overlay
     body = desired.get("manifest_body") or {}
     override = desired.get("caddy_listen") or body.get("caddy_listen")
     if override:
@@ -601,6 +607,26 @@ def _run(transport, argv, heartbeat=None, timeout=3600):
         return transport.run(argv, timeout=timeout)
     finally:
         done.set()
+
+
+def _overlay_json(raw):
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, (dict, list)):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _applied_dockerfile(desired):
+    overlay = desired.get("dockerfile")
+    if overlay:
+        return overlay
+    return _dockerfile_from_body(desired.get("manifest_body") or {})
 
 
 def _dockerfile_from_body(manifest_body):

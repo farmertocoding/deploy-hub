@@ -72,20 +72,32 @@ def release_deploy_locks(deployment):
 
 def touch_heartbeat(deployment):
     """Stamp Deployment.last_heartbeat; also touch held OperationLock rows."""
-    from django.db import close_old_connections
+    from django.db import close_old_connections, connection
     from django.db.utils import OperationalError
 
     now = timezone.now()
     try:
-        Deployment.objects.filter(pk=deployment.pk).update(last_heartbeat=now)
-        deployment.last_heartbeat = now
-        holder = str(deployment.pk)
-        site = deployment.manifest.site
-        locks.heartbeat("site", site.pk, "deploy", holder=holder)
-        if site.primary_target_id:
-            locks.heartbeat("target", site.primary_target_id, "deploy", holder=holder)
+        _write_heartbeat(deployment, now)
     except OperationalError:
+        if connection.vendor != "sqlite":
+            raise
         close_old_connections()
+        try:
+            _write_heartbeat(deployment, now)
+        except OperationalError:
+            if connection.vendor != "sqlite":
+                raise
+            close_old_connections()
+
+
+def _write_heartbeat(deployment, now):
+    Deployment.objects.filter(pk=deployment.pk).update(last_heartbeat=now)
+    deployment.last_heartbeat = now
+    holder = str(deployment.pk)
+    site = deployment.manifest.site
+    locks.heartbeat("site", site.pk, "deploy", holder=holder)
+    if site.primary_target_id:
+        locks.heartbeat("target", site.primary_target_id, "deploy", holder=holder)
 
 
 def load_env_snapshot(deployment):
@@ -385,10 +397,13 @@ def _dispatch_step(deployment, step, desired):
 
 
 def _snapshot_and_runbook(deployment, desired):
-    if deployment.text_artifacts.exists():
-        return
     from deploys.artifacts import snapshot_artifacts
     from deploys.breakglass import write_runbook
+
+    if not deployment.text_artifacts.exists():
+        snapshot_artifacts(desired)
+    if _runbook_present(desired):
+        return
 
     slug = desired["site_slug"]
     path = f"/srv/sites/{slug}"
@@ -397,10 +412,15 @@ def _snapshot_and_runbook(deployment, desired):
     if not made.ok:
         transport.run(["sudo", "mkdir", "-p", path])
         transport.run(["sudo", "chown", f"{_ssh_user(transport)}:{_ssh_user(transport)}", path])
-    snapshot_artifacts(desired)
     runbook = f"{path}/BREAK-GLASS.md"
     transport.run(["chmod", "u+w", runbook])
     write_runbook(desired)
+
+
+def _runbook_present(desired):
+    transport = desired["transport"]
+    path = f"/srv/sites/{desired['site_slug']}/BREAK-GLASS.md"
+    return transport.probe(["test", "-f", path]).ok
 
 
 def _ssh_user(transport):

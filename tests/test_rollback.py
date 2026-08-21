@@ -111,3 +111,96 @@ def test_rollback_does_not_remove_named_volume():
     original.refresh_from_db()
     assert original.status == Deployment.Status.SUCCEEDED
     assert original.steps.filter(status=DeploymentStep.Status.SUCCEEDED).count() == 9
+
+
+@pytest.mark.req("REL-P4-ARTIFACT-SNAPSHOTS")
+def test_rollback_overlay_dockerfile_is_what_gets_built():
+    """Rollback packs snapshot dockerfile bytes, not a body re-generation.
+
+    What would make this fail: _assemble_desired copying the overlay while
+    ensure_build still tars _dockerfile_from_body(body).
+    """
+    import io
+    import tarfile
+
+    from deploys.pipeline import rollback
+    from deploys.steps import _dockerfile_from_body
+
+    _site, original, transport, dns = _deploy("rb-df")
+    generated = _dockerfile_from_body(original.manifest.body or {})
+    overlay = "FROM alpine:3.20\n# rollback-snapshot-bytes\n"
+    assert overlay != generated
+
+    row = DeploymentArtifact.objects.get(deployment=original, kind="dockerfile")
+    row.content = overlay
+    row.save(update_fields=["content"])
+
+    transport.images.clear()
+    transport.calls.clear()
+    rollback(original.pk, transport=transport, dns=dns)
+
+    packed = None
+    for kind, remote in transport.calls:
+        if kind != "put":
+            continue
+        payload = transport.files.get(remote)
+        if not isinstance(payload, (bytes, bytearray)):
+            continue
+        try:
+            with tarfile.open(fileobj=io.BytesIO(payload), mode="r") as tf:
+                member = tf.extractfile("Dockerfile") or tf.extractfile("./Dockerfile")
+                if member is not None:
+                    packed = member.read().decode()
+                    break
+        except tarfile.TarError:
+            continue
+    assert packed == overlay
+    assert "npm ci" not in packed
+
+
+@pytest.mark.req("SEC-P5-BREAK-GLASS")
+@pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
+def test_cutover_writes_runbook_when_artifacts_exist_but_remote_missing():
+    """Resume after a failed runbook put still writes the remote 0400 file.
+
+    What would make this fail: text_artifacts.exists() returning before
+    write_runbook when BREAK-GLASS.md is not on the target.
+    """
+    from deploys.pipeline import _assemble_desired, _snapshot_and_runbook
+
+    site, deployment, transport, dns = _deploy("rb-rbk")
+    assert deployment.text_artifacts.exists()
+    runbook = f"/srv/sites/{site.name}/BREAK-GLASS.md"
+    assert runbook in transport.files
+    transport.files.pop(runbook)
+    transport.calls.clear()
+
+    desired = _assemble_desired(
+        deployment, transport=transport, dns=dns, sleep=None,
+    )
+    _snapshot_and_runbook(deployment, desired)
+
+    assert runbook in transport.files
+    assert any(
+        kind == "put" and remote == runbook
+        for kind, remote in transport.mutating_calls()
+    )
+    assert deployment.text_artifacts.count() == 5
+
+
+@pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
+def test_cutover_second_skip_when_snapshot_and_runbook_landed():
+    """When artifacts and the remote runbook are both present, cutover is silent.
+
+    What would make this fail: mkdir/chmod/put on a second cutover that already
+    landed both, so T1 second-deploy mutating_calls is never empty.
+    """
+    from deploys.pipeline import _assemble_desired, _snapshot_and_runbook
+
+    _site, deployment, transport, dns = _deploy("rb-both")
+    transport.calls.clear()
+    desired = _assemble_desired(
+        deployment, transport=transport, dns=dns, sleep=None,
+    )
+    _snapshot_and_runbook(deployment, desired)
+    assert transport.mutating_calls() == []

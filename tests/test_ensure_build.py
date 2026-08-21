@@ -239,3 +239,28 @@ def test_generated_dockerfile_uses_npm_ci_or_hashed_pip(tmp_path):
     py_df = _tar_text(_put_bytes(py_transport), "Dockerfile")
     assert "pip install --require-hashes" in py_df
     assert "npm install" not in py_df
+
+
+@pytest.mark.req("REL-P4-ARTIFACT-SNAPSHOTS")
+def test_overlay_dockerfile_is_packed_not_body_template(tmp_path):
+    """desired['dockerfile'] is packed even when it differs from body generation.
+
+    What would make this fail: ensure_build still tarring _dockerfile_from_body(body)
+    while the overlay holds snapshot bytes.
+    """
+    from deploys.steps import _dockerfile_from_body, ensure_build
+
+    body = {"runtime": "node"}
+    generated = _dockerfile_from_body(body)
+    overlay = "FROM alpine:3.20\n# rollback-snapshot-bytes\n"
+    assert overlay != generated
+    assert "npm ci" in generated
+
+    transport = StepTransport()
+    desired = _desired(_source_tree(tmp_path), transport, body=body)
+    desired["dockerfile"] = overlay
+    ensure_build(desired)
+
+    packed = _tar_text(_put_bytes(transport), "Dockerfile")
+    assert packed == overlay
+    assert "npm ci" not in packed

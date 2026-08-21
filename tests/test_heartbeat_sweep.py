@@ -239,3 +239,65 @@ def test_sweep_does_not_clobber_superseded(monkeypatch):
         assert row.pk not in result["aborted"]
     assert queued == []
     assert resumable.last_heartbeat == stale_at
+
+
+@pytest.mark.req("REL-C1-HEARTBEAT-SWEEP")
+def test_touch_heartbeat_swallows_sqlite_operational_error(monkeypatch):
+    """SQLite table-lock during a pulse is closed and swallowed.
+
+    What would make this fail: letting OperationalError escape on sqlite, or
+    treating every backend as sqlite.
+    """
+    from django.db import connection
+    from django.db.utils import OperationalError
+
+    from deploys.pipeline import touch_heartbeat
+
+    deployment = _running_deployment(
+        slug="hb-sqlite",
+        heartbeat=timezone.now(),
+        step_statuses={"build": DeploymentStep.Status.RUNNING},
+    )
+
+    class BoomQS:
+        def update(self, **_kw):
+            raise OperationalError("database table is locked")
+
+    class BoomManager:
+        def filter(self, **_kw):
+            return BoomQS()
+
+    monkeypatch.setattr("deploys.pipeline.Deployment.objects", BoomManager())
+    monkeypatch.setattr(connection, "vendor", "sqlite")
+    touch_heartbeat(deployment)
+
+
+@pytest.mark.req("REL-C1-HEARTBEAT-SWEEP")
+def test_touch_heartbeat_reraises_postgres_operational_error(monkeypatch):
+    """A failed pulse on Postgres must raise so the sweep can see a miss, not silence.
+
+    What would make this fail: catching OperationalError for every vendor.
+    """
+    from django.db import connection
+    from django.db.utils import OperationalError
+
+    from deploys.pipeline import touch_heartbeat
+
+    deployment = _running_deployment(
+        slug="hb-pg",
+        heartbeat=timezone.now(),
+        step_statuses={"build": DeploymentStep.Status.RUNNING},
+    )
+
+    class BoomQS:
+        def update(self, **_kw):
+            raise OperationalError("connection already closed")
+
+    class BoomManager:
+        def filter(self, **_kw):
+            return BoomQS()
+
+    monkeypatch.setattr("deploys.pipeline.Deployment.objects", BoomManager())
+    monkeypatch.setattr(connection, "vendor", "postgresql")
+    with pytest.raises(OperationalError):
+        touch_heartbeat(deployment)

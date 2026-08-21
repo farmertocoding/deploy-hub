@@ -1,4 +1,6 @@
 """ensure_dns: mesh_only skips; public list-then-diff upsert (D6)."""
+import json
+
 import pytest
 
 from core.transport import FakeTransport
@@ -149,3 +151,31 @@ def test_second_dns_zero_mutating_calls():
     assert dns.upserts == []
     assert "upsert" not in dns.ops
     assert transport.mutating_calls() == []
+
+
+@pytest.mark.req("REL-P4-ARTIFACT-SNAPSHOTS")
+def test_overlay_dns_set_is_upserted_not_derived():
+    """desired['dns_set'] is upserted even when it differs from body generation.
+
+    What would make this fail: ensure_dns still calling _desired_dns_records from
+    domain/dns_values and ignoring the overlay JSON.
+    """
+    from deploys.steps import ensure_dns
+
+    dns = CountingDns()
+    overlay = [{
+        "name": "other.example.com",
+        "rtype": "A",
+        "values": ["9.9.9.9"],
+        "proxied": False,
+    }]
+    desired = _desired(dns)
+    desired["dns_set"] = json.dumps(overlay)
+    ensure_dns(desired)
+
+    assert dns.upserts
+    hit = dns.upserts[0]
+    assert hit["name"] == "other.example.com"
+    assert hit["values"] == ["9.9.9.9"]
+    assert hit["proxied"] is False
+    assert hit["name"] != DOMAIN
