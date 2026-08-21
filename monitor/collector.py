@@ -45,7 +45,7 @@ def collect(target, transport, *, now=None, sleep=None, tick_started=None, monot
     ensure_hub_dir(transport, user)
     remote = hub_join("collect-once", ssh_user=user)
     transport.put(_SCRIPT_PATH.read_bytes(), remote, mode=0o700)
-    result = transport.probe([remote, str(tid)])
+    result = transport.probe([remote, str(tid), str(_stored_offset(target))])
     if not result.ok:
         raise RuntimeError(result.stderr or "collector script failed")
     payload = json.loads(result.stdout)
@@ -53,4 +53,38 @@ def collect(target, transport, *, now=None, sleep=None, tick_started=None, monot
     payload["schema_version"] = SCHEMA_VERSION
     if now is not None:
         payload["ts"] = now.isoformat() if hasattr(now, "isoformat") else str(now)
+    _persist_collect(target, payload)
     return payload
+
+
+def _stored_offset(target):
+    raw = getattr(target, "collect_log_offset", None)
+    if raw in (None, ""):
+        return 0
+    return int(raw)
+
+
+def _persist_collect(target, payload):
+    """Remember inode/offset and the JSON so the reconciler can ride this minute."""
+    chunk = payload.get("log_chunk") or {}
+    try:
+        inode = int(chunk.get("inode") or 0)
+    except (TypeError, ValueError):
+        inode = 0
+    try:
+        offset = int(chunk.get("offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
+    target.collect_log_inode = inode
+    target.collect_log_offset = offset
+    target.collect_payload = payload
+    from django.db.models import Model
+    from django.utils import timezone
+
+    collected_at = timezone.now()
+    target.collect_at = collected_at
+    if not isinstance(target, Model):
+        return
+    target.save(update_fields=[
+        "collect_log_inode", "collect_log_offset", "collect_payload", "collect_at",
+    ])

@@ -17,7 +17,10 @@ def run_backup(unit, *, plaintext=None, transport=None):
         dump = _collect(unit, plaintext=plaintext, transport=transport)
         key_row = _ensure_backup_key(unit.site)
         key = service.get(key_row, reason="site-backup")
-        return vault_backup.seal(dump, key)
+        aad = Secret.build_aad(
+            Secret.Kind.BACKUP_KEY, "site", str(unit.site_id),
+        )
+        return vault_backup.seal(dump, key, aad=aad)
     except Exception:
         from core.audit import audit
 

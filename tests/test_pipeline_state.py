@@ -284,3 +284,35 @@ def test_execute_stops_when_superseded(monkeypatch):
         status=DeploymentStep.Status.PENDING,
     ).count() == 8
     assert deployment.steps.get(name="build").status == DeploymentStep.Status.SUCCEEDED
+
+
+@pytest.mark.req("REL-A5-POSTGRES-LOCKS")
+@pytest.mark.req("REL-P3-RESUMABLE-DEPLOYS")
+def test_execute_releases_lock_if_post_success_save_raises(monkeypatch):
+    """try/finally must drop deploy locks even if work after SUCCEEDED save raises.
+
+    What would make this fail: releasing only on the happy return path, so a
+    boom after status=succeeded leaves the site deploy lock held forever.
+    """
+    from pipeline_fakes import PipelineTransport, queued_deployment
+
+    from core.models import OperationLock
+    from deploys.pipeline import execute
+    from providers.fakes import FakeDnsProvider
+
+    _site, deployment = queued_deployment("lock-finally")
+    real_save = Deployment.save
+
+    def save(self, *args, **kwargs):
+        real_save(self, *args, **kwargs)
+        if self.status == Deployment.Status.SUCCEEDED:
+            raise RuntimeError("post-success")
+
+    monkeypatch.setattr(Deployment, "save", save)
+    with pytest.raises(RuntimeError, match="post-success"):
+        execute(
+            deployment.pk, transport=PipelineTransport(), dns=FakeDnsProvider(),
+        )
+    assert not OperationLock.objects.filter(
+        kind=OperationLock.Kind.DEPLOY, holder=str(deployment.pk),
+    ).exists()

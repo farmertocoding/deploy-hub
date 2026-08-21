@@ -288,7 +288,7 @@ def ensure_cutover(desired):
         raise RuntimeError("cutover refused: not ready")
     transport = desired["transport"]
     old = desired.get("old_container")
-    if old:
+    if old and _container_running(transport, old) is not False:
         result = _run(transport, ["docker", "stop", old], desired.get("heartbeat"))
         if not result.ok:
             raise RuntimeError(f"docker stop failed: {result.stderr}")

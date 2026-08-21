@@ -264,3 +264,28 @@ def test_two_collectors_do_not_open_three_ssh_sessions(tmp_path):
     _assert_contract(second, log=log)
     assert _script_executions(transport) == 2
     assert _script_executions(transport) < 3
+
+
+@pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
+def test_second_collect_passes_persisted_log_offset(tmp_path):
+    """The next collect of the same file must probe with the previous log offset.
+
+    What would make this fail: probe([script, target_id]) with no argv[2], or
+    forgetting inode/offset so every minute re-sends the same chunk from 0.
+    """
+    from monitor.collector import collect
+
+    transport, log = _transport(tmp_path)
+    target = _target()
+    first = collect(target, transport, sleep=_noop)
+    offset = first["log_chunk"]["offset"]
+    assert offset == log.stat().st_size
+    transport.calls.clear()
+    collect(target, transport, sleep=_noop)
+    probes = [
+        argv for kind, argv in transport.calls
+        if kind == "probe" and argv and argv[0] == WRITABLE_REMOTE
+    ]
+    assert probes, transport.calls
+    assert len(probes[0]) >= 3, probes[0]
+    assert probes[0][2] == str(offset)

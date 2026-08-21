@@ -31,18 +31,35 @@ class ScriptedCurlTransport(FakeTransport):
 
 
 class CutoverTransport(FakeTransport):
-    """Records docker stop/rm without changing FakeTransport.mutating_calls."""
+    """Records docker stop/rm; inspect reports Running until stop."""
 
     def __init__(self):
         super().__init__()
         self.stopped = []
         self.removed = []
+        self.containers = {OLD: "running"}
+
+    def probe(self, argv, *, timeout=60):
+        if not isinstance(argv, (list, tuple)):
+            raise TypeError("argv must be a list — never a shell string (§4.5)")
+        argv = list(argv)
+        self.calls.append(("probe", argv))
+        if argv[:2] == ["docker", "inspect"]:
+            name = argv[-1]
+            state = self.containers.get(name)
+            if state is None:
+                return CommandResult(argv, exit_code=1, stderr="Error: No such container")
+            stdout = "true" if state == "running" else "false"
+            return CommandResult(argv, stdout=stdout)
+        return CommandResult(argv)
 
     def run(self, argv, *, timeout=60):
         result = super().run(argv, timeout=timeout)
         argv = list(argv)
         if argv[:2] == ["docker", "stop"] and len(argv) >= 3:
             self.stopped.append(argv[2])
+            if argv[2] in self.containers:
+                self.containers[argv[2]] = "exited"
         if argv[:2] == ["docker", "rm"]:
             self.removed.append(argv[-1])
         return result
@@ -132,6 +149,7 @@ def test_smoke_sees_ready():
     _assert_caddy_smoke_curl(ok)
 
 
+@pytest.mark.req("PIPE-S4-READINESS-GATE")
 def test_ws_smoke_when_manifest_declares_ws():
     """A Manifest that declares ws must also receive one T1 frame before passing.
 
@@ -204,3 +222,20 @@ def test_cutover_after_ready_not_before():
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     assert parsed > datetime.now(timezone.utc)
+
+
+def test_second_cutover_skips_stop_when_old_already_stopped():
+    """A second ensure_cutover of the same desired must not docker stop again.
+
+    What would make this fail: always `docker stop` old_container without
+    probing Running first, so a re-run of a stopped old is still mutating.
+    """
+    from deploys.steps import ensure_cutover
+
+    transport = CutoverTransport()
+    desired = _cutover_desired(transport, ready=True)
+    ensure_cutover(desired)
+    assert _stop_argvs(transport), transport.mutating_calls()
+    transport.calls.clear()
+    ensure_cutover(desired)
+    assert transport.mutating_calls() == []

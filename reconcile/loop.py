@@ -1,11 +1,12 @@
 """Desired vs observed reconciler with C2 brakes and N3 staleness policy."""
 from datetime import timedelta
 
+from django.conf import settings
 from django.utils import timezone
 
 from core import locks
 from core.audit import audit
-from core.models import AuditEvent, OperationLock, SiteInstance
+from core.models import AuditEvent, OperationLock, SiteInstance, Target
 from deploys.steps import ensure_start
 
 MUTATION_BUDGET = 2
@@ -13,9 +14,11 @@ GLOBAL_MUTATION_BUDGET = 3
 FLAP_WINDOW = timedelta(minutes=10)
 FLAP_CYCLE_LIMIT = 3
 BACKOFF_AFTER = 3
+COLLECT_FRESH_S = 60
 STALE_REASONS = frozenset({"data-stale", "feed-stale", "feed-staleness", "staleness"})
 UPSTREAM_REASONS = frozenset({"upstream-down"})
 REARM_SCOPED_AUDITS = frozenset({"reconcile_flap_pause", "reconcile_backoff"})
+RUNNING_DOCKER = frozenset({"running", "true", "1"})
 
 
 def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, instance=None):
@@ -25,6 +28,9 @@ def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, inst
     ``budget`` caps mutations for this call (T1 / remaining global cap).
     """
     del jitter  # schedule hint only — never a mutate skip
+    if not getattr(settings, "HUB_RECONCILE_ENABLED", True):
+        _audit_once("reconcile_globally_disabled", None)
+        return {"mutations": 0}
     now = now or timezone.now()
     cap = MUTATION_BUDGET if budget is None else budget
     used = 0
@@ -32,7 +38,7 @@ def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, inst
     if instance is not None:
         qs = qs.filter(pk=instance.pk)
     for row in qs:
-        observed = _read_observed(row, transport, site, observe)
+        observed = _read_observed(row, transport, site, observe, now)
         _persist_observation(row, observed, now)
         if _braked(site, row, observed, now):
             continue
@@ -62,12 +68,20 @@ def rearm(instance):
     audit("reconcile_rearmed", instance, source=AuditEvent.Source.RECONCILER)
 
 
-def _read_observed(instance, transport, site, observe):
+def _read_observed(instance, transport, site, observe, now=None):
     if observe is not None:
         raw = observe(instance) or {}
         return {
             "state": raw.get("state") or SiteInstance.ObservedState.ABSENT,
             "reason": raw.get("reason") or "",
+        }
+    clock = now or timezone.now()
+    payload = _fresh_collect_payload(instance, clock)
+    if payload is not None:
+        name = _container_name(_desired(site, instance, transport))
+        return {
+            "state": _state_from_collect(payload, name),
+            "reason": "",
         }
     return {
         "state": _probe_container_state(transport, site, instance),
@@ -152,7 +166,7 @@ def _apply(site, instance, transport, action, now, observe=None):
     try:
         _record(transport, "lock", ["recheck"])
         instance.refresh_from_db()
-        observed = _read_observed(instance, transport, site, observe)
+        observed = _read_observed(instance, transport, site, observe, now)
         _persist_observation(instance, observed, now)
         if _braked(site, instance, observed, now):
             return False
@@ -194,6 +208,7 @@ def _apply(site, instance, transport, action, now, observe=None):
             "reconcile_repair", instance,
             source=AuditEvent.Source.RECONCILER, op=action,
         )
+        _invalidate_collect(instance.target)
         return True
     except Exception:
         instance.consecutive_failures = instance.consecutive_failures + 1
@@ -226,6 +241,65 @@ def _desired(site, instance, transport):
 
 def _container_name(desired):
     return f"site-{desired['site_slug']}-{desired['deployment_id']}"
+
+
+def _fresh_collect_payload(instance, now):
+    target = instance.target
+    if target is None:
+        return None
+    pk = getattr(target, "pk", None)
+    if pk is not None:
+        fresh = Target.objects.filter(pk=pk).only(
+            "collect_payload", "collect_at",
+        ).first()
+        if fresh is not None:
+            target = fresh
+    payload = getattr(target, "collect_payload", None)
+    collected_at = getattr(target, "collect_at", None)
+    if not payload or collected_at is None:
+        return None
+    age = now - collected_at
+    if age.total_seconds() > COLLECT_FRESH_S:
+        return None
+    return payload
+
+
+def _invalidate_collect(target):
+    if target is None or not getattr(target, "pk", None):
+        return
+    Target.objects.filter(pk=target.pk).update(collect_at=None)
+    target.collect_at = None
+
+
+def _health_for(payload, name):
+    healthz = payload.get("healthz") or {}
+    if not isinstance(healthz, dict):
+        return {}
+    checks = healthz.get("checks") or {}
+    per = checks.get(name) if isinstance(checks, dict) else None
+    if isinstance(per, dict) and ("live" in per or "ready" in per):
+        return per
+    return healthz
+
+
+def _state_from_collect(payload, name):
+    rows = payload.get("containers") or []
+    by_name = {}
+    for row in rows:
+        if isinstance(row, dict) and row.get("name"):
+            by_name[row["name"]] = (row.get("state") or "").strip().lower()
+    if name not in by_name:
+        return SiteInstance.ObservedState.ABSENT
+    if by_name[name] not in RUNNING_DOCKER:
+        return SiteInstance.ObservedState.STOPPED
+    health = _health_for(payload, name)
+    live = bool(health.get("live"))
+    ready = bool(health.get("ready"))
+    if live and ready:
+        return SiteInstance.ObservedState.RUNNING
+    if live and not ready:
+        return SiteInstance.ObservedState.WARMING
+    return SiteInstance.ObservedState.UNHEALTHY
 
 
 def _probe_container_state(transport, site, instance):
@@ -264,10 +338,12 @@ def _last_rearm(obj):
 
 
 def _audit_once(action, obj, **detail):
+    object_type = type(obj).__name__ if obj is not None else ""
+    object_id = str(getattr(obj, "pk", "")) if obj is not None else ""
     qs = AuditEvent.objects.filter(
         action=action,
-        object_type=type(obj).__name__,
-        object_id=str(getattr(obj, "pk", "")),
+        object_type=object_type,
+        object_id=object_id,
     )
     if action in REARM_SCOPED_AUDITS:
         rearmed = _last_rearm(obj)

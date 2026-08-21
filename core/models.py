@@ -199,6 +199,10 @@ class Target(models.Model):
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.PENDING,
     )
+    collect_payload = models.JSONField(null=True, blank=True)
+    collect_at = models.DateTimeField(null=True, blank=True)
+    collect_log_inode = models.BigIntegerField(null=True, blank=True)
+    collect_log_offset = models.BigIntegerField(default=0)
 
     def __str__(self):
         return self.host

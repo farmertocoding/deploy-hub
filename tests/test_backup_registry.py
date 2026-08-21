@@ -179,3 +179,44 @@ def test_kek_absent_from_site_backup_bytes(tmp_path):
     assert kek not in sealed
     assert url not in sealed
     assert DUMP_PLAINTEXT_MARKER not in sealed
+
+
+def test_backup_aad_is_site_bound_swap_fails_closed():
+    """Sealed dump AAD is the site's identity; another site's key/AAD cannot open it.
+
+    What would make this fail: sealing with static b"backup-dump" so site A's
+    key opens the blob under a foreign AAD, or accepting a swapped ciphertext
+    under site B's backup key.
+    """
+    from cryptography.exceptions import InvalidTag
+
+    from core.models import BackupUnit
+    from provision.backup import run_backup
+    from vault import backup as vault_backup
+
+    site_a = _site("aad-a")
+    site_b = _site("aad-b")
+    unit_a = BackupUnit.objects.create(
+        site=site_a, kind=BackupUnit.Kind.POSTGRES, schedule="0 2 * * *",
+    )
+    unit_b = BackupUnit.objects.create(
+        site=site_b, kind=BackupUnit.Kind.POSTGRES, schedule="0 2 * * *",
+    )
+    sealed_a = run_backup(unit_a, plaintext=DUMP_PLAINTEXT_MARKER)
+    run_backup(unit_b, plaintext=b"other-site-dump")
+    key_a = service.get(Secret.objects.get(
+        kind=Secret.Kind.BACKUP_KEY, owner_type="site", owner_id=str(site_a.pk),
+    ))
+    key_b = service.get(Secret.objects.get(
+        kind=Secret.Kind.BACKUP_KEY, owner_type="site", owner_id=str(site_b.pk),
+    ))
+    aad_a = Secret.build_aad(Secret.Kind.BACKUP_KEY, "site", str(site_a.pk))
+    aad_b = Secret.build_aad(Secret.Kind.BACKUP_KEY, "site", str(site_b.pk))
+
+    assert vault_backup.unseal(sealed_a, key_a, aad=aad_a) == DUMP_PLAINTEXT_MARKER
+    with pytest.raises(InvalidTag):
+        vault_backup.unseal(sealed_a, key_a, aad=aad_b)
+    with pytest.raises(InvalidTag):
+        vault_backup.unseal(sealed_a, key_b, aad=aad_b)
+    with pytest.raises(InvalidTag):
+        vault_backup.unseal(sealed_a, key_b, aad=aad_a)

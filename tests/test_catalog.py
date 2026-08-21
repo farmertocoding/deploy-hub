@@ -265,6 +265,38 @@ def test_fail2ban_ignoreip_fix_reloads_after_install():
         assert rollback[idx + 1] == "100.64.1.1"
 
 
+@pytest.mark.req("HARD-R3-IGNOREIP")
+@pytest.mark.django_db
+def test_fail2ban_rollback_substitutes_mesh_ip(monkeypatch):
+    """Live rollback argv must delignoreip the Hub mesh IP, never 100.64.1.1.
+
+    What would make this fail: running the catalog placeholder, or applying
+    rollback when HUB_MESH_IP is unset so the live jail keeps a fake ignoreip.
+    """
+    from catalog.apply import rollback_entry
+    from catalog.entries import ENTRIES
+
+    mesh = "100.64.9.9"
+    target = _target()
+    entry = ENTRIES["fail2ban-ignoreip"]
+    monkeypatch.delenv("HUB_MESH_IP", raising=False)
+    refused = FakeTransport()
+    assert rollback_entry(target, entry, refused) is None
+    for _kind, argv in refused.mutating_calls():
+        joined = " ".join(str(part) for part in argv)
+        assert "100.64.1.1" not in joined
+
+    monkeypatch.setenv("HUB_MESH_IP", mesh)
+    transport = FakeTransport()
+    assert rollback_entry(target, entry, transport) is not None
+    runs = [argv for kind, argv in transport.mutating_calls() if kind == "run"]
+    assert runs, transport.calls
+    blob = " ".join(str(part) for argv in runs for part in argv)
+    assert mesh in blob
+    assert "100.64.1.1" not in blob
+    assert "delignoreip" in blob
+
+
 @pytest.mark.req("HARD-R2-SSHD-VALIDATE-FIRST")
 def test_sshd_dropin_fix_validates_with_sshd_t():
     """sshd-dropin fix must validate with sshd -t before installing the live path.

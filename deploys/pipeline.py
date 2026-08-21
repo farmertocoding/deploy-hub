@@ -34,6 +34,13 @@ from deploys.steps import (
 CRASH_AFTER_ENV = "HUB_TEST_CRASH_AFTER_STEP"
 DEFAULT_GIT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+TERMINAL_STATUSES = {
+    Deployment.Status.SUCCEEDED,
+    Deployment.Status.FAILED,
+    Deployment.Status.CANCELLED,
+    Deployment.Status.SUPERSEDED,
+    Deployment.Status.ROLLED_BACK,
+}
 
 
 def resume_step(deployment):
@@ -169,7 +176,15 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
         return {"started": False, "status": deployment.status}
 
     touch_heartbeat(deployment)
+    try:
+        return _execute_running(deployment, transport=transport, dns=dns, sleep=sleep)
+    finally:
+        deployment.refresh_from_db()
+        if deployment.status in TERMINAL_STATUSES:
+            release_deploy_locks(deployment)
 
+
+def _execute_running(deployment, *, transport, dns, sleep):
     site = deployment.manifest.site
     if transport is None:
         transport = _default_transport(site)
@@ -199,7 +214,6 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
     site = deployment.manifest.site
     site.config_stale = False
     site.save(update_fields=["config_stale"])
-    release_deploy_locks(deployment)
     return {"started": True, "status": Deployment.Status.SUCCEEDED}
 
 

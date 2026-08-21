@@ -406,3 +406,126 @@ def test_tick_all_fail_open_continues_fleet():
     tick_all.run(budget=2, transport_for=transport_for)
     inst_b.refresh_from_db()
     assert inst_b.observed_state == SiteInstance.ObservedState.RUNNING
+
+
+def _inspect_argvs(transport):
+    found = []
+    for kind, argv in transport.calls:
+        if kind != "probe" or not argv:
+            continue
+        if argv[:2] == ["docker", "inspect"]:
+            found.append(argv)
+    return found
+
+
+@pytest.mark.req("REL-P1-RECONCILER")
+def test_tick_uses_fresh_collector_json_not_inspect():
+    """One target, two instances: a fresh collect payload drives unhealthy/warming
+    and the following tick must not docker inspect.
+
+    What would make this fail: production _probe_container_state always
+    inspecting Running, or opening a second inspect SSH the same minute while
+    the collector JSON is ≤60s old.
+    """
+    import json
+
+    from django.utils import timezone
+    from test_collector import CollectorTransport, _noop
+
+    from monitor.collector import collect
+    from reconcile.loop import tick
+
+    project = Project.objects.create(name="fleet", slug="p-fleet")
+    zone = NetworkZone.objects.create(name="lan", slug="lan-fleet")
+    target = Target.objects.create(
+        zone=zone,
+        kind=Target.Kind.SSH,
+        host="10.0.0.8",
+        ssh_user="deploy",
+        ssh_key_ref="vault-fleet",
+        host_key_fingerprint="SHA256:test",
+        lifecycle=Target.Lifecycle.PERMANENT,
+        status=Target.Status.READY,
+    )
+    site_warm = Site.objects.create(
+        project=project, name="warm", primary_target=target, reconcile_enabled=True,
+    )
+    site_sick = Site.objects.create(
+        project=project, name="sick", primary_target=target, reconcile_enabled=True,
+    )
+    inst_warm = SiteInstance.objects.create(
+        site=site_warm,
+        target=target,
+        desired_image_tag="app:recon",
+        desired_state=SiteInstance.DesiredState.RUNNING,
+        observed_state=SiteInstance.ObservedState.ABSENT,
+        internal_port=20000,
+    )
+    inst_sick = SiteInstance.objects.create(
+        site=site_sick,
+        target=target,
+        desired_image_tag="app:recon",
+        desired_state=SiteInstance.DesiredState.RUNNING,
+        observed_state=SiteInstance.ObservedState.ABSENT,
+        consecutive_failures=1,
+        internal_port=20001,
+    )
+    warm_name = f"site-warm-{inst_warm.pk}"
+    sick_name = f"site-sick-{inst_sick.pk}"
+    payload = {
+        "schema_version": 1,
+        "target_id": target.pk,
+        "ts": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "metrics": {"load1": 0.1, "mem_pct": 1.0, "disk_pct": 1.0},
+        "containers": [
+            {"name": warm_name, "state": "running"},
+            {"name": sick_name, "state": "running"},
+        ],
+        "log_chunk": {
+            "file": "/var/log/caddy/access.log",
+            "inode": 1,
+            "offset": 10,
+            "bytes": "",
+        },
+        "clock": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "healthz": {
+            "live": True,
+            "ready": True,
+            "checks": {
+                warm_name: {"live": True, "ready": False, "checks": {}},
+                sick_name: {"live": False, "ready": False, "checks": {}},
+            },
+        },
+    }
+    transport = CollectorTransport(stdout=json.dumps(payload))
+    collect(target, transport, sleep=_noop)
+    transport.calls.clear()
+
+    tick(site_warm, transport=transport, jitter=0)
+    tick(site_sick, transport=transport, jitter=0)
+    inst_warm.refresh_from_db()
+    inst_sick.refresh_from_db()
+    assert inst_warm.observed_state == SiteInstance.ObservedState.WARMING
+    assert inst_sick.observed_state == SiteInstance.ObservedState.UNHEALTHY
+    assert _inspect_argvs(transport) == []
+    assert _mutating(transport) == []
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_global_kill_switch_stops_mutations():
+    """HUB_RECONCILE_ENABLED=False is a fleet brake even when sites stay enabled.
+
+    What would make this fail: checking only per-site reconcile_enabled, or
+    writing a new AuditEvent every tick.
+    """
+    from django.test import override_settings
+
+    from reconcile.loop import tick
+
+    site, _inst, transport = _world("gkill")
+    assert site.reconcile_enabled is True
+    with override_settings(HUB_RECONCILE_ENABLED=False):
+        tick(site, transport=transport, jitter=0)
+        tick(site, transport=transport, jitter=0)
+    assert _mutating(transport) == []
+    assert AuditEvent.objects.filter(action="reconcile_globally_disabled").count() == 1

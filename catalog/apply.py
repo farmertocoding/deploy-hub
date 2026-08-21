@@ -103,3 +103,32 @@ def _apply_fail2ban(target, entry, transport):
         if not result.ok:
             return None
     return _record(target, entry, results[-1])
+
+
+def rollback_entry(target, entry, transport):
+    """Run `entry.rollback`. fail2ban substitutes HUB_MESH_IP; refuse if missing."""
+    if entry.id == "fail2ban-ignoreip":
+        return _rollback_fail2ban(target, entry, transport)
+    results = []
+    for step in argv_steps(entry.rollback):
+        result = transport.run(step)
+        results.append(result)
+        if not result.ok:
+            return None
+    return results[-1] if results else None
+
+
+def _rollback_fail2ban(target, entry, transport):
+    mesh_ip = (os.environ.get("HUB_MESH_IP") or "").strip()
+    if not mesh_ip:
+        return None
+    results = []
+    for step in argv_steps(entry.rollback):
+        run = [mesh_ip if part == PLACEHOLDER_IP else part for part in step]
+        if PLACEHOLDER_IP in run:
+            return None
+        result = transport.run(run)
+        results.append(result)
+        if not result.ok:
+            return None
+    return results[-1] if results else None

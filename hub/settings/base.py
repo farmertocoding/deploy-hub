@@ -150,6 +150,12 @@ VAULT_KEYFILE_REQUIRE_MODE = True
 # The in-memory test KEK is opt-in and off by default; prod.py hard-fails on it.
 VAULT_ALLOW_FAKE_KEK = False
 
+# Fleet reconciler kill switch. Per-site Site.reconcile_enabled still applies when
+# this is True. Default on: an unset env must not park the fleet.
+HUB_RECONCILE_ENABLED = os.environ.get("HUB_RECONCILE_ENABLED", "true").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
