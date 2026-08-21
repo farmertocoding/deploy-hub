@@ -9,6 +9,7 @@ sensitive:
   - realtime/consumers.py    # the only group_add call site
   - catalog/**
   - core/transport.py        # SSH transport seam
+  - core/ssh.py              # SSH transport, host-key pin
   - providers/**
   - .github/workflows/**
   - conformance/requirements.yaml

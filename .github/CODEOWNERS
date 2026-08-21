@@ -11,6 +11,7 @@
 /core/otp.py @farmertocoding
 /core/middleware.py @farmertocoding
 /core/transport.py @farmertocoding
+/core/ssh.py @farmertocoding
 /realtime/authorize.py @farmertocoding
 /realtime/consumers.py @farmertocoding
 /.github/ @farmertocoding
