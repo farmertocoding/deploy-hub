@@ -68,7 +68,7 @@ refuse_if_running() {
     if [[ ! "${count}" =~ ^[0-9]+$ ]]; then
         die "running-deployment check did not print a count (got ${count:-empty})"
     fi
-    if (( count > 0 )); then
+    if ((count > 0)); then
         die "refusing: ${count} running Deployment(s); drain them before upgrading the Hub"
     fi
 }
