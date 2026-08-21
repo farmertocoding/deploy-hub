@@ -10,6 +10,8 @@ import json
 import os
 import tarfile
 import threading
+import time
+from datetime import timedelta
 from pathlib import Path
 
 HEARTBEAT_INTERVAL_S = 30
@@ -138,6 +140,146 @@ def ensure_migrate(desired):
         step.status = DeploymentStep.Status.SUCCEEDED
         step.save(update_fields=["status"])
     return {"status": "migrated"}
+
+
+def ensure_start(desired):
+    """Start the named green container; recreate stops the old writer first."""
+    transport = desired["transport"]
+    heartbeat = desired.get("heartbeat")
+    name = _container_name(desired)
+    running = _container_running(transport, name)
+    if running is True:
+        return {"status": "skipped", "name": name}
+
+    if running is False:
+        result = _run(transport, ["docker", "start", name], heartbeat)
+        if not result.ok:
+            raise RuntimeError(f"docker start failed: {result.stderr}")
+        return {"status": "started", "name": name}
+
+    strategy = _deploy_strategy(desired)
+    if strategy == "recreate":
+        site = desired.get("site")
+        if site is not None:
+            _set_maintenance_until(site, desired)
+        old = desired.get("old_container")
+        if old and old != name and _container_running(transport, old) is True:
+            result = _run(transport, ["docker", "stop", old], heartbeat)
+            if not result.ok:
+                raise RuntimeError(f"docker stop failed: {result.stderr}")
+
+    result = _run(transport, _docker_run_argv(desired, name), heartbeat)
+    if not result.ok:
+        raise RuntimeError(f"docker run failed: {result.stderr}")
+    return {"status": "started", "name": name}
+
+
+def ensure_health_check(desired):
+    """Poll pinned /healthz JSON until ready; frozen checks fail immediately."""
+    timeout = _warmup_timeout_s(desired)
+    sleep = desired.get("sleep") or time.sleep
+    now = desired.get("now") or time.monotonic
+    interval = desired.get("poll_interval_s", 1)
+    deadline = now() + timeout
+    prev_checks = None
+    while True:
+        payload = _healthz_payload(desired)
+        if payload.get("ready"):
+            return {"status": "ready", "healthz": payload}
+        checks = payload.get("checks")
+        if prev_checks is not None and checks == prev_checks:
+            raise RuntimeError("healthz checks frozen while not ready")
+        prev_checks = checks
+        if now() >= deadline:
+            raise RuntimeError("warmup timeout: never ready")
+        sleep(interval)
+
+
+def _container_name(desired):
+    return f"site-{desired['site_slug']}-{desired['deployment_id']}"
+
+
+def _deploy_strategy(desired):
+    body = desired.get("manifest_body") or {}
+    if body.get("local_state") or body.get("exclusive_upstream"):
+        return "recreate"
+    if body.get("deploy_strategy"):
+        return body["deploy_strategy"]
+    site = desired.get("site")
+    if site is not None:
+        strategy = getattr(site, "deploy_strategy", None)
+        if strategy:
+            return strategy
+    return "blue_green"
+
+
+def _container_running(transport, name):
+    result = transport.probe([
+        "docker", "inspect", "--format", "{{.State.Running}}", name,
+    ])
+    if not result.ok:
+        return None
+    return result.stdout.strip().lower() in {"true", "running", "1"}
+
+
+def _docker_run_argv(desired, name):
+    argv = ["docker", "run", "-d", "--name", name]
+    body = desired.get("manifest_body") or {}
+    for spec in _volume_specs(desired["site_slug"], body):
+        argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])
+    argv.append(desired["image_tag"])
+    return argv
+
+
+def _set_maintenance_until(site, desired):
+    from django.utils import timezone
+
+    site.maintenance_until = timezone.now() + timedelta(seconds=_warmup_timeout_s(desired))
+    if hasattr(site, "save"):
+        site.save(update_fields=["maintenance_until"])
+
+
+def _warmup_timeout_s(desired):
+    body = desired.get("manifest_body") or {}
+    if body.get("warmup_timeout_s") is not None:
+        return int(body["warmup_timeout_s"])
+    nested = (body.get("healthz") or {}).get("warmup_timeout_s")
+    if nested is not None:
+        return int(nested)
+    site = desired.get("site")
+    if site is not None and getattr(site, "warmup_timeout_s", None) is not None:
+        return int(site.warmup_timeout_s)
+    return 60
+
+
+def _readiness_path(desired):
+    body = desired.get("manifest_body") or {}
+    if body.get("readiness_path"):
+        return body["readiness_path"]
+    nested = (body.get("healthz") or {}).get("readiness_path")
+    if nested:
+        return nested
+    site = desired.get("site")
+    if site is not None and getattr(site, "readiness_path", None):
+        return site.readiness_path
+    return "/healthz.ready"
+
+
+def _healthz_payload(desired):
+    fetch = desired.get("healthz_fetch")
+    if fetch is not None:
+        return fetch()
+    transport = desired["transport"]
+    name = _container_name(desired)
+    path = _readiness_path(desired)
+    ip_r = transport.probe([
+        "docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", name,
+    ])
+    ip = (ip_r.stdout or "").strip() or "127.0.0.1"
+    result = transport.probe(["curl", "-sf", f"http://{ip}{path}"])
+    if not result.ok or not (result.stdout or "").strip():
+        return {"live": False, "ready": False, "checks": {}}
+    return json.loads(result.stdout)
 
 
 def _image_present(transport, tag):
