@@ -14,7 +14,7 @@ import textwrap
 
 import pytest
 
-pytest_plugins = ["test_hub_test_target"]
+pytest_plugins = ["tests.harness.target"]
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
@@ -456,7 +456,7 @@ def test_harden_twice_second_run_no_mutating_transport(hub_target):
     What would make this fail: second run calling systemctl reload / ufw enable,
     or binding Hub docker.sock into the target.
     """
-    from test_hub_test_target import SOCK, _docker, _exec
+    from tests.harness.target import SOCK, _docker, _exec
 
     inspect = _docker(["inspect", hub_target.container], check=True).stdout
     assert SOCK not in inspect

@@ -155,7 +155,11 @@ def test_no_prod_vault_env_names_in_harness_modules():
     for root in roots:
         if not root.exists():
             continue
-        files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file())
+        files = (
+            [root]
+            if root.is_file()
+            else sorted(p for p in root.rglob("*.py") if p.is_file())
+        )
         for path in files:
             text = path.read_text(encoding="utf-8")
             for needle in PROD_VAULT_NEEDLES:

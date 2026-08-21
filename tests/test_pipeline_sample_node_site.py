@@ -1,19 +1,13 @@
 """sample-node-site through the real pipeline: twice, volume, recreate (T1 + T2)."""
 from __future__ import annotations
 
-import io
 import json
-import os
 import shutil
-import socket
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass, field
-from pathlib import Path
 
 import pytest
-from paramiko import ECDSAKey
 from pipeline_fakes import (
     NPM_CI_DOCKERFILE,
     SAMPLE_NODE_SITE,
@@ -25,9 +19,9 @@ from pipeline_fakes import (
 from deploys.models import Deployment, DeploymentStep
 from providers.fakes import FakeDnsProvider
 
-pytestmark = pytest.mark.django_db
+pytest_plugins = ["tests.harness.target"]
 
-REPO = Path(__file__).resolve().parent.parent
+pytestmark = pytest.mark.django_db
 
 
 def _execute(deployment, transport, dns):
@@ -150,8 +144,6 @@ def test_recreate_old_writer_stopped_first():
     assert smoke.finished <= cutover.started
 
 
-# --- T2: real SshTransport against hub-test-target (copied helpers, not a plugin) ---
-
 def _docker_available():
     if shutil.which("docker") is None:
         return False
@@ -164,101 +156,7 @@ def _docker_available():
     return probe.returncode == 0
 
 
-def _docker(argv, *, stdin=None, timeout=60, check=False):
-    result = subprocess.run(
-        ["docker", *argv],
-        input=stdin,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    if check and result.returncode != 0:
-        raise AssertionError(
-            f"docker {argv!r} exited {result.returncode}\n"
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
-    return result
-
-
-def _exec(container, argv, *, stdin=None, timeout=60, check=False):
-    return _docker(
-        ["exec", "-i", container, *argv],
-        stdin=stdin,
-        timeout=timeout,
-        check=check,
-    )
-
-
-def _wait_tcp(host, port, *, deadline):
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=1) as sock:
-                banner = sock.recv(256)
-            if banner.startswith(b"SSH-2.0"):
-                return banner
-        except OSError:
-            time.sleep(0.5)
-    raise AssertionError(f"sshd did not listen on {host}:{port} before timeout")
-
-
-def _wait_exec(container, argv, *, ready, deadline, timeout=30):
-    last = None
-    while time.time() < deadline:
-        last = _exec(container, argv, timeout=timeout)
-        if ready(last):
-            return last
-        time.sleep(1)
-    raise AssertionError(
-        f"waiting for {argv!r} in {container}: last exit={last.returncode if last else None}"
-    )
-
-
-def _presented_fingerprint(host, port, user, pkey):
-    import paramiko
-
-    class _Record(paramiko.MissingHostKeyPolicy):
-        def __init__(self):
-            self.key = None
-
-        def missing_host_key(self, client, hostname, key):
-            self.key = key
-            client.get_host_keys().add(hostname, key.get_name(), key)
-
-    policy = _Record()
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(policy)
-    last = None
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        try:
-            client.connect(
-                host, port=port, username=user, pkey=pkey,
-                look_for_keys=False, allow_agent=False, timeout=5,
-            )
-            client.close()
-            break
-        except paramiko.SSHException as exc:
-            last = exc
-            time.sleep(0.5)
-    else:
-        raise AssertionError(f"could not SSH to learn host key: {last}")
-    if policy.key is None:
-        raise AssertionError("sshd presented no host key")
-    return policy.key.fingerprint
-
-
-@dataclass(frozen=True)
-class HubTarget:
-    container: str
-    host: str
-    port: int
-    user: str
-    host_key_fingerprint: str
-    client_key_pem: bytes = field(repr=False)
-
-
-IMAGE_DIR = REPO / "images" / "hub-test-target"
-IMAGE = "hub-test-target:local"
+# --- T2: real SshTransport against the shared hub_target fixture ---
 
 T2_SERVE_PY = """\
 import json
@@ -293,70 +191,6 @@ CMD ["python3", "/app/serve.py"]
 """
 
 
-@pytest.fixture(scope="session")
-def hub_target(tmp_path_factory):
-    """One privileged systemd container. Does not bind the Hub docker.sock."""
-    home = tmp_path_factory.mktemp("t2-pipe-home")
-    (home / ".ssh").mkdir()
-    previous_home = os.environ.get("HOME")
-    os.environ["HOME"] = str(home)
-    name = None
-    try:
-        build = _docker(["build", "-t", IMAGE, str(IMAGE_DIR)], timeout=600)
-        if build.returncode != 0:
-            raise AssertionError(
-                f"hub-test-target image failed to build\n"
-                f"stdout:\n{build.stdout}\nstderr:\n{build.stderr}"
-            )
-        name = f"hub-test-target-pipe-{uuid.uuid4().hex[:8]}"
-        launched = _docker(
-            [
-                "run", "-d", "--name", name, "--privileged", "--cgroupns=host",
-                "-p", "127.0.0.1::22", IMAGE,
-            ],
-            timeout=60,
-        )
-        if launched.returncode != 0:
-            raise AssertionError(
-                f"docker run hub-test-target failed\n"
-                f"stdout:\n{launched.stdout}\nstderr:\n{launched.stderr}"
-            )
-        port_line = _docker(["port", name, "22/tcp"], check=True).stdout.strip()
-        port = int(port_line.rsplit(":", 1)[1])
-        deadline = time.time() + 120
-        _wait_exec(
-            name,
-            ["systemctl", "is-system-running"],
-            ready=lambda r: r.stdout.strip() in {"running", "degraded"},
-            deadline=deadline,
-        )
-        _wait_tcp("127.0.0.1", port, deadline=deadline)
-        key = ECDSAKey.generate()
-        pem_buf = io.StringIO()
-        key.write_private_key(pem_buf)
-        client_pem = pem_buf.getvalue().encode()
-        pubkey = f"{key.get_name()} {key.get_base64()} t2-pipeline\n"
-        _exec(name, ["tee", "/home/deploy/.ssh/authorized_keys"], stdin=pubkey, check=True)
-        _exec(name, ["chown", "deploy:deploy", "/home/deploy/.ssh/authorized_keys"], check=True)
-        _exec(name, ["chmod", "600", "/home/deploy/.ssh/authorized_keys"], check=True)
-        fingerprint = _presented_fingerprint("127.0.0.1", port, "deploy", key)
-        yield HubTarget(
-            container=name,
-            host="127.0.0.1",
-            port=port,
-            user="deploy",
-            host_key_fingerprint=fingerprint,
-            client_key_pem=client_pem,
-        )
-    finally:
-        if name is not None:
-            _docker(["rm", "-f", name], timeout=60)
-        if previous_home is None:
-            os.environ.pop("HOME", None)
-        else:
-            os.environ["HOME"] = previous_home
-
-
 @pytest.mark.t2
 @pytest.mark.skipif(not _docker_available(), reason="docker is not available")
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
@@ -374,6 +208,7 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     from core.transport import RecordingTransport
     from deploys.models import Manifest
     from deploys.pipeline import execute
+    from tests.harness.target import _docker, _wait_exec
     from vault import service
     from vault.models import Secret
 
