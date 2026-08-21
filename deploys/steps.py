@@ -483,6 +483,36 @@ def _container_running(transport, name):
     return result.stdout.strip().lower() in {"true", "running", "1"}
 
 
+def _positive_port(raw):
+    if raw is None or isinstance(raw, bool) or raw == "":
+        return None
+    if isinstance(raw, int):
+        return raw if raw > 0 else None
+    text = str(raw).strip()
+    if text.isdigit():
+        value = int(text)
+        return value if value > 0 else None
+    return None
+
+
+def _listen_port(desired):
+    """In-container listen port for -e PORT=. Never a secret; never from env_mapping."""
+    port = _positive_port(desired.get("internal_port"))
+    if port is not None:
+        return port
+    inst = desired.get("instance")
+    if inst is not None:
+        port = _positive_port(getattr(inst, "internal_port", None))
+        if port is not None:
+            return port
+    body = desired.get("manifest_body") or {}
+    for key in ("port", "PORT"):
+        port = _positive_port(body.get(key))
+        if port is not None:
+            return port
+    return 8080
+
+
 def _docker_run_argv(desired, name):
     argv = ["docker", "run", "-d", "--name", name]
     if desired.get("env_file"):
@@ -495,6 +525,7 @@ def _docker_run_argv(desired, name):
     body = desired.get("manifest_body") or {}
     for spec in _volume_specs(desired["site_slug"], body):
         argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])
+    argv.extend(["-e", f"PORT={_listen_port(desired)}"])
     argv.append(desired["image_tag"])
     return argv
 

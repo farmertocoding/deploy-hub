@@ -19,7 +19,6 @@ pytestmark = pytest.mark.django_db
 HUB_MESH = "100.64.9.9"
 LIVE_JAIL = "/etc/fail2ban/jail.local"
 PRODUCER = Path(__file__).resolve().parent.parent / "monitor" / "collect_once.py"
-LISTEN_PORT = 18080
 CONTAINER_IP = "192.0.2.1"
 
 
@@ -111,7 +110,15 @@ def test_fail2ban_collapsed_live_dest_does_not_record(monkeypatch):
 
 
 def _fake_empty_health_on_port(tmp_path, name, *, port, body):
-    """docker inspect Health is empty; /healthz JSON lives only on $PORT, not :80."""
+    """Hub-shaped inspect: empty Health, PortBindings, ExposedPorts.
+
+    ``port`` is the listen value `_docker_run_argv` would put in Config.Env as
+    PORT=<n>. None means Env has no PORT (pre-fix Hub, or a container Hub did
+    not start).
+    """
+    env = ["PATH=/usr/bin"]
+    if port is not None:
+        env = [f"PORT={port}", *env]
     inspect = {
         "State": {"Running": True},
         "NetworkSettings": {
@@ -121,7 +128,7 @@ def _fake_empty_health_on_port(tmp_path, name, *, port, body):
         "HostConfig": {"PortBindings": {}},
         "Config": {
             "ExposedPorts": {},
-            "Env": [f"PORT={port}", "PATH=/usr/bin"],
+            "Env": env,
         },
     }
     script = tmp_path / "tool.py"
@@ -162,6 +169,8 @@ def _fake_empty_health_on_port(tmp_path, name, *, port, body):
         "    sys.exit(1)\n"
         "if tool == 'curl':\n"
         "    url = args[-1] if args else ''\n"
+        "    if PORT is None:\n"
+        "        sys.exit(22)\n"
         "    want = 'http://%s:%s/healthz' % (IP, PORT)\n"
         "    if url == want:\n"
         "        sys.stdout.write(BODY)\n"
@@ -211,7 +220,7 @@ def test_tick_uses_n2_healthz_json_on_listen_port(tmp_path, monkeypatch):
         "checks": {"upstream": "upstream-down"},
     }
     _fake_empty_health_on_port(
-        tmp_path, name, port=LISTEN_PORT, body=json.dumps(payload),
+        tmp_path, name, port=inst.internal_port, body=json.dumps(payload),
     )
     log = tmp_path / "access.log"
     log.write_bytes(b'{"status":200}\n')

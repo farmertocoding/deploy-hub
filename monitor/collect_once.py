@@ -133,7 +133,10 @@ def _curl_healthz(docker, name):
     info = _inspect_container(docker, name)
     ip = _ip_from_inspect(info) or _container_ip(docker, name)
     port = _listen_port_from_inspect(info)
-    if not ip or not port:
+    if not port:
+        # No published/EXPOSE/$PORT: cannot curl, but that is not UNHEALTHY.
+        return {"live": True, "ready": False, "reason": "listen-port-unknown"}
+    if not ip:
         return {"live": False, "ready": False}
     curl = shutil.which("curl") or "/usr/bin/curl"
     raw = _curl_body(curl, _healthz_url(ip, port))

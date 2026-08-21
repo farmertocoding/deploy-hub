@@ -17,6 +17,7 @@ BACKOFF_AFTER = 3
 COLLECT_FRESH_S = 60
 STALE_REASONS = frozenset({"data-stale", "feed-stale", "feed-staleness", "staleness"})
 UPSTREAM_REASONS = frozenset({"upstream-down"})
+LISTEN_PORT_UNKNOWN = "listen-port-unknown"
 REARM_SCOPED_AUDITS = frozenset({"reconcile_flap_pause", "reconcile_backoff"})
 RUNNING_DOCKER = frozenset({"running", "true", "1"})
 
@@ -129,6 +130,8 @@ def _plan(instance, observed):
     }:
         return "stop"
     if state == SiteInstance.ObservedState.UNHEALTHY:
+        if _reason_key(observed.get("reason")) == LISTEN_PORT_UNKNOWN:
+            return None
         if instance.consecutive_failures >= 1:
             return None
         if desired == SiteInstance.DesiredState.RUNNING:
@@ -340,6 +343,8 @@ def _state_from_collect(payload, name):
     if by_name[name] not in RUNNING_DOCKER:
         return SiteInstance.ObservedState.STOPPED
     health = _health_for(payload, name)
+    if _reason_key(health.get("reason")) == LISTEN_PORT_UNKNOWN:
+        return SiteInstance.ObservedState.WARMING
     live = bool(health.get("live"))
     ready = bool(health.get("ready"))
     if live and ready:
