@@ -1,0 +1,20 @@
+# Human-merge only (build-process.md §5 / conformance/paths.yaml). D-001.
+# Ordinary paths are not listed — they may auto-merge on green later.
+/vault/ @farmertocoding
+/catalog/ @farmertocoding
+/scripts/ @farmertocoding
+/intake/ @farmertocoding
+/providers/ @farmertocoding
+/scanner/modules/ @farmertocoding
+/scanner/declarations.py @farmertocoding
+/core/views.py @farmertocoding
+/core/otp.py @farmertocoding
+/core/middleware.py @farmertocoding
+/core/transport.py @farmertocoding
+/realtime/authorize.py @farmertocoding
+/realtime/consumers.py @farmertocoding
+/.github/ @farmertocoding
+/conformance/requirements.yaml @farmertocoding
+/conformance/check.py @farmertocoding
+/scripts_dev/mutation_gate.py @farmertocoding
+/scripts_dev/mutation_scope.py @farmertocoding
