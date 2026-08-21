@@ -1,4 +1,4 @@
-"""Collector Beat entry. Lives on queue ``probes`` via ``monitor.*``."""
+"""Collector and missed-drill Beat entries. Live on queue ``probes`` via ``monitor.*``."""
 import time
 
 from celery import shared_task
@@ -38,3 +38,16 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
         finally:
             locks.release("target", target.pk, "collect", holder="collect-all")
     return {"ok": True, "n": n}
+
+
+@shared_task(ignore_result=True)
+def detect_missed_drills(*, now=None):
+    from django.utils import timezone
+
+    from monitor.drills import find_missed
+
+    clock = now or timezone.now()
+    missed = find_missed(clock)
+    for kind in missed:
+        audit("drill-missed", source="celery", severity="warning", kind=kind)
+    return {"ok": True, "n": len(missed)}

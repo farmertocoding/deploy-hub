@@ -1,6 +1,6 @@
 """core: shared kernel. AuditEvent (§D1) plus the product models the whole
 system is about — Project (code), Site (project + domain + config), Zone,
-Target, SiteInstance — per §D9's canonical vocabulary.
+Target, SiteInstance, CheckRun — per §D9's canonical vocabulary.
 
 core deliberately imports nothing from scanner/, deploys/ or wizard/: everything
 imports core, so a dependency here becomes a dependency everywhere (see
@@ -9,6 +9,7 @@ vault must not import core; Target.ssh_key_ref is a vault owner-id string, not
 an FK.
 """
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -368,3 +369,46 @@ class BackupUnit(models.Model):
 
     def __str__(self):
         return f"{self.site_id}:{self.kind}"
+
+
+def _default_checkrun_results():
+    return {"schema_version": 1}
+
+
+class CheckRun(models.Model):
+    """One scheduled or executed drill/check (HARNESS-DRILLS-BEAT)."""
+
+    class Kind(models.TextChoices):
+        HUB_DOWN = "hub_down"
+        RESTORE_CLEAN = "restore_clean"
+        REAPER = "reaper"
+        PAGER = "pager"
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled"
+        RUNNING = "running"
+        SUCCEEDED = "succeeded"
+        FAILED = "failed"
+        SKIPPED = "skipped"
+
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    status = models.CharField(max_length=16, choices=Status.choices)
+    started = models.DateTimeField(null=True, blank=True)
+    finished = models.DateTimeField(null=True, blank=True)
+    due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    results = models.JSONField(default=_default_checkrun_results)
+
+    class Meta:
+        indexes = [models.Index(fields=["kind", "due_at"])]
+
+    def clean(self):
+        results = self.results
+        if not isinstance(results, dict) or "schema_version" not in results:
+            raise ValidationError({"results": "results must include schema_version"})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.kind} {self.status}"
