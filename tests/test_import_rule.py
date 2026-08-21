@@ -94,3 +94,10 @@ def test_reconcile_never_imports_scanner():
     """Reconciler shares deploys.steps; it must not grow a scanner edge either."""
     path = _reaches("reconcile", "scanner")
     assert path is None, "reconcile reaches scanner via: " + " -> ".join(path or [])
+
+
+@pytest.mark.req("ARCH-V6-DEPLOYS-NO-SCANNER-IMPORT")
+def test_monitor_never_imports_scanner():
+    """Collector JSON lives in monitor/; it must not grow a scanner edge either."""
+    path = _reaches("monitor", "scanner")
+    assert path is None, "monitor reaches scanner via: " + " -> ".join(path or [])

@@ -191,6 +191,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "reconcile.tasks.tick_all",
         "schedule": 90.0,
     },
+    "collect-all-targets": {
+        "task": "monitor.tasks.collect_all",
+        "schedule": 60.0,
+    },
 }
 
 LOGGING = {
