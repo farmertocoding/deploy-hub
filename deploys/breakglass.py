@@ -1,10 +1,5 @@
 """Per-site break-glass runbook on the target (§P5). No secrets."""
 
-_SECRET_MARKERS = (
-    "VAULT-TEST-PLAINTEXT-MARKER-do-not-log",
-    "PIPELINE-ENV-SNAPSHOT-MARKER-do-not-log",
-)
-
 
 def write_runbook(desired):
     """Put markdown at /srv/sites/{slug}/BREAK-GLASS.md with mode 0400."""
@@ -37,6 +32,4 @@ def _render_runbook(desired):
         "\n## DNS\n\n"
         "    # upsert the site record via the Hub DnsProvider; no tokens on this host\n"
     )
-    for marker in _SECRET_MARKERS:
-        text = text.replace(marker, "")
     return text

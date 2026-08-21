@@ -78,8 +78,9 @@ def test_runbook_mode_0400():
 def test_runbook_contains_no_vault_plaintext():
     """Planted vault plaintext must not appear in the on-target markdown.
 
-    What would make this fail: interpolating env values, dumping the vault
-    marker, or embedding desired['env'] into the runbook body.
+    What would make this fail: interpolating desired['env'] or
+    manifest_body env values so the planted marker is rendered (the
+    renderer must not strip that marker after the fact).
     """
     from deploys.breakglass import write_runbook
 

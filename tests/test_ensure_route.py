@@ -65,6 +65,16 @@ def _data_binary_path(argv):
     return None
 
 
+def _upstream_dials(route):
+    dials = []
+    for item in route.get("routes") or []:
+        for handle in item.get("handle") or []:
+            for upstream in handle.get("upstreams") or []:
+                if upstream.get("dial"):
+                    dials.append(upstream["dial"])
+    return dials
+
+
 def _put_json(transport):
     puts = [remote for kind, remote in transport.calls if kind == "put"]
     assert puts, "expected put of Caddy route JSON"
@@ -96,19 +106,24 @@ def _desired(transport, *, exposure="public", mesh_bind=None, domain="blog.examp
 def test_caddy_put_by_id():
     """Route JSON is put, then applied with a curl/caddy argv list keyed site-{slug}.
 
-    What would make this fail: missing @id site-{slug}, applying via a shell
-    string or heredoc, or shipping a Cloudflare origin certificate this phase.
+    What would make this fail: missing @id site-{slug}, listen not mesh-bind vs
+    :443, a hardcoded upstream, applying via a shell string or heredoc, or
+    shipping a Cloudflare origin certificate this phase.
     """
     from deploys.steps import ensure_route_tls
 
     transport = RouteTransport()
-    ensure_route_tls(_desired(transport, exposure="public"))
+    desired = _desired(transport, exposure="public")
+    desired["internal_port"] = 21000
+    ensure_route_tls(desired)
 
     route = _put_json(transport)
     assert route["@id"] == ROUTE_ID
+    assert route.get("listen") == [":443"]
     dumped = json.dumps(route)
     assert "BEGIN CERTIFICATE" not in dumped
     assert "-----BEGIN" not in dumped
+    assert _upstream_dials(route) == ["127.0.0.1:21000"]
 
     runs = _mutating_runs(transport)
     assert runs, "expected a curl/caddy run after put"
@@ -122,10 +137,11 @@ def test_caddy_put_by_id():
     assert "heredoc" not in joined.lower()
 
     mesh = RouteTransport()
-    ensure_route_tls(_desired(mesh, exposure="mesh_only", mesh_bind="127.0.0.1"))
+    ensure_route_tls(_desired(mesh, exposure="mesh_only", mesh_bind="100.64.1.8"))
     mesh_route = _put_json(mesh)
     assert mesh_route["@id"] == ROUTE_ID
-    assert "127.0.0.1" in json.dumps(mesh_route)
+    assert mesh_route.get("listen") == ["100.64.1.8:443"]
+    assert ":443" not in mesh_route["listen"]
 
 
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")

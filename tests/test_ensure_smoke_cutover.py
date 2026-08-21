@@ -52,6 +52,24 @@ def _curl_ok(payload):
     return {"exit_code": 0, "stdout": json.dumps(payload)}
 
 
+def _assert_caddy_smoke_curl(transport, listen="127.0.0.1:443"):
+    curls = [
+        argv for kind, argv in transport.calls
+        if kind == "probe" and isinstance(argv, list) and argv[:1] == ["curl"]
+    ]
+    assert curls, "expected probe curl of the Caddy ready path"
+    assert any(listen in str(part) for argv in curls for part in argv), (
+        f"curl argv must include Caddy listen {listen}, got {curls}"
+    )
+    assert all(kind == "probe" for kind, argv in transport.calls
+               if isinstance(argv, list) and argv[:1] == ["curl"])
+    inspects = [
+        argv for kind, argv in transport.calls
+        if isinstance(argv, list) and argv[:2] == ["docker", "inspect"]
+    ]
+    assert inspects == [], f"smoke must not docker-inspect, got {inspects}"
+
+
 def _smoke_desired(transport, *, body=None, ws_fetch=None, healthz_fetch=None):
     desired = {
         "transport": transport,
@@ -96,32 +114,22 @@ def _rm_argvs(transport):
 
 @pytest.mark.req("PIPE-S4-READINESS-GATE")
 def test_smoke_sees_ready():
-    """Smoke succeeds only when the Caddy/healthz probe reports ready.
+    """Smoke succeeds only when a probe curl of the Caddy listen reports ready.
 
-    What would make this fail: treating live-but-not-ready as success, or
-    skipping the probe curl of the ready path.
+    What would make this fail: treating live-but-not-ready as success, curling
+    the container IP from docker inspect, or skipping the Caddy listen host:port.
     """
     from deploys.steps import ensure_smoke
 
     miss = ScriptedCurlTransport([_curl_ok(NOT_READY)])
     with pytest.raises(RuntimeError):
         ensure_smoke(_smoke_desired(miss))
-    curls = [
-        argv for kind, argv in miss.calls
-        if kind == "probe" and isinstance(argv, list) and argv[:1] == ["curl"]
-    ]
-    assert curls
-    assert all(kind == "probe" for kind, argv in miss.calls if isinstance(argv, list)
-               and argv[:1] == ["curl"])
+    _assert_caddy_smoke_curl(miss)
 
     ok = ScriptedCurlTransport([_curl_ok(READY)])
     result = ensure_smoke(_smoke_desired(ok))
     assert result.get("status") != "failed"
-    ok_curls = [
-        argv for kind, argv in ok.calls
-        if kind == "probe" and isinstance(argv, list) and argv[:1] == ["curl"]
-    ]
-    assert ok_curls
+    _assert_caddy_smoke_curl(ok)
 
 
 def test_ws_smoke_when_manifest_declares_ws():

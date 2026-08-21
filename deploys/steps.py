@@ -252,8 +252,8 @@ def ensure_route_tls(desired):
 
 
 def ensure_smoke(desired):
-    """Probe the Caddy/healthz ready path; ws sites also receive one frame."""
-    payload = _healthz_payload(desired)
+    """Probe the Caddy listen /healthz ready path; ws sites also receive one frame."""
+    payload = _caddy_smoke_payload(desired)
     if not payload.get("ready"):
         raise RuntimeError("smoke failed: not ready")
     if _declares_ws(desired.get("manifest_body") or {}):
@@ -339,10 +339,34 @@ def _caddy_route(desired, route_id):
             "match": [{"host": [domain]}],
             "handle": [{
                 "handler": "reverse_proxy",
-                "upstreams": [{"dial": "127.0.0.1:20000"}],
+                "upstreams": [{"dial": _caddy_upstream(desired)}],
             }],
         }],
     }
+
+
+def _caddy_upstream(desired):
+    if desired.get("upstream"):
+        return desired["upstream"]
+    return f"127.0.0.1:{desired.get('internal_port', 20000)}"
+
+
+def _caddy_listen_hostport(desired):
+    """Host:port smoke curls. Public :443 becomes 127.0.0.1:443 (no TLS this phase)."""
+    route_id = f"site-{desired['site_slug']}"
+    listen = (_caddy_route(desired, route_id).get("listen") or [":443"])[0]
+    if listen.startswith(":"):
+        return f"127.0.0.1{listen}"
+    return listen
+
+
+def _caddy_smoke_payload(desired):
+    transport = desired["transport"]
+    url = f"http://{_caddy_listen_hostport(desired)}{_readiness_path(desired)}"
+    result = transport.probe(["curl", "-sf", url])
+    if not result.ok or not (result.stdout or "").strip():
+        return {"live": False, "ready": False}
+    return json.loads(result.stdout)
 
 
 def _probe_caddy_route(transport, route_id):
