@@ -368,7 +368,10 @@ def test_d012_no_live_code_imports_the_parked_declarations_module():
         # `mutants/` is the mutation gate's working COPY of this tree
         # (spec-mutation-gate.md): it holds a mutated `scanner/declarations.py` and the
         # test file that imports it, both by construction, and neither is live code.
-        if rel.startswith((".venv/", "node_modules/", "mutants/")) or rel in allowed:
+        if rel.startswith((
+            ".venv/", "node_modules/", "mutants/",
+            ".worktrees/", ".pytest_cache/", ".ruff_cache/", ".stage-tmp/",
+        )) or rel in allowed:
             continue
         if pattern.search(path.read_text(encoding="utf-8")):
             offenders.append(rel)

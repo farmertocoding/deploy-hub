@@ -1128,3 +1128,65 @@ def test_t1_default_markexpr_deselects_t3_and_stays_full_run(tmp_path):
         f"full_run={report['full_run']!r} narrowed_by={report.get('narrowed_by')}\n"
         f"{proc.stdout}{proc.stderr}"
     )
+
+
+@pytest.mark.req("HARNESS-T3-SKIP-POLICY")
+def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
+    """Module/class `pytestmark = pytest.mark.t3` (or a list) is an inherited t3 mark.
+
+    What would make this fail: collect_mark_nodeids reading only `@pytest.mark.t3`
+    decorators, so a passed test that is t3 only via pytestmark is wrong-marker
+    and `make conformance-2.5` stays red after a real t3 pass
+    (`tests/test_hub_test_target.py` shape).
+    """
+    list_src = (
+        "import pytest\n\n"
+        "pytestmark = [pytest.mark.t3, pytest.mark.skipif(False, reason='x')]\n\n"
+        '@pytest.mark.req("FIX-T3-PYTESTMARK")\n'
+        "def test_live():\n"
+        "    assert True\n"
+    )
+    root = write_repo(
+        tmp_path / "list",
+        reqs=[_req("FIX-T3-PYTESTMARK", tier="t3")],
+        tests_src={"tests/test_live.py": list_src},
+        outcomes={"tests/test_live.py::test_live": "passed"},
+    )
+    res = run_check(root)
+    assert res.returncode == 0, (
+        f"a passed test with module pytestmark=[t3, ...] did not verify:\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    assert status_of(root, "FIX-T3-PYTESTMARK") == "verified"
+    assert "wrong marker" not in res.stdout
+
+    bare = write_repo(
+        tmp_path / "bare",
+        reqs=[_req("FIX-T3-BARE", tier="t3")],
+        tests_src={"tests/test_live.py":
+                   "import pytest\n\n"
+                   "pytestmark = pytest.mark.t3\n\n"
+                   '@pytest.mark.req("FIX-T3-BARE")\n'
+                   "def test_live():\n"
+                   "    assert True\n"},
+        outcomes={"tests/test_live.py::test_live": "passed"},
+    )
+    res_bare = run_check(bare)
+    assert res_bare.returncode == 0, res_bare.stdout + res_bare.stderr
+    assert status_of(bare, "FIX-T3-BARE") == "verified"
+
+    klass = write_repo(
+        tmp_path / "class",
+        reqs=[_req("FIX-T3-CLASS", tier="t3")],
+        tests_src={"tests/test_live.py":
+                   "import pytest\n\n"
+                   "class TestLive:\n"
+                   "    pytestmark = pytest.mark.t3\n\n"
+                   "    @pytest.mark.req(\"FIX-T3-CLASS\")\n"
+                   "    def test_live(self):\n"
+                   "        assert True\n"},
+        outcomes={"tests/test_live.py::TestLive::test_live": "passed"},
+    )
+    res_cls = run_check(klass)
+    assert res_cls.returncode == 0, res_cls.stdout + res_cls.stderr
+    assert status_of(klass, "FIX-T3-CLASS") == "verified"

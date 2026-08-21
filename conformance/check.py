@@ -212,26 +212,59 @@ def collect_markers(root):
     return found
 
 
+def _mark_name_from_expr(expr):
+    """`pytest.mark.t3` / `pytest.mark.t3(...)` → `'t3'`; else None."""
+    target = expr.func if isinstance(expr, ast.Call) else expr
+    parts = []
+    while isinstance(target, ast.Attribute):
+        parts.append(target.attr)
+        target = target.value
+    if isinstance(target, ast.Name):
+        parts.append(target.id)
+    if parts and "mark" in parts:
+        return parts[0]
+    return None
+
+
 def _decorator_mark_names(node):
     """Bare mark names on a function or class (`pytest.mark.t3` → `t3`)."""
     names = []
     for dec in node.decorator_list:
-        target = dec.func if isinstance(dec, ast.Call) else dec
-        parts = []
-        while isinstance(target, ast.Attribute):
-            parts.append(target.attr)
-            target = target.value
-        if isinstance(target, ast.Name):
-            parts.append(target.id)
-        if parts and "mark" in parts:
-            names.append(parts[0])
+        name = _mark_name_from_expr(dec)
+        if name:
+            names.append(name)
+    return names
+
+
+def _pytestmark_names(node):
+    """Mark names assigned to `pytestmark` on a module or class.
+
+    pytest applies `pytestmark = pytest.mark.t3` and
+    `pytestmark = [pytest.mark.t3, pytest.mark.skipif(...)]` to every test
+    in that scope. The decorator-only walk missed that, so a real t3 pass
+    via module pytestmark was reported as wrong-marker (D-024).
+    """
+    names = []
+    for stmt in getattr(node, "body", []):
+        if not isinstance(stmt, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "pytestmark"
+                   for t in stmt.targets):
+            continue
+        value = stmt.value
+        elts = value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]
+        for elt in elts:
+            name = _mark_name_from_expr(elt)
+            if name:
+                names.append(name)
     return names
 
 
 def _collect_mark_from(node, relpath, classes, inherited, mark_name, found):
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.ClassDef):
-            marks = inherited | set(_decorator_mark_names(child))
+            marks = (inherited | set(_decorator_mark_names(child))
+                     | set(_pytestmark_names(child)))
             _collect_mark_from(
                 child, relpath, classes + [child.name], marks, mark_name, found)
         elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -244,11 +277,13 @@ def _collect_mark_from(node, relpath, classes, inherited, mark_name, found):
 
 
 def collect_mark_nodeids(root, mark_name):
-    """AST nodeids whose function (or enclosing class) carries `@pytest.mark.<name>`."""
+    """AST nodeids that carry `@pytest.mark.<name>` or inherit it via pytestmark."""
     found = set()
     for py in sorted((root / "tests").rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        _collect_mark_from(tree, str(py.relative_to(root)), [], set(), mark_name, found)
+        module_marks = set(_pytestmark_names(tree))
+        _collect_mark_from(
+            tree, str(py.relative_to(root)), [], module_marks, mark_name, found)
     return found
 
 

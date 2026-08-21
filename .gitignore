@@ -15,6 +15,9 @@ dump.rdb
 # the mutated sources and its per-mutant results here, and it is a cache, not evidence.
 mutants/
 
+# Linked checkouts for parallel implementers (not part of the tree).
+.worktrees/
+
 .DS_Store
 .stage-tmp/
 _to_delete/
