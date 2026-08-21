@@ -163,15 +163,19 @@ def _run(argv, *, env, cwd=None, timeout=30):
 
 @pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
 def test_scripts_live_under_scripts_dir():
-    """The host set lives in scripts/. hub-upgrade.sh may be the Task 19 stub.
+    """The host set lives in scripts/. hub-upgrade.sh is the C6 fifth script.
 
-    What would make this fail: scripts missing, or the Task 19 header gone.
+    What would make this fail: scripts missing, or hub-upgrade.sh not a real
+    upgrade script (still a stub, or no drain/dump/rollback).
     """
     for path in (HARDEN, CF_UFW, VERIFY, WATCH, UPGRADE):
         assert path.is_file(), f"missing {path.relative_to(REPO)}"
         assert path.stat().st_mode & stat.S_IXUSR
-    header = UPGRADE.read_text(encoding="utf-8")
-    assert "# Task 19 fills C6" in header
+    source = UPGRADE.read_text(encoding="utf-8")
+    assert "set -euo pipefail" in source
+    assert "pg_dump" in source
+    assert "--rollback" in source
+    assert "hub-upgrade.sh: stub" not in source
 
 
 @pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")

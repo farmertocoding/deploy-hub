@@ -2,7 +2,7 @@
 
 For the Ubuntu servers in the **web deploy automation & monitor** fleet. Derived from the reviewed plan (`deploy-system-plan.md` §6.5/§6.6/§7.1) and the 2026-07-30 security round (`plan-addendum-2026-07-30.md` §B/§C). Every rule below is also implemented by the scripts, so you can read-and-type or run — same commands either way (the plan's one-catalog principle).
 
-**UPDATE 2026-08-21 (Task 6 fix):** Script provenance & custody (per review3 §Q8). The canonical location of every script below is the **Hub repo under `scripts/`** — `scripts/**` is on the always-human-merged sensitive-path list (build-process §5). Versions as of this update: `harden-ubuntu.sh` v2026-08-21 · `update-cloudflare-ufw.sh` v2026-08-20 · `verify-hardening.sh` v2026-08-20 · `hub-upgrade.sh` v2026-08-20 (Task 19 stub: `# Task 19 fills C6`) · `server-watch.sh` v2026-08-20. **Rule: any script change updates this doc in the same change.** These scripts are the **pre-Hub interim implementation of specific catalog entry IDs**: script versions map to catalog entry versions, and each script is retired when the corresponding Hub Beat/provisioner machinery goes live — at which point the provisioner **removes the script cron jobs** so there is no double execution and no double paging.
+**UPDATE 2026-08-21 (Task 6 fix):** Script provenance & custody (per review3 §Q8). The canonical location of every script below is the **Hub repo under `scripts/`** — `scripts/**` is on the always-human-merged sensitive-path list (build-process §5). Versions as of this update: `harden-ubuntu.sh` v2026-08-21 · `update-cloudflare-ufw.sh` v2026-08-20 · `verify-hardening.sh` v2026-08-20 · `hub-upgrade.sh` v2026-08-21 · `server-watch.sh` v2026-08-20. **Rule: any script change updates this doc in the same change.** These scripts are the **pre-Hub interim implementation of specific catalog entry IDs**: script versions map to catalog entry versions, and each script is retired when the corresponding Hub Beat/provisioner machinery goes live — at which point the provisioner **removes the script cron jobs** so there is no double execution and no double paging.
 
 ## The scripts
 
@@ -11,7 +11,7 @@ For the Ubuntu servers in the **web deploy automation & monitor** fleet. Derived
 | `harden-ubuntu.sh` | every server, once (re-runnable) | Full hardening: users, SSH, ufw, fail2ban, auto-updates, sysctl, chrony, Docker, Tailscale. Profiles: `hub` / `target` / `intake` (review3 §O2). `DRY_RUN=1` prints instead of executing. |
 | `update-cloudflare-ufw.sh` | target hosts, weekly cron | Refreshes the "443/80 only from Cloudflare" ufw rules from Cloudflare's published lists; aborts safely if the fetch looks wrong. |
 | `verify-hardening.sh` | every server, cron/CI/after changes | Read-only pass/fail checklist (drift detection until the Hub's own §6B audit exists). |
-| `hub-upgrade.sh` | the Hub host only | Safe upgrade of the Hub itself: drain-check → DB backup → build → migrate → warm restart → smoke test, with `--rollback`. |
+| `hub-upgrade.sh` | the Hub host only | Safe upgrade of the Hub itself: drain-check → DB backup → keep previous image → build → migrate → warm restart → smoke test. `--rollback` restores the previous kept image. |
 | `server-watch.sh` | every server, cron | Interim fleet alerting (pre-Hub): publishes failures to the ntfy pager channel — delivered with a **distinct per-server ntfy publish token** (review3 §V8/§M3), so a compromised host is identifiable and revocable. |
 
 ### Script ↔ catalog id
@@ -23,7 +23,7 @@ Scripts are the pre-Hub interim of these catalog ids (Task 5). Script files land
 | `scripts/harden-ubuntu.sh` | ntp-chrony, log-rotation, docker-daemon-json, sshd-dropin, ufw-posture-hub, ufw-posture-target, ufw-posture-intake, fail2ban-ignoreip, caddy |
 | `scripts/update-cloudflare-ufw.sh` | ufw-posture-target |
 | `scripts/verify-hardening.sh` | check argv of every id above |
-| `scripts/hub-upgrade.sh` | (Task 19) |
+| `scripts/hub-upgrade.sh` | C6 Hub self-upgrade |
 | `scripts/server-watch.sh` | — |
 
 ### Quick start
@@ -179,7 +179,7 @@ The mesh is the trust anchor for everything, so (addendum §B8): hardware-key 2F
 
 ### R9 — Deploy safety rules the scripts encode
 
-The safest deploy is the one that is boring and reversible: **never `runserver`** (gunicorn behind Caddy) · immutable image tags, never `:latest` · migrate **before** switching traffic, expand-contract for destructive changes · blue-green cutover with the old container kept stopped for instant rollback · backup **before** migrate, encrypted, off-host · every deploy recorded (who/what/when/log). `hub-upgrade.sh` applies the same discipline to the Hub itself: drain → backup → migrate → warm restart (SIGTERM so Celery tasks checkpoint) → smoke test → `--rollback` available.
+The safest deploy is the one that is boring and reversible: **never `runserver`** (gunicorn behind Caddy) · immutable image tags, never `:latest` · migrate **before** switching traffic, expand-contract for destructive changes · blue-green cutover with the old container kept stopped for instant rollback · backup **before** migrate, encrypted, off-host · every deploy recorded (who/what/when/log). `hub-upgrade.sh` applies the same discipline to the Hub itself: drain → backup → migrate → warm restart (SIGTERM so Celery tasks checkpoint) → smoke test → `--rollback` restores the previous kept image.
 
 ### R10 — Verify from outside, on a schedule
 
