@@ -77,11 +77,9 @@ def test_apply_skips_build_and_ship():
     pending/succeeded, a new git_sha (new image tag), or leaving config_stale set.
     """
     from deploys.env import apply_env, put_env
-    from deploys.steps import image_tag
 
     site, original = queued_deployment("applyenv", body=fixture_body("applyenv"))
     old_body = dict(original.manifest.body)
-    old_tag = image_tag(old_body.get("git_sha"), old_body)
 
     put_env(site, {"API_KEY": PLANTED})
     transport = PipelineTransport()
@@ -91,11 +89,6 @@ def test_apply_skips_build_and_ship():
     assert deployment.pk != original.pk
     assert deployment.manifest.version == original.manifest.version + 1
     assert deployment.manifest.body.get("git_sha") == old_body.get("git_sha")
-    new_tag = image_tag(
-        deployment.manifest.body.get("git_sha"),
-        deployment.manifest.body,
-    )
-    assert new_tag == old_tag
 
     by_name = {step.name: step.status for step in deployment.steps.order_by("seq")}
     assert by_name[DeploymentStep.Name.BUILD] == DeploymentStep.Status.SKIPPED
@@ -184,3 +177,75 @@ def test_values_not_in_task_kwargs_or_logs():
     for step in deployment.steps.all():
         assert PLANTED not in step.log_text
     assert PLANTED not in json.dumps(deployment.manifest.body)
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_execute_clears_config_stale_after_delay(monkeypatch):
+    """delay must not be the writer of config_stale; execute success is.
+
+    What would make this fail: clearing only inside apply_env after a
+    transport-injected execute, or leaving the flag set when the worker finishes.
+    """
+    from deploys.env import apply_env, put_env
+    from deploys.pipeline import execute
+    from deploys.tasks import run_deploy
+
+    site, _original = queued_deployment("envdelay", body=fixture_body("envdelay"))
+    put_env(site, {"API_KEY": PLANTED})
+    site.refresh_from_db()
+    assert site.config_stale is True
+
+    queued = []
+    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+    apply_env(site)
+    site.refresh_from_db()
+    assert site.config_stale is True
+    assert queued
+
+    execute(queued[0], transport=PipelineTransport(), dns=FakeDnsProvider())
+    site.refresh_from_db()
+    assert site.config_stale is False
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_apply_pins_last_succeeded_image_tag():
+    """Apply docker-runs the last succeeded tag, not image_tag() of Manifest N+1.
+
+    Wizard bodies carry env_bundle_ref; a new vault pk must not invent a tag
+    that was never built. What would make this fail: hashing the new body, or
+    omitting env fields from image_tag() so historical tags no longer match.
+    """
+    from deploys.env import apply_env, put_env
+    from deploys.steps import image_tag
+    from vault import service as vault_service
+    from vault.models import Secret
+
+    bundle = vault_service.put(
+        kind=Secret.Kind.ENV_BUNDLE,
+        owner_type="manifest",
+        owner_id="pin-v1",
+        plaintext=b'{"DATABASE_URL":"old"}',
+    )
+    body = fixture_body("envpin", extra={
+        "env_bundle_ref": bundle.pk,
+        "env_names": ["DATABASE_URL"],
+    })
+    site, original = queued_deployment("envpin", body=body)
+    original.status = Deployment.Status.SUCCEEDED
+    original.save(update_fields=["status"])
+    prev_tag = image_tag(body["git_sha"], original.manifest.body)
+
+    put_env(site, {"DATABASE_URL": PLANTED})
+    transport = PipelineTransport()
+    deployment = apply_env(site, transport=transport, dns=FakeDnsProvider())
+
+    new_body = deployment.manifest.body
+    computed = image_tag(new_body.get("git_sha"), new_body)
+    assert computed != prev_tag
+    runs = [
+        argv for kind, argv in transport.mutating_calls()
+        if kind == "run" and argv[:2] == ["docker", "run"]
+    ]
+    assert runs
+    assert any(prev_tag in argv for argv in runs)
+    assert all(computed not in argv for argv in runs)

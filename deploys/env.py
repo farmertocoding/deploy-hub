@@ -45,7 +45,7 @@ def merge_env(site, mapping):
 
 
 def apply_env(site, *, transport=None, dns=None):
-    """Enqueue a same-image deploy (build+ship skipped) and clear config_stale on success."""
+    """Enqueue a same-image deploy (build+ship skipped). execute() clears config_stale."""
     from deploys.models import Deployment, DeploymentStep, Manifest
     from deploys.pipeline import execute, persist_steps
 
@@ -89,9 +89,6 @@ def apply_env(site, *, transport=None, dns=None):
         run_deploy.delay(deployment.pk)
 
     deployment.refresh_from_db()
-    if deployment.status == Deployment.Status.SUCCEEDED:
-        site.config_stale = False
-        site.save(update_fields=["config_stale"])
     return deployment
 
 

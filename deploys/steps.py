@@ -21,28 +21,26 @@ VAULT_CONTEXT_MARKERS = frozenset({
 })
 
 
-# Env is runtime, not image: apply with the same git_sha must reuse the existing tag.
-_IMAGE_TAG_OMIT = frozenset({"env_bundle_ref", "env_names", "env"})
-
-
 def image_tag(git_sha, manifest_body):
-    """Deterministic tag: git sha plus a stable hash of the image-relevant body."""
-    body = {
-        key: value
-        for key, value in (manifest_body or {}).items()
-        if key not in _IMAGE_TAG_OMIT
-    }
+    """Deterministic tag: git sha plus a stable hash of canonical Manifest.body."""
     digest = hashlib.sha256(
-        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(manifest_body, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
     return f"{git_sha}-{digest}"
+
+
+def _desired_image_tag(desired):
+    """Honor an explicit pin (env apply) before recomputing from the current body."""
+    pinned = desired.get("image_tag")
+    if pinned:
+        return pinned
+    return image_tag(desired["git_sha"], desired.get("manifest_body") or {})
 
 
 def ensure_build(desired):
     """Probe the tag; on miss, put a vault-free context and docker build on the target."""
     transport = desired["transport"]
-    body = desired["manifest_body"]
-    tag = image_tag(desired["git_sha"], body)
+    tag = _desired_image_tag(desired)
     if _image_present(transport, tag):
         return {"status": "skipped", "tag": tag}
 

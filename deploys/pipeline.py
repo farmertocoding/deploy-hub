@@ -196,6 +196,9 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
         return {"started": True, "status": deployment.status}
     deployment.status = Deployment.Status.SUCCEEDED
     deployment.save(update_fields=["status"])
+    site = deployment.manifest.site
+    site.config_stale = False
+    site.save(update_fields=["config_stale"])
     release_deploy_locks(deployment)
     return {"started": True, "status": Deployment.Status.SUCCEEDED}
 
@@ -236,6 +239,16 @@ def _previous_succeeded(deployment):
     )
 
 
+def _build_and_ship_skipped(deployment):
+    skipped = set(
+        deployment.steps.filter(
+            name__in=[DeploymentStep.Name.BUILD, DeploymentStep.Name.SHIP],
+            status=DeploymentStep.Status.SKIPPED,
+        ).values_list("name", flat=True)
+    )
+    return skipped == {DeploymentStep.Name.BUILD, DeploymentStep.Name.SHIP}
+
+
 def _assemble_desired(deployment, *, transport, dns, sleep):
     site = deployment.manifest.site
     body = deployment.manifest.body or {}
@@ -265,6 +278,13 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
     else:
         env_names = list(body.get("env_names") or [])
 
+    if prev is not None and _build_and_ship_skipped(deployment):
+        prev_body = prev.manifest.body or {}
+        git_sha = prev_body.get("git_sha") or git_sha
+        pinned_tag = image_tag(git_sha, prev_body)
+    else:
+        pinned_tag = image_tag(git_sha, body)
+
     desired = {
         "transport": transport,
         "site": site,
@@ -274,7 +294,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
         "manifest_body": body,
         "git_sha": git_sha,
         "source_dir": source_dir,
-        "image_tag": image_tag(git_sha, body),
+        "image_tag": pinned_tag,
         "heartbeat": lambda: touch_heartbeat(deployment),
         "old_container": old_container,
         "dns": dns,

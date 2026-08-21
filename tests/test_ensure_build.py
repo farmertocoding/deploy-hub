@@ -207,6 +207,29 @@ def test_second_build_zero_mutating_calls(tmp_path):
 
 
 @pytest.mark.req("SEC-B1-BUILD-OFFHUB")
+def test_ensure_build_honors_explicit_image_tag(tmp_path):
+    """An explicit desired image_tag is the tag docker build -t uses.
+
+    What would make this fail: recomputing image_tag() from Manifest.body and
+    ignoring the pinned on-disk tag from a skip-build apply.
+    """
+    from deploys.steps import ensure_build, image_tag
+
+    transport = StepTransport()
+    body = {"runtime": "node"}
+    desired = _desired(_source_tree(tmp_path), transport, body=body)
+    desired["image_tag"] = "pinned-from-last-succeeded"
+    computed = image_tag(GIT_SHA, body)
+    assert computed != desired["image_tag"]
+
+    ensure_build(desired)
+    argv = _build_argv(transport)
+    assert argv[argv.index("-t") + 1] == "pinned-from-last-succeeded"
+    assert "pinned-from-last-succeeded" in transport.images
+    assert computed not in transport.images
+
+
+@pytest.mark.req("SEC-B1-BUILD-OFFHUB")
 @pytest.mark.django_db
 def test_generated_dockerfile_uses_npm_ci_or_hashed_pip(tmp_path):
     """Generated Dockerfiles pin installs from Manifest.body: npm ci or hashed pip.
