@@ -2,6 +2,8 @@
 import ast
 import inspect
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,32 +24,33 @@ CONTRACT_KEYS = {
 }
 LOG_CHUNK_KEYS = {"file", "inode", "offset", "bytes"}
 HEALTHZ_KEYS = {"live", "ready", "checks"}
-
-
-def _payload(target_id=42):
-    return {
-        "schema_version": 1,
-        "target_id": target_id,
-        "ts": "2026-08-21T04:13:00Z",
-        "metrics": {"load1": 0.2, "mem_pct": 41.0, "disk_pct": 12.0},
-        "containers": [{"name": "site-app-1", "state": "running"}],
-        "log_chunk": {
-            "file": "/var/log/caddy/access.log",
-            "inode": 12345,
-            "offset": 100,
-            "bytes": "",
-        },
-        "clock": "2026-08-21T04:13:00Z",
-        "healthz": {"live": True, "ready": True, "checks": {}},
-    }
+PRODUCER = Path(__file__).resolve().parent.parent / "monitor" / "collect_once.py"
+WRITABLE_REMOTE = "/tmp/hub-collect-once"
 
 
 def _target(pk=42):
     return SimpleNamespace(pk=pk, id=pk)
 
 
+def _run_producer(tmp_path, target_id=42):
+    """Execute collect_once.py against a temp log (no SSH). Returns (stdout, log)."""
+    log = tmp_path / "access.log"
+    log.write_bytes(b'{"status":200}\n')
+    proc = subprocess.run(
+        [sys.executable, str(PRODUCER), str(target_id), "0", str(log)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout, log
+
+
 class CollectorTransport(FakeTransport):
-    """Canned collector JSON from the one script probe; test -f is not a session."""
+    """One probe returns the producer script's real stdout; test -f is not a session."""
+
+    def __init__(self, stdout=""):
+        super().__init__()
+        self._stdout = stdout
 
     def probe(self, argv, *, timeout=60):
         if not isinstance(argv, (list, tuple)):
@@ -57,14 +60,19 @@ class CollectorTransport(FakeTransport):
         if argv and argv[0] == "test":
             remote = argv[-1]
             return CommandResult(argv, exit_code=0 if remote in self.files else 1)
-        return CommandResult(argv, stdout=json.dumps(_payload()))
+        return CommandResult(argv, stdout=self._stdout)
 
     def run(self, argv, *, timeout=60):
         if not isinstance(argv, (list, tuple)):
             raise TypeError("argv must be a list — never a shell string (§4.5)")
         argv = list(argv)
         self.calls.append(("run", argv))
-        return CommandResult(argv, stdout=json.dumps(_payload()))
+        return CommandResult(argv, stdout=self._stdout)
+
+
+def _transport(tmp_path, target_id=42):
+    stdout, log = _run_producer(tmp_path, target_id)
+    return CollectorTransport(stdout=stdout), log
 
 
 def _noop(_seconds):
@@ -92,25 +100,32 @@ def _script_executions(transport):
     return n
 
 
+def _assert_contract(payload, *, log=None):
+    assert set(payload) == CONTRACT_KEYS
+    assert set(payload["log_chunk"]) == LOG_CHUNK_KEYS
+    assert set(payload["healthz"]) == HEALTHZ_KEYS
+    if log is not None:
+        assert payload["log_chunk"]["file"] == str(log)
+
+
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
-def test_one_session_returns_full_contract():
+def test_one_session_returns_full_contract(tmp_path):
     """One put + one probe of the collector script returns the pinned JSON.
 
-    What would make this fail: a second argv for metrics/logs/clock, or dropping
-    a contract key, or parsing something other than that one script's stdout.
+    What would make this fail: a second argv for metrics/logs/clock, dropping
+    a contract key from collect_once.py, or putting to a path deploy cannot SFTP.
     """
     from monitor.collector import collect
     from monitor.tasks import collect_all
 
-    transport = CollectorTransport()
+    transport, log = _transport(tmp_path)
     result = collect(_target(), transport, sleep=_noop)
 
-    assert set(result) == CONTRACT_KEYS
-    assert set(result["log_chunk"]) == LOG_CHUNK_KEYS
-    assert set(result["healthz"]) == HEALTHZ_KEYS
+    _assert_contract(result, log=log)
     assert _script_executions(transport) == 1
     puts = [c for c in transport.calls if c[0] == "put"]
     assert len(puts) == 1
+    assert puts[0][1] == WRITABLE_REMOTE
 
     beat = {entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()}
     assert collect_all.name in beat
@@ -124,27 +139,29 @@ def test_one_session_returns_full_contract():
 
 
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
-def test_contract_has_metrics_containers_log_chunk_clock_healthz():
-    """C3 fields are present; healthz is the pinned {live, ready, checks} object.
+def test_contract_has_metrics_containers_log_chunk_clock_healthz(tmp_path):
+    """C3 fields come from collect_once.py; healthz is {live, ready, checks}.
 
-    What would make this fail: renaming a field, flattening healthz, or omitting
-    log_chunk.inode/offset so the next minute cannot resume the file.
+    What would make this fail: renaming a field in the producer, flattening
+    healthz, or omitting log_chunk.inode/offset so the next minute cannot resume.
     """
     from monitor.collector import collect
 
-    result = collect(_target(), CollectorTransport(), sleep=_noop)
+    transport, log = _transport(tmp_path)
+    result = collect(_target(), transport, sleep=_noop)
     for key in ("metrics", "containers", "log_chunk", "clock", "healthz"):
         assert key in result
-    assert result["healthz"]["live"] is True
-    assert result["healthz"]["ready"] is True
+    assert "live" in result["healthz"]
+    assert "ready" in result["healthz"]
     assert "checks" in result["healthz"]
     chunk = result["log_chunk"]
-    assert chunk["file"]
+    assert chunk["file"] == str(log)
     assert "inode" in chunk and "offset" in chunk and "bytes" in chunk
+    assert '{"status":200}' in chunk["bytes"]
 
 
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
-def test_jitter_is_stable_per_target():
+def test_jitter_is_stable_per_target(tmp_path):
     """jitter_s(target_id) is in 0..59 and repeats for the same id.
 
     What would make this fail: random.randint, Python's salted hash() across
@@ -159,26 +176,28 @@ def test_jitter_is_stable_per_target():
     assert len(spread) > 1
 
     slept = []
-    collect(_target(7), CollectorTransport(), sleep=slept.append)
+    transport, _log = _transport(tmp_path, target_id=7)
+    collect(_target(7), transport, sleep=slept.append)
     assert slept == [jitter_s(7)]
 
 
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
-def test_script_put_not_heredoc():
+def test_script_put_not_heredoc(tmp_path):
     """The on-target script lands via put; argv lists never carry the body.
 
-    What would make this fail: run/probe of a shell string, cat <<EOF, or
-    stuffing the script into bash -c.
+    What would make this fail: run/probe of a shell string, cat <<EOF,
+    stuffing the script into bash -c, or putting to /usr/local/bin.
     """
     from monitor import collector
     from monitor.collector import collect
 
-    transport = CollectorTransport()
+    transport, log = _transport(tmp_path)
     collect(_target(), transport, sleep=_noop)
 
     puts = [remote for kind, remote in transport.calls if kind == "put"]
     assert puts, "expected transport.put of the collector script"
     remote = puts[0]
+    assert remote == WRITABLE_REMOTE
     payload = transport.files[remote]
     if isinstance(payload, (bytes, bytearray)):
         body = payload.decode()
@@ -188,6 +207,16 @@ def test_script_put_not_heredoc():
         body = str(payload)
     assert body.strip()
     assert "<<" not in body.splitlines()[0]
+
+    put_script = tmp_path / "put-body.py"
+    put_script.write_text(body, encoding="utf-8")
+    produced = subprocess.run(
+        [sys.executable, str(put_script), "42", "0", str(log)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _assert_contract(json.loads(produced.stdout), log=log)
 
     for kind, argv in transport.calls:
         if kind not in ("run", "probe"):
@@ -218,7 +247,7 @@ def test_script_put_not_heredoc():
 
 
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")
-def test_two_collectors_do_not_open_three_ssh_sessions():
+def test_two_collectors_do_not_open_three_ssh_sessions(tmp_path):
     """Two collect() calls on one Transport are two script executions, not three.
 
     What would make this fail: a third independent metrics/logs/clock argv, or
@@ -227,11 +256,11 @@ def test_two_collectors_do_not_open_three_ssh_sessions():
     """
     from monitor.collector import collect
 
-    transport = CollectorTransport()
+    transport, log = _transport(tmp_path)
     target = _target()
     first = collect(target, transport, sleep=_noop)
     second = collect(target, transport, sleep=_noop)
-    assert set(first) == CONTRACT_KEYS
-    assert set(second) == CONTRACT_KEYS
+    _assert_contract(first, log=log)
+    _assert_contract(second, log=log)
     assert _script_executions(transport) == 2
     assert _script_executions(transport) < 3

@@ -185,7 +185,8 @@ def test_cutover_writes_runbook_when_artifacts_exist_but_remote_missing():
         kind == "put" and remote == runbook
         for kind, remote in transport.mutating_calls()
     )
-    assert deployment.text_artifacts.count() == 5
+    assert deployment.text_artifacts.count() == 6
+    assert deployment.text_artifacts.filter(kind="image_tag").exists()
 
 
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")

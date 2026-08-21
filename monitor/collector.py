@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-REMOTE_SCRIPT = "/usr/local/bin/hub-collect-once"
+REMOTE_SCRIPT = "/tmp/hub-collect-once"
 _SCRIPT_PATH = Path(__file__).with_name("collect_once.py")
 
 
