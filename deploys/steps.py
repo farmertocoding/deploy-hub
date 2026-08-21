@@ -595,14 +595,9 @@ def _healthz_payload(desired):
         name,
     ])
     ip = (ip_r.stdout or "").strip().split()[0] if (ip_r.stdout or "").strip() else ""
-    if ip:
-        url = f"http://{ip}{path}"
-    else:
-        port = int(desired.get("internal_port") or 80)
-        if port not in {80, 443}:
-            url = f"http://127.0.0.1:{port}{path}"
-        else:
-            url = f"http://127.0.0.1{path}"
+    listen = _listen_port(desired)
+    host = ip or "127.0.0.1"
+    url = f"http://{host}:{listen}{path}"
     result = transport.probe(["curl", "-sf", url])
     if not result.ok or not (result.stdout or "").strip():
         return {"live": False, "ready": False}
