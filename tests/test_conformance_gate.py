@@ -24,6 +24,7 @@ import subprocess
 import sys
 
 import gates
+import pytest
 import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -64,7 +65,7 @@ def write_repo(root, *, reqs, tests_src=None, report="auto", waivers="",
                 lines.append(f"{prefix}{k}:")
                 for item in v:
                     lines.append(f"      - {json.dumps(item)}")
-            elif isinstance(v, int):
+            elif isinstance(v, (int, float)):
                 lines.append(f"{prefix}{k}: {v}")
             else:
                 lines.append(f"{prefix}{k}: {json.dumps(str(v))}")
@@ -841,21 +842,22 @@ def test_t2_live():
 
 
 def test_t2_deselect_is_skipped_and_full_run(tmp_path):
-    """`make test` is `pytest -q -m "not t2"`. Deselected T2 nodeids must be skipped.
+    """`make test` is `pytest -q -m "not t2 and not t3"`. Deselected T2 nodeids
+    must be skipped.
 
     Uncollected req markers are red regardless of phase (R4-9). Recording the
     T2 tests as skipped keeps SEC-68/SEC-B1 out of `not-collected`, and the
     default T1 filter is not a narrowed run.
     """
     report, proc = run_child_pytest(
-        tmp_path / "not-t2", addopts='-m "not t2"', tests=CHILD_T2_TESTS)
+        tmp_path / "not-t2", addopts='-m "not t2 and not t3"', tests=CHILD_T2_TESTS)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert report["outcomes"]["test_child.py::test_t1_unit"] == "passed"
     assert report["outcomes"]["test_child.py::test_t2_live"] == "skipped", (
         f"T2 nodeid missing or not skipped (would be not-collected):\n{report}"
     )
     assert report["full_run"] is True, (
-        f"-m 'not t2' must still be a full T1 gating run:\n"
+        f"-m 'not t2 and not t3' must still be a full T1 gating run:\n"
         f"full_run={report['full_run']!r} narrowed_by={report.get('narrowed_by')}\n"
         f"{proc.stdout}{proc.stderr}"
     )
@@ -929,3 +931,200 @@ def test_issue_r7_registry_text_matches_what_the_declaration_tests_prove():
     # And the source citation has to reach the spec that RULED it, or the pinned
     # text_hash watches a section that says the opposite of the requirement.
     assert "spec-r7-enforce-declaration-acceptance.md" in req["source"], req["source"]
+
+
+T3_MARKED_TEST = (
+    "import pytest\n\n\n"
+    "@pytest.mark.t3\n"
+    '@pytest.mark.req("{rid}")\n'
+    "def {name}():\n"
+    "    assert True\n"
+)
+
+CHILD_T3_TESTS = '''\
+import pytest
+
+
+def test_t1_unit():
+    assert True
+
+
+@pytest.mark.t2
+def test_t2_live():
+    assert True
+
+
+@pytest.mark.t3
+def test_t3_live():
+    assert True
+'''
+
+
+def test_phase_accepts_two_point_five(tmp_path):
+    """`--phase 2.5` must be a legal gate, and write_repo must emit 2.5 as YAML number.
+
+    What would make this fail: argparse `--phase type=int` (rejects 2.5), schema
+    `phase must be int`, or write_repo quoting floats so the registry stores a string.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-PHASE", phase=2.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-PHASE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    yaml_text = (root / "conformance" / "requirements.yaml").read_text()
+    assert re.search(r"^    phase: 2\.5\s*$", yaml_text, re.M), (
+        f"write_repo must emit YAML float 2.5 as a number, not a quoted string:\n"
+        f"{yaml_text}"
+    )
+    res = run_check(root, phase=2.5)
+    assert res.returncode == 0, (
+        f"--phase 2.5 was rejected:\n{res.stdout}{res.stderr}"
+    )
+    header = matrix(root)
+    assert header["phase"] == 2.5
+    assert header["requirements"]["FIX-PHASE"]["due"] is True
+    assert status_of(root, "FIX-PHASE") == "verified"
+
+    res2 = run_check(root, phase=2)
+    assert res2.returncode == 0, res2.stdout + res2.stderr
+    assert matrix(root)["requirements"]["FIX-PHASE"]["due"] is False, (
+        "a phase-2.5 req must not be due at --phase 2"
+    )
+
+
+@pytest.mark.req("HARNESS-T3-SKIP-POLICY")
+def test_t3_tier_req_not_verified_by_t1_sibling(tmp_path):
+    """A T1 pass must not verify a `tier: t3` req (D-024). Carrying the id on T1 is red.
+
+    What would make this fail: evaluate_test_req treating any passed sibling as
+    verified, including an unmarked T1 test next to a skipped T3 test.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T3-ONLY", tier="t3")],
+        tests_src={
+            "tests/test_unit.py": MARKED_TEST.format(
+                rid="FIX-T3-ONLY", name="test_unit"),
+            "tests/test_live.py": T3_MARKED_TEST.format(
+                rid="FIX-T3-ONLY", name="test_live"),
+        },
+        outcomes={
+            "tests/test_unit.py::test_unit": "passed",
+            "tests/test_live.py::test_live": "skipped",
+        },
+    )
+    res = run_check(root)
+    assert res.returncode != 0, (
+        f"a T1 sibling pass verified a tier:t3 req:\n{res.stdout}"
+    )
+    assert status_of(root, "FIX-T3-ONLY") != "verified"
+    assert "wrong marker" in res.stdout, (
+        f"a T1 test carrying a tier:t3 id must be named as wrong marker:\n{res.stdout}"
+    )
+
+
+@pytest.mark.req("HARNESS-T3-SKIP-POLICY")
+def test_t3_tier_req_skipped_only_when_all_t3_skipped(tmp_path):
+    """Every `@pytest.mark.t3` outcome skipped/xfailed is skipped-only, never verified.
+
+    What would make this fail: counting skip/xfail as a pass for `tier: t3`.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T3-SKIP", tier="t3")],
+        tests_src={"tests/test_live.py":
+                   T3_MARKED_TEST.format(rid="FIX-T3-SKIP", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "skipped"},
+    )
+    res = run_check(root)
+    assert res.returncode != 0, (
+        f"a skipped-only tier:t3 req went green:\n{res.stdout}"
+    )
+    assert status_of(root, "FIX-T3-SKIP") == "skipped-only"
+
+    xfail = write_repo(
+        tmp_path / "xfail",
+        reqs=[_req("FIX-T3-SKIP", tier="t3")],
+        tests_src={"tests/test_live.py":
+                   T3_MARKED_TEST.format(rid="FIX-T3-SKIP", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "xfailed"},
+    )
+    assert run_check(xfail).returncode != 0
+    assert status_of(xfail, "FIX-T3-SKIP") == "skipped-only"
+
+
+@pytest.mark.req("HARNESS-T3-SKIP-POLICY")
+def test_t3_tier_req_verified_only_after_t3_pass(tmp_path):
+    """`tier: t3` is verified only when ≥1 `@pytest.mark.t3` test passed and none failed.
+
+    What would make this fail: refusing a genuine t3 pass, or verifying from a
+    non-t3 nodeid.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T3-PASS", tier="t3")],
+        tests_src={"tests/test_live.py":
+                   T3_MARKED_TEST.format(rid="FIX-T3-PASS", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "passed"},
+    )
+    res = run_check(root)
+    assert res.returncode == 0, (
+        f"a passed @pytest.mark.t3 test did not verify a tier:t3 req:\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    assert status_of(root, "FIX-T3-PASS") == "verified"
+
+
+def test_exclude_tier_t3_omits_t3_reqs_from_due_set(tmp_path):
+    """`--exclude-tier t3` drops `tier: t3` reqs from the due set (review-round).
+
+    What would make this fail: exclude-tier ignored, so an uncovered t3 req still
+    fails the gate the same way a T1 uncovered req does.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T3-EXCL", tier="t3"), _req("FIX-T1-DUE")],
+        tests_src={"tests/test_t1.py":
+                   MARKED_TEST.format(rid="FIX-T1-DUE", name="test_t1")},
+        outcomes={"tests/test_t1.py::test_t1": "passed"},
+    )
+    res_all = run_check(root)
+    assert res_all.returncode != 0, (
+        f"an uncovered tier:t3 req was not due at --phase 1:\n{res_all.stdout}"
+    )
+    assert status_of(root, "FIX-T3-EXCL") == "uncovered"
+    assert matrix(root)["requirements"]["FIX-T3-EXCL"]["due"] is True
+
+    res = run_check(root, extra=("--exclude-tier", "t3"))
+    assert res.returncode == 0, (
+        f"--exclude-tier t3 still failed the gate:\n{res.stdout}{res.stderr}"
+    )
+    assert matrix(root)["requirements"]["FIX-T3-EXCL"]["due"] is False
+    assert matrix(root)["requirements"]["FIX-T1-DUE"]["due"] is True
+    assert status_of(root, "FIX-T1-DUE") == "verified"
+
+
+def test_t1_default_markexpr_deselects_t3_and_stays_full_run(tmp_path):
+    """`make test` is `-m "not t2 and not t3"`. T3 nodeids are skipped; full_run stays.
+
+    What would make this fail: T3 deselection counted as narrowing, or the T3
+    nodeid omitted from the report (not-collected).
+    """
+    report, proc = run_child_pytest(
+        tmp_path / "not-t2-t3",
+        addopts='-m "not t2 and not t3"',
+        tests=CHILD_T3_TESTS,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert report["outcomes"]["test_child.py::test_t1_unit"] == "passed"
+    assert report["outcomes"]["test_child.py::test_t2_live"] == "skipped", report
+    assert report["outcomes"]["test_child.py::test_t3_live"] == "skipped", (
+        f"T3 nodeid missing or not skipped (would be not-collected):\n{report}"
+    )
+    assert report["full_run"] is True, (
+        f'-m "not t2 and not t3" must still be a full T1 gating run:\n'
+        f"full_run={report['full_run']!r} narrowed_by={report.get('narrowed_by')}\n"
+        f"{proc.stdout}{proc.stderr}"
+    )

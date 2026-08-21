@@ -34,11 +34,11 @@ django.setup()
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# `make test` is `pytest -q -m "not t2"`. That deselects live-container tests so
-# lint-and-unit stays T1-fast, but the nodeids still exist in the suite: the
-# plugin records them as skipped so check.py never sees `not-collected` (R4-9).
-# The filter is the default T1 gate, not a narrowed run.
-_T2_DEFAULT_MARKEXPR = "not t2"
+# `make test` is `pytest -q -m "not t2 and not t3"`. That deselects live-container
+# and Multipass tests so lint-and-unit stays T1-fast, but the nodeids still exist
+# in the suite: the plugin records them as skipped so check.py never sees
+# `not-collected` (R4-9). The filter is the default T1 gate, not a narrowed run.
+_T2_DEFAULT_MARKEXPR = "not t2 and not t3"
 
 # conformance/gates.py owns the gate machinery this plugin and the gate tests both read
 # (N1). `conformance/` deliberately has no __init__.py — it is not an importable package,
@@ -99,16 +99,19 @@ def pytest_runtest_logreport(report):
 # caught by the same rule.
 _DESELECTED = 0
 _DESELECTED_T2 = 0
+_DESELECTED_T3 = 0
 
 
 def pytest_deselected(items):
     """Record not-run collected items as skipped; count leftover narrowing."""
-    global _DESELECTED, _DESELECTED_T2
+    global _DESELECTED, _DESELECTED_T2, _DESELECTED_T3
     _DESELECTED += len(items)
     for item in items:
         _OUTCOMES.setdefault(item.nodeid, "skipped")
         if item.get_closest_marker("t2"):
             _DESELECTED_T2 += 1
+        if item.get_closest_marker("t3"):
+            _DESELECTED_T3 += 1
 
 
 def _normalized_markexpr(option):
@@ -145,7 +148,8 @@ def _narrowing_reasons(config, exitstatus):
     extra_deselected = _DESELECTED
     if markexpr == _T2_DEFAULT_MARKEXPR:
         extra_deselected -= _DESELECTED_T2
-    if extra_deselected:
+        extra_deselected -= _DESELECTED_T3
+    if extra_deselected > 0:
         reasons.append(f"{extra_deselected} test(s) deselected during collection")
     # 0 = all passed, 1 = tests failed; anything else means the session was cut short.
     if int(exitstatus) not in (0, 1):

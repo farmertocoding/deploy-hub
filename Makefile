@@ -52,8 +52,8 @@ GNUMAKEFLAGS and MAKEFILES, and drop dry-run/ignore-errors/question/touch flags 
 any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the Makefile.)
 endif
 
-.PHONY: dev test test-frontend test-t2 lint conformance review-round generate-client \
-	check-generated log-scrub py-roots mutation scripts-lint
+.PHONY: dev test test-frontend test-t2 lint conformance conformance-2.5 review-round \
+	generate-client check-generated log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -113,10 +113,10 @@ dev:
 	docker compose up --build
 
 test:
-	pytest -q -m "not t2"
+	pytest -q -m "not t2 and not t3"
 
 # T2 live image tests (D-015). Not a review-round prerequisite: T1 must stay
-# runnable without waiting on a container. Default `test` is `-m "not t2"`.
+# runnable without waiting on a container. Default `test` is `-m "not t2 and not t3"`.
 test-t2:
 	pytest -q -m t2
 
@@ -138,8 +138,13 @@ scripts-lint:
 	shfmt -d -i 4 -ci $(SCRIPTS)
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
+# Review-round gate: phase 2.5 without Multipass-only (tier:t3) reqs (D-024, D-029).
 conformance:
-	python conformance/check.py --phase 2
+	python conformance/check.py --phase 2.5 --exclude-tier t3
+
+# All-tiers phase 2.5 gate. Not a review-round prerequisite (D-023).
+conformance-2.5:
+	python conformance/check.py --phase 2.5
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #

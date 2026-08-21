@@ -13,7 +13,17 @@
         "additionalProperties": false,
         "properties": {
           "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$"},
-          "phase": {"type": "integer", "minimum": 0, "maximum": 7},
+          "phase": {
+            "description": "Integer or half-step float in 0–7 (2.5, 5.5). D-029.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 7,
+            "multipleOf": 0.5
+          },
+          "tier": {
+            "description": "Proof tier (default t1). D-024: tier:t3 is verified only by a passed @pytest.mark.t3 test; skipped/xfailed/T1 siblings never verify it.",
+            "enum": ["t1", "t2", "t3"]
+          },
           "verify": {"enum": ["test", "demo", "checklist", "static-gate"]},
           "source": {"type": "string", "minLength": 5},
           "text": {"type": "string", "minLength": 10},

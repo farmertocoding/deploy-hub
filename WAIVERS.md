@@ -81,3 +81,4 @@ WAIVED: scripts/hub-upgrade.sh+C6+drain-is-toctou — named test is refuse-immed
 WAIVED: frontend/src/App.jsx+UX-F8-SIMULATION-STATES+demo-pane-no-site-deploy-topics — Task 20 is seed-only; screens are Phase 3. Named UX-F8 tests never claimed a pane. (2026-08-21)
 WAIVED: simulation/seed_v0.json+review3-N2+warming-omits-elapsed-expected — seed token is present; elapsed/expected copy waits for the site-card UI. (2026-08-21)
 WAIVED: deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns — commands + 0400 + no secrets hold; impact/DNS copy is Phase 3 operator UX. (2026-08-21)
+WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the 24h live form is the Phase 2.5 nightly drill. check.py verified file presence, not duration. (2026-08-21)

@@ -27,6 +27,8 @@
 #              under docs/plan/ (claude/project-inventory.md, DECISIONS.md), so there is
 #              nothing to hash. HARD-V2-MESH-BEFORE-FIREWALL was the fifth: it is now
 #              pinned to `### Quick start` in server-hardening.md plus review3 §V2.
+#   tier:      t1|t2|t3 (default t1). D-024: tier:t3 is verified only by a passed
+#              @pytest.mark.t3 test. --exclude-tier t3 omits them from the due set.
 schema_version: 1
 requirements:
   - id: P0-LOGIN
@@ -620,3 +622,77 @@ requirements:
     gate: check-generated
     text_hash: sha256:b504120b907b9affd71be615f9e1a4509e662573ead924b5f6f4feb61f19d25d
     text: Generated client artifacts (types + zod) are regenerated in CI and must match the committed files (make check-generated).
+
+  # — Phase 2.5 harness (docs/phase-2.5-design-note.md §3). Do not bump
+  # REL-P2-HUB-DOWN-SITES-UP off phase 2; the 24h waiver stays (D-026).
+  - id: HARNESS-B9-TEST-MODE
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §1
+    text_hash: sha256:8ac5f6403bfb82dac49a6825f9e2034e9ae7717ca30eb5fb18ec9b1597f84a2d
+    text: HUB_TEST_MODE plus NetworkZone.purpose refuses non-test zones and keeps prod vault material out of the harness.
+  - id: HARNESS-T3-SKIP-POLICY
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §5
+    text_hash: sha256:d18dd326059aa8f763aef6bf1dc051d69fbd775056c1b759329599ba0801aecc
+    text: A tier t3 requirement is verified only by a passed pytest.mark.t3 test; T1 siblings, skips, and xfails never verify it.
+  - id: HARNESS-T3-NIGHTLY
+    phase: 2.5
+    verify: test
+    tier: t3
+    source: phase-2.5-design-note.md §4
+    text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
+    text: Local Multipass nightly provisions a throwaway VM, deploys both fixtures, proves HTTP ready, v2, rollback-within-60s, and reaper-empty teardown.
+  - id: HARNESS-T3-UFW-TRUTH
+    phase: 2.5
+    verify: test
+    tier: t3
+    source: phase-2.5-design-note.md §1
+    text_hash: sha256:8ac5f6403bfb82dac49a6825f9e2034e9ae7717ca30eb5fb18ec9b1597f84a2d
+    text: ufw and fail2ban truth is proven on a real Multipass VM via harden-ubuntu.sh and verify-hardening.sh, not a container false-green.
+  - id: HARNESS-T3-TOXIPROXY
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §4
+    text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
+    text: toxiproxy on the SSH path injects a mid-deploy timeout and the heartbeat sweep resumes the deploy.
+  - id: HARNESS-T3-LE-STAGING
+    phase: 2.5
+    verify: test
+    tier: t3
+    source: phase-2.5-design-note.md §1
+    text_hash: sha256:8ac5f6403bfb82dac49a6825f9e2034e9ae7717ca30eb5fb18ec9b1597f84a2d
+    text: HTTPS plus Let's Encrypt staging and wss through CF plus Caddy run only when the test-zone token is present; absent credentials are skipped-only, never a T1-sibling green.
+  - id: HARNESS-DRILLS-BEAT
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §1
+    text_hash: sha256:8ac5f6403bfb82dac49a6825f9e2034e9ae7717ca30eb5fb18ec9b1597f84a2d
+    text: Drills are Beat jobs that write CheckRun rows; a skipped or missed drill is an AuditEvent.
+  - id: HARNESS-REAPER-TEST-PLANE
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §4
+    text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
+    text: Teardown-in-finally plus a purpose-test name-prefix reaper leaves no hub-t3 VM behind.
+  - id: REL-P3-WORKER-DEATH
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §1
+    text_hash: sha256:8ac5f6403bfb82dac49a6825f9e2034e9ae7717ca30eb5fb18ec9b1597f84a2d
+    text: SIGKILL of a live worker is the Phase 2.5 kill-matrix; the Phase 2 in-process RuntimeError hook is not a pass for this id.
+  - id: REL-P2-DRILL-STUB
+    phase: 2.5
+    verify: test
+    source: phase-2.5-design-note.md §5
+    text_hash: sha256:d18dd326059aa8f763aef6bf1dc051d69fbd775056c1b759329599ba0801aecc
+    text: Phase 2.5 ships a Beat drill and a short nightly Hub-down stub; the REL-P2 24h waiver stays and the stub must not claim 24h.
+  - id: P25-HARNESS-DEMO
+    phase: 2.5
+    verify: demo
+    source: phase-2.5-design-note.md §4
+    demo:
+      - conformance/demos/phase-2.5.md
+    text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
+    text: The phase-2.5 harness demo is recorded under conformance/demos/phase-2.5.md from a local Multipass run or a dated host-without-multipass waiver.

@@ -80,9 +80,36 @@ ALLOWED_KEYS = {
     "id", "phase", "verify", "source", "text", "kind", "status", "retired_reason",
     # R4-9 additions (§3.2 rules 3, 4, 6)
     "demo", "gate", "text_hash",
+    # D-024 / D-029: proof tier (default t1). t3 is verified only by @pytest.mark.t3.
+    "tier",
 }
 PASSING_OUTCOMES = {"passed", "xpassed"}
 INCONCLUSIVE_OUTCOMES = {"skipped", "xfailed"}
+VALID_TIERS = {"t1", "t2", "t3"}
+
+
+def is_valid_phase(phase):
+    """Int or half-step float in 0–7 (2.5, 5.5). bool is rejected (it is an int)."""
+    if isinstance(phase, bool) or not isinstance(phase, (int, float)):
+        return False
+    if not 0 <= phase <= 7:
+        return False
+    return float(phase * 2).is_integer()
+
+
+def parse_phase_arg(value):
+    try:
+        phase = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid phase: {value!r}") from exc
+    if not is_valid_phase(phase):
+        raise argparse.ArgumentTypeError(
+            f"phase must be int or half-step float 0-7, got {value!r}")
+    return phase
+
+
+def req_tier(req):
+    return req.get("tier") or "t1"
 
 
 # ── registry ────────────────────────────────────────────────────────────────
@@ -103,10 +130,12 @@ def load_registry(root):
         missing = {"id", "phase", "verify", "source", "text"} - set(r)
         if missing:
             problems.append(f"{rid}: missing keys {sorted(missing)}")
-        if not isinstance(r.get("phase"), int) or not 0 <= r.get("phase", -1) <= 7:
-            problems.append(f"{rid}: phase must be int 0-7")
+        if not is_valid_phase(r.get("phase")):
+            problems.append(f"{rid}: phase must be int or half-step float 0-7")
         if r.get("verify") not in VERIFY_KINDS:
             problems.append(f"{rid}: verify must be one of {sorted(VERIFY_KINDS)}")
+        if "tier" in r and r.get("tier") not in VALID_TIERS:
+            problems.append(f"{rid}: tier must be one of {sorted(VALID_TIERS)}")
         extra = set(r) - ALLOWED_KEYS
         if extra:
             problems.append(f"{rid}: unknown keys {sorted(extra)}")
@@ -180,6 +209,46 @@ def collect_markers(root):
     for py in sorted((root / "tests").rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         _collect_from(tree, str(py.relative_to(root)), [], found)
+    return found
+
+
+def _decorator_mark_names(node):
+    """Bare mark names on a function or class (`pytest.mark.t3` → `t3`)."""
+    names = []
+    for dec in node.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        parts = []
+        while isinstance(target, ast.Attribute):
+            parts.append(target.attr)
+            target = target.value
+        if isinstance(target, ast.Name):
+            parts.append(target.id)
+        if parts and "mark" in parts:
+            names.append(parts[0])
+    return names
+
+
+def _collect_mark_from(node, relpath, classes, inherited, mark_name, found):
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            marks = inherited | set(_decorator_mark_names(child))
+            _collect_mark_from(
+                child, relpath, classes + [child.name], marks, mark_name, found)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not child.name.startswith("test"):
+                continue
+            nodeid = "::".join([relpath, *classes, child.name])
+            marks = inherited | set(_decorator_mark_names(child))
+            if mark_name in marks:
+                found.add(nodeid)
+
+
+def collect_mark_nodeids(root, mark_name):
+    """AST nodeids whose function (or enclosing class) carries `@pytest.mark.<name>`."""
+    found = set()
+    for py in sorted((root / "tests").rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        _collect_mark_from(tree, str(py.relative_to(root)), [], set(), mark_name, found)
     return found
 
 
@@ -458,11 +527,24 @@ def text_hash_of(bodies):
 
 # ── main ────────────────────────────────────────────────────────────────────
 
-def evaluate_test_req(req_id, ast_ids, outcomes):
-    """Status + detail lines for a `verify: test` requirement (rules 1 and 2)."""
+def evaluate_test_req(req_id, ast_ids, outcomes, *, tier="t1", t3_nodeids=frozenset()):
+    """Status + detail lines for a `verify: test` requirement (rules 1 and 2).
+
+    D-024: `tier: t3` is verified only by a passed `@pytest.mark.t3` test. A T1
+    (or otherwise non-t3) test that carries the id is red (wrong marker).
+    skipped/xfailed never count as verified.
+    """
     details = []
     if not ast_ids:
         return "uncovered", [f"{req_id} (test) has no @pytest.mark.req marker"], {}
+
+    if tier == "t3":
+        wrong = [nid for nid in ast_ids if nid not in t3_nodeids]
+        if wrong:
+            return "failed", [
+                f"{req_id} (test) wrong marker: a test without @pytest.mark.t3 "
+                f"carries a tier:t3 req id: " + ", ".join(wrong)
+            ], {}
 
     seen, missing, failed, passed, inconclusive = {}, [], [], [], []
     for ast_id in ast_ids:
@@ -503,7 +585,10 @@ def evaluate_test_req(req_id, ast_ids, outcomes):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", type=int, default=None)
+    parser.add_argument("--phase", type=parse_phase_arg, default=None)
+    parser.add_argument(
+        "--exclude-tier", action="append", default=[], choices=sorted(VALID_TIERS),
+        help="omit this tier from the due set (repeatable; review-round uses t3)")
     parser.add_argument("--repo", default=None,
                         help="tree to evaluate (default: this checkout)")
     parser.add_argument("--run-report", default=None,
@@ -538,6 +623,7 @@ def main():
         return 0
 
     markers = collect_markers(root)
+    t3_nodeids = collect_mark_nodeids(root, "t3")
     waived, waiver_problems = gates.parse_waivers(root)
     failures = []
     warnings = []
@@ -600,15 +686,23 @@ def main():
     for req_id, req in registry.items():
         phase = req["phase"]
         kind = req["verify"]
+        tier = req_tier(req)
         ast_ids = markers.get(req_id, [])
-        due = (args.phase is None or phase <= args.phase) and req.get("status") != "retired"
-        entry = {"phase": phase, "verify": kind, "tests": ast_ids, "due": due}
+        due = (
+            (args.phase is None or phase <= args.phase)
+            and req.get("status") != "retired"
+            and tier not in args.exclude_tier
+        )
+        entry = {
+            "phase": phase, "verify": kind, "tests": ast_ids, "due": due, "tier": tier,
+        }
         details = []
 
         if req.get("status") == "retired":
             status = "retired"
         elif kind == "test":
-            status, details, seen = evaluate_test_req(req_id, ast_ids, outcomes)
+            status, details, seen = evaluate_test_req(
+                req_id, ast_ids, outcomes, tier=tier, t3_nodeids=t3_nodeids)
             entry["outcomes"] = seen
         elif kind == "demo":
             paths = req.get("demo")
