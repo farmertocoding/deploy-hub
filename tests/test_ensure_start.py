@@ -307,3 +307,56 @@ def test_second_start_zero_mutating_calls():
         for kind, argv in transport.calls
         if isinstance(argv, list)
     )
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+def test_docker_run_argv_includes_restart_unless_stopped():
+    """docker run must pass --restart unless-stopped as two tokens before the image.
+
+    What would make this fail: omitting the policy, placing it after the image
+    tag (so Docker treats it as the command), or using one --restart=unless-stopped
+    token.
+    """
+    from deploys.steps import _docker_run_argv, ensure_start
+
+    transport = StartTransport()
+    ensure_start(_desired(transport, slug="relp2", deployment_id=8))
+    runs = [argv for argv in _run_argvs(transport) if argv[:2] == ["docker", "run"]]
+    assert runs, transport.calls
+    argv = runs[0]
+    assert argv[-1] == IMAGE_TAG
+    assert argv[-3:-1] == ["--restart", "unless-stopped"], argv
+
+    built = _docker_run_argv({
+        "image_tag": IMAGE_TAG,
+        "site_slug": "relp2",
+        "deployment_id": 8,
+        "manifest_body": {},
+    }, "site-relp2-8")
+    assert built[-1] == IMAGE_TAG
+    assert built[-3:-1] == ["--restart", "unless-stopped"], built
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+def test_restart_flag_is_literal_argv_not_shell():
+    """--restart and unless-stopped are two argv tokens, never a shell string.
+
+    What would make this fail: returning a joined string, interpolating
+    f"--restart {policy}", or stuffing both words into one token.
+    """
+    from deploys.steps import _docker_run_argv
+
+    argv = _docker_run_argv({
+        "image_tag": IMAGE_TAG,
+        "site_slug": "relp2lit",
+        "deployment_id": 1,
+        "manifest_body": {},
+    }, "site-relp2lit-1")
+    assert isinstance(argv, list)
+    assert all(isinstance(part, str) for part in argv)
+    assert "--restart" in argv
+    restart_at = argv.index("--restart")
+    assert argv[restart_at + 1] == "unless-stopped"
+    assert "--restart unless-stopped" not in argv
+    assert "--restart=unless-stopped" not in argv
+    assert not any(" " in part for part in argv)

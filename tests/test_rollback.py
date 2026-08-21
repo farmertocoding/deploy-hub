@@ -205,3 +205,27 @@ def test_cutover_second_skip_when_snapshot_and_runbook_landed():
     )
     _snapshot_and_runbook(deployment, desired)
     assert transport.mutating_calls() == []
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+def test_rollback_run_argv_still_has_unless_stopped():
+    """Rollback's docker run still carries --restart unless-stopped before the tag.
+
+    What would make this fail: rollback assembling a different run argv that
+    drops the restart policy, or interpolating it into one token.
+    """
+    from deploys.pipeline import rollback
+
+    _site, original, transport, dns = _deploy("rb-rst")
+    transport.calls.clear()
+    rollback(original.pk, transport=transport, dns=dns)
+    runs = [
+        argv for kind, argv in transport.calls
+        if kind == "run" and isinstance(argv, list) and argv[:2] == ["docker", "run"]
+    ]
+    assert runs, transport.calls
+    for argv in runs:
+        assert isinstance(argv, list)
+        assert argv[-3:-1] == ["--restart", "unless-stopped"], argv
+        assert "--restart unless-stopped" not in argv
+        assert "--restart=unless-stopped" not in argv

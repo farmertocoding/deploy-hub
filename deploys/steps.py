@@ -526,6 +526,7 @@ def _docker_run_argv(desired, name):
     for spec in _volume_specs(desired["site_slug"], body):
         argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])
     argv.extend(["-e", f"PORT={_listen_port(desired)}"])
+    argv.extend(["--restart", "unless-stopped"])
     argv.append(desired["image_tag"])
     return argv
 
