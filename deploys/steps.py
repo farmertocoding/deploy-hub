@@ -182,14 +182,17 @@ def ensure_health_check(desired):
     interval = desired.get("poll_interval_s", 1)
     deadline = now() + timeout
     prev_checks = None
+    have_prev = False
     while True:
         payload = _healthz_payload(desired)
         if payload.get("ready"):
             return {"status": "ready", "healthz": payload}
-        checks = payload.get("checks")
-        if prev_checks is not None and checks == prev_checks:
-            raise RuntimeError("healthz checks frozen while not ready")
-        prev_checks = checks
+        if _checks_are_comparable(payload):
+            checks = payload.get("checks")
+            if have_prev and checks == prev_checks:
+                raise RuntimeError("healthz checks frozen while not ready")
+            prev_checks = checks
+            have_prev = True
         if now() >= deadline:
             raise RuntimeError("warmup timeout: never ready")
         sleep(interval)
@@ -278,8 +281,13 @@ def _healthz_payload(desired):
     ip = (ip_r.stdout or "").strip() or "127.0.0.1"
     result = transport.probe(["curl", "-sf", f"http://{ip}{path}"])
     if not result.ok or not (result.stdout or "").strip():
-        return {"live": False, "ready": False, "checks": {}}
+        return {"live": False, "ready": False}
     return json.loads(result.stdout)
+
+
+def _checks_are_comparable(payload):
+    """Frozen-check only after a live reply or a real checks object, not a curl miss."""
+    return bool(payload.get("live")) or "checks" in payload
 
 
 def _image_present(transport, tag):

@@ -1,7 +1,32 @@
 """ensure_health_check: cutover gates on ready, not live; stuck warm fails fast (S4)."""
+import json
+
 import pytest
 
-from core.transport import FakeTransport
+from core.transport import CommandResult, FakeTransport
+
+
+class CurlHealthTransport(FakeTransport):
+    """Production path: scripted probe-curl results, inspect is probe-only."""
+
+    def __init__(self, curl_results):
+        super().__init__()
+        self._curl_results = list(curl_results)
+        self.curl_probes = []
+
+    def probe(self, argv, *, timeout=60):
+        if not isinstance(argv, (list, tuple)):
+            raise TypeError("argv must be a list — never a shell string (§4.5)")
+        argv = list(argv)
+        self.calls.append(("probe", argv))
+        if argv and argv[0] == "curl":
+            self.curl_probes.append(argv)
+            if not self._curl_results:
+                raise AssertionError("unexpected extra curl probe")
+            return CommandResult(argv, **self._curl_results.pop(0))
+        if argv[:2] == ["docker", "inspect"]:
+            return CommandResult(argv, stdout="10.0.0.9")
+        return CommandResult(argv)
 
 
 def _payload(*, live=True, ready=False, checks=None):
@@ -174,4 +199,41 @@ def test_liveness_is_not_the_cutover_gate():
         ))
     assert fetches
     assert all(p["live"] is True and p["ready"] is False for p in fetches)
+    assert _caddy_mutating(transport) == []
+
+
+@pytest.mark.req("PIPE-S4-READINESS-GATE")
+def test_curl_misses_retry_until_ready():
+    """Two probe-curl misses after docker run are a boot, not a frozen warm.
+
+    What would make this fail: synthesizing checks: {} on a failed curl so the
+    second miss raises frozen-checks, instead of retrying until ready.
+    """
+    from deploys.steps import ensure_health_check
+
+    miss = {"exit_code": 1, "stdout": "", "stderr": "connection refused"}
+    ready = {
+        "exit_code": 0,
+        "stdout": json.dumps({
+            "live": True, "ready": True, "checks": {"backfill_pct": 100},
+        }),
+    }
+    transport = CurlHealthTransport([miss, miss, ready])
+    result = ensure_health_check({
+        "transport": transport,
+        "site_slug": "app",
+        "deployment_id": 7,
+        "manifest_body": {"warmup_timeout_s": 60},
+        "image_tag": "abc123-deadbeefdeadbeef",
+        "sleep": lambda _s: None,
+        "poll_interval_s": 0,
+    })
+    assert result["status"] == "ready"
+    assert len(transport.curl_probes) == 3
+    curls = [
+        (kind, argv) for kind, argv in transport.calls
+        if isinstance(argv, list) and argv[:1] == ["curl"]
+    ]
+    assert curls
+    assert all(kind == "probe" for kind, argv in curls)
     assert _caddy_mutating(transport) == []
