@@ -21,16 +21,15 @@ def test_flake_quarantine_cap():
 
 
 def test_core_ssh_py_is_on_sensitive_paths():
-    """Phase 2.5 leftover: Fabric SshTransport + host-key pin was omitted from
-    the human-merge glob. Matched the way the guard matches (R7-9): yaml.safe_load
-    plus PurePosixPath, so a comment-only mention of core/ssh.py does not count."""
+    """Phase 2.5 leftover: Fabric SshTransport + host-key pin was omitted from the
+    human-merge glob. Membership is a parsed `sensitive:` entry, so a comment-only
+    mention of `core/ssh.py` does not count. Exact membership, not Path.match:
+    on versions without full_match, match("ssh.py") would accept core/ssh.py."""
     paths = yaml.safe_load(
         (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
     patterns = paths["sensitive"]
-    target = pathlib.PurePosixPath("core/ssh.py")
-    assert any(target.full_match(p) if hasattr(target, "full_match")
-               else target.match(p) for p in patterns), (
-        f"core/ssh.py is matched by no sensitive-path glob in {patterns}")
+    assert "core/ssh.py" in patterns, (
+        f"core/ssh.py is not an exact sensitive-path entry in {patterns}")
 
 
 def test_codeowners_lists_core_ssh_py():
