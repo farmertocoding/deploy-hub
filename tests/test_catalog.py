@@ -70,7 +70,7 @@ RELEASED = {
         "rollback": ["ufw", "delete", "allow", "in", "on", "tailscale0"],
     },
     "fail2ban-ignoreip": {
-        "version": 4,
+        "version": 5,
         "check": [
             "grep", "-E",
             "^ignoreip = 127.0.0.1/8 [^[:space:]]+",
@@ -79,7 +79,7 @@ RELEASED = {
         "fix": [
             [
                 "install", "-m", "0644",
-                "/usr/local/share/hub-catalog/jail.local",
+                "/home/deploy/.hub/jail.local",
                 "/etc/fail2ban/jail.local",
             ],
             ["systemctl", "reload", "fail2ban"],

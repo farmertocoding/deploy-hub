@@ -44,6 +44,7 @@ class FakeTransport(Transport):
         self.responses = responses or {}
         self.calls = []  # (kind, payload) tuples — the run-twice test reads this
         self.files = {}
+        self.put_modes = {}
 
     def run(self, argv, *, timeout=60):
         if not isinstance(argv, (list, tuple)):
@@ -66,6 +67,7 @@ class FakeTransport(Transport):
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         self.calls.append(("put", remote_path))
         self.files[remote_path] = local_path_or_bytes
+        self.put_modes[remote_path] = mode
 
     def get(self, remote_path):
         self.calls.append(("get", remote_path))

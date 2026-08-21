@@ -1,20 +1,40 @@
 """Collector Beat entry. Lives on queue ``probes`` via ``monitor.*``."""
+import time
+
 from celery import shared_task
 
+from core.audit import audit
 
-@shared_task
-def collect_all(*, transport_for=None, sleep=None, now=None):
+
+@shared_task(ignore_result=True)
+def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
+    from core import locks
     from core.models import Target
     from core.ssh import SshTransport
     from monitor.collector import collect
 
     factory = transport_for or SshTransport
-    payloads = []
+    mono = monotonic or time.monotonic
+    started = mono()
+    n = 0
     for target in Target.objects.filter(status=Target.Status.READY):
-        try:
-            payloads.append(
-                collect(target, factory(target), now=now, sleep=sleep)
-            )
-        except Exception:
+        lock = locks.acquire("target", target.pk, "collect", "collect-all")
+        if lock is None:
             continue
-    return payloads
+        try:
+            collect(
+                target, factory(target), now=now, sleep=sleep,
+                tick_started=started, monotonic=mono,
+            )
+            n += 1
+        except Exception as exc:
+            audit(
+                "collector-failed",
+                target,
+                source="celery",
+                error=type(exc).__name__,
+            )
+            continue
+        finally:
+            locks.release("target", target.pk, "collect", holder="collect-all")
+    return {"ok": True, "n": n}

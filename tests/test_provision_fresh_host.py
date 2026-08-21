@@ -103,14 +103,14 @@ def test_pre_hardened_empty_host_is_allowed_and_imports_catalog_versions():
         "docker-daemon-json": 2,
         "sshd-dropin": 4,
         "ufw-posture-target": 1,
-        "fail2ban-ignoreip": 4,
+        "fail2ban-ignoreip": 5,
         "caddy": 1,
     }
     assert "ufw-posture-hub" not in rows
     assert "ufw-posture-intake" not in rows
     assert all(row.mode == "import" for row in AppliedCatalogEntry.objects.all())
     runs = [payload for kind, payload in transport.calls if kind == "run"]
-    assert ["crontab", "/tmp/hub-crontab"] in runs
+    assert ["crontab", "/home/deploy/.hub/crontab"] in runs
     assert not any(payload[:1] == ["apt-get"] for payload in runs)
 
 

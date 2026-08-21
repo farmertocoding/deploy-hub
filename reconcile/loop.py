@@ -42,6 +42,12 @@ def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, inst
             continue
         if used >= cap:
             continue
+        if OperationLock.objects.filter(
+            scope=OperationLock.Scope.SITE,
+            object_id=str(site.pk),
+            kind=OperationLock.Kind.DEPLOY,
+        ).exists():
+            continue
         if _apply(site, row, transport, action, now, observe=observe):
             used += 1
             if _cycle_count(row, now) >= FLAP_CYCLE_LIMIT:

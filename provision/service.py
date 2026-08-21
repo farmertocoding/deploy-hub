@@ -10,12 +10,11 @@ from dataclasses import dataclass
 from catalog.apply import argv_steps
 from catalog.entries import CATALOG
 from catalog.models import AppliedCatalogEntry
+from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
 
 LISTENERS_ARGV = ["ss", "-ltnH"]
 CONTAINERS_ARGV = ["docker", "ps", "-a", "--format", "{{.Names}}"]
 CRONTAB_LIST_ARGV = ["crontab", "-l"]
-CRONTAB_PATH = "/tmp/hub-crontab"
-CRONTAB_INSTALL_ARGV = ["crontab", CRONTAB_PATH]
 
 # :80 / :443, but not :8080 / :4430.
 _HTTP_PORT = re.compile(r":(80|443)(?!\d)")
@@ -71,7 +70,7 @@ def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
         )
 
     _import_catalog_versions(target, transport, profile=profile)
-    _delete_script_crons(transport, live_beat_jobs)
+    _delete_script_crons(transport, live_beat_jobs, target=target)
     return ProvisionResult(allowed=True)
 
 
@@ -112,7 +111,7 @@ def _checks_ok(transport, entry):
     return True
 
 
-def _delete_script_crons(transport, live_beat_jobs):
+def _delete_script_crons(transport, live_beat_jobs, *, target=None):
     """Drop crontab lines for scripts whose matching Hub Beat job is live."""
     live = tuple(live_beat_jobs or ())
     if not live:
@@ -123,5 +122,8 @@ def _delete_script_crons(transport, live_beat_jobs):
     if kept == lines:
         return
     body = ("\n".join(kept) + "\n") if kept else ""
-    transport.put(body.encode(), CRONTAB_PATH)
-    transport.run(CRONTAB_INSTALL_ARGV)
+    user = ssh_user_from(target)
+    path = hub_join("crontab", ssh_user=user)
+    ensure_hub_dir(transport, user)
+    transport.put(body.encode(), path, mode=0o600)
+    transport.run(["crontab", path])

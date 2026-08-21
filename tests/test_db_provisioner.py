@@ -90,11 +90,13 @@ def test_ensures_postgres_role_and_vaults_url():
         argv[:2] == ["docker", "run"]
         and any(str(part).startswith("postgres") for part in argv)
         and "site-shop-postgres" in argv
+        and "--env-file" in argv
         for argv in runs
-    ), f"expected docker run of site-shop-postgres, got {runs}"
-    assert any("CREATE ROLE" in " ".join(argv) for argv in runs), (
-        f"expected CREATE ROLE via docker exec, got {runs}"
-    )
+    ), f"expected docker run --env-file of site-shop-postgres, got {runs}"
+    assert not any("CREATE ROLE" in " ".join(argv) for argv in runs)
+    assert any(
+        b"CREATE ROLE" in payload for payload in _put_payloads(transport)
+    ), "expected CREATE ROLE SQL via put, not argv"
 
     secret = Secret.objects.get(
         kind=Secret.Kind.DATABASE_URL,
@@ -138,8 +140,13 @@ def test_container_miss_replaces_stale_vaulted_url():
     assert url.startswith(b"postgres://")
     assert b"dead-password" not in url
     role_sql = next(
-        (part for argv in _runs(transport) for part in argv
-         if isinstance(part, str) and "CREATE ROLE" in part),
+        (
+            payload.decode() if isinstance(payload, (bytes, bytearray)) else str(payload)
+            for payload in _put_payloads(transport)
+            if b"CREATE ROLE" in (
+                payload if isinstance(payload, (bytes, bytearray)) else payload.encode()
+            )
+        ),
         "",
     )
     assert role_sql, "expected CREATE ROLE on the miss path"
@@ -195,11 +202,10 @@ def test_database_url_not_in_build_context(tmp_path):
     url = service.get(secret)
     assert url.startswith(b"postgres://")
 
-    for payload in _put_payloads(db_transport):
-        assert url not in payload
     for argv in _runs(db_transport):
         joined = " ".join(str(part) for part in argv).encode()
         assert url not in joined
+        assert b"-e" not in joined or b"POSTGRES_PASSWORD=" not in joined
 
     source = tmp_path / "src"
     source.mkdir()

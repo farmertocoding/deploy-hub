@@ -3,7 +3,7 @@
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 — argv-list docker ps, never shell=True
 import sys
 import time
 
@@ -40,9 +40,10 @@ def _metrics():
 
 
 def _containers():
+    docker = shutil.which("docker") or "/usr/bin/docker"
     try:
-        proc = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.State}}"],
+        proc = subprocess.run(  # nosec B603 — argv list; absolute or which()'d docker
+            [docker, "ps", "-a", "--format", "{{.Names}}\t{{.State}}"],
             capture_output=True,
             text=True,
             timeout=15,

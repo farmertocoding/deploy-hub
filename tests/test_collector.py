@@ -25,7 +25,7 @@ CONTRACT_KEYS = {
 LOG_CHUNK_KEYS = {"file", "inode", "offset", "bytes"}
 HEALTHZ_KEYS = {"live", "ready", "checks"}
 PRODUCER = Path(__file__).resolve().parent.parent / "monitor" / "collect_once.py"
-WRITABLE_REMOTE = "/tmp/hub-collect-once"
+WRITABLE_REMOTE = "/home/deploy/.hub/collect-once"
 
 
 def _target(pk=42):
@@ -94,7 +94,7 @@ def _script_executions(transport):
         if not isinstance(argv, list) or not argv:
             n += 1
             continue
-        if argv[0] == "test":
+        if argv[0] in {"test", "mkdir", "chmod"}:
             continue
         n += 1
     return n

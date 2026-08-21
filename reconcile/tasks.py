@@ -1,6 +1,7 @@
 """Reconciler Beat entry. Lives on queue ``probes`` via ``reconcile.*``."""
 from celery import shared_task
 
+from core.audit import audit
 from reconcile.loop import GLOBAL_MUTATION_BUDGET
 
 
@@ -23,7 +24,13 @@ def tick_all(*, budget=None, transport_for=None):
                 budget=remaining,
                 instance=instance,
             )
-        except Exception:
+        except Exception as exc:
+            audit(
+                "reconcile-tick-failed",
+                instance,
+                source="celery",
+                error=type(exc).__name__,
+            )
             continue
         remaining -= int((result or {}).get("mutations") or 0)
     return {"remaining": remaining}

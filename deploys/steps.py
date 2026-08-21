@@ -14,6 +14,8 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
+from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
+
 HEARTBEAT_INTERVAL_S = 30
 VAULT_CONTEXT_MARKERS = frozenset({
     b"VAULT-TEST-PLAINTEXT-MARKER-do-not-log",
@@ -45,9 +47,11 @@ def ensure_build(desired):
         return {"status": "skipped", "tag": tag}
 
     archive = _context_tar(desired["source_dir"], _applied_dockerfile(desired))
-    remote = desired.get("remote_context") or f"/tmp/hub-build/{tag}"
+    user = ssh_user_from(desired)
+    remote = desired.get("remote_context") or hub_join("build", tag, ssh_user=user)
     tar_remote = f"{remote}.tar"
     heartbeat = desired.get("heartbeat")
+    ensure_hub_dir(transport, user, heartbeat)
     _run(transport, ["mkdir", "-p", remote], heartbeat)
     transport.put(archive, tar_remote)
     _run(transport, ["tar", "-xf", tar_remote, "-C", remote], heartbeat)
@@ -65,8 +69,11 @@ def ensure_ship(desired):
     if _image_present(transport, tag):
         return {"status": "skipped", "tag": tag}
 
-    remote = desired.get("remote_context") or f"/tmp/hub-build/{tag}"
+    user = ssh_user_from(desired)
+    remote = desired.get("remote_context") or hub_join("build", tag, ssh_user=user)
     archive_path = f"{remote}.image.tar"
+    ensure_hub_dir(transport, user, desired.get("heartbeat"))
+    _run(transport, ["mkdir", "-p", str(Path(remote).parent)], desired.get("heartbeat"))
     transport.put(desired.get("image_archive", b""), archive_path)
     result = _run(
         transport, ["docker", "load", "-i", archive_path], desired.get("heartbeat"),
@@ -175,6 +182,7 @@ def ensure_start(desired):
             if not result.ok:
                 raise RuntimeError(f"docker stop failed: {result.stderr}")
 
+    _put_env_file(desired)
     result = _run(transport, _docker_run_argv(desired, name), heartbeat)
     if not result.ok:
         raise RuntimeError(f"docker run failed: {result.stderr}")
@@ -187,10 +195,13 @@ def ensure_health_check(desired):
     sleep = desired.get("sleep") or time.sleep
     now = desired.get("now") or time.monotonic
     interval = desired.get("poll_interval_s", 1)
+    heartbeat = desired.get("heartbeat")
     deadline = now() + timeout
     prev_checks = None
     have_prev = False
     while True:
+        if heartbeat is not None:
+            heartbeat()
         payload = _healthz_payload(desired)
         if payload.get("ready"):
             return {"status": "ready", "healthz": payload}
@@ -241,8 +252,9 @@ def ensure_route_tls(desired):
     current = _probe_caddy_route(transport, route_id)
     if current == route:
         return {"status": "skipped", "id": route_id}
-    remote = f"/tmp/hub-caddy-{route_id}.json"
+    remote = hub_join(f"caddy-{route_id}.json", ssh_user=ssh_user_from(desired))
     payload = json.dumps(route, sort_keys=True, separators=(",", ":")).encode()
+    ensure_hub_dir(transport, ssh_user_from(desired), desired.get("heartbeat"))
     transport.put(payload, remote)
     result = _run(
         transport,
@@ -473,6 +485,8 @@ def _container_running(transport, name):
 
 def _docker_run_argv(desired, name):
     argv = ["docker", "run", "-d", "--name", name]
+    if desired.get("env_file"):
+        argv.extend(["--env-file", desired["env_file"]])
     extra = desired.get("docker_run_extra")
     if extra is None:
         extra = (desired.get("manifest_body") or {}).get("docker_run_extra")
@@ -483,6 +497,24 @@ def _docker_run_argv(desired, name):
         argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])
     argv.append(desired["image_tag"])
     return argv
+
+
+def _put_env_file(desired):
+    """Write vaulted env to a 0600 file on the target; never on docker argv."""
+    mapping = desired.get("env_mapping") or {}
+    if not mapping:
+        return
+    transport = desired["transport"]
+    user = ssh_user_from(desired)
+    heartbeat = desired.get("heartbeat")
+    ensure_hub_dir(transport, user, heartbeat)
+    remote = hub_join(
+        f"site-{desired['site_slug']}-{desired['deployment_id']}.env",
+        ssh_user=user,
+    )
+    body = "".join(f"{key}={mapping[key]}\n" for key in sorted(mapping))
+    transport.put(body.encode(), remote, mode=0o600)
+    desired["env_file"] = remote
 
 
 def _set_maintenance_until(site, desired):

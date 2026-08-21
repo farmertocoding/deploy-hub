@@ -7,15 +7,21 @@ network. `deploys/` still does not import `scanner/`.
 import shutil
 import subprocess  # nosec B404 — argv-list git ls-remote, never shell=True
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from core.audit import audit
 from core.models import AuditEvent, Site
+from core.validators import validate_git_url
 from deploys.models import Deployment, Manifest
 
 
 def git_ls_remote(url, ref):
     """Return the object sha at `ref` on `url`. Argv list, never a shell string."""
+    try:
+        validate_git_url(url, resolve=True)
+    except ValidationError:
+        return ""
     git = shutil.which("git")
     if not git:
         return ""
@@ -154,6 +160,19 @@ def poll(*, ls_remote=None, now=None, in_window=None):
     sites = Site.objects.select_related("project").exclude(project__git_url="")
     for site in sites:
         project = site.project
+        try:
+            validate_git_url(
+                project.git_url, resolve=ls_remote is git_ls_remote,
+            )
+        except ValidationError as exc:
+            code = ""
+            if getattr(exc, "error_list", None):
+                code = getattr(exc.error_list[0], "code", "") or ""
+            audit(
+                "git-url-blocked", site, source="celery",
+                code=code or "invalid",
+            )
+            continue
         sha = ls_remote(project.git_url, project.git_ref)
         if not sha:
             continue

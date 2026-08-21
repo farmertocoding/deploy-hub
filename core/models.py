@@ -265,6 +265,7 @@ class OperationLock(models.Model):
         DEPLOY = "deploy"
         PROVISION = "provision"
         RECONCILE = "reconcile"
+        COLLECT = "collect"
 
     scope = models.CharField(max_length=16, choices=Scope.choices)
     object_id = models.CharField(max_length=64)

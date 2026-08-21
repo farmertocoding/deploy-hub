@@ -168,7 +168,6 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
     if deployment.status != Deployment.Status.RUNNING:
         return {"started": False, "status": deployment.status}
 
-    load_env_snapshot(deployment)
     touch_heartbeat(deployment)
 
     site = deployment.manifest.site
@@ -179,6 +178,7 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
     desired = _assemble_desired(
         deployment, transport=transport, dns=dns, sleep=sleep,
     )
+    desired["env_mapping"] = _env_mapping_for_deploy(deployment)
 
     for step in deployment.steps.order_by("seq"):
         deployment.refresh_from_db()
@@ -413,6 +413,10 @@ def _run_step(deployment, step, desired=None):
     work["step"] = step
     try:
         _dispatch_step(deployment, step, work)
+    except Exception:
+        _mark_failed(deployment, step)
+        raise
+    try:
         _crash_if_configured(step)
     except Exception:
         step.refresh_from_db()
@@ -487,6 +491,53 @@ def _runbook_present(desired):
 def _ssh_user(transport):
     target = getattr(transport, "target", None)
     return getattr(target, "ssh_user", None) or "deploy"
+
+
+def _mark_failed(deployment, step):
+    """ensure_* raised: persist FAILED so the row cannot look immortal (F3)."""
+    now = timezone.now()
+    step.status = DeploymentStep.Status.FAILED
+    step.finished = now
+    step.save(update_fields=["status", "finished"])
+    deployment.status = Deployment.Status.FAILED
+    deployment.save(update_fields=["status"])
+    release_deploy_locks(deployment)
+
+
+def _env_mapping_for_deploy(deployment):
+    """Decrypt env bundle + vaulted DATABASE_URL. Values stay in-process only."""
+    mapping = {}
+    raw = load_env_snapshot(deployment)
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError, UnicodeDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            mapping = {
+                str(key): "" if value is None else str(value)
+                for key, value in parsed.items()
+                if str(key).strip()
+            }
+    site = deployment.manifest.site
+    from vault import service as vault_service
+    from vault.models import Secret
+
+    secret = (
+        Secret.objects.filter(
+            kind=Secret.Kind.DATABASE_URL,
+            owner_type="site",
+            owner_id=str(site.pk),
+        )
+        .order_by("-pk")
+        .first()
+    )
+    if secret is not None:
+        url = vault_service.get(secret, reason=f"deploy {deployment.pk} database_url")
+        if isinstance(url, (bytes, bytearray)):
+            url = url.decode()
+        mapping["DATABASE_URL"] = str(url)
+    return mapping
 
 
 def _crash_if_configured(step):

@@ -364,11 +364,14 @@ def hub_target(tmp_path_factory):
 def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     """execute + SshTransport deploys sample-node-site to hub-test-target twice.
 
-    What would make this fail: Hub docker.sock, skipping T2, or a first deploy
-    that never reaches succeeded. Uses a COPY-from-tree image (not npm ci).
+    What would make this fail: Hub docker.sock, skipping T2, a first deploy that
+    never reaches succeeded, or a second execute that docker build/run again.
+    Uses a COPY-from-tree image (not npm ci). RecordingTransport proves the
+    replay issues zero mutating docker build/run.
     """
     from core.models import NetworkZone, Project, Site, Target
     from core.ssh import SshTransport
+    from core.transport import RecordingTransport
     from deploys.models import Manifest
     from deploys.pipeline import execute
     from vault import service
@@ -436,9 +439,10 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     })
     manifest = Manifest.objects.create(site=site, version=1, body=body)
     first = Deployment.objects.create(manifest=manifest)
+    rec = RecordingTransport(SshTransport(target))
 
     try:
-        result = execute(first.pk)
+        result = execute(first.pk, transport=rec)
     except Exception as exc:
         ssh = SshTransport(target)
         name = f"site-{slug}-{first.pk}"
@@ -463,14 +467,20 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     first.refresh_from_db()
     assert first.status == Deployment.Status.SUCCEEDED, result
 
-    ssh = SshTransport(target)
     volume = f"site-{slug}-data"
-    vol = ssh.probe(["docker", "volume", "inspect", volume])
+    vol = rec.probe(["docker", "volume", "inspect", volume])
     assert vol.ok, vol.stderr
 
-    second = Deployment.objects.create(manifest=manifest)
-    result2 = execute(second.pk)
-    second.refresh_from_db()
-    assert second.status == Deployment.Status.SUCCEEDED, result2
-    vol2 = ssh.probe(["docker", "volume", "inspect", volume])
+    rec.calls.clear()
+    _requeue_pending(first)
+    result2 = execute(first.pk, transport=rec)
+    first.refresh_from_db()
+    assert first.status == Deployment.Status.SUCCEEDED, result2
+    mutating_docker = [
+        argv for kind, argv in rec.calls
+        if kind == "run" and isinstance(argv, list) and argv[:1] == ["docker"]
+        and len(argv) > 1 and argv[1] in {"build", "run"}
+    ]
+    assert mutating_docker == [], mutating_docker
+    vol2 = rec.probe(["docker", "volume", "inspect", volume])
     assert vol2.ok, vol2.stderr
