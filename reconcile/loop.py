@@ -9,36 +9,43 @@ from core.models import AuditEvent, OperationLock, SiteInstance
 from deploys.steps import ensure_start
 
 MUTATION_BUDGET = 2
+GLOBAL_MUTATION_BUDGET = 3
 FLAP_WINDOW = timedelta(minutes=10)
 FLAP_CYCLE_LIMIT = 3
 BACKOFF_AFTER = 3
 STALE_REASONS = frozenset({"data-stale", "feed-stale", "feed-staleness", "staleness"})
 UPSTREAM_REASONS = frozenset({"upstream-down"})
+REARM_SCOPED_AUDITS = frozenset({"reconcile_flap_pause", "reconcile_backoff"})
 
 
-def tick(site, *, transport, now=None, observe=None, jitter=0):
+def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, instance=None):
     """Observe one site's instances and repair drift unless a brake applies.
 
-    ``jitter`` is accepted for Beat spreading; T1 passes 0 and it does not skip work.
+    ``jitter`` is accepted for Beat spreading; it does not skip work.
+    ``budget`` caps mutations for this call (T1 / remaining global cap).
     """
-    del jitter  # schedule hint only — never a mutate skip (nonzero must not disable)
+    del jitter  # schedule hint only — never a mutate skip
     now = now or timezone.now()
+    cap = MUTATION_BUDGET if budget is None else budget
     used = 0
-    for instance in site.instances.all():
-        observed = _read_observed(instance, transport, site, observe)
-        _persist_observation(instance, observed, now)
-        if _braked(site, instance, observed, now):
+    qs = site.instances.all()
+    if instance is not None:
+        qs = qs.filter(pk=instance.pk)
+    for row in qs:
+        observed = _read_observed(row, transport, site, observe)
+        _persist_observation(row, observed, now)
+        if _braked(site, row, observed, now):
             continue
-        action = _plan(instance, observed)
+        action = _plan(row, observed)
         if action is None:
-            _maybe_clear_failures(instance, observed)
+            _maybe_clear_failures(row, observed)
             continue
-        if used >= MUTATION_BUDGET:
+        if used >= cap:
             continue
-        if _apply(site, instance, transport, action, now):
+        if _apply(site, row, transport, action, now, observe=observe):
             used += 1
-            if _cycle_count(instance, now) >= FLAP_CYCLE_LIMIT:
-                _audit_once("reconcile_flap_pause", instance)
+            if _cycle_count(row, now) >= FLAP_CYCLE_LIMIT:
+                _audit_once("reconcile_flap_pause", row)
     return {"mutations": used}
 
 
@@ -97,6 +104,14 @@ def _plan(instance, observed):
     desired = instance.desired_state
     if state == SiteInstance.ObservedState.WARMING:
         return None
+    if desired in {
+        SiteInstance.DesiredState.STOPPED,
+        SiteInstance.DesiredState.ABSENT,
+    } and state in {
+        SiteInstance.ObservedState.RUNNING,
+        SiteInstance.ObservedState.UNHEALTHY,
+    }:
+        return "stop"
     if state == SiteInstance.ObservedState.UNHEALTHY:
         if instance.consecutive_failures >= 1:
             return None
@@ -108,13 +123,6 @@ def _plan(instance, observed):
         SiteInstance.ObservedState.STOPPED,
     }:
         return "start"
-    if desired == SiteInstance.DesiredState.STOPPED and state in {
-        SiteInstance.ObservedState.RUNNING,
-        SiteInstance.ObservedState.UNHEALTHY,
-    }:
-        return "stop"
-    if desired == SiteInstance.DesiredState.ABSENT and state == SiteInstance.ObservedState.RUNNING:
-        return "stop"
     return None
 
 
@@ -128,7 +136,7 @@ def _maybe_clear_failures(instance, observed):
         instance.save(update_fields=["consecutive_failures"])
 
 
-def _apply(site, instance, transport, action, now):
+def _apply(site, instance, transport, action, now, observe=None):
     holder = f"reconcile:{site.pk}"
     lock = locks.acquire(
         OperationLock.Scope.SITE, site.pk, OperationLock.Kind.RECONCILE, holder,
@@ -137,7 +145,15 @@ def _apply(site, instance, transport, action, now):
         return False
     try:
         _record(transport, "lock", ["recheck"])
-        _probe_container_state(transport, site, instance)
+        instance.refresh_from_db()
+        observed = _read_observed(instance, transport, site, observe)
+        _persist_observation(instance, observed, now)
+        if _braked(site, instance, observed, now):
+            return False
+        action = _plan(instance, observed)
+        if action is None:
+            _maybe_clear_failures(instance, observed)
+            return False
         if not OperationLock.objects.filter(
             scope=OperationLock.Scope.SITE,
             object_id=str(site.pk),
@@ -152,10 +168,14 @@ def _apply(site, instance, transport, action, now):
             instance.consecutive_failures = 0
             instance.observed_state = SiteInstance.ObservedState.RUNNING
         elif action == "stop":
-            transport.run(["docker", "stop", name])
+            result = transport.run(["docker", "stop", name])
+            if not result.ok:
+                raise RuntimeError(f"docker stop failed: {result.stderr}")
             instance.observed_state = SiteInstance.ObservedState.STOPPED
         elif action == "restart":
-            transport.run(["docker", "restart", name])
+            result = transport.run(["docker", "restart", name])
+            if not result.ok:
+                raise RuntimeError(f"docker restart failed: {result.stderr}")
             instance.consecutive_failures = instance.consecutive_failures + 1
             instance.observed_state = SiteInstance.ObservedState.UNHEALTHY
         else:
@@ -225,13 +245,29 @@ def _reason_key(reason):
     return (reason or "").strip().lower().replace("_", "-")
 
 
+def _last_rearm(obj):
+    return (
+        AuditEvent.objects.filter(
+            action="reconcile_rearmed",
+            object_type=type(obj).__name__,
+            object_id=str(getattr(obj, "pk", "")),
+        )
+        .order_by("-ts")
+        .first()
+    )
+
+
 def _audit_once(action, obj, **detail):
-    exists = AuditEvent.objects.filter(
+    qs = AuditEvent.objects.filter(
         action=action,
         object_type=type(obj).__name__,
         object_id=str(getattr(obj, "pk", "")),
-    ).exists()
-    if exists:
+    )
+    if action in REARM_SCOPED_AUDITS:
+        rearmed = _last_rearm(obj)
+        if rearmed is not None:
+            qs = qs.filter(ts__gt=rearmed.ts)
+    if qs.exists():
         return None
     return audit(action, obj, source=AuditEvent.Source.RECONCILER, **detail)
 
@@ -263,18 +299,18 @@ def _flap_paused(instance):
 
 
 def _cycle_count(instance, now):
-    events = (
-        AuditEvent.objects.filter(
-            action="reconcile_repair",
-            object_type="SiteInstance",
-            object_id=str(instance.pk),
-            ts__gte=now - FLAP_WINDOW,
-        )
-        .order_by("ts")
+    events = AuditEvent.objects.filter(
+        action="reconcile_repair",
+        object_type="SiteInstance",
+        object_id=str(instance.pk),
+        ts__gte=now - FLAP_WINDOW,
     )
+    rearmed = _last_rearm(instance)
+    if rearmed is not None:
+        events = events.filter(ts__gt=rearmed.ts)
     ops = [
         event.detail.get("op")
-        for event in events
+        for event in events.order_by("ts")
         if event.detail.get("op") in {"start", "stop"}
     ]
     cycles = 0

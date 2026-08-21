@@ -155,6 +155,11 @@ def test_backoff_after_three_failures():
     assert inst.consecutive_failures == 0
     tick(site, transport=transport, jitter=0)
     assert len(_mutating(transport)) > len(after_three)
+    for _ in range(2):
+        tick(site, transport=transport, jitter=0)
+    inst.refresh_from_db()
+    assert inst.consecutive_failures >= 3
+    assert AuditEvent.objects.filter(action="reconcile_backoff").count() == 2
 
 
 @pytest.mark.req("REL-C2-RECONCILER-BRAKES")
@@ -224,3 +229,180 @@ def test_reprobe_before_mutate():
     )
     lock_idx = max(i for i, kind in enumerate(kinds[:probe_idx + 1]) if kind == "lock")
     assert lock_idx < probe_idx < run_idx
+
+
+def _oscillate(site, inst, transport, now, cycles):
+    from reconcile.loop import tick
+
+    for _ in range(cycles):
+        inst.desired_state = SiteInstance.DesiredState.RUNNING
+        inst.save(update_fields=["desired_state"])
+        tick(site, transport=transport, now=now, jitter=0)
+        inst.desired_state = SiteInstance.DesiredState.STOPPED
+        inst.save(update_fields=["desired_state"])
+        tick(site, transport=transport, now=now, jitter=0)
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_flap_pauses_again_after_rearm():
+    """rearm must not permanently disable flap: three new cycles pause and audit again.
+
+    What would make this fail: _audit_once refusing a second flap_pause, or
+    _flap_paused staying false because pause.ts < rearm.ts with no new row.
+    """
+    from reconcile.loop import rearm, tick
+
+    now = timezone.now()
+    site, inst, transport = _world("flap-rearm")
+    _oscillate(site, inst, transport, now, 3)
+    assert AuditEvent.objects.filter(action="reconcile_flap_pause").count() == 1
+    rearm(inst)
+    inst.desired_state = SiteInstance.DesiredState.RUNNING
+    inst.save(update_fields=["desired_state"])
+    after_rearm = list(_mutating(transport))
+    tick(site, transport=transport, now=now, jitter=0)
+    assert len(_mutating(transport)) > len(after_rearm)
+    _oscillate(site, inst, transport, now, 2)
+    assert AuditEvent.objects.filter(action="reconcile_flap_pause").count() == 1
+    _oscillate(site, inst, transport, now, 1)
+    assert AuditEvent.objects.filter(action="reconcile_flap_pause").count() == 2
+    paused_at = list(_mutating(transport))
+    inst.desired_state = SiteInstance.DesiredState.RUNNING
+    inst.save(update_fields=["desired_state"])
+    tick(site, transport=transport, now=now, jitter=0)
+    assert _mutating(transport) == paused_at
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_reprobe_skips_when_locked_observe_converged():
+    """First observe unhealthy, locked re-observe running → no docker restart.
+
+    What would make this fail: applying the original action after the re-probe
+    discarded the new observation.
+    """
+    from reconcile.loop import tick
+
+    site, inst, transport = _world("reprobe-skip")
+    inst.desired_state = SiteInstance.DesiredState.RUNNING
+    inst.observed_state = SiteInstance.ObservedState.RUNNING
+    inst.save(update_fields=["desired_state", "observed_state"])
+    seen = []
+
+    def observe(_i):
+        if not seen:
+            seen.append("unhealthy")
+            return {"state": "unhealthy", "reason": "checks_failing"}
+        seen.append("running")
+        return {"state": "running", "reason": ""}
+
+    tick(site, transport=transport, observe=observe, jitter=0)
+    assert [argv[1] for argv in _start_stop_runs(transport)] == []
+    assert seen == ["unhealthy", "running"]
+    inst.refresh_from_db()
+    assert inst.observed_state == SiteInstance.ObservedState.RUNNING
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_desired_stop_unhealthy_still_stops():
+    """desired stopped + observed unhealthy must docker stop, not skip or restart.
+
+    What would make this fail: the unhealthy branch returning None before stop.
+    """
+    from reconcile.loop import tick
+
+    site, inst, transport = _world("stop-unhealthy")
+    tick(site, transport=transport, jitter=0)
+    transport.calls.clear()
+    inst.desired_state = SiteInstance.DesiredState.STOPPED
+    inst.save(update_fields=["desired_state"])
+    tick(
+        site,
+        transport=transport,
+        observe=lambda _i: {"state": "unhealthy", "reason": "checks_failing"},
+        jitter=0,
+    )
+    stops = [argv for argv in _start_stop_runs(transport) if argv[1] == "stop"]
+    restarts = [argv for argv in _start_stop_runs(transport) if argv[1] == "restart"]
+    assert stops
+    assert restarts == []
+    inst.refresh_from_db()
+    assert inst.observed_state == SiteInstance.ObservedState.STOPPED
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_failed_docker_stop_does_not_mark_stopped():
+    """A failed docker stop must not persist observed_state=stopped.
+
+    What would make this fail: treating any transport.run as success.
+    """
+    from reconcile.loop import tick
+
+    class FailStopTransport(PipelineTransport):
+        def run(self, argv, *, timeout=60):
+            argv = list(argv)
+            if argv[:2] == ["docker", "stop"]:
+                self.calls.append(("run", argv))
+                return CommandResult(argv, exit_code=1, stderr="cannot stop")
+            return super().run(argv, timeout=timeout)
+
+    site, inst, _unused = _world("fail-stop")
+    transport = FailStopTransport()
+    tick(site, transport=transport, jitter=0)
+    inst.refresh_from_db()
+    assert inst.observed_state == SiteInstance.ObservedState.RUNNING
+    inst.desired_state = SiteInstance.DesiredState.STOPPED
+    inst.save(update_fields=["desired_state"])
+    tick(site, transport=transport, jitter=0)
+    inst.refresh_from_db()
+    assert inst.observed_state != SiteInstance.ObservedState.STOPPED
+    assert any(
+        kind == "run" and argv[:2] == ["docker", "stop"]
+        for kind, argv in _mutating(transport)
+    )
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_tick_all_global_budget_uses_instance_target():
+    """A global budget leaves remaining instances for the next Beat; transport is per instance.
+
+    What would make this fail: iterating only primary_target, or mutating the
+    whole fleet in one tick_all.
+    """
+    from reconcile.tasks import tick_all
+
+    _site_a, inst_a, t_a = _world("gb-a")
+    _site_b, inst_b, t_b = _world("gb-b")
+    _site_a.primary_target = None
+    _site_a.save(update_fields=["primary_target"])
+    transports = {inst_a.target_id: t_a, inst_b.target_id: t_b}
+
+    tick_all.run(budget=1, transport_for=lambda target: transports[target.pk])
+
+    inst_a.refresh_from_db()
+    inst_b.refresh_from_db()
+    running = sum(
+        inst.observed_state == SiteInstance.ObservedState.RUNNING
+        for inst in (inst_a, inst_b)
+    )
+    assert running == 1
+
+
+@pytest.mark.req("REL-C2-RECONCILER-BRAKES")
+def test_tick_all_fail_open_continues_fleet():
+    """One instance raising must not abort the rest of the Beat pass.
+
+    What would make this fail: an uncaught SshTransport error stopping tick_all.
+    """
+    from reconcile.tasks import tick_all
+
+    _site_a, inst_a, _t_a = _world("fo-a")
+    _site_b, inst_b, t_b = _world("fo-b")
+
+    def transport_for(target):
+        if target.pk == inst_a.target_id:
+            raise RuntimeError("ssh fail")
+        return t_b
+
+    tick_all.run(budget=2, transport_for=transport_for)
+    inst_b.refresh_from_db()
+    assert inst_b.observed_state == SiteInstance.ObservedState.RUNNING
