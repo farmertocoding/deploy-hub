@@ -6,6 +6,7 @@ before taking the unique (scope, object_id, kind) lock.
 """
 import json
 import os
+import signal
 from pathlib import Path
 
 from django.conf import settings
@@ -34,6 +35,7 @@ from deploys.steps import (
 )
 
 CRASH_AFTER_ENV = "HUB_TEST_CRASH_AFTER_STEP"
+CRASH_SIGNAL_ENV = "HUB_TEST_CRASH_SIGNAL"
 DEFAULT_GIT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 TERMINAL_STATUSES = {
@@ -437,10 +439,7 @@ def _run_step(deployment, step, desired=None):
     try:
         _crash_if_configured(step)
     except Exception:
-        step.refresh_from_db()
-        if step.status == DeploymentStep.Status.SUCCEEDED:
-            step.status = DeploymentStep.Status.RUNNING
-            step.save(update_fields=["status"])
+        _unmark_step_succeeded(step)
         raise
 
     if step.name == DeploymentStep.Name.CUTOVER:
@@ -558,10 +557,21 @@ def _env_mapping_for_deploy(deployment):
     return mapping
 
 
+def _unmark_step_succeeded(step):
+    """ensure_migrate may persist SUCCEEDED before the hook; resume must see it open."""
+    step.refresh_from_db()
+    if step.status == DeploymentStep.Status.SUCCEEDED:
+        step.status = DeploymentStep.Status.RUNNING
+        step.save(update_fields=["status"])
+
+
 def _crash_if_configured(step):
     """Kill-matrix hook. Fires after ensure_* and before the step is succeeded."""
     flag = os.environ.get(CRASH_AFTER_ENV, "")
     if not flag:
         return
     if flag == step.name or flag == str(step.seq):
+        if os.environ.get(CRASH_SIGNAL_ENV, "") == "SIGKILL":
+            _unmark_step_succeeded(step)
+            os.kill(os.getpid(), signal.SIGKILL)
         raise RuntimeError(f"{CRASH_AFTER_ENV}={flag}")
