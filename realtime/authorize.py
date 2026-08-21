@@ -8,6 +8,8 @@ TOPIC_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,90}$")
 ALLOWED_PREFIXES = (
     "demo.",       # demo job log streams
     "alerts",
+    "site.",       # site.{id}.status (warming, data-stale, recreate-down)
+    "deploy.",     # deploy.{id}.status (named §D2 step failure)
 )
 
 

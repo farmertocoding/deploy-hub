@@ -560,7 +560,7 @@ requirements:
     text: T1 actions require hardware touch + type-the-name; T2 a diff-summarizing confirm; T3 (rollback/restart) a single click with undo — never behind a hardware touch.
   - id: UX-F8-SIMULATION-STATES
     phase: 2
-    verify: checklist
+    verify: test
     source: plan-addendum-2026-07-30.md §F8 / review3 §N2
     text_hash: sha256:7642fa533c38cfb1a25c13ebf7fe29fa46e7ac62b0edc4f1bb7fd452ca4bcc4e
     text: Every screen renders empty/loading/live/error/degraded states in simulation mode, including warming and data-stale badges.

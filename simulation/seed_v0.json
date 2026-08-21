@@ -1,5 +1,5 @@
 {
-  "comment": "Simulation-mode seed v0 (§F8): 2 zones, 4 targets, 6 sites. Loaded by the replayer once product models exist (Phase 2+); v0 drives the demo log panel only.",
+  "comment": "Simulation-mode seed v0 (§F8): 2 zones, 4 targets, 6 sites. Loaded by the replayer once product models exist (Phase 2+); v0 drives the demo log panel only. Task 20 extends scripted events with warming / data-stale / recreate-down / named-step deploy failure.",
   "zones": [
     {"name": "zone-a-home", "kind": "home_lan", "cidr": "192.168.1.0/24"},
     {"name": "zone-b-office", "kind": "home_lan", "cidr": "10.0.0.0/24"}
@@ -15,12 +15,16 @@
     {"domain": "api.example.com", "tier": "prod", "target": "home-server-1"},
     {"domain": "staging.shop.example.com", "tier": "staging", "target": "home-server-2"},
     {"domain": "blog.example.com", "tier": "prod", "target": "office-server-1"},
-    {"domain": "lab.example.com", "tier": "experiment", "target": "home-server-2"},
+    {"domain": "lab.example.com", "tier": "experiment", "target": "home-server-2", "deploy_strategy": "recreate", "instances": 1, "single_instance": true},
     {"domain": "docs.example.com", "tier": "prod", "target": "office-server-1"}
   ],
   "scripted_events": [
     {"t": 0, "topic": "demo.sim.log", "event": {"line": "simulation replayer online"}},
     {"t": 1, "topic": "alerts", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "engaged"}},
-    {"t": 3, "topic": "alerts", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "relaxed"}}
+    {"t": 3, "topic": "alerts", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "relaxed"}},
+    {"t": 5, "topic": "site.shop.status", "event": {"site": "shop.example.com", "observed": "warming"}},
+    {"t": 7, "topic": "site.api.status", "event": {"site": "api.example.com", "observed": "running", "badge": "data-stale"}},
+    {"t": 9, "topic": "site.lab.status", "event": {"site": "lab.example.com", "deploy_strategy": "recreate", "observed": "down"}},
+    {"t": 11, "topic": "deploy.staging-shop.status", "event": {"site": "staging.shop.example.com", "step": "health_check", "status": "failed"}}
   ]
 }

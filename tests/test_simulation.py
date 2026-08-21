@@ -42,6 +42,120 @@ def test_replay_publishes_through_real_path_with_monotonic_seqs():
         assert current_seq(topic) == before[topic] + count
 
 
+def _load_seed():
+    return json.loads(pathlib.Path(SEED).read_text())
+
+
+def _event_state(event):
+    """observed / status / observed_state / state — the fields a badge would read."""
+    return (event.get("observed") or event.get("observed_state")
+            or event.get("status") or event.get("state"))
+
+
+@pytest.mark.req("UX-F8-SIMULATION-STATES")
+def test_seed_includes_warming():
+    """A scripted event carries warming (observed/status) so the badge is renderable.
+
+    What would make this fail: dropping the warming event, or spelling it only
+    in a comment / site field the replayer never publishes.
+    """
+    assert any(
+        _event_state(entry.get("event") or {}) == "warming"
+        for entry in _load_seed()["scripted_events"]
+    ), "seed has no scripted event with observed/status warming"
+
+
+@pytest.mark.req("UX-F8-SIMULATION-STATES")
+def test_seed_includes_data_stale():
+    """A scripted event carries the data-stale badge (data-stale / data_stale).
+
+    What would make this fail: omitting the badge, or using a generic 'stale'
+    that is not the feed-staleness token.
+    """
+    tokens = ("data-stale", "data_stale")
+    assert any(
+        any(tok in json.dumps(entry.get("event") or {}) for tok in tokens)
+        for entry in _load_seed()["scripted_events"]
+    ), "seed has no data-stale / data_stale badge event"
+
+
+@pytest.mark.req("UX-F8-SIMULATION-STATES")
+def test_seed_includes_single_instance():
+    """The seed shows a site with a single instance (site field or event).
+
+    What would make this fail: every site looking multi-instance / scale-ready,
+    with no instances:1 or single_instance mark.
+    """
+    seed = _load_seed()
+
+    def marks_single(obj):
+        if not isinstance(obj, dict):
+            return False
+        if obj.get("instances") == 1 or obj.get("single_instance") is True:
+            return True
+        if obj.get("scale_ready") is False:
+            return True
+        for key in ("kind", "badge", "mark", "scale"):
+            val = obj.get(key)
+            if isinstance(val, str) and val.replace("_", "-") in {
+                "single-instance", "single-instance-only",
+            }:
+                return True
+        return False
+
+    assert (
+        any(marks_single(site) for site in seed["sites"])
+        or any(marks_single(entry.get("event") or {}) for entry in seed["scripted_events"])
+    ), "seed shows no single-instance site"
+
+
+@pytest.mark.req("UX-F8-SIMULATION-STATES")
+def test_seed_includes_recreate_site_down_impact():
+    """Recreate takes the site down: an event, or deploy_strategy=recreate + a down window.
+
+    What would make this fail: recreate with no down window, or a down event
+    only on a blue-green site.
+    """
+    seed = _load_seed()
+    recreate_sites = {
+        site.get("domain") for site in seed["sites"]
+        if site.get("deploy_strategy") == "recreate"
+    }
+    down_states = {"down", "stopped", "absent", "offline"}
+    for entry in seed["scripted_events"]:
+        event = entry.get("event") or {}
+        is_down = _event_state(event) in down_states
+        is_recreate = (
+            event.get("deploy_strategy") == "recreate" or "recreate" in json.dumps(event)
+        )
+        if is_recreate and is_down:
+            return
+        if is_down and event.get("site") in recreate_sites:
+            return
+    pytest.fail("seed has no recreate-down impact")
+
+
+@pytest.mark.req("UX-F8-SIMULATION-STATES")
+def test_seed_includes_deploy_failure_at_a_named_step():
+    """A scripted deploy fails at a named §D2 step (e.g. health_check).
+
+    What would make this fail: a generic deploy-failed event with no step, or
+    a step name that is not in the D2 pipeline.
+    """
+    d2_steps = {
+        "build", "ship", "migrate", "start_green", "health_check",
+        "dns", "route_tls", "smoke_test", "cutover",
+    }
+    failed = {"failed", "fail", "error"}
+    for entry in _load_seed()["scripted_events"]:
+        event = entry.get("event") or {}
+        step = event.get("step") or event.get("step_name") or event.get("name")
+        status = event.get("status") or event.get("outcome") or event.get("result")
+        if step in d2_steps and status in failed:
+            return
+    pytest.fail("seed has no deploy failure at a named D2 step")
+
+
 # ── R9-Q2: the boundary neither suite crosses ──────────────────────────────────
 #
 # `frontend/src/sim.js` carries a scan report pasted out of a real run, and the node
