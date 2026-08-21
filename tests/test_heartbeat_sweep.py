@@ -49,13 +49,20 @@ def _beat_sweep_task_names():
 
 @pytest.mark.req("REL-C1-HEARTBEAT-SWEEP")
 @pytest.mark.req("REL-P3-RESUMABLE-DEPLOYS")
-def test_stale_running_is_resumed_or_aborted():
+def test_stale_running_is_resumed_or_aborted(monkeypatch):
     """Stale last_heartbeat (>2 min): resume if a pending/running step remains, else abort.
 
     What would make this fail: leaving a stale row running, or aborting one that
     still has a step to resume.
     """
+    from pipeline_fakes import PipelineTransport
+
+    from deploys import pipeline
     from deploys.heartbeat import sweep
+    from providers.fakes import FakeDnsProvider
+
+    monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
+    monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
 
     assert "deploys.tasks.sweep_stale_deployments" in _beat_sweep_task_names()
 

@@ -40,9 +40,9 @@ def ensure_build(desired):
     archive = _context_tar(desired["source_dir"], _dockerfile_from_body(body))
     remote = desired.get("remote_context") or f"/tmp/hub-build/{tag}"
     tar_remote = f"{remote}.tar"
-    transport.put(archive, tar_remote)
     heartbeat = desired.get("heartbeat")
     _run(transport, ["mkdir", "-p", remote], heartbeat)
+    transport.put(archive, tar_remote)
     _run(transport, ["tar", "-xf", tar_remote, "-C", remote], heartbeat)
     result = _run(transport, ["docker", "build", "-t", tag, remote], heartbeat)
     if not result.ok:
@@ -240,7 +240,8 @@ def ensure_route_tls(desired):
     result = _run(
         transport,
         [
-            "curl", "-X", "PUT", f"http://127.0.0.1:2019/id/{route_id}",
+            "curl", "-sf", "-X", "PUT",
+            f"http://127.0.0.1:2019/config/apps/http/servers/{route_id}",
             "-H", "Content-Type: application/json",
             "--data-binary", f"@{remote}",
         ],
@@ -326,7 +327,10 @@ def _persist_dns_rows(desired, records):
 
 def _caddy_route(desired, route_id):
     body = desired.get("manifest_body") or {}
-    if _exposure(desired) == "mesh_only":
+    override = desired.get("caddy_listen") or body.get("caddy_listen")
+    if override:
+        listen = [override]
+    elif _exposure(desired) == "mesh_only":
         host = body.get("mesh_bind") or "127.0.0.1"
         listen = [f"{host}:443"]
     else:
@@ -335,6 +339,7 @@ def _caddy_route(desired, route_id):
     return {
         "@id": route_id,
         "listen": listen,
+        "automatic_https": {"disable": True},
         "routes": [{
             "match": [{"host": [domain]}],
             "handle": [{
@@ -363,20 +368,32 @@ def _caddy_listen_hostport(desired):
 def _caddy_smoke_payload(desired):
     transport = desired["transport"]
     url = f"http://{_caddy_listen_hostport(desired)}{_readiness_path(desired)}"
-    result = transport.probe(["curl", "-sf", url])
+    domain = desired.get("domain") or f"{desired['site_slug']}.local"
+    result = transport.probe([
+        "curl", "-sf", "-H", f"Host: {domain}", url,
+    ])
     if not result.ok or not (result.stdout or "").strip():
         return {"live": False, "ready": False}
-    return json.loads(result.stdout)
-
-
-def _probe_caddy_route(transport, route_id):
-    result = transport.probe(["curl", "-sf", f"http://127.0.0.1:2019/id/{route_id}"])
-    if not result.ok or not (result.stdout or "").strip():
-        return None
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
-        return None
+        return {"live": False, "ready": False}
+
+
+def _probe_caddy_route(transport, route_id):
+    urls = [
+        f"http://127.0.0.1:2019/id/{route_id}",
+        f"http://127.0.0.1:2019/config/apps/http/servers/{route_id}",
+    ]
+    for url in urls:
+        result = transport.probe(["curl", "-sf", url])
+        if not result.ok or not (result.stdout or "").strip():
+            continue
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def _declares_ws(body):
@@ -443,6 +460,11 @@ def _container_running(transport, name):
 
 def _docker_run_argv(desired, name):
     argv = ["docker", "run", "-d", "--name", name]
+    extra = desired.get("docker_run_extra")
+    if extra is None:
+        extra = (desired.get("manifest_body") or {}).get("docker_run_extra")
+    if extra:
+        argv.extend(list(extra))
     body = desired.get("manifest_body") or {}
     for spec in _volume_specs(desired["site_slug"], body):
         argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])
@@ -492,13 +514,26 @@ def _healthz_payload(desired):
     name = _container_name(desired)
     path = _readiness_path(desired)
     ip_r = transport.probe([
-        "docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", name,
+        "docker", "inspect", "--format",
+        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+        name,
     ])
-    ip = (ip_r.stdout or "").strip() or "127.0.0.1"
-    result = transport.probe(["curl", "-sf", f"http://{ip}{path}"])
+    ip = (ip_r.stdout or "").strip().split()[0] if (ip_r.stdout or "").strip() else ""
+    if ip:
+        url = f"http://{ip}{path}"
+    else:
+        port = int(desired.get("internal_port") or 80)
+        if port not in {80, 443}:
+            url = f"http://127.0.0.1:{port}{path}"
+        else:
+            url = f"http://127.0.0.1{path}"
+    result = transport.probe(["curl", "-sf", url])
     if not result.ok or not (result.stdout or "").strip():
         return {"live": False, "ready": False}
-    return json.loads(result.stdout)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"live": False, "ready": False}
 
 
 def _checks_are_comparable(payload):
@@ -555,7 +590,10 @@ def _run(transport, argv, heartbeat=None, timeout=3600):
     done = threading.Event()
 
     def pulse():
+        from django.db import close_old_connections
+
         while not done.wait(HEARTBEAT_INTERVAL_S):
+            close_old_connections()
             heartbeat()
 
     threading.Thread(target=pulse, daemon=True).start()

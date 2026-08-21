@@ -50,7 +50,7 @@ class RouteTransport(FakeTransport):
 def _route_id_from_argv(argv):
     for part in argv:
         text = str(part)
-        if "/id/" in text:
+        if "/id/" in text or "/servers/" in text:
             return text.rstrip("/").rsplit("/", 1)[-1]
     return None
 

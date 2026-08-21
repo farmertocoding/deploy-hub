@@ -144,16 +144,20 @@ def test_rollback_is_a_new_deployment_row():
 
 
 @pytest.mark.req("PIPE-D2-STATE-MACHINE")
-def test_env_snapshot_goes_through_vault():
+def test_env_snapshot_goes_through_vault(monkeypatch):
     """Env bytes come from vault.service.get; never task kwargs, artifacts, or logs.
 
     What would make this fail: copying bundle plaintext onto DeploymentArtifact
     or into Celery kwargs, or reading Secret.ciphertext by hand.
     """
+    from pipeline_fakes import PipelineTransport
+
+    from deploys import pipeline
     from deploys import tasks as deploy_tasks
     from deploys.models import DeploymentArtifact
     from deploys.pipeline import load_env_snapshot
     from deploys.tasks import run_deploy
+    from providers.fakes import FakeDnsProvider
 
     site, _ = _site_with_target(slug="env")
     bundle = vault_service.put(
@@ -175,6 +179,10 @@ def test_env_snapshot_goes_through_vault():
     snapshot = load_env_snapshot(deployment)
     assert snapshot == ENV_MARKER
     Secret.objects.filter(pk=bundle.pk).update(last_used_at=None)
+
+    fake = PipelineTransport()
+    monkeypatch.setattr(pipeline, "_default_transport", lambda site: fake)
+    monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
 
     run_deploy.delay(deployment.pk)
     bundle.refresh_from_db()
@@ -248,22 +256,27 @@ def test_execute_stops_when_superseded(monkeypatch):
     What would make this fail: execute finishing the remaining steps and
     writing succeeded after another deploy marked this row superseded.
     """
+    from pipeline_fakes import PipelineTransport
+
     from deploys import pipeline
+    from providers.fakes import FakeDnsProvider
 
     site, _ = _site_with_target(slug="exec-supersede")
     deployment = _queued_deployment(site)
     assert pipeline.begin_deploy(deployment) is True
 
     real_run = pipeline._run_step
+    transport = PipelineTransport()
+    dns = FakeDnsProvider()
 
-    def run_then_supersede(dep, step):
-        real_run(dep, step)
+    def run_then_supersede(dep, step, desired=None):
+        real_run(dep, step, desired)
         Deployment.objects.filter(pk=dep.pk).update(
             status=Deployment.Status.SUPERSEDED,
         )
 
     monkeypatch.setattr(pipeline, "_run_step", run_then_supersede)
-    result = pipeline.execute(deployment.pk)
+    result = pipeline.execute(deployment.pk, transport=transport, dns=dns)
     deployment.refresh_from_db()
     assert deployment.status == Deployment.Status.SUPERSEDED
     assert result["status"] == Deployment.Status.SUPERSEDED
