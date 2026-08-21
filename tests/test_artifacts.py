@@ -8,6 +8,7 @@ KINDS = {
     "dns_set",
     "env_names",
     "firewall_argv",
+    "image_tag",
 }
 
 
@@ -37,6 +38,7 @@ def _desired(deployment, *, extra=None):
         "dns_set": '[{"name": "art.example.com", "rtype": "A"}]',
         "env_names": ["DATABASE_URL", "API_KEY"],
         "firewall_argv": ["ufw", "allow", "80", "443"],
+        "image_tag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-deadbeefdeadbeef",
     }
     if extra:
         desired.update(extra)
@@ -73,6 +75,8 @@ def test_every_generated_artifact_snapshotted():
     assert "art.example.com" in dns.content
     fw = DeploymentArtifact.objects.get(deployment=deployment, kind="firewall_argv")
     assert "ufw" in fw.content
+    tag = DeploymentArtifact.objects.get(deployment=deployment, kind="image_tag")
+    assert "deadbeefdeadbeef" in tag.content
 
 
 @pytest.mark.req("REL-P4-ARTIFACT-SNAPSHOTS")

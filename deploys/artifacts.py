@@ -3,7 +3,7 @@ import json
 
 
 def snapshot_artifacts(desired):
-    """Write Dockerfile, Caddy route, DNS set, env names, and firewall argv rows."""
+    """Write Dockerfile, Caddy route, DNS set, env names, firewall argv, and image tag."""
     from deploys.models import DeploymentArtifact
 
     deployment = desired["deployment"]
@@ -13,6 +13,7 @@ def snapshot_artifacts(desired):
         "dns_set": _dns_content(desired),
         "env_names": json.dumps(list(desired.get("env_names") or [])),
         "firewall_argv": json.dumps(list(desired.get("firewall_argv") or [])),
+        "image_tag": desired.get("image_tag") or "",
     }
     for kind, content in rows.items():
         DeploymentArtifact.objects.create(

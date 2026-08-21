@@ -249,3 +249,53 @@ def test_apply_pins_last_succeeded_image_tag():
     assert runs
     assert any(prev_tag in argv for argv in runs)
     assert all(computed not in argv for argv in runs)
+
+
+def _docker_run_tags(transport):
+    return [
+        argv[-1]
+        for kind, argv in transport.mutating_calls()
+        if kind == "run" and argv[:2] == ["docker", "run"]
+    ]
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_second_apply_reuses_original_built_tag():
+    """Two sequential applies reuse the tag the first real build produced.
+
+    What would make this fail: pinning image_tag() of the last apply Manifest
+    (new env_bundle_ref) instead of the on-disk tag the succeeded row ran.
+    """
+    from deploys.env import apply_env, put_env
+    from deploys.pipeline import execute
+    from deploys.steps import image_tag
+
+    site, original = queued_deployment("env2apply", body=fixture_body("env2apply"))
+    transport = PipelineTransport()
+    dns = FakeDnsProvider()
+    execute(original.pk, transport=transport, dns=dns)
+    original.refresh_from_db()
+    assert original.status == Deployment.Status.SUCCEEDED
+    built_tag = image_tag(
+        original.manifest.body.get("git_sha"),
+        original.manifest.body,
+    )
+    assert built_tag in _docker_run_tags(transport)
+
+    put_env(site, {"API_KEY": "first-" + PLANTED})
+    transport.calls.clear()
+    first = apply_env(site, transport=transport, dns=dns)
+    first_computed = image_tag(first.manifest.body.get("git_sha"), first.manifest.body)
+    assert first_computed != built_tag
+    assert _docker_run_tags(transport) == [built_tag]
+
+    put_env(site, {"API_KEY": "second-" + PLANTED})
+    transport.calls.clear()
+    second = apply_env(site, transport=transport, dns=dns)
+    second_computed = image_tag(
+        second.manifest.body.get("git_sha"),
+        second.manifest.body,
+    )
+    assert second_computed != built_tag
+    assert second_computed != first_computed
+    assert _docker_run_tags(transport) == [built_tag]

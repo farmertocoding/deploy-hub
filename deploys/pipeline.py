@@ -249,6 +249,49 @@ def _build_and_ship_skipped(deployment):
     return skipped == {DeploymentStep.Name.BUILD, DeploymentStep.Name.SHIP}
 
 
+def _stored_image_tag(deployment):
+    row = DeploymentArtifact.objects.filter(
+        deployment=deployment, kind="image_tag",
+    ).first()
+    if row is None:
+        return None
+    tag = (row.content or "").strip()
+    return tag or None
+
+
+def _walk_to_built_deploy(deployment):
+    """Nearest succeeded deploy that actually built (build not skipped)."""
+    rows = (
+        Deployment.objects.filter(
+            manifest__site=deployment.manifest.site,
+            status=Deployment.Status.SUCCEEDED,
+        )
+        .exclude(pk=deployment.pk)
+        .order_by("-pk")
+    )
+    for row in rows:
+        build = row.steps.filter(name=DeploymentStep.Name.BUILD).first()
+        if build is None or build.status != DeploymentStep.Status.SKIPPED:
+            return row
+    return None
+
+
+def _pin_from_succeeded_history(deployment, fallback_sha):
+    """Reuse the on-disk tag: stored artifact, else walk back to a real build."""
+    prev = _previous_succeeded(deployment)
+    if prev is not None:
+        stored = _stored_image_tag(prev)
+        if stored:
+            sha = (prev.manifest.body or {}).get("git_sha") or fallback_sha
+            return sha, stored
+    built = _walk_to_built_deploy(deployment)
+    if built is None:
+        return fallback_sha, image_tag(fallback_sha, deployment.manifest.body or {})
+    body = built.manifest.body or {}
+    sha = body.get("git_sha") or fallback_sha
+    return sha, _stored_image_tag(built) or image_tag(sha, body)
+
+
 def _assemble_desired(deployment, *, transport, dns, sleep):
     site = deployment.manifest.site
     body = deployment.manifest.body or {}
@@ -279,9 +322,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
         env_names = list(body.get("env_names") or [])
 
     if prev is not None and _build_and_ship_skipped(deployment):
-        prev_body = prev.manifest.body or {}
-        git_sha = prev_body.get("git_sha") or git_sha
-        pinned_tag = image_tag(git_sha, prev_body)
+        git_sha, pinned_tag = _pin_from_succeeded_history(deployment, git_sha)
     else:
         pinned_tag = image_tag(git_sha, body)
 
