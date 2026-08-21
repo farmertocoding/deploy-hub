@@ -23,6 +23,9 @@ class Secret(models.Model):
         CLOUD_CREDENTIAL = "cloud_credential"
         # nosec B105 — a Kind label naming what a row holds, not a credential.
         API_TOKEN = "api_token"  # nosec B105
+        DATABASE_URL = "database_url"
+        # nosec B105 — Kind label for the per-site backup key, distinct from the KEK.
+        BACKUP_KEY = "backup_key"  # nosec B105
 
     kind = models.CharField(max_length=32, choices=Kind.choices)
     owner_type = models.CharField(max_length=32)  # 'site' | 'target' | 'project' | ...

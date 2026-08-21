@@ -332,3 +332,26 @@ class SiteVolume(models.Model):
 
     def __str__(self):
         return f"{self.site_id}:{self.name}"
+
+
+class BackupUnit(models.Model):
+    """Per-site data-backup registry (§E5/§N6). Beat stub seals dumps; ntfy is Phase 3."""
+
+    class Kind(models.TextChoices):
+        POSTGRES = "postgres"
+        SQLITE_FILE = "sqlite_file"
+        DIRECTORY_SYNC = "directory_sync"
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="backup_units")
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    schedule = models.CharField(max_length=128, default="0 2 * * *")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["site", "kind"], name="uniq_backupunit_site_kind",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.site_id}:{self.kind}"
