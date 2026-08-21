@@ -47,6 +47,15 @@ const Readiness = z
     pending_sandbox: z.array(z.object({}).partial().passthrough()),
   })
   .passthrough();
+const EnvNames = z
+  .object({ names: z.array(z.string()), config_stale: z.boolean() })
+  .passthrough();
+const EnvApply = z.object({ deployment_id: z.number().int() }).passthrough();
+const EnvWrite = z.object({ env: z.record(z.string()) }).passthrough();
+const PatchedEnvWrite = z
+  .object({ env: z.record(z.string()) })
+  .partial()
+  .passthrough();
 const Manifest = z
   .object({
     version: z.number().int(),
@@ -90,6 +99,10 @@ export const schemas = {
   SiteSummary,
   ProjectSummary,
   Readiness,
+  EnvNames,
+  EnvApply,
+  EnvWrite,
+  PatchedEnvWrite,
   Manifest,
   Materialize,
   Question,

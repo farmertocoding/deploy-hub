@@ -1,0 +1,186 @@
+"""Env lifecycle: config-stale, apply same image, names not values (PIPE-D2 / §E4)."""
+import ast
+import inspect
+import json
+from pathlib import Path
+
+import pytest
+from pipeline_fakes import PipelineTransport, fixture_body, queued_deployment
+
+from deploys.models import Deployment, DeploymentArtifact, DeploymentStep
+from providers.fakes import FakeDnsProvider
+
+pytestmark = pytest.mark.django_db
+
+PLANTED = "ENV-LIFECYCLE-SECRET-MARKER-do-not-log"
+
+
+@pytest.fixture
+def auth_client(client, django_user_model):
+    """Logged-in operator with a confirmed second factor (§6.10)."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = django_user_model.objects.create_user(username="op", password="pw-1234567890")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    return client
+
+
+def _site(*, slug="envlife"):
+    from core.models import Project, Site
+
+    project = Project.objects.create(name=slug, slug=f"p-{slug}")
+    return Site.objects.create(project=project, name=slug)
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_put_env_marks_config_stale():
+    """Add, edit, and delete through put_env all set Site.config_stale.
+
+    What would make this fail: writing the mapping without flipping the flag,
+    or storing values on Site / Manifest.body instead of a site-owned vault bundle.
+    """
+    from deploys.env import put_env
+    from vault.models import Secret
+
+    site = _site()
+    assert site.config_stale is False
+
+    put_env(site, {"DATABASE_URL": PLANTED})
+    site.refresh_from_db()
+    assert site.config_stale is True
+    assert Secret.objects.filter(
+        kind=Secret.Kind.ENV_BUNDLE,
+        owner_type="site",
+        owner_id=str(site.pk),
+    ).exists()
+    assert PLANTED not in json.dumps(site.__dict__, default=str)
+
+    site.config_stale = False
+    site.save(update_fields=["config_stale"])
+    put_env(site, {"DATABASE_URL": "edited-" + PLANTED})
+    site.refresh_from_db()
+    assert site.config_stale is True
+
+    site.config_stale = False
+    site.save(update_fields=["config_stale"])
+    put_env(site, {})
+    site.refresh_from_db()
+    assert site.config_stale is True
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_apply_skips_build_and_ship():
+    """Apply enqueues Manifest N+1, skips build+ship, runs 4–9 on the existing tag.
+
+    What would make this fail: docker build in mutating_calls, build/ship left
+    pending/succeeded, a new git_sha (new image tag), or leaving config_stale set.
+    """
+    from deploys.env import apply_env, put_env
+    from deploys.steps import image_tag
+
+    site, original = queued_deployment("applyenv", body=fixture_body("applyenv"))
+    old_body = dict(original.manifest.body)
+    old_tag = image_tag(old_body.get("git_sha"), old_body)
+
+    put_env(site, {"API_KEY": PLANTED})
+    transport = PipelineTransport()
+    dns = FakeDnsProvider()
+    deployment = apply_env(site, transport=transport, dns=dns)
+
+    assert deployment.pk != original.pk
+    assert deployment.manifest.version == original.manifest.version + 1
+    assert deployment.manifest.body.get("git_sha") == old_body.get("git_sha")
+    new_tag = image_tag(
+        deployment.manifest.body.get("git_sha"),
+        deployment.manifest.body,
+    )
+    assert new_tag == old_tag
+
+    by_name = {step.name: step.status for step in deployment.steps.order_by("seq")}
+    assert by_name[DeploymentStep.Name.BUILD] == DeploymentStep.Status.SKIPPED
+    assert by_name[DeploymentStep.Name.SHIP] == DeploymentStep.Status.SKIPPED
+    for name in (
+        DeploymentStep.Name.MIGRATE,
+        DeploymentStep.Name.START_GREEN,
+        DeploymentStep.Name.HEALTH_CHECK,
+        DeploymentStep.Name.DNS,
+        DeploymentStep.Name.ROUTE_TLS,
+        DeploymentStep.Name.SMOKE_TEST,
+        DeploymentStep.Name.CUTOVER,
+    ):
+        assert by_name[name] == DeploymentStep.Status.SUCCEEDED, name
+
+    deployment.refresh_from_db()
+    assert deployment.status == Deployment.Status.SUCCEEDED
+    site.refresh_from_db()
+    assert site.config_stale is False
+
+    assert not any(
+        kind == "run" and list(argv[:2]) == ["docker", "build"]
+        for kind, argv in transport.mutating_calls()
+    )
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_get_lists_names_not_values(auth_client):
+    """GET /api/v1/sites/<id>/env/ lists names; planted values are absent from JSON.
+
+    What would make this fail: echoing env values on GET, or omitting the names
+    that put_env wrote.
+    """
+    from deploys.env import list_env_names, put_env
+
+    site = _site(slug="envget")
+    put_env(site, {"DATABASE_URL": PLANTED, "API_KEY": "also-" + PLANTED})
+
+    assert list_env_names(site) == ["API_KEY", "DATABASE_URL"]
+
+    response = auth_client.get(f"/api/v1/sites/{site.pk}/env/")
+    assert response.status_code == 200
+    payload = response.json()
+    wire = json.dumps(payload)
+    assert PLANTED not in wire
+    names = payload.get("names") or payload.get("env_names")
+    assert "DATABASE_URL" in names
+    assert "API_KEY" in names
+
+    written = auth_client.put(
+        f"/api/v1/sites/{site.pk}/env/",
+        data={"env": {"NEW_SECRET": PLANTED}},
+        content_type="application/json",
+    )
+    assert written.status_code in (200, 201)
+    assert PLANTED not in json.dumps(written.json())
+
+
+@pytest.mark.req("PIPE-D2-STATE-MACHINE")
+def test_values_not_in_task_kwargs_or_logs():
+    """run_deploy stays ids-only; planted env never lands in artifacts or step logs.
+
+    What would make this fail: extra Celery kwargs, snapshotting env values, or
+    writing plaintext into DeploymentStep.log_text.
+    """
+    from deploys import tasks as deploy_tasks
+    from deploys.env import apply_env, put_env
+    from deploys.tasks import run_deploy
+
+    source = ast.parse(Path(inspect.getfile(deploy_tasks)).read_text(encoding="utf-8"))
+    for node in ast.walk(source):
+        if isinstance(node, ast.FunctionDef) and node.name == "run_deploy":
+            assert [a.arg for a in node.args.args] == ["deployment_id"]
+            break
+    else:
+        pytest.fail("run_deploy is missing from deploys.tasks")
+    assert list(inspect.signature(run_deploy).parameters) == ["deployment_id"]
+
+    site, _original = queued_deployment("envlogs", body=fixture_body("envlogs"))
+    put_env(site, {"DATABASE_URL": PLANTED})
+    transport = PipelineTransport()
+    deployment = apply_env(site, transport=transport, dns=FakeDnsProvider())
+
+    for artifact in DeploymentArtifact.objects.filter(deployment=deployment):
+        assert PLANTED not in artifact.content
+    for step in deployment.steps.all():
+        assert PLANTED not in step.log_text
+    assert PLANTED not in json.dumps(deployment.manifest.body)

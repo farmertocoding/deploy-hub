@@ -11,4 +11,5 @@ urlpatterns = [
     path("api/", include("realtime.urls")),
     path("api/auth/", include("core.urls")),
     path("api/v1/", include("wizard.urls")),
+    path("api/v1/", include("deploys.urls")),
 ]

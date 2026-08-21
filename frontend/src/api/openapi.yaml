@@ -190,6 +190,114 @@ paths:
               schema:
                 $ref: '#/components/schemas/Readiness'
           description: ''
+  /api/v1/sites/{site_id}/env/:
+    get:
+      operationId: v1_sites_env_retrieve
+      description: GET names; PUT replaces / PATCH merges values; POST applies the
+        current env.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvNames'
+          description: ''
+    post:
+      operationId: v1_sites_env_create
+      description: GET names; PUT replaces / PATCH merges values; POST applies the
+        current env.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvApply'
+          description: ''
+    put:
+      operationId: v1_sites_env_update
+      description: GET names; PUT replaces / PATCH merges values; POST applies the
+        current env.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EnvWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EnvWrite'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvNames'
+          description: ''
+    patch:
+      operationId: v1_sites_env_partial_update
+      description: GET names; PUT replaces / PATCH merges values; POST applies the
+        current env.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedEnvWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedEnvWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedEnvWrite'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvNames'
+          description: ''
   /api/v1/sites/{site_id}/manifest/:
     get:
       operationId: v1_sites_manifest_retrieve
@@ -323,6 +431,36 @@ components:
           default: false
       required:
       - name
+    EnvApply:
+      type: object
+      properties:
+        deployment_id:
+          type: integer
+      required:
+      - deployment_id
+    EnvNames:
+      type: object
+      properties:
+        names:
+          type: array
+          items:
+            type: string
+        config_stale:
+          type: boolean
+      required:
+      - config_stale
+      - names
+    EnvWrite:
+      type: object
+      properties:
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: name -> value. Values are write-only and stored in the vault.
+      required:
+      - env
     Login:
       type: object
       properties:
@@ -370,6 +508,15 @@ components:
             as you go.
       required:
       - answers
+    PatchedEnvWrite:
+      type: object
+      properties:
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+          description: name -> value. Values are write-only and stored in the vault.
     ProjectSummary:
       type: object
       properties:

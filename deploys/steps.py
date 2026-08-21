@@ -21,10 +21,19 @@ VAULT_CONTEXT_MARKERS = frozenset({
 })
 
 
+# Env is runtime, not image: apply with the same git_sha must reuse the existing tag.
+_IMAGE_TAG_OMIT = frozenset({"env_bundle_ref", "env_names", "env"})
+
+
 def image_tag(git_sha, manifest_body):
-    """Deterministic tag: git sha plus a stable hash of canonical Manifest.body."""
+    """Deterministic tag: git sha plus a stable hash of the image-relevant body."""
+    body = {
+        key: value
+        for key, value in (manifest_body or {}).items()
+        if key not in _IMAGE_TAG_OMIT
+    }
     digest = hashlib.sha256(
-        json.dumps(manifest_body, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
     return f"{git_sha}-{digest}"
 

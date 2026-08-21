@@ -174,6 +174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/env/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET names; PUT replaces / PATCH merges values; POST applies the current env. */
+        get: operations["v1_sites_env_retrieve"];
+        /** @description GET names; PUT replaces / PATCH merges values; POST applies the current env. */
+        put: operations["v1_sites_env_update"];
+        /** @description GET names; PUT replaces / PATCH merges values; POST applies the current env. */
+        post: operations["v1_sites_env_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description GET names; PUT replaces / PATCH merges values; POST applies the current env. */
+        patch: operations["v1_sites_env_partial_update"];
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/manifest/": {
         parameters: {
             query?: never;
@@ -227,6 +247,19 @@ export interface components {
             /** @default false */
             confirm_warnings: boolean;
         };
+        EnvApply: {
+            deployment_id: number;
+        };
+        EnvNames: {
+            names: string[];
+            config_stale: boolean;
+        };
+        EnvWrite: {
+            /** @description name -> value. Values are write-only and stored in the vault. */
+            env: {
+                [key: string]: string;
+            };
+        };
         Login: {
             username: string;
             password: string;
@@ -248,6 +281,12 @@ export interface components {
             /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
             answers: {
                 [key: string]: unknown;
+            };
+        };
+        PatchedEnvWrite: {
+            /** @description name -> value. Values are write-only and stored in the vault. */
+            env?: {
+                [key: string]: string;
             };
         };
         ProjectSummary: {
@@ -509,6 +548,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    v1_sites_env_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvNames"];
+                };
+            };
+        };
+    };
+    v1_sites_env_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvWrite"];
+                "application/x-www-form-urlencoded": components["schemas"]["EnvWrite"];
+                "multipart/form-data": components["schemas"]["EnvWrite"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvNames"];
+                };
+            };
+        };
+    };
+    v1_sites_env_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvApply"];
+                };
+            };
+        };
+    };
+    v1_sites_env_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedEnvWrite"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedEnvWrite"];
+                "multipart/form-data": components["schemas"]["PatchedEnvWrite"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvNames"];
                 };
             };
         };
