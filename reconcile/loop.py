@@ -77,7 +77,7 @@ def _read_observed(instance, transport, site, observe, now=None):
         name = _container_name(_desired(site, instance, transport))
         return {
             "state": _state_from_collect(payload, name),
-            "reason": "",
+            "reason": _reason_from_collect(payload, name),
         }
     return {
         "state": _probe_container_state(transport, site, instance),
@@ -304,6 +304,29 @@ def _health_for(payload, name):
     if isinstance(per, dict) and ("live" in per or "ready" in per):
         return per
     return healthz
+
+
+def _reason_from_collect(payload, name):
+    health = _health_for(payload, name)
+    if not isinstance(health, dict):
+        return ""
+    explicit = health.get("reason")
+    if explicit:
+        return str(explicit)
+    checks = health.get("checks")
+    if not isinstance(checks, dict):
+        return ""
+    upstream = checks.get("upstream")
+    if isinstance(upstream, str):
+        key = _reason_key(upstream)
+        if key in UPSTREAM_REASONS:
+            return key
+    for key, val in checks.items():
+        for token in (key, val):
+            text = _reason_key(str(token))
+            if text in STALE_REASONS:
+                return text
+    return ""
 
 
 def _state_from_collect(payload, name):

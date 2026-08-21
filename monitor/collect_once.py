@@ -108,8 +108,7 @@ def _container_health(docker, name):
         return {"live": True, "ready": False}
     if status == "unhealthy":
         return {"live": False, "ready": False}
-    live, ready = _curl_healthz(docker, name)
-    return {"live": live, "ready": ready}
+    return _curl_healthz(docker, name)
 
 
 def _inspect_health(docker, name):
@@ -131,12 +130,111 @@ def _inspect_health(docker, name):
 
 
 def _curl_healthz(docker, name):
-    ip = _container_ip(docker, name)
-    if not ip:
-        return False, False
+    info = _inspect_container(docker, name)
+    ip = _ip_from_inspect(info) or _container_ip(docker, name)
+    port = _listen_port_from_inspect(info)
+    if not ip or not port:
+        return {"live": False, "ready": False}
     curl = shutil.which("curl") or "/usr/bin/curl"
-    ok = _curl_ok(curl, f"http://{ip}/healthz")
-    return ok, ok
+    raw = _curl_body(curl, _healthz_url(ip, port))
+    if not raw.strip():
+        return {"live": False, "ready": False}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"live": False, "ready": False}
+    if not isinstance(payload, dict):
+        return {"live": False, "ready": False}
+    checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+    return {
+        "live": bool(payload.get("live")),
+        "ready": bool(payload.get("ready")),
+        "checks": checks,
+        "reason": _reason_from_checks(checks),
+    }
+
+
+def _inspect_container(docker, name):
+    try:
+        proc = subprocess.run(  # nosec B603 — argv list; docker from which()
+            [docker, "inspect", name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return {}
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return {}
+    try:
+        rows = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(rows, list):
+        return rows[0] if rows and isinstance(rows[0], dict) else {}
+    return rows if isinstance(rows, dict) else {}
+
+
+def _ip_from_inspect(info):
+    nets = (info.get("NetworkSettings") or {}).get("Networks") or {}
+    if isinstance(nets, dict):
+        for net in nets.values():
+            if isinstance(net, dict) and net.get("IPAddress"):
+                return str(net["IPAddress"]).strip()
+    ip = (info.get("NetworkSettings") or {}).get("IPAddress")
+    return str(ip).strip() if ip else ""
+
+
+def _first_container_port(mapping):
+    if not isinstance(mapping, dict):
+        return None
+    for key in mapping:
+        num = str(key).split("/", 1)[0]
+        if num.isdigit():
+            return int(num)
+    return None
+
+
+def _listen_port_from_inspect(info):
+    host = info.get("HostConfig") or {}
+    port = _first_container_port(host.get("PortBindings"))
+    if port:
+        return port
+    cfg = info.get("Config") or {}
+    port = _first_container_port(cfg.get("ExposedPorts"))
+    if port:
+        return port
+    for item in cfg.get("Env") or []:
+        if not isinstance(item, str) or not item.startswith("PORT="):
+            continue
+        raw = item.split("=", 1)[1].strip()
+        if raw.isdigit():
+            return int(raw)
+    return None
+
+
+def _healthz_url(ip, port, path="/healthz"):
+    port = int(port)
+    if port in {80, 443}:
+        return f"http://{ip}{path}"
+    return f"http://{ip}:{port}{path}"
+
+
+def _reason_from_checks(checks):
+    if not isinstance(checks, dict):
+        return ""
+    upstream = checks.get("upstream")
+    if isinstance(upstream, str):
+        key = upstream.strip().lower().replace("_", "-")
+        if key == "upstream-down":
+            return "upstream-down"
+    for key, val in checks.items():
+        for token in (key, val):
+            text = str(token).strip().lower().replace("_", "-")
+            if text in {"data-stale", "feed-stale", "feed-staleness", "staleness"}:
+                return text
+    return ""
 
 
 def _container_ip(docker, name):
@@ -157,7 +255,7 @@ def _container_ip(docker, name):
     return (proc.stdout or "").strip().split()[0] if proc.stdout else ""
 
 
-def _curl_ok(curl, url):
+def _curl_body(curl, url):
     try:
         proc = subprocess.run(  # nosec B603 — argv list; curl from which()
             [curl, "-sfS", "--max-time", "2", url],
@@ -167,8 +265,10 @@ def _curl_ok(curl, url):
             check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
-    return proc.returncode == 0
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout or ""
 
 
 def main():

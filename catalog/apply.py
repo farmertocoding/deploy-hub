@@ -8,6 +8,7 @@ from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
 
 JAIL_TEMPLATE = Path(__file__).resolve().parent / "files" / "jail.local"
 PLACEHOLDER_IP = "100.64.1.1"
+LIVE_JAIL = "/etc/fail2ban/jail.local"
 
 
 def argv_steps(field):
@@ -92,17 +93,30 @@ def parse_hub_mesh_ip(raw=None):
     return str(addr)
 
 
+def _is_hub_jail_source(part):
+    """Catalog / hub_join staging path only — never the live fail2ban dest."""
+    return str(part).endswith("/.hub/jail.local")
+
+
 def _jail_pin_paths(entry):
     pins = set()
     for step in argv_steps(entry.fix):
         for part in step:
-            if part.endswith("jail.local"):
+            if _is_hub_jail_source(part):
                 pins.add(part)
     return pins
 
 
 def _rewrite_jail_paths(step, staging, pins):
     return [staging if part in pins else part for part in step]
+
+
+def _live_jail_dest_collapsed(original, rewritten):
+    if not original or original[0] != "install":
+        return False
+    if LIVE_JAIL not in original:
+        return False
+    return LIVE_JAIL not in rewritten
 
 
 def _apply_fail2ban(target, entry, transport):
@@ -129,7 +143,10 @@ def _apply_fail2ban(target, entry, transport):
     pins = _jail_pin_paths(entry)
     results = []
     for step in argv_steps(entry.fix):
-        result = transport.run(_rewrite_jail_paths(step, staging, pins))
+        run = _rewrite_jail_paths(step, staging, pins)
+        if _live_jail_dest_collapsed(step, run):
+            return None
+        result = transport.run(run)
         results.append(result)
         if not result.ok:
             return None
