@@ -6,7 +6,7 @@ from providers.fakes import FakeDnsProvider
 
 DOMAIN = "app.example.com"
 ZONE = "example.com"
-ORIGIN = "10.0.0.8"
+ORIGIN = "127.0.0.1"
 
 
 class CountingDns(FakeDnsProvider):
@@ -49,7 +49,7 @@ def _desired(dns, *, exposure="public", site=None, transport=None):
         "dns": dns,
         "zone": ZONE,
         "domain": DOMAIN,
-        "origin": ORIGIN,
+        "dns_values": [ORIGIN],
     }
     if site is not None:
         desired["site"] = site
@@ -80,6 +80,14 @@ def test_mesh_only_skips_dns():
     ensure_dns(_desired(dns, exposure="public", site=site))
     assert dns.upserts == []
     assert "upsert" not in dns.ops
+
+    public_site = Site.objects.create(
+        project=project, name="mesh-body", exposure=Site.Exposure.PUBLIC,
+    )
+    dns = CountingDns()
+    ensure_dns(_desired(dns, exposure="mesh_only", site=public_site))
+    assert dns.upserts == []
+    assert dns.ops == []
 
 
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")

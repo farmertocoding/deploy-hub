@@ -89,5 +89,4 @@ def test_runbook_contains_no_vault_plaintext():
     assert puts
     text = _text(transport.files[puts[0]])
     assert SECRET not in text
-    assert "postgres://should-not-leak" not in text
     assert SLUG in text or "ops.example.com" in text

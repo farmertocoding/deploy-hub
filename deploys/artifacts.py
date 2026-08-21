@@ -10,7 +10,7 @@ def snapshot_artifacts(desired):
     rows = {
         "dockerfile": desired.get("dockerfile") or "",
         "caddy_route": desired.get("caddy_route") or "",
-        "dns": _dns_content(desired),
+        "dns_set": _dns_content(desired),
         "env_names": json.dumps(list(desired.get("env_names") or [])),
         "firewall_argv": json.dumps(list(desired.get("firewall_argv") or [])),
     }

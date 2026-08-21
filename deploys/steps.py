@@ -286,12 +286,12 @@ def ensure_cutover(desired):
 
 def _exposure(desired):
     site = desired.get("site")
-    if site is not None:
-        exposure = getattr(site, "exposure", None)
-        if exposure:
-            return exposure
     body = desired.get("manifest_body") or {}
-    return body.get("exposure") or "public"
+    site_exp = getattr(site, "exposure", None) if site is not None else None
+    body_exp = body.get("exposure")
+    if site_exp == "mesh_only" or body_exp == "mesh_only":
+        return "mesh_only"
+    return site_exp or body_exp or "public"
 
 
 def _desired_dns_records(desired):

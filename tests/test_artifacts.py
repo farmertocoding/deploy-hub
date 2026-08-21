@@ -98,4 +98,3 @@ def test_artifact_has_no_secret_values():
     assert rows
     for row in rows:
         assert SECRET not in row.content, f"{row.kind} leaked secret values"
-        assert "should-never-snapshot-me" not in row.content

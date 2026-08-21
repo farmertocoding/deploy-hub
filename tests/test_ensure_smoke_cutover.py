@@ -52,10 +52,6 @@ def _curl_ok(payload):
     return {"exit_code": 0, "stdout": json.dumps(payload)}
 
 
-def _curl_miss():
-    return {"exit_code": 1, "stdout": "", "stderr": "connection refused"}
-
-
 def _smoke_desired(transport, *, body=None, ws_fetch=None, healthz_fetch=None):
     desired = {
         "transport": transport,
