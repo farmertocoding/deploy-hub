@@ -48,11 +48,7 @@ def tick(site, *, transport, now=None, observe=None, jitter=0, budget=None, inst
             continue
         if used >= cap:
             continue
-        if OperationLock.objects.filter(
-            scope=OperationLock.Scope.SITE,
-            object_id=str(site.pk),
-            kind=OperationLock.Kind.DEPLOY,
-        ).exists():
+        if _deploy_lock_held(site, row):
             continue
         if _apply(site, row, transport, action, now, observe=observe):
             used += 1
@@ -181,6 +177,8 @@ def _apply(site, instance, transport, action, now, observe=None):
             holder=holder,
         ).exists():
             return False
+        if _deploy_lock_held(site, instance):
+            return False
         desired = _desired(site, instance, transport)
         name = _container_name(desired)
         if action == "start":
@@ -223,10 +221,36 @@ def _apply(site, instance, transport, action, now, observe=None):
         )
 
 
+def _deploy_lock_held(site, instance):
+    if OperationLock.objects.filter(
+        scope=OperationLock.Scope.SITE,
+        object_id=str(site.pk),
+        kind=OperationLock.Kind.DEPLOY,
+    ).exists():
+        return True
+    target_id = getattr(instance, "target_id", None) or getattr(
+        getattr(instance, "target", None), "pk", None,
+    )
+    if target_id is None:
+        return False
+    return OperationLock.objects.filter(
+        scope=OperationLock.Scope.TARGET,
+        object_id=str(target_id),
+        kind=OperationLock.Kind.DEPLOY,
+    ).exists()
+
+
 def _desired(site, instance, transport):
     from deploys.models import Deployment
 
-    dep = Deployment.objects.filter(manifest__site=site).order_by("-pk").first()
+    dep = (
+        Deployment.objects.filter(
+            manifest__site=site,
+            status=Deployment.Status.SUCCEEDED,
+        )
+        .order_by("-pk")
+        .first()
+    )
     body = (dep.manifest.body if dep is not None else None) or {}
     return {
         "transport": transport,

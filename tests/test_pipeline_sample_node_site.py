@@ -482,5 +482,6 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
         and len(argv) > 1 and argv[1] in {"build", "run"}
     ]
     assert mutating_docker == [], mutating_docker
+    assert rec.mutating_calls() == []
     vol2 = rec.probe(["docker", "volume", "inspect", volume])
     assert vol2.ok, vol2.stderr

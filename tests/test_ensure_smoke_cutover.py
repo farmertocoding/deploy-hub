@@ -224,6 +224,7 @@ def test_cutover_after_ready_not_before():
     assert parsed > datetime.now(timezone.utc)
 
 
+@pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
 def test_second_cutover_skips_stop_when_old_already_stopped():
     """A second ensure_cutover of the same desired must not docker stop again.
 

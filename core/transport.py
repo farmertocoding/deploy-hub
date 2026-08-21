@@ -100,3 +100,7 @@ class RecordingTransport(Transport):
     def get(self, remote_path):
         self.calls.append(("get", remote_path))
         return self.inner.get(remote_path)
+
+    def mutating_calls(self):
+        """Calls that change remote state — must be [] on a second idempotent run (§D6)."""
+        return [c for c in self.calls if c[0] in ("run", "put")]

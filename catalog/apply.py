@@ -1,9 +1,10 @@
 """Apply a catalog entry through Transport; same-version re-apply is a no-op."""
+import ipaddress
 import os
 from pathlib import Path
 
 from catalog.models import AppliedCatalogEntry
-from core.hubfs import ensure_hub_dir, hub_join
+from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
 
 JAIL_TEMPLATE = Path(__file__).resolve().parent / "files" / "jail.local"
 PLACEHOLDER_IP = "100.64.1.1"
@@ -74,13 +75,43 @@ def _apply_generic(target, entry, transport):
     return _record(target, entry, results[-1])
 
 
+def parse_hub_mesh_ip(raw=None):
+    """Singular IPv4, same rules as scripts/harden-ubuntu.sh require_hub_mesh_ip."""
+    if raw is None:
+        raw = os.environ.get("HUB_MESH_IP")
+    if raw is None:
+        return None
+    if not raw or any(ch.isspace() for ch in raw) or "/" in raw:
+        return None
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    if not isinstance(addr, ipaddress.IPv4Address):
+        return None
+    return str(addr)
+
+
+def _jail_pin_paths(entry):
+    pins = set()
+    for step in argv_steps(entry.fix):
+        for part in step:
+            if part.endswith("jail.local"):
+                pins.add(part)
+    return pins
+
+
+def _rewrite_jail_paths(step, staging, pins):
+    return [staging if part in pins else part for part in step]
+
+
 def _apply_fail2ban(target, entry, transport):
     """Substitute HUB_MESH_IP into jail.local at put time; refuse if missing."""
     skipped = _skip_if_current(target, entry, transport)
     if skipped is not None:
         return skipped
 
-    mesh_ip = (os.environ.get("HUB_MESH_IP") or "").strip()
+    mesh_ip = parse_hub_mesh_ip()
     if not mesh_ip:
         return None
 
@@ -90,15 +121,15 @@ def _apply_fail2ban(target, entry, transport):
         if live.startswith("ignoreip") and PLACEHOLDER_IP in live:
             return None
 
-    user = getattr(target, "ssh_user", None) or "deploy"
+    user = ssh_user_from(target)
     staging = hub_join("jail.local", ssh_user=user)
     ensure_hub_dir(transport, user)
     transport.put(rendered.encode(), staging, mode=0o644)
 
+    pins = _jail_pin_paths(entry)
     results = []
     for step in argv_steps(entry.fix):
-        run = [staging if part == "/home/deploy/.hub/jail.local" else part for part in step]
-        result = transport.run(run)
+        result = transport.run(_rewrite_jail_paths(step, staging, pins))
         results.append(result)
         if not result.ok:
             return None
@@ -119,7 +150,7 @@ def rollback_entry(target, entry, transport):
 
 
 def _rollback_fail2ban(target, entry, transport):
-    mesh_ip = (os.environ.get("HUB_MESH_IP") or "").strip()
+    mesh_ip = parse_hub_mesh_ip()
     if not mesh_ip:
         return None
     results = []

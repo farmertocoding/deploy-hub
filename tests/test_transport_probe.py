@@ -40,6 +40,22 @@ def test_run_and_put_still_count_as_mutating():
 
 @REQ_ARGLISTS
 @REQ_IDEMPOTENT
+def test_recording_transport_mutating_calls_are_run_and_put():
+    from core.transport import RecordingTransport
+
+    rec = RecordingTransport(FakeTransport())
+    rec.probe(["true"])
+    rec.run(["echo", "hello"])
+    rec.put(b"data", "/remote/f")
+    rec.get("/remote/f")
+    assert rec.mutating_calls() == [
+        ("run", ["echo", "hello"]),
+        ("put", "/remote/f"),
+    ]
+
+
+@REQ_ARGLISTS
+@REQ_IDEMPOTENT
 def test_get_is_not_mutating():
     t = FakeTransport()
     t.put(b"data", "/remote/f")

@@ -77,7 +77,11 @@ def _persist_collect(target, payload):
         offset = 0
     target.collect_log_inode = inode
     target.collect_log_offset = offset
-    target.collect_payload = payload
+    stored = dict(payload)
+    chunk = dict(stored.get("log_chunk") or {})
+    chunk.pop("bytes", None)
+    stored["log_chunk"] = chunk
+    target.collect_payload = stored
     from django.db.models import Model
     from django.utils import timezone
 

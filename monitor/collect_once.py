@@ -83,8 +83,92 @@ def _clock():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _healthz():
-    return {"live": True, "ready": True, "checks": {}}
+def _healthz(containers):
+    checks = {}
+    docker = shutil.which("docker") or "/usr/bin/docker"
+    for row in containers:
+        name = row.get("name") if isinstance(row, dict) else None
+        if not name:
+            continue
+        checks[name] = _container_health(docker, name)
+    lives = [bool(item.get("live")) for item in checks.values()]
+    readies = [bool(item.get("ready")) for item in checks.values()]
+    return {
+        "live": all(lives) if lives else True,
+        "ready": all(readies) if readies else True,
+        "checks": checks,
+    }
+
+
+def _container_health(docker, name):
+    status = _inspect_health(docker, name)
+    if status == "healthy":
+        return {"live": True, "ready": True}
+    if status == "starting":
+        return {"live": True, "ready": False}
+    if status == "unhealthy":
+        return {"live": False, "ready": False}
+    live, ready = _curl_healthz(docker, name)
+    return {"live": live, "ready": ready}
+
+
+def _inspect_health(docker, name):
+    try:
+        proc = subprocess.run(  # nosec B603 — argv list; docker from which()
+            [
+                docker, "inspect", "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return ""
+    return (proc.stdout or "").strip().lower()
+
+
+def _curl_healthz(docker, name):
+    ip = _container_ip(docker, name)
+    if not ip:
+        return False, False
+    curl = shutil.which("curl") or "/usr/bin/curl"
+    ok = _curl_ok(curl, f"http://{ip}/healthz")
+    return ok, ok
+
+
+def _container_ip(docker, name):
+    try:
+        proc = subprocess.run(  # nosec B603 — argv list; docker from which()
+            [
+                docker, "inspect", "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return ""
+    return (proc.stdout or "").strip().split()[0] if proc.stdout else ""
+
+
+def _curl_ok(curl, url):
+    try:
+        proc = subprocess.run(  # nosec B603 — argv list; curl from which()
+            [curl, "-sfS", "--max-time", "2", url],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    return proc.returncode == 0
 
 
 def main():
@@ -95,15 +179,16 @@ def main():
         typed_id = int(target_id)
     except (TypeError, ValueError):
         typed_id = target_id
+    containers = _containers()
     payload = {
         "schema_version": SCHEMA_VERSION,
         "target_id": typed_id,
         "ts": _clock(),
         "metrics": _metrics(),
-        "containers": _containers(),
+        "containers": containers,
         "log_chunk": _log_chunk(log_file, offset),
         "clock": _clock(),
-        "healthz": _healthz(),
+        "healthz": _healthz(containers),
     }
     json.dump(payload, sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")

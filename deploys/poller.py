@@ -4,6 +4,7 @@ Beat drives `deploys.tasks.poll_git` on queue `probes` every 1–5 min. There is
 Django webhook — T1 injects `ls_remote(url, ref) -> sha` so tests never hit the
 network. `deploys/` still does not import `scanner/`.
 """
+import os
 import shutil
 import subprocess  # nosec B404 — argv-list git ls-remote, never shell=True
 
@@ -14,6 +15,35 @@ from core.audit import audit
 from core.models import AuditEvent, Site
 from core.validators import validate_git_url
 from deploys.models import Deployment, Manifest
+
+_GIT_DROP_ENV = (
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_CONFIG",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_COUNT",
+)
+_GIT_SSH_COMMAND = (
+    "ssh -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none"
+)
+
+
+def _isolated_git_env():
+    """Hub git must not use the operator agent, askpass, or ambient gitconfig."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _GIT_DROP_ENV and not key.startswith("GIT_CONFIG_")
+    }
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSH_COMMAND"] = _GIT_SSH_COMMAND
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    return env
 
 
 def git_ls_remote(url, ref):
@@ -27,11 +57,17 @@ def git_ls_remote(url, ref):
         return ""
     try:
         result = subprocess.run(  # nosec B603 — argv list; `--` before url/ref
-            [git, "ls-remote", "--", url, ref],
+            [
+                git,
+                "-c", "http.followRedirects=false",
+                "-c", "credential.helper=",
+                "ls-remote", "--", url, ref,
+            ],
             capture_output=True,
             text=True,
             timeout=30,
             check=False,
+            env=_isolated_git_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
