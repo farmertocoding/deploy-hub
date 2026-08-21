@@ -1,0 +1,30 @@
+REL-P2-HUB-DOWN-SITES-UP — duration honest
+
+Date: 2026-08-21
+Requirement text (unchanged): Sites keep serving with the Hub stopped for 24h
+(chaos drill); every site-serving dependency lives on the target.
+
+What ran NOW (T2 chaos, not 24h):
+  tests/test_pipeline_sample_node_site.py::test_t2_execute_sample_node_site_twice
+  tests/test_hub_test_target.py::test_hub_docker_sock_not_bound
+  2 passed in 37.78s (2026-08-21, this session)
+
+  After execute() returned, site HTTP was served by Caddy and the site
+  container on hub-test-target. The Hub in this drill is the pytest process
+  that opened SSH, issued ensure_* argv, and returned — it is not on the
+  HTTP path. No Hub compose stack was running. Hub docker.sock was not
+  mounted into the target.
+
+  Duration: the T2 run (~38s). That is "Hub process not serving the site"
+  on the test target, not a 24h fleet drill.
+
+What did NOT run:
+  24h Hub-stopped chaos against a live site. No live fleet site exists
+  here to leave up for a day. Do not read this file as a 24h drill.
+
+  docker run argv in deploys/steps.py::_docker_run_argv is
+  `docker run -d --name <green>` plus volumes — it does not pass
+  `--restart unless-stopped`. Target reboot survival is unproven.
+
+When a live site exists: run the 24h form (stop Hub, confirm every site
+unaffected for 24h) and replace this record.

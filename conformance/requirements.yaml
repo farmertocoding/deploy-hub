@@ -124,6 +124,9 @@ requirements:
     phase: 2
     verify: demo
     source: deploy-system-plan.md §1.5 P2
+    demo:
+      - conformance/demos/phase-2.md
+      - conformance/demos/phase-2/
     text_hash: sha256:265705547b71d6cbeaf7de8920978800cfc6e597120ed2117fcde9dff4445ba7
     text: Sites keep serving with the Hub stopped for 24h (chaos drill); every site-serving dependency lives on the target.
   - id: REL-P3-RESUMABLE-DEPLOYS
@@ -281,6 +284,18 @@ requirements:
       The phase-1 milestone demo is recorded: `python -m hub scan` run against
       SATURDAYS_site and TAKKO (the real-repo demo set, D-016) and the in-repo
       sample-node-site fixture, with each run's report checked in.
+  - id: P2-PIPELINE-DEMO
+    phase: 2
+    verify: demo
+    source: plan-addendum-2026-07-30.md §I
+    demo:
+      - conformance/demos/phase-2.md
+      - conformance/demos/phase-2/
+    text_hash: sha256:5529aa22dae0bac7bc53903c2c454ef6e27940cf752ae7e3ebabde6f05a6e539
+    text: >
+      The phase-2 milestone demo is recorded: sample-node-site through the real
+      pipeline to hub-test-target twice (CI half); TAKKO real-world pipeline
+      deploy is named as outstanding in the same record.
 
   # — Pipeline & deploy (Phase 2)
   - id: SEC-B1-BUILD-OFFHUB

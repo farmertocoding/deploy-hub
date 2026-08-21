@@ -1,0 +1,25 @@
+T1 acceptance — sample-node-site pipeline clauses (FakeTransport)
+
+Date: 2026-08-21
+Branch: phase-2
+Command:
+  CONFORMANCE_RUN_REPORT=off .venv/bin/pytest tests/acceptance/test_phase_2.py -q --tb=short
+
+Result:
+  ........  8 passed in 0.86s
+
+Named tests (T1 transcription; T2 live path is t2-pipeline.txt / Task 13):
+  test_sample_node_site_deploys_to_hub_test_target
+  test_second_deploy_zero_mutating_calls
+  test_resume_from_crash
+  test_rollback_reapplies_artifacts
+  test_named_volume_survives
+  test_build_not_on_hub
+  test_mesh_only_skips_dns
+  test_no_webhook_route
+
+Task 13 T1 (fc45b1d / dafeead), from task-13-report.md:
+  tests/test_rollback.py + test_crash_kill_matrix.py + test_pipeline_sample_node_site.py
+  GREEN named T1: 33 passed, 1 deselected (t2)
+  Full T1 after Task 13: 1086 passed, 6 skipped, 8 deselected
+  After fix round: 1094 passed

@@ -1,0 +1,15 @@
+TAKKO real-pipeline half — outstanding
+
+Date: 2026-08-21
+P2-PIPELINE-DEMO names two halves:
+  CI half: in-repo sample-node-site/ through the real pipeline to hub-test-target
+           (executable in this repo; see t1-acceptance.txt and t2-pipeline.txt).
+  Real-world half: TAKKO through the same pipeline.
+
+This session did not deploy TAKKO. There is no TAKKO deploy log, no SSH
+transcript, and no invented success. The in-repo fixture is the executable
+CI half. TAKKO remains the real-world half still outstanding.
+
+When TAKKO is deployed for real, replace this file with that run's
+command, commit, and result — the same way phase-1/scan-TAKKO.txt holds
+an actual scan, not a placeholder.

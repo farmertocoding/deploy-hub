@@ -139,7 +139,7 @@ scripts-lint:
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
 conformance:
-	python conformance/check.py --phase 1
+	python conformance/check.py --phase 2
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #

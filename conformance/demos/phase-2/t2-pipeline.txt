@@ -1,0 +1,27 @@
+T2 — sample-node-site through SshTransport to hub-test-target (CI half)
+
+Date: 2026-08-21 (this session re-run)
+Branch: phase-2
+HEAD at record start: d055888
+
+This session:
+  CONFORMANCE_RUN_REPORT=off .venv/bin/pytest \
+    tests/test_pipeline_sample_node_site.py::test_t2_execute_sample_node_site_twice \
+    tests/test_hub_test_target.py::test_hub_docker_sock_not_bound -q --tb=short
+  ..  2 passed in 37.78s
+
+What that proves:
+  execute() + SshTransport deploys sample-node-site to hub-test-target twice.
+  Named volume site-{slug}-data still inspects after the second deploy.
+  Hub /var/run/docker.sock is not a mount on the target (D-015 / SEC-B1).
+  Image is alpine + stdlib HTTP, COPY from sample-node-site/ (not npm ci on vfs).
+  T2 Caddy listen is 127.0.0.1:8088 (image Caddyfile owns :80). TLS is Phase 3.
+
+Task 13 original (cite, do not invent):
+  commit fc45b1d — A crash must re-run the same ensure, and rollback must not
+    delete the site volume, so the pipeline calls ensure_* after each step,
+    crashes before marking succeeded, and rollback is a new Deployment of the
+    original artifacts.
+  T2 then: 1 passed, 3 deselected in 34.51s
+  fix round dafeead: test_t2_execute_sample_node_site_twice 1 passed in 35.93s
+  Report: .superpowers/sdd/phase-2-tasks/task-13-report.md
