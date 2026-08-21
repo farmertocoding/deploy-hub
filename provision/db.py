@@ -45,17 +45,17 @@ def ensure_site_db(desired):
     if not role.ok:
         raise RuntimeError(f"CREATE ROLE failed: {role.stderr}")
     url = f"postgres://{ident}:{password}@{container}:5432/{ident}".encode()
-    if not Secret.objects.filter(
+    Secret.objects.filter(
         kind=Secret.Kind.DATABASE_URL,
         owner_type="site",
         owner_id=str(site.pk),
-    ).exists():
-        service.put(
-            kind=Secret.Kind.DATABASE_URL,
-            owner_type="site",
-            owner_id=str(site.pk),
-            plaintext=url,
-        )
+    ).delete()
+    service.put(
+        kind=Secret.Kind.DATABASE_URL,
+        owner_type="site",
+        owner_id=str(site.pk),
+        plaintext=url,
+    )
     return {"status": "created", "container": container}
 
 

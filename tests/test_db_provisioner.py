@@ -106,6 +106,48 @@ def test_ensures_postgres_role_and_vaults_url():
     assert b"site-shop-postgres" in url
 
 
+@pytest.mark.req("SEC-69-KEK-NEVER-IN-BACKUPS")
+def test_container_miss_replaces_stale_vaulted_url():
+    """A missing container with an existing DATABASE_URL vaults the minted password.
+
+    What would make this fail: skipping put because a Secret row exists, so
+    vault.service.get keeps the dead URL after CREATE ROLE minted a new one.
+    """
+    from provision.db import ensure_site_db
+    from vault import service
+    from vault.models import Secret
+
+    site = _site("rotate")
+    stale = b"postgres://rotate:dead-password@site-rotate-postgres:5432/rotate"
+    service.put(
+        kind=Secret.Kind.DATABASE_URL,
+        owner_type="site",
+        owner_id=str(site.pk),
+        plaintext=stale,
+    )
+    transport = PostgresTransport()
+    ensure_site_db({"transport": transport, "site": site, "site_slug": "rotate"})
+
+    secret = Secret.objects.get(
+        kind=Secret.Kind.DATABASE_URL,
+        owner_type="site",
+        owner_id=str(site.pk),
+    )
+    url = service.get(secret)
+    assert url != stale
+    assert url.startswith(b"postgres://")
+    assert b"dead-password" not in url
+    role_sql = next(
+        (part for argv in _runs(transport) for part in argv
+         if isinstance(part, str) and "CREATE ROLE" in part),
+        "",
+    )
+    assert role_sql, "expected CREATE ROLE on the miss path"
+    minted = role_sql.split("PASSWORD '", 1)[1].split("'", 1)[0].encode()
+    assert minted in url
+    assert minted not in stale
+
+
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
 def test_second_ensure_zero_mutating_calls():
     """A present postgres container is probed then skipped; second call mutates nothing.
