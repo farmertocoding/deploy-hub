@@ -10,7 +10,7 @@ import subprocess  # nosec B404 — argv-list git ls-remote, never shell=True
 from django.utils import timezone
 
 from core.audit import audit
-from core.models import Site
+from core.models import AuditEvent, Site
 from deploys.models import Deployment, Manifest
 
 
@@ -108,6 +108,38 @@ def _enqueue(site, sha, latest):
     return Deployment.objects.create(manifest=manifest, status=Deployment.Status.QUEUED)
 
 
+def _queued_for_sha(site, sha):
+    for dep in Deployment.objects.filter(
+        manifest__site=site,
+        status=Deployment.Status.QUEUED,
+    ).select_related("manifest"):
+        if (dep.manifest.body or {}).get("git_sha") == sha:
+            return dep
+    return None
+
+
+def _promote_waiting(site, sha, *, in_window, now, delay):
+    """Delay a parked windowed row once the cron window opens. No new Manifest."""
+    if site.deploy_policy != Site.DeployPolicy.WINDOWED:
+        return
+    if not in_window(site.deploy_window_cron, now):
+        return
+    dep = _queued_for_sha(site, sha)
+    if dep is None or dep.last_heartbeat is not None:
+        return
+    waiting = AuditEvent.objects.filter(
+        action="deploy-waiting",
+        object_type="Deployment",
+        object_id=str(dep.pk),
+    ).exists()
+    if not waiting:
+        return
+    Deployment.objects.filter(
+        pk=dep.pk, status=Deployment.Status.QUEUED,
+    ).update(last_heartbeat=now)
+    delay(dep.pk)
+
+
 def poll(*, ls_remote=None, now=None, in_window=None):
     """For each Site with a Project git_url, enqueue when the branch head moved."""
     if ls_remote is None:
@@ -129,7 +161,12 @@ def poll(*, ls_remote=None, now=None, in_window=None):
         if latest is None:
             continue
         latest_sha = (latest.body or {}).get("git_sha") or ""
-        if sha == _last_deployed_sha(site) or sha == latest_sha:
+        if sha == _last_deployed_sha(site):
+            continue
+        if sha == latest_sha:
+            _promote_waiting(
+                site, sha, in_window=in_window, now=now, delay=run_deploy.delay,
+            )
             continue
         if site.deploy_policy == Site.DeployPolicy.CONFIRM:
             audit("deploy-confirm-required", site, source="celery", git_sha=sha)

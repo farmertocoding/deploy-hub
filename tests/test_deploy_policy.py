@@ -104,3 +104,34 @@ def test_auto_inside_window_enqueues(monkeypatch):
     assert created.status == Deployment.Status.QUEUED
     assert created.manifest.body["git_sha"] == NEW_SHA
     assert not AuditEvent.objects.filter(action="deploy-waiting").exists()
+
+
+@pytest.mark.req("PIPE-N8-DEPLOY-POLICY")
+def test_windowed_inside_window_promotes_waiting_row(monkeypatch):
+    """A QUEUED waiting row is delayed when the window later opens; no second Manifest.
+
+    What would make this fail: skipping because latest Manifest already has the
+    sha, or materializing version N+2 instead of delaying the parked pk.
+    """
+    from deploys.poller import poll
+
+    delayed = _patch_delay(monkeypatch)
+    site = _git_site(
+        slug="window-promote",
+        policy=Site.DeployPolicy.WINDOWED,
+        cron="0 9 * * 1-5",
+    )
+
+    poll(ls_remote=lambda url, ref: NEW_SHA, in_window=lambda cron, now: False)
+    assert delayed == []
+    waiting = Deployment.objects.exclude(status=Deployment.Status.SUCCEEDED).get()
+    assert waiting.status == Deployment.Status.QUEUED
+    versions = list(
+        Manifest.objects.filter(site=site).order_by("version").values_list("version", flat=True),
+    )
+
+    poll(ls_remote=lambda url, ref: NEW_SHA, in_window=lambda cron, now: True)
+    assert delayed == [waiting.pk]
+    assert list(
+        Manifest.objects.filter(site=site).order_by("version").values_list("version", flat=True),
+    ) == versions
