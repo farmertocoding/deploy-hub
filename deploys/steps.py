@@ -198,6 +198,198 @@ def ensure_health_check(desired):
         sleep(interval)
 
 
+def ensure_dns(desired):
+    """Skip mesh_only; public lists then upserts only on (name, rtype) diff."""
+    if _exposure(desired) == "mesh_only":
+        return {"status": "skipped"}
+    dns = desired["dns"]
+    zone = desired["zone"]
+    existing = {
+        (rec["name"], rec["rtype"]): rec for rec in dns.list_records(zone)
+    }
+    wanted = _desired_dns_records(desired)
+    upserted = []
+    for rec in wanted:
+        key = (rec["name"], rec["rtype"])
+        current = existing.get(key)
+        values = list(rec["values"])
+        proxied = rec.get("proxied", True)
+        if (
+            current is not None
+            and list(current.get("values") or []) == values
+            and current.get("proxied", False) == proxied
+        ):
+            continue
+        dns.upsert_record(zone, rec["name"], rec["rtype"], values, proxied=proxied)
+        upserted.append(key)
+    _persist_dns_rows(desired, wanted)
+    return {"status": "ensured", "upserted": upserted}
+
+
+def ensure_route_tls(desired):
+    """PUT Caddy route by id site-{slug}; skip when the live route matches."""
+    transport = desired["transport"]
+    route_id = f"site-{desired['site_slug']}"
+    route = _caddy_route(desired, route_id)
+    current = _probe_caddy_route(transport, route_id)
+    if current == route:
+        return {"status": "skipped", "id": route_id}
+    remote = f"/tmp/hub-caddy-{route_id}.json"
+    payload = json.dumps(route, sort_keys=True, separators=(",", ":")).encode()
+    transport.put(payload, remote)
+    result = _run(
+        transport,
+        [
+            "curl", "-X", "PUT", f"http://127.0.0.1:2019/id/{route_id}",
+            "-H", "Content-Type: application/json",
+            "--data-binary", f"@{remote}",
+        ],
+        desired.get("heartbeat"),
+    )
+    if not result.ok:
+        raise RuntimeError(f"caddy put failed: {result.stderr}")
+    return {"status": "applied", "id": route_id}
+
+
+def ensure_smoke(desired):
+    """Probe the Caddy/healthz ready path; ws sites also receive one frame."""
+    payload = _healthz_payload(desired)
+    if not payload.get("ready"):
+        raise RuntimeError("smoke failed: not ready")
+    if _declares_ws(desired.get("manifest_body") or {}):
+        if not _ws_frame(desired):
+            raise RuntimeError("smoke failed: no ws frame")
+    return {"status": "ready", "healthz": payload}
+
+
+def ensure_cutover(desired):
+    """Refuse unless ready; stop the old container and keep it for rollback."""
+    if not _cutover_ready(desired):
+        raise RuntimeError("cutover refused: not ready")
+    transport = desired["transport"]
+    old = desired.get("old_container")
+    if old:
+        result = _run(transport, ["docker", "stop", old], desired.get("heartbeat"))
+        if not result.ok:
+            raise RuntimeError(f"docker stop failed: {result.stderr}")
+    step = desired.get("step")
+    if step is not None:
+        from django.utils import timezone
+
+        artifacts = dict(step.artifacts or {})
+        deadline = timezone.now() + timedelta(seconds=_cutover_grace_s(desired))
+        artifacts["grace_deadline"] = deadline.isoformat()
+        step.artifacts = artifacts
+        step.save(update_fields=["artifacts"])
+    return {"status": "cutover"}
+
+
+def _exposure(desired):
+    site = desired.get("site")
+    if site is not None:
+        exposure = getattr(site, "exposure", None)
+        if exposure:
+            return exposure
+    body = desired.get("manifest_body") or {}
+    return body.get("exposure") or "public"
+
+
+def _desired_dns_records(desired):
+    domain = desired.get("domain")
+    site = desired.get("site")
+    if not domain and site is not None:
+        domain = getattr(site, "domain", None)
+    values = desired.get("dns_values") or ["127.0.0.1"]
+    return [{
+        "name": domain,
+        "rtype": desired.get("dns_rtype") or "A",
+        "values": list(values),
+        "proxied": desired.get("dns_proxied", True),
+    }]
+
+
+def _persist_dns_rows(desired, records):
+    site = desired.get("site")
+    if site is None or not getattr(site, "pk", None):
+        return
+    from core.models import DnsRecord
+
+    for rec in records:
+        value = rec["values"][0] if rec["values"] else ""
+        DnsRecord.objects.update_or_create(
+            site=site,
+            name=rec["name"],
+            rtype=rec["rtype"],
+            defaults={"value": value},
+        )
+
+
+def _caddy_route(desired, route_id):
+    body = desired.get("manifest_body") or {}
+    if _exposure(desired) == "mesh_only":
+        host = body.get("mesh_bind") or "127.0.0.1"
+        listen = [f"{host}:443"]
+    else:
+        listen = [":443"]
+    domain = desired.get("domain") or f"{desired['site_slug']}.local"
+    return {
+        "@id": route_id,
+        "listen": listen,
+        "routes": [{
+            "match": [{"host": [domain]}],
+            "handle": [{
+                "handler": "reverse_proxy",
+                "upstreams": [{"dial": "127.0.0.1:20000"}],
+            }],
+        }],
+    }
+
+
+def _probe_caddy_route(transport, route_id):
+    result = transport.probe(["curl", "-sf", f"http://127.0.0.1:2019/id/{route_id}"])
+    if not result.ok or not (result.stdout or "").strip():
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _declares_ws(body):
+    if body.get("ws") or body.get("websocket"):
+        return True
+    nested = body.get("healthz") or {}
+    return bool(nested.get("ws") or nested.get("websocket"))
+
+
+def _ws_frame(desired):
+    fetch = desired.get("ws_fetch")
+    if fetch is not None:
+        return fetch()
+    result = desired["transport"].probe(["websocat", "-n1", "ws://127.0.0.1/ws"])
+    if not result.ok:
+        return None
+    return result.stdout
+
+
+def _cutover_ready(desired):
+    if "ready" in desired:
+        return bool(desired["ready"])
+    fetch = desired.get("healthz_fetch")
+    if fetch is not None:
+        return bool(fetch().get("ready"))
+    return bool(_healthz_payload(desired).get("ready"))
+
+
+def _cutover_grace_s(desired):
+    if desired.get("grace_s") is not None:
+        return int(desired["grace_s"])
+    body = desired.get("manifest_body") or {}
+    if body.get("cutover_grace_s") is not None:
+        return int(body["cutover_grace_s"])
+    return 30
+
+
 def _container_name(desired):
     return f"site-{desired['site_slug']}-{desired['deployment_id']}"
 

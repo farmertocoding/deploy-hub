@@ -140,7 +140,7 @@ requirements:
     text: Every generated artifact is snapshotted per deployment; rollback re-applies a known artifact set.
   - id: SEC-P5-BREAK-GLASS
     phase: 2
-    verify: checklist
+    verify: test
     source: deploy-system-plan.md §1.5 P5
     text_hash: sha256:265705547b71d6cbeaf7de8920978800cfc6e597120ed2117fcde9dff4445ba7
     text: Per-site break-glass runbooks (0400 root-owned, no secrets) are generated and stored on the target.
@@ -148,7 +148,7 @@ requirements:
   # — §4.5 validation standard (beyond the Phase-0 first form)
   - id: VAL-45-SHELL-ARGLISTS
     phase: 2
-    verify: checklist
+    verify: test
     source: deploy-system-plan.md §4.5
     text_hash: sha256:b504120b907b9affd71be615f9e1a4509e662573ead924b5f6f4feb61f19d25d
     text: Everything touching a shell is built as argument lists, never interpolated strings; file contents via SFTP, never heredocs.
