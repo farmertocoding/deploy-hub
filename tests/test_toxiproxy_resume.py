@@ -23,6 +23,9 @@ from tests.harness.target import SOCK, _docker_available
 
 REPO = Path(__file__).resolve().parent.parent
 STALE_AFTER = timedelta(minutes=2)
+# Alpine T2 migrate (seq 3) finishes inside this window on a live SSH path.
+# A 2s sleep is too short: migrate/start can still be in flight without a toxic.
+STEP3_LIVE_BUDGET_S = 15
 
 pytest_plugins = ["tests.harness.target"]
 
@@ -171,23 +174,51 @@ def _spawn_worker(pk, db_path):
     )
 
 
-def _wait_step_status(deployment, seq, *, want, proc, deadline):
-    last = None
+def _assert_toxic_stalled_after_step_2(deployment, proc, *, budget_s=STEP3_LIVE_BUDGET_S):
+    """After a live-path step-3 budget, the child must still be hung.
+
+    What would make this fail: the toxic never stalling SSH, so seq>2 succeeds
+    (or the child exits) inside the same window a healthy alpine migrate would.
+    """
+    deadline = time.time() + budget_s
     while time.time() < deadline:
-        connections.close_all()
-        deployment.refresh_from_db()
-        step = deployment.steps.filter(seq=seq).first()
-        last = step.status if step is not None else None
-        if step is not None and step.status == want:
-            return step
         if proc.poll() is not None:
             stdout, stderr = proc.communicate(timeout=5)
             raise AssertionError(
-                f"worker exited {proc.returncode} before step {seq} became {want}; "
-                f"last={last}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                f"worker exited {proc.returncode} during the live-path budget; "
+                f"toxic did not stall SSH\nstdout:\n{stdout}\nstderr:\n{stderr}"
             )
         time.sleep(0.2)
-    raise AssertionError(f"timed out waiting for step {seq} {want}; last={last}")
+    connections.close_all()
+    deployment.refresh_from_db()
+    later = [
+        (step.seq, step.name, step.status)
+        for step in deployment.steps.filter(seq__gt=2)
+        if step.status == DeploymentStep.Status.SUCCEEDED
+    ]
+    assert proc.poll() is None
+    assert later == [], (
+        f"seq>2 succeeded during the live-path budget; toxic did not stall SSH: {later}"
+    )
+
+
+def _wait_step_2_then_toxic(deployment, proc, proxy, *, deadline):
+    """Arm the downstream timeout the instant seq 2 is succeeded."""
+    while time.time() < deadline:
+        connections.close_all()
+        deployment.refresh_from_db()
+        step = deployment.steps.filter(seq=2).first()
+        if step is not None and step.status == DeploymentStep.Status.SUCCEEDED:
+            proxy.toxic_timeout("hub-ssh")
+            return
+        if proc.poll() is not None:
+            stdout, stderr = proc.communicate(timeout=5)
+            raise AssertionError(
+                f"worker exited {proc.returncode} before step 2 succeeded; "
+                f"last={step.status if step else None}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            )
+        time.sleep(0.05)
+    raise AssertionError("timed out waiting for step 2 before arming toxic")
 
 
 @pytest.mark.t2
@@ -197,6 +228,7 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
     """SshTransport through toxiproxy: timeout after step 2, sweep resumes.
 
     What would make this fail: Hub docker.sock, skipping T2 when docker exists,
+    SIGKILL before a live alpine migrate would have finished (toxic as scenery),
     marking the timed-out step succeeded, or a second execute that never
     reaches succeeded.
     """
@@ -282,25 +314,22 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
             "upstream": "127.0.0.1:20000",
             "caddy_listen": "127.0.0.1:8088",
             "warmup_timeout_s": 60,
+            # Volume create + empty migrate finishes before a parent poll can
+            # arm the toxic. This argv is a real SSH through the proxy so the
+            # live-path budget is observable and the timeout can hold it.
+            "backup_argv": ["sleep", "8"],
         })
         manifest = Manifest.objects.create(site=site, version=1, body=body)
         deployment = Deployment.objects.create(manifest=manifest)
 
         proc = _spawn_worker(deployment.pk, toxiproxy_db)
         try:
-            _wait_step_status(
-                deployment, 2,
-                want=DeploymentStep.Status.SUCCEEDED,
-                proc=proc,
-                deadline=time.time() + 180,
+            _wait_step_2_then_toxic(
+                deployment, proc, proxy, deadline=time.time() + 180,
             )
-            proxy.toxic_timeout("hub-ssh")
-            time.sleep(2)
-            if proc.poll() is None:
-                proc.kill()
-                proc.communicate(timeout=10)
-            else:
-                proc.communicate(timeout=5)
+            _assert_toxic_stalled_after_step_2(deployment, proc)
+            proc.kill()
+            proc.communicate(timeout=10)
         finally:
             if proc.poll() is None:
                 proc.kill()
