@@ -156,6 +156,17 @@ HUB_RECONCILE_ENABLED = os.environ.get("HUB_RECONCILE_ENABLED", "true").strip().
     "0", "false", "no", "off",
 }
 
+# --- Test plane (§B9 credential wall) ---
+# Prod default is False. Tests flip this with override_settings; do not flip it here.
+HUB_TEST_MODE = os.environ.get("HUB_TEST_MODE", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+HUB_TEST_ZONE_SLUGS = [
+    slug.strip()
+    for slug in os.environ.get("HUB_TEST_ZONE_SLUGS", "hub-test").split(",")
+    if slug.strip()
+]
+
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")

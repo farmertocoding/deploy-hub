@@ -105,8 +105,16 @@ class Project(models.Model):
 class NetworkZone(models.Model):
     """A network (§D9). Targets sit in a zone; the Hub talks to them through it."""
 
+    class Purpose(models.TextChoices):
+        PROD = "prod"
+        TEST = "test"
+
     name = models.CharField(max_length=128)
     slug = models.SlugField(max_length=128, unique=True)
+    # Default prod: existing rows fail-closed under HUB_TEST_MODE (§B9).
+    purpose = models.CharField(
+        max_length=16, choices=Purpose.choices, default=Purpose.PROD,
+    )
 
     def __str__(self):
         return self.name

@@ -8,10 +8,12 @@ import json
 import os
 from pathlib import Path
 
+from django.conf import settings
 from django.utils import timezone
 
 from core import locks
 from core.models import OperationLock
+from core.test_mode import assert_test_zone
 from deploys.models import Deployment, DeploymentArtifact, DeploymentStep
 from deploys.steps import (
     _caddy_route,
@@ -166,8 +168,10 @@ def _noop_sleep(_seconds):
 def execute(deployment_id, *, transport=None, dns=None, sleep=None):
     """Run (or resume) a deployment. Task kwargs must stay ids-only."""
     deployment = Deployment.objects.select_related(
-        "manifest__site__primary_target",
+        "manifest__site__primary_target__zone",
     ).get(pk=deployment_id)
+    if settings.HUB_TEST_MODE:
+        assert_test_zone(deployment.manifest.site.primary_target.zone)
     if deployment.status == Deployment.Status.QUEUED:
         if not begin_deploy(deployment):
             return {"started": False}

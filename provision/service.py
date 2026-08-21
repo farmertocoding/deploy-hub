@@ -11,6 +11,7 @@ from catalog.apply import argv_steps
 from catalog.entries import CATALOG
 from catalog.models import AppliedCatalogEntry
 from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
+from core.test_mode import assert_test_zone
 
 LISTENERS_ARGV = ["ss", "-ltnH"]
 CONTAINERS_ARGV = ["docker", "ps", "-a", "--format", "{{.Names}}"]
@@ -35,6 +36,7 @@ class ProvisionResult:
 
 def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
     """Guard, then import pre-hardened catalog versions. Never a shell string."""
+    assert_test_zone(target.zone)
     listeners = transport.probe(LISTENERS_ARGV)
     if not listeners.ok:
         return ProvisionResult(
