@@ -1,16 +1,64 @@
-"""T3 Multipass driver. Argv lists only; never bind Hub docker.sock."""
+"""T3 Multipass harness. Argv lists only; never bind Hub docker.sock.
+
+The driver primitives — the hub-t3- prefix guard, list/delete/version argv,
+the typed-argv runner, availability — live once in monitor/reaper.py, where
+product code may import them (2.5 panel I4: two copies had already diverged).
+This module re-exports them for the T1/T3 suite and keeps only the
+harness-side operations (launch, exec, transfer, cloud-init) on top.
+"""
 from __future__ import annotations
 
 import json
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 
-NAME_PREFIX = "hub-t3-"
+from monitor.reaper import (
+    NAME_PREFIX,
+    VERSION_TIMEOUT_S,
+    T3NameError,
+    _run,
+    delete_purge,
+    delete_purge_argv,
+    list_argv,
+    list_names,
+    multipass_available,
+    require_t3_name,
+    version_argv,
+)
+
+__all__ = [
+    "CLOUD_INIT",
+    "DEFAULT_IMAGE",
+    "DEFAULT_USER",
+    "NAME_PREFIX",
+    "NO_ROUTE_GRACE_S",
+    "NO_ROUTE_HINT",
+    "NO_ROUTE_MARKER",
+    "VERSION_TIMEOUT_S",
+    "MultipassVM",
+    "T3NameError",
+    "delete_purge",
+    "delete_purge_argv",
+    "exec",
+    "exec_argv",
+    "exec_result",
+    "info_ipv4",
+    "launch",
+    "launch_argv",
+    "list_argv",
+    "list_names",
+    "multipass_available",
+    "require_t3_name",
+    "transfer",
+    "transfer_argv",
+    "version_argv",
+    "wait_exec",
+    "waiver_illegal_if",
+]
+
 DEFAULT_IMAGE = "22.04"
 DEFAULT_USER = "deploy"
-VERSION_TIMEOUT_S = 5
 
 # `- default` keeps the image's default user (multipass injects its own SSH
 # key there; a `users:` list without it drops that user and multipass exec
@@ -34,31 +82,11 @@ runcmd:
 """
 
 
-class T3NameError(ValueError):
-    """Name is outside the hub-t3- reaper prefix."""
-
-
 @dataclass(frozen=True)
 class MultipassVM:
     name: str
     ipv4: str
     user: str
-
-
-def require_t3_name(name):
-    if not str(name).startswith(NAME_PREFIX):
-        raise T3NameError(
-            f"refusing {name!r}: test-plane names must start with {NAME_PREFIX!r}"
-        )
-    return name
-
-
-def version_argv():
-    return ["multipass", "version"]
-
-
-def list_argv():
-    return ["multipass", "list", "--format", "csv"]
 
 
 def launch_argv(name, cpus, mem, disk, image=DEFAULT_IMAGE, cloud_init_path=None):
@@ -96,33 +124,9 @@ def transfer_argv(src, dest):
     return ["multipass", "transfer", src, dest]
 
 
-def delete_purge_argv(name):
-    require_t3_name(name)
-    return ["multipass", "delete", "--purge", name]
-
-
 def _require_transfer_name(spec):
     if ":" in spec and not spec.startswith("/"):
         require_t3_name(spec.split(":", 1)[0])
-
-
-def _run(argv, *, timeout=60):
-    if not isinstance(argv, (list, tuple)) or any(not isinstance(p, str) for p in argv):
-        raise TypeError("argv must be a list of str — never a shell string")
-    return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout)
-
-
-def multipass_available():
-    try:
-        result = subprocess.run(
-            version_argv(),
-            capture_output=True,
-            text=True,
-            timeout=VERSION_TIMEOUT_S,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 def waiver_illegal_if(probe):
@@ -225,21 +229,6 @@ def transfer(src, dest, *, run_fn=None, timeout=120):
     return result
 
 
-def delete_purge(name, *, run_fn=None):
-    require_t3_name(name)
-    runner = run_fn or _run
-    result = runner(delete_purge_argv(name))
-    if getattr(result, "returncode", 0) == 0:
-        return result
-    err = f"{getattr(result, 'stderr', '')} {getattr(result, 'stdout', '')}".lower()
-    if "does not exist" in err or "not found" in err:
-        return result
-    raise RuntimeError(
-        f"multipass delete --purge {name} failed: "
-        f"{getattr(result, 'stderr', '') or getattr(result, 'stdout', '')}"
-    )
-
-
 def info_ipv4(name, *, run_fn=None):
     require_t3_name(name)
     runner = run_fn or _run
@@ -256,21 +245,3 @@ def info_ipv4(name, *, run_fn=None):
     if isinstance(addrs, list) and addrs:
         return str(addrs[0])
     return ""
-
-
-def list_names(*, run_fn=None):
-    runner = run_fn or _run
-    result = runner(list_argv())
-    if getattr(result, "returncode", 0) != 0:
-        err = f"{getattr(result, 'stderr', '')} {getattr(result, 'stdout', '')}".lower()
-        if "does not exist" in err or "not found" in err:
-            return []
-        raise RuntimeError(f"multipass list failed: {getattr(result, 'stderr', '')}")
-    names = []
-    for i, line in enumerate((result.stdout or "").splitlines()):
-        if i == 0 and line.lower().startswith("name"):
-            continue
-        raw = line.split(",", 1)[0].strip()
-        if raw:
-            names.append(raw)
-    return names
