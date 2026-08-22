@@ -6,8 +6,17 @@
 // the 12a frame still accepts detail / fix_hint / site).
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
-import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
+import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
+
+function filterFromSearch() {
+  try {
+    const entity = new URLSearchParams(window.location.search || "").get("entity");
+    return entity ? { entity } : {};
+  } catch {
+    return {};
+  }
+}
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -78,16 +87,19 @@ export function AcceptRiskForm({ finding, onAccept }) {
   );
 }
 
-export function FindingDetail({ finding, onBack }) {
+export function FindingDetail({ finding, onBack, onAck, onAccept }) {
   const site = finding.site || finding.entity || "";
   const why = finding.detail || finding.body || "";
   const fix = finding.fix_hint || finding.fix_action || "";
+  const canAck = finding.state === "open";
+  const canAccept = finding.state === "open" || finding.state === "acked";
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%", display: "grid", gap: 8 }}>
       <h3 style={{ margin: 0 }}>{safeText(finding.title)}</h3>
       <div style={{ color: "#8b949e" }}>
         <SeverityChip severity={finding.severity} />
         {site ? ` · ${site}` : ""}
+        {finding.state ? <>{" · "}<StateChip finding={finding} /></> : null}
       </div>
       <p style={{ margin: 0, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
         {safeText(why)}</p>
@@ -95,6 +107,12 @@ export function FindingDetail({ finding, onBack }) {
         <p style={{ margin: 0, color: "#8b949e", whiteSpace: "pre-line",
           overflowWrap: "anywhere" }}>Fix: {safeText(fix)}</p>
       )}
+      {canAck && (
+        <div>
+          <button style={box} onClick={() => onAck?.(finding.id)}>Ack</button>
+        </div>
+      )}
+      {canAccept && <AcceptRiskForm finding={finding} onAccept={onAccept} />}
       <div><button style={box} onClick={onBack}>Back to findings</button></div>
     </div>
   );
@@ -115,6 +133,7 @@ export function FindingsView({
     if (filter.entity && f.entity !== filter.entity) return false;
     return true;
   });
+  const entities = [...new Set(findings.map((f) => f.entity).filter(Boolean))].sort();
   return (
     <div style={{ padding: 16 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -137,12 +156,24 @@ export function FindingsView({
             <option value="resolved">resolved</option>
           </select>
         </label>
+        <label>entity{" "}
+          <select aria-label="Filter by entity" value={filter.entity || ""}
+            onChange={(e) => onFilter?.({ ...filter, entity: e.target.value || undefined })}>
+            <option value="">all</option>
+            {entities.map((entity) => (
+              <option key={entity} value={entity}>{entity}</option>
+            ))}
+          </select>
+        </label>
       </div>
       {rows.map((f) => (
         <div key={f.id} style={{ ...box, marginBottom: 8 }}>
           <SeverityChip severity={f.severity} />{" "}
           <StateChip finding={f} />{" "}
-          <strong>{safeText(f.title)}</strong>
+          <a href={routeHash("findings", f.id)}
+            onClick={(e) => { e.preventDefault(); onNav?.("findings", f.id); }}>
+            <strong>{safeText(f.title)}</strong>
+          </a>
           {(f.state === "open") && (
             <div style={{ marginTop: 8 }}>
               <button style={box} onClick={() => onAck?.(f.id)}>Ack</button>
@@ -160,7 +191,7 @@ export function FindingsView({
 export default function Findings({ route, onNav }) {
   const [bundle, setBundle] = useState(undefined);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState({});
+  const [filter, setFilter] = useState(filterFromSearch);
   const load = () => {
     setError("");
     setBundle(undefined);
@@ -178,7 +209,9 @@ export default function Findings({ route, onNav }) {
     if (phase === "loading") return <LoadingLine what="finding" />;
     if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
     if (bundle?.data)
-      return <FindingDetail finding={bundle.data} onBack={() => onNav("findings")} />;
+      return <FindingDetail finding={bundle.data} onBack={() => onNav("findings")}
+        onAck={(id) => ackFinding(id).then(load)}
+        onAccept={(id, reason) => acceptRisk(id, reason).then(load)} />;
     return (
       <div style={{ padding: 16 }}>
         <p style={{ color: "#8b949e" }}>Finding {route.id} was not found.</p>

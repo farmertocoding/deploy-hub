@@ -150,3 +150,57 @@ test("finding_detail_renders_at_phone_width", () => {
   assert.match(markup, /max-width:100%/,
     "finding-detail does not yield to a narrow viewport");
 });
+
+test("entity_filter_is_offered_and_slices_the_inbox", () => {
+  // What would make this fail: the inbox claiming an entity filter in the
+  // predicate while offering only severity/state, so an operator cannot
+  // slice to site:… .
+  const other = {
+    ...OPEN, id: 8, entity: "site:other.example.com", title: "other is down",
+  };
+  const markup = render(FindingsView, {
+    phase: "live", findings: [OPEN, other], onNav: () => {},
+  });
+  assert.match(markup, /aria-label="Filter by entity"/, markup);
+  assert.match(markup, /site:takko\/prod/, markup);
+  assert.match(markup, /site:other\.example\.com/, markup);
+
+  const sliced = visibleText(render(FindingsView, {
+    phase: "live", findings: [OPEN, other],
+    filter: { entity: "site:takko/prod" }, onNav: () => {},
+  }));
+  assert.ok(sliced.includes(OPEN.title), sliced);
+  assert.ok(!sliced.includes(other.title),
+    `entity filter did not hide the other site: ${sliced}`);
+});
+
+test("inbox_row_opens_finding_detail_which_can_ack_and_accept_risk", () => {
+  // What would make this fail: list titles staying inert, or FindingDetail
+  // keeping what/why/fix and Back only — no ack, no accept-risk.
+  const inbox = render(FindingsView, {
+    phase: "live", findings: [OPEN], onNav: () => {},
+  });
+  assert.match(inbox, /href="#\/findings\/7"/, inbox);
+
+  const detail = render(FindingDetail, { finding: OPEN, onBack: () => {} });
+  const text = visibleText(detail);
+  assert.match(detail, />Ack</, detail);
+  assert.match(text, /Accept risk/i, text);
+  assert.match(detail, /disabled/,
+    "detail accept-risk must stay unusable until a reason is typed");
+  assert.match(detail, /aria-label="Accept-risk reason"/, detail);
+
+  const ackedMarkup = render(FindingDetail, {
+    finding: { ...OPEN, state: "acked" }, onBack: () => {},
+  });
+  assert.doesNotMatch(ackedMarkup, />Ack</);
+  assert.match(visibleText(ackedMarkup), /Accept risk/i, ackedMarkup);
+
+  const acceptedMarkup = render(FindingDetail, {
+    finding: { ...OPEN, state: "accepted", accepted_reason: "lab only" },
+    onBack: () => {},
+  });
+  assert.doesNotMatch(acceptedMarkup, />Ack</);
+  assert.doesNotMatch(visibleText(acceptedMarkup), /Accept risk/i);
+  assert.match(visibleText(acceptedMarkup), /lab only/, acceptedMarkup);
+});

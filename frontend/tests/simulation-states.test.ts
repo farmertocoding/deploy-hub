@@ -149,3 +149,20 @@ test("every_new_state_renders_in_simulation_mode", () => {
   const site = states.find((s) => s.id === "unproxied-cert-refusal");
   assert.ok(visibleText(render(SiteStatus, { site: site.site })).length > 0);
 });
+
+test("every_seed_state_has_a_scripted_event", () => {
+  // What would make this fail: states[] enumerating a topic the replayer
+  // never publishes (P3 / acked / accepted / resolved / degraded-polling /
+  // single-instance were the first holes).
+  const seed = loadSeed();
+  const covered = new Set(
+    (seed.scripted_events || [])
+      .map((e: any) => e.state_id)
+      .filter(Boolean),
+  );
+  const missing = (seed.states || [])
+    .map((s: any) => s.id)
+    .filter((id: string) => !covered.has(id));
+  assert.deepEqual(missing, [],
+    `scripted_events omit states: ${missing.join(", ")}`);
+});

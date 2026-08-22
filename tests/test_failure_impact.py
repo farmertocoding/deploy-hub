@@ -4,9 +4,14 @@ The alert body, the break-glass runbook (Task 16) and the Deploys UI all
 read `deploys.failure_impact.IMPACT`. A second copy of these strings is the
 bug this file exists to catch.
 """
+import json
+import pathlib
+
 import pytest
 
 from deploys.models import DeploymentStep
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
 
 pytestmark = pytest.mark.req("UX-F4-FAILURE-IMPACT")
 
@@ -52,8 +57,9 @@ def test_recreate_strategy_says_site_is_down_not_old_version_serving():
 
 
 def test_alert_body_ui_and_runbook_read_the_same_table():
-    """What would make this fail: alert / UI / runbook growing their own
-    copy of the impact strings."""
+    """What would make this fail: a second copy of the three impact
+    sentences — seed/UI headlines drifting from impact_line(), or
+    Deploys.jsx / breakglass.py literaling the table."""
     from deploys import failure_impact as fi
 
     assert fi.alert_impact is fi.IMPACT
@@ -65,6 +71,31 @@ def test_alert_body_ui_and_runbook_read_the_same_table():
             assert line == fi.ui_line(step, strategy)
             assert line in fi.alert_body(step, strategy)
             assert line in fi.runbook_line(step, strategy)
+
+    sentences = {
+        fi.OLD_VERSION_SERVING, fi.SITE_UNREACHABLE, fi.SITE_IS_DOWN,
+    }
+    seed = json.loads((REPO / "simulation/seed_v1.json").read_text())
+    for state in seed["states"]:
+        deploy = state.get("deploy")
+        if not deploy:
+            continue
+        failed = [s for s in deploy["steps"] if s.get("state") == "failed"]
+        assert failed, state["id"]
+        assert deploy["headline"] == fi.impact_line(
+            failed[0]["name"], deploy["strategy"]), state["id"]
+    for entry in seed["scripted_events"]:
+        event = entry.get("event") or {}
+        if event.get("status") == "failed" and event.get("step"):
+            assert event.get("impact") == fi.impact_line(
+                event["step"], event["strategy"]), entry
+
+    for rel in ("frontend/src/screens/Deploys.jsx", "deploys/breakglass.py"):
+        text = (REPO / rel).read_text()
+        leaked = [s for s in sentences if s in text]
+        assert leaked == [], f"{rel} literals impact copy: {leaked}"
+    deploys_jsx = (REPO / "frontend/src/screens/Deploys.jsx").read_text()
+    assert "deploy.headline || deploy.impact" in deploys_jsx
 
 
 def test_failure_offers_at_most_three_actions():
