@@ -76,6 +76,34 @@ def test_database_rebind_requires_test_mode(monkeypatch, settings, tmp_path):
         connections.databases["default"]["NAME"] = original
 
 
+def test_prod_settings_pin_test_mode_off(monkeypatch, tmp_path):
+    """prod.py is the backstop: stray env vars must not open the rebind gate.
+
+    What would make this fail: prod.py inheriting base.py's env-derived
+    HUB_TEST_MODE instead of pinning it False the way it pins DEBUG and
+    VAULT_ALLOW_FAKE_KEK — a prod worker with HUB_TEST_MODE +
+    HUB_TEST_DATABASE in its environment would have its database repointed.
+    """
+    import importlib
+
+    from hub.settings import base as base_settings
+
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_TEST_MODE", "1")
+    monkeypatch.setenv("HUB_TEST_DATABASE", str(tmp_path / "repointed.sqlite3"))
+    try:
+        # Reload base first: `from .base import *` in prod.py reads the module
+        # as already loaded, so without this the env vars never reach the
+        # derivation and the assertion below would pass vacuously.
+        importlib.reload(base_settings)
+        assert base_settings.HUB_TEST_MODE is True, "env vars never reached base"
+        prod = importlib.reload(importlib.import_module("hub.settings.prod"))
+        assert prod.HUB_TEST_MODE is False
+    finally:
+        monkeypatch.undo()
+        importlib.reload(base_settings)
+
+
 @pytest.fixture
 def fake_child_db(tmp_path, django_db_blocker):
     """A migrated file-backed sqlite the parent and a worker child can share."""
