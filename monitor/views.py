@@ -64,11 +64,6 @@ class TransitionSerializer(serializers.Serializer):
         return attrs
 
 
-def _snapshot(data):
-    # seq FIRST, then the table read (§D7) — see module docstring.
-    return {"seq": findings_seq(), "data": data}
-
-
 class FindingListView(APIView):
     @extend_schema(parameters=[FindingFilterSerializer],
                    responses={200: FindingListSnapshotSerializer})
@@ -110,4 +105,8 @@ class FindingTransitionView(APIView):
             # An impossible transition (e.g. acking a resolved finding) is a
             # state conflict, not bad input: 409, like apply-env's busy path.
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(_snapshot(FindingSerializer(row).data))
+        # seq FIRST, then serialize (§D7), same as list/detail: read the other
+        # way round, a concurrent event yields seq > data and a replaying
+        # client would discard it.
+        seq = findings_seq()
+        return Response({"seq": seq, "data": FindingSerializer(row).data})

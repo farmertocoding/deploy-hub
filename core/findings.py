@@ -13,7 +13,7 @@ quiet when the SAME fingerprint re-fires and re-surfaces only as a NEW row
 when the fingerprint changes. A RESOLVED row that re-fires reopens — silence
 after resolve would be the queue lying.
 """
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .audit import audit
@@ -102,16 +102,24 @@ def finding(source_engine, fingerprint, **fields):
         # leave nothing behind.
         _require_copy_values({name: fields.get(name, "") for name in _COPY_FIELDS})
         try:
-            row = Finding.objects.create(
-                fingerprint=fingerprint, source_engine=source_engine,
-                first_seen=now, last_seen=now, **fields,
-            )
+            # Savepoint, not a bare try: a swallowed IntegrityError breaks any
+            # enclosing atomic block (django_db tests, Celery under
+            # transaction.atomic()) and the retry below would raise
+            # TransactionManagementError exactly where the race matters.
+            with transaction.atomic():
+                row = Finding.objects.create(
+                    fingerprint=fingerprint, source_engine=source_engine,
+                    first_seen=now, last_seen=now, **fields,
+                )
         except IntegrityError:
             # Two engines filing the same fingerprint concurrently: the loser
             # takes the update path — still never a second row.
             return finding(source_engine, fingerprint, **fields)
+        # finding_severity, NOT severity: audit()'s own named `severity` is the
+        # info/warning/security enum column — a p1/p2/p3 would land there as a
+        # permanently corrupt append-only row. The finding's severity is detail.
         audit("finding_filed", row, source="system",
-              fingerprint=fingerprint, severity=row.severity)
+              fingerprint=fingerprint, finding_severity=row.severity)
         _publish(row, "filed")
         return row
 

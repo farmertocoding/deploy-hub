@@ -139,6 +139,59 @@ def test_every_transition_writes_an_audit_event():
         ).count() == 1, f"missing audit row for {action}"
 
 
+def test_audit_severity_column_stays_in_its_enum():
+    """Round-2 fix pin: audit() has its own named `severity` (info/warning/
+    security). Passing the finding's p1/p2/p3 through that kwarg silently
+    stored a value outside the enum in the append-only table — the finding's
+    severity must travel in detail, never the column."""
+    from core.findings import accept_risk, ack
+
+    row = _file(fingerprint="fp-sev-1")   # p1
+    ack(row)
+    other = _file(fingerprint="fp-sev-2")
+    accept_risk(other, "known and accepted")
+
+    allowed = {c for c, _ in AuditEvent.Severity.choices}
+    for event in AuditEvent.objects.filter(object_type="Finding"):
+        assert event.severity in allowed, (
+            f"{event.action} wrote severity {event.severity!r} outside the enum")
+
+    filed = AuditEvent.objects.get(action="finding_filed", object_id=str(row.pk))
+    assert filed.detail["finding_severity"] == "p1"
+
+
+def test_concurrent_create_retry_survives_an_open_transaction(monkeypatch):
+    """The lookup-miss/create race, forced, INSIDE an atomic block (the shape
+    of every django_db test and any Celery task under transaction.atomic()):
+    the loser's IntegrityError must be contained by a savepoint so the retry's
+    update path still has a usable transaction — a bare except leaves it
+    broken and the retry dies with TransactionManagementError."""
+    from django.db import transaction
+
+    winner = _file(fingerprint="fp-race")
+
+    real_filter = Finding.objects.filter
+    state = {"missed": False}
+
+    def stale_filter(*args, **kwargs):
+        # The loser's existence check races the winner's commit and sees
+        # nothing — exactly once; the retry's lookup sees the truth.
+        if not state["missed"]:
+            state["missed"] = True
+            return Finding.objects.none()
+        return real_filter(*args, **kwargs)
+
+    monkeypatch.setattr(Finding.objects, "filter", stale_filter)
+
+    with transaction.atomic():
+        row = _file(fingerprint="fp-race", body="the loser's fresher copy")
+        assert row.pk == winner.pk
+
+    assert Finding.objects.count() == 1
+    assert Finding.objects.get(fingerprint="fp-race").body == \
+        "the loser's fresher copy"
+
+
 def test_finding_copy_carries_what_why_and_exact_fix():
     """§6.6 copy contract via the model's fields: title (what), body (why it
     matters), fix_action (exact fix). The helper refuses blank ones — six
