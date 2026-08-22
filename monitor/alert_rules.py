@@ -340,6 +340,13 @@ RULES = (
         "Target publish token marked revoked; one manual ntfy-account step remains",
         "D-036 / review3 §M3",
     ),
+    _r(
+        "pager-drill",
+        "p1",
+        "Monthly pager test: a scheduled synthetic P1 (TEST — ack me) "
+        "verifies the whole path phone-deep",
+        "alert-protocol.md §7 / ALERT-PAGER-DRILL",
+    ),
 )
 
 RULES_BY_KIND = {rule.kind: rule for rule in RULES}
@@ -369,6 +376,9 @@ def classify(kind, **facts):
         facts.get("hub_surface") or facts.get("cve_matches_hub")
     ):
         return "p2"
+
+    if kind == "drill-missed" and facts.get("drill_kind") == "pager":
+        return "p1"
 
     return rule.severity
 

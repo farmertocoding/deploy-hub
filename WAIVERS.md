@@ -87,7 +87,7 @@ WAIVED: tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-r
 # — tests/test_breakglass.py now asserts impact before commands, Hub-side
 # upsert_record only, freshness metadata, 0400 root-owned, no token/secret,
 # and the alert-protocol §3 advisory-only note.
-WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the 24h live form is the Phase 2.5 nightly drill. check.py verified file presence, not duration. (2026-08-21)
+WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the hub-down prober is now a real external HTTP GET (D-042); the 24 h form is a dated calendar item, not a claimed duration. check.py verified file presence, not duration. First recorded 2026-08-21. (2026-08-22)
 
 # Phase 2.5 exit (Task 16, amended by the panel fix wave). D-024: a `tier: t3` req
 # is verified only by a passed @pytest.mark.t3 test, and on a host that cannot run

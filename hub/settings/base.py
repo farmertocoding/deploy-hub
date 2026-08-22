@@ -259,6 +259,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.build_weekly_rollup",
         "schedule": crontab(hour=8, minute=0, day_of_week="monday"),
     },
+    "drill-pager-monthly": {
+        "task": "monitor.tasks.run_pager_drill",
+        "schedule": 30 * 86400,
+    },
 }
 # crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday).
 CELERY_TIMEZONE = TIME_ZONE
