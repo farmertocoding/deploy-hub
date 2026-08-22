@@ -229,7 +229,20 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.run_restore_clean_drill",
         "schedule": 30 * 86400,
     },
+    "probe-uptime": {
+        "task": "monitor.tasks.probe_uptime",
+        "schedule": 60.0,
+    },
 }
+
+# --- Dead-man + canary (alert-protocol §5, D-039) ---
+# A vault owner-id ref (the Target.ssh_key_ref pattern) — never the receiver
+# URL itself. The URL is a secret-bearing capability; it lives only in the
+# vault and appears in no setting, log, task arg or Finding body.
+HUB_DEADMAN_URL_REF = os.environ.get("HUB_DEADMAN_URL_REF", "deadman-ping")
+# The known-good external endpoint the canary rule probes BEFORE any
+# mass-outage declaration (§5.3). Not a secret.
+HUB_CANARY_URL = os.environ.get("HUB_CANARY_URL", "https://one.one.one.one/")
 
 LOGGING = {
     "version": 1,

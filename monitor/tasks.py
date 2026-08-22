@@ -75,3 +75,21 @@ def run_restore_clean_drill():
 
     run = body()
     return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def probe_uptime():
+    """Beat `probe-uptime` (60 s, queue probes): one HTTP probe cycle, then
+    the dead-man ping — fired only when the cycle completed every target
+    (§C7). No secret ever appears in args or the returned dict."""
+    from monitor.deadman import ping_after_cycle
+    from monitor.uptime import probe_cycle
+
+    cycle = probe_cycle()
+    outcome = ping_after_cycle(cycle)
+    return {
+        "ok": True,
+        "completed": cycle["completed"],
+        "n": cycle["n"],
+        "pinged": outcome["pinged"],
+    }
