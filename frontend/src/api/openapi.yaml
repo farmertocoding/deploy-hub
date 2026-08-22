@@ -141,6 +141,32 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/cloudflare/connect/:
+    post:
+      operationId: v1_cloudflare_connect_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudflareConnectResult'
+          description: ''
   /api/v1/findings/:
     get:
       operationId: v1_findings_retrieve
@@ -517,6 +543,25 @@ components:
         * `ack` - ack
         * `resolve` - resolve
         * `accept_risk` - accept_risk
+    CloudflareConnect:
+      type: object
+      properties:
+        token:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - token
+    CloudflareConnectResult:
+      type: object
+      properties:
+        account:
+          $ref: '#/components/schemas/DnsAccountConnected'
+        zone:
+          $ref: '#/components/schemas/DnsZoneConnected'
+      required:
+      - account
+      - zone
     Confirm:
       type: object
       properties:
@@ -541,6 +586,37 @@ components:
           type: boolean
           default: false
       required:
+      - name
+    DnsAccountConnected:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        provider:
+          $ref: '#/components/schemas/ProviderEnum'
+        label:
+          type: string
+          maxLength: 128
+      required:
+      - id
+      - label
+    DnsZoneConnected:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        provider_zone_id:
+          type: string
+          maxLength: 64
+        purpose:
+          $ref: '#/components/schemas/PurposeEnum'
+      required:
+      - id
       - name
     EnvApply:
       type: object
@@ -721,6 +797,19 @@ components:
       - sites
       - slug
       - tiers
+    ProviderEnum:
+      enum:
+      - cloudflare
+      type: string
+      description: '* `cloudflare` - Cloudflare'
+    PurposeEnum:
+      enum:
+      - prod
+      - test
+      type: string
+      description: |-
+        * `prod` - Prod
+        * `test` - Test
     Question:
       type: object
       properties:

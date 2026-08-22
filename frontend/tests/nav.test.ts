@@ -56,7 +56,7 @@ test("advisors_are_tabs_not_top_level_pages", () => {
   assert.match(markup, /aria-current="page"/, "the current screen is not announced");
 
   // …and the demo pane's actual home is the Settings tab bar.
-  assert.deepEqual(SETTINGS_TABS.map((t) => t.id), ["developer", "vault"]);
+  assert.deepEqual(SETTINGS_TABS.map((t) => t.id), ["cloudflare", "developer", "vault"]);
 });
 
 test("every_list_screen_has_an_empty_state", () => {
