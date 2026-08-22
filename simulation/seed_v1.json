@@ -1,0 +1,269 @@
+{
+  "comment": "Simulation-mode seed v1 (§F8): v0 shape (2 zones, 4 targets, 6 sites) plus every Task-13 state. Scripted events publish finding payloads on `findings` (D-045); site/deploy status stay on the authorized site./deploy. prefixes. Warming carries elapsed_s/expected_s so the badge is reviewable.",
+  "zones": [
+    {"name": "zone-a-home", "kind": "home_lan", "cidr": "192.168.1.0/24"},
+    {"name": "zone-b-office", "kind": "home_lan", "cidr": "10.0.0.0/24"}
+  ],
+  "targets": [
+    {"name": "home-server-1", "zone": "zone-a-home", "kind": "ssh", "lifecycle": "permanent"},
+    {"name": "home-server-2", "zone": "zone-a-home", "kind": "ssh", "lifecycle": "permanent"},
+    {"name": "office-server-1", "zone": "zone-b-office", "kind": "ssh", "lifecycle": "permanent"},
+    {"name": "burst-ec2-1", "zone": "aws-use1", "kind": "aws_ec2", "lifecycle": "ephemeral"}
+  ],
+  "sites": [
+    {"domain": "shop.example.com", "tier": "prod", "target": "home-server-1"},
+    {"domain": "api.example.com", "tier": "prod", "target": "home-server-1"},
+    {"domain": "staging.shop.example.com", "tier": "staging", "target": "home-server-2"},
+    {"domain": "blog.example.com", "tier": "prod", "target": "office-server-1"},
+    {"domain": "lab.example.com", "tier": "experiment", "target": "home-server-2", "deploy_strategy": "recreate", "instances": 1, "single_instance": true},
+    {"domain": "docs.example.com", "tier": "prod", "target": "office-server-1"}
+  ],
+  "states": [
+    {
+      "id": "finding-p1-open",
+      "must_render": ["P1", "shop.example.com is down", "open"],
+      "finding": {
+        "id": 1, "source_engine": "uptime", "severity": "p1",
+        "entity": "site:shop.example.com", "title": "shop.example.com is down",
+        "body": "Three consecutive probes failed; visitors see connection errors.",
+        "fix_action": "Check docker ps on the target; restart the container.",
+        "state": "open", "fingerprint": "fp-shop-down", "accepted_reason": "",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z"
+      }
+    },
+    {
+      "id": "finding-p2-open",
+      "must_render": ["P2", "Certificate for blog.example.com expires in 14 days", "open"],
+      "finding": {
+        "id": 2, "source_engine": "certs", "severity": "p2",
+        "entity": "site:blog.example.com",
+        "title": "Certificate for blog.example.com expires in 14 days",
+        "body": "TlsCertificate.not_after is inside the 30-day window.",
+        "fix_action": "Re-issue the Origin CA certificate from Settings.",
+        "state": "open", "fingerprint": "fp-blog-cert", "accepted_reason": "",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z"
+      }
+    },
+    {
+      "id": "finding-p3-open",
+      "must_render": ["P3", "docs.example.com has no traffic in 24h", "open"],
+      "finding": {
+        "id": 3, "source_engine": "traffic", "severity": "p3",
+        "entity": "site:docs.example.com",
+        "title": "docs.example.com has no traffic in 24h",
+        "body": "The digest has nothing to roll up for this site.",
+        "fix_action": "Confirm the site is still wanted, or archive it.",
+        "state": "open", "fingerprint": "fp-docs-quiet", "accepted_reason": "",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z"
+      }
+    },
+    {
+      "id": "finding-p2-acked",
+      "must_render": ["P2", "acked", "api.example.com data feed is stale"],
+      "finding": {
+        "id": 4, "source_engine": "uptime", "severity": "p2",
+        "entity": "site:api.example.com",
+        "title": "api.example.com data feed is stale",
+        "body": "Last tick is older than the site's staleness threshold.",
+        "fix_action": "Inspect the worker; restart if it is wedged.",
+        "state": "acked", "fingerprint": "fp-api-stale", "accepted_reason": "",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z"
+      }
+    },
+    {
+      "id": "finding-p3-accepted",
+      "must_render": ["P3", "accepted", "lab is experiment-only"],
+      "finding": {
+        "id": 5, "source_engine": "readiness", "severity": "p3",
+        "entity": "site:lab.example.com",
+        "title": "lab.example.com is a single-instance experiment",
+        "body": "Scale-out is refused for local-state sites.",
+        "fix_action": "Leave it, or make the site scale-ready.",
+        "state": "accepted", "fingerprint": "fp-lab-single",
+        "accepted_reason": "lab is experiment-only",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z"
+      }
+    },
+    {
+      "id": "finding-p1-resolved",
+      "must_render": ["P1", "resolved", "shop.example.com recovered"],
+      "finding": {
+        "id": 6, "source_engine": "uptime", "severity": "p1",
+        "entity": "site:shop.example.com",
+        "title": "shop.example.com recovered",
+        "body": "Probes succeeded after the restart.",
+        "fix_action": "No further action.",
+        "state": "resolved", "fingerprint": "fp-shop-recovered", "accepted_reason": "",
+        "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:20:00Z"
+      }
+    },
+    {
+      "id": "degraded-polling",
+      "must_render": ["degraded", "polling every 10 s"]
+    },
+    {
+      "id": "deploy-failure-blue-green",
+      "must_render": ["Old version still serving — site unaffected", "health_check", "Retry from step 5"],
+      "deploy": {
+        "id": 11, "site": "staging.shop.example.com", "version": 2,
+        "state": "failed", "strategy": "blue_green",
+        "headline": "Old version still serving — site unaffected",
+        "steps": [
+          {"name": "build", "state": "succeeded"},
+          {"name": "ship", "state": "succeeded"},
+          {"name": "migrate", "state": "succeeded"},
+          {"name": "start_green", "state": "succeeded"},
+          {"name": "health_check", "state": "failed"},
+          {"name": "dns", "state": "pending"},
+          {"name": "route_tls", "state": "pending"},
+          {"name": "smoke_test", "state": "pending"},
+          {"name": "cutover", "state": "pending"}
+        ],
+        "actions": [
+          {"id": "retry", "label": "Retry from step 5 (health_check)",
+           "does": "Resume the deploy at health_check (blue_green); earlier succeeded steps are not re-run."},
+          {"id": "rollback", "label": "Roll back",
+           "does": "Restore the previous release and stop this deploy."},
+          {"id": "abort", "label": "Abort & clean up",
+           "does": "Cancel this deploy and remove in-progress green resources."}
+        ]
+      }
+    },
+    {
+      "id": "deploy-failure-recreate",
+      "must_render": ["Site is down — old version is not serving", "start_green", "Retry from step 4"],
+      "deploy": {
+        "id": 12, "site": "lab.example.com", "version": 1,
+        "state": "failed", "strategy": "recreate",
+        "headline": "Site is down — old version is not serving",
+        "steps": [
+          {"name": "build", "state": "succeeded"},
+          {"name": "ship", "state": "succeeded"},
+          {"name": "migrate", "state": "succeeded"},
+          {"name": "start_green", "state": "failed"},
+          {"name": "health_check", "state": "pending"},
+          {"name": "dns", "state": "pending"},
+          {"name": "route_tls", "state": "pending"},
+          {"name": "smoke_test", "state": "pending"},
+          {"name": "cutover", "state": "pending"}
+        ],
+        "actions": [
+          {"id": "retry", "label": "Retry from step 4 (start_green)",
+           "does": "Resume the deploy at start_green (recreate); earlier succeeded steps are not re-run."},
+          {"id": "rollback", "label": "Roll back",
+           "does": "Restore the previous release and stop this deploy."},
+          {"id": "abort", "label": "Abort & clean up",
+           "does": "Cancel this deploy and remove in-progress green resources."}
+        ]
+      }
+    },
+    {
+      "id": "warming",
+      "must_render": ["warming", "45s elapsed", "600s expected"],
+      "site": {
+        "name": "prod", "domain": "shop.example.com", "project": "shop",
+        "observed": "warming", "elapsed_s": 45, "expected_s": 600
+      }
+    },
+    {
+      "id": "data-stale",
+      "must_render": ["data-stale"],
+      "site": {
+        "name": "prod", "domain": "api.example.com", "project": "api",
+        "observed": "running", "badge": "data-stale"
+      }
+    },
+    {
+      "id": "single-instance",
+      "must_render": ["single-instance"],
+      "site": {
+        "name": "lab", "domain": "lab.example.com", "project": "lab",
+        "instances": 1, "single_instance": true
+      }
+    },
+    {
+      "id": "cert-expiring",
+      "must_render": ["Certificate for blog.example.com expires in 14 days"],
+      "finding": {
+        "id": 2, "source_engine": "certs", "severity": "p2",
+        "entity": "site:blog.example.com",
+        "title": "Certificate for blog.example.com expires in 14 days",
+        "body": "TlsCertificate.not_after is inside the 30-day window.",
+        "fix_action": "Re-issue the Origin CA certificate from Settings.",
+        "state": "open", "fingerprint": "fp-blog-cert", "accepted_reason": ""
+      }
+    },
+    {
+      "id": "unproxied-cert-refusal",
+      "must_render": ["TLS refused", "unproxied public site", "View finding"],
+      "site": {
+        "name": "prod", "domain": "shop.example.com", "project": "shop",
+        "cert_refusal": {"detail": "unproxied public site", "finding_id": 7}
+      },
+      "finding": {
+        "id": 7, "source_engine": "certs", "severity": "p1",
+        "entity": "site:shop.example.com",
+        "title": "Unproxied site cannot be issued a certificate",
+        "body": "shop.example.com is public and unproxied; Hub-central DNS-01 is not built.",
+        "fix_action": "Proxy the site through Cloudflare, or wait for Phase 4's DNS-01.",
+        "state": "open", "fingerprint": "fp-unproxied", "accepted_reason": ""
+      }
+    },
+    {
+      "id": "alert-storm",
+      "must_render": ["Alert storm", "12 P2s"],
+      "finding": {
+        "id": 8, "source_engine": "antinoise", "severity": "p2",
+        "entity": "host:home-server-1",
+        "title": "Alert storm: 12 P2s grouped",
+        "body": "More than one P2 fired inside ten minutes; they left as one push.",
+        "fix_action": "Ack the group; inspect the host before the next burst.",
+        "state": "open", "fingerprint": "fp-storm", "accepted_reason": ""
+      }
+    },
+    {
+      "id": "host-down-suppression",
+      "must_render": ["Host home-server-1 is down", "3 site alerts suppressed"],
+      "finding": {
+        "id": 9, "source_engine": "uptime", "severity": "p1",
+        "entity": "host:home-server-1",
+        "title": "Host home-server-1 is down — 3 site alerts suppressed",
+        "body": "The host is unreachable; per-site downs are collapsed into this Finding.",
+        "fix_action": "Bring the host back; site alerts will resume on their own.",
+        "state": "open", "fingerprint": "fp-host-down", "accepted_reason": ""
+      }
+    },
+    {
+      "id": "map-empty",
+      "must_render": ["Map is empty"],
+      "sites": []
+    },
+    {
+      "id": "map-populated",
+      "must_render": ["Map is populated"],
+      "sites": [
+        {"domain": "shop.example.com"},
+        {"domain": "api.example.com"},
+        {"domain": "staging.shop.example.com"},
+        {"domain": "blog.example.com"},
+        {"domain": "lab.example.com"},
+        {"domain": "docs.example.com"}
+      ]
+    }
+  ],
+  "scripted_events": [
+    {"t": 0, "topic": "demo.sim.log", "event": {"line": "simulation replayer online"}},
+    {"t": 1, "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 1, "severity": "p1", "state": "open", "entity": "site:shop.example.com", "title": "shop.example.com is down"}},
+    {"t": 3, "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 8, "severity": "p2", "state": "open", "title": "Alert storm: 12 P2s grouped"}},
+    {"t": 5, "topic": "site.shop.status", "event": {"site": "shop.example.com", "observed": "warming", "elapsed_s": 45, "expected_s": 600}},
+    {"t": 7, "topic": "site.api.status", "event": {"site": "api.example.com", "observed": "running", "badge": "data-stale"}},
+    {"t": 9, "topic": "site.lab.status", "event": {"site": "lab.example.com", "deploy_strategy": "recreate", "observed": "down"}},
+    {"t": 11, "topic": "deploy.staging-shop.status", "event": {"site": "staging.shop.example.com", "step": "health_check", "status": "failed", "strategy": "blue_green", "impact": "Old version still serving — site unaffected"}},
+    {"t": 13, "topic": "deploy.lab.status", "event": {"site": "lab.example.com", "step": "start_green", "status": "failed", "strategy": "recreate", "impact": "Site is down — old version is not serving"}},
+    {"t": 15, "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 9, "severity": "p1", "state": "open", "title": "Host home-server-1 is down — 3 site alerts suppressed"}},
+    {"t": 17, "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 7, "severity": "p1", "state": "open", "title": "Unproxied site cannot be issued a certificate"}},
+    {"t": 19, "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 2, "severity": "p2", "state": "open", "title": "Certificate for blog.example.com expires in 14 days"}},
+    {"t": 21, "topic": "findings", "event": {"kind": "map", "state": "empty", "title": "Map is empty"}},
+    {"t": 23, "topic": "findings", "event": {"kind": "map", "state": "populated", "title": "Map is populated", "sites": 6}}
+  ]
+}

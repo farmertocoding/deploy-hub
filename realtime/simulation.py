@@ -1,4 +1,4 @@
-"""Simulation-mode event replayer v0 (§F8).
+"""Simulation-mode event replayer v1 (§F8).
 
 Publishes scripted synthetic events through the REAL Channels path — the same
 publish() the product uses — so UI failure states can be rendered and tested.
@@ -10,7 +10,7 @@ import time
 
 from .publish import publish
 
-SEED = pathlib.Path(__file__).resolve().parent.parent / "simulation/seed_v0.json"
+SEED = pathlib.Path(__file__).resolve().parent.parent / "simulation/seed_v1.json"
 
 
 def replay(speed=1.0):

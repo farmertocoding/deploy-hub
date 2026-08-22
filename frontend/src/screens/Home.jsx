@@ -9,7 +9,7 @@ import { DESKTOP_MIN_PX } from "../Chrome.jsx";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
-export function MapPanel({ width }) {
+export function MapPanel({ width, sites }) {
   if (width < DESKTOP_MIN_PX) {
     // §F6: the map is explicitly OUT of the phone scope. Saying so beats rendering a
     // squashed unusable one — the phone screens are Sites, Deploys and the finding
@@ -17,6 +17,22 @@ export function MapPanel({ width }) {
     return (
       <p style={{ color: "#8b949e", padding: "0 16px" }}>
         Map is desktop-only — use Sites for status on a phone.</p>
+    );
+  }
+  // Task 14 owns the graph. These two sentences exist so §F8 can render
+  // empty vs populated without this screen becoming the map.
+  if (Array.isArray(sites) && sites.length === 0) {
+    return (
+      <div style={{ ...box, margin: 16, minHeight: 160, color: "#8b949e" }}>
+        Map is empty — no sites to place.
+      </div>
+    );
+  }
+  if (Array.isArray(sites) && sites.length > 0) {
+    return (
+      <div style={{ ...box, margin: 16, minHeight: 160, color: "#8b949e" }}>
+        Map is populated — {sites.length} sites.
+      </div>
     );
   }
   return (
