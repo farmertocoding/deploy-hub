@@ -218,6 +218,20 @@ def _write_lease(name):
         path.write_text(existing + name + "\n", encoding="utf-8")
 
 
+def _clear_lease():
+    """Drop the lease after a successful reap.
+
+    reap_test_plane deletes every listed AND leased hub-t3-* name, so once it
+    returns without raising, every leased name is gone and keeping the file
+    only poisons later runs (reap re-deleting ghosts; the hermetic T1 reaper
+    tests read the default lease root). A failed reap keeps the lease — that
+    is the file's whole job.
+    """
+    path = REPO / "tmp" / ".t3-lease"
+    if path.is_file():
+        path.unlink()
+
+
 def _mp_exec(vm, argv, *, timeout=300):
     return exec(vm.mp(), argv, timeout=timeout)
 
@@ -593,6 +607,7 @@ def t3_vm():
         yield vm
     finally:
         reap_test_plane()
+        _clear_lease()
 
 
 def remove_site_containers(vm):

@@ -66,8 +66,12 @@ def test_reaper_only_matches_hub_t3_prefix(tmp_path):
 
 
 @pytest.mark.req("HARNESS-REAPER-TEST-PLANE")
-def test_reaper_idempotent_on_absent_name():
+def test_reaper_idempotent_on_absent_name(tmp_path):
     """Absent `hub-t3-*` is success; a second reap is still success.
+
+    Hermetic lease_root: the default is the repo's tmp/, which on a Multipass
+    host carries real session leases — reading it here made this T1 test red
+    after any live T3 run.
 
     What would make this fail: delete_purge / reap raising when the name is
     already gone.
@@ -87,15 +91,17 @@ def test_reaper_idempotent_on_absent_name():
     delete_purge("hub-t3-gone", run_fn=gone)
 
     deleted = []
-    reap_test_plane(list_fn=lambda: [], delete_fn=deleted.append)
+    reap_test_plane(list_fn=lambda: [], delete_fn=deleted.append, lease_root=tmp_path)
     assert deleted == []
-    reap_test_plane(list_fn=lambda: [], delete_fn=deleted.append)
+    reap_test_plane(list_fn=lambda: [], delete_fn=deleted.append, lease_root=tmp_path)
     assert deleted == []
 
 
 @pytest.mark.req("HARNESS-REAPER-TEST-PLANE")
-def test_reaper_refuses_bare_name_without_prefix():
+def test_reaper_refuses_bare_name_without_prefix(tmp_path):
     """launch / delete_purge refuse names that do not start with `hub-t3-`.
+
+    Hermetic lease_root, same reason as test_reaper_idempotent_on_absent_name.
 
     What would make this fail: deleting `ubuntu` or launching `primary` because
     a caller omitted the reaper prefix.
@@ -109,5 +115,6 @@ def test_reaper_refuses_bare_name_without_prefix():
         launch("orphan-vm", cpus=1, mem="1G", disk="5G")
 
     deleted = []
-    reap_test_plane(list_fn=lambda: ["orphan-vm"], delete_fn=deleted.append)
+    reap_test_plane(
+        list_fn=lambda: ["orphan-vm"], delete_fn=deleted.append, lease_root=tmp_path)
     assert deleted == []
