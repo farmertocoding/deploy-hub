@@ -428,11 +428,101 @@ def _declares_ws(body):
     return bool(nested.get("ws") or nested.get("websocket"))
 
 
+# Dependency-free ws probe run with the target's python3 (same contract as the
+# curl healthz probe above). The old fallback ran `websocat -n1 ws://127.0.0.1/ws`
+# — a binary no target ships, against port 80, without the Host header Caddy
+# routes on — so the first live ws smoke (T3, panel fix wave) failed for every
+# ws site. Handshake + first frame; prints the payload; exit 0 only on a real
+# data frame.
+_WS_PROBE_PY = b"""\
+import base64
+import os
+import socket
+import sys
+
+
+def main(host, port, path, server_name):
+    key = base64.b64encode(os.urandom(16)).decode()
+    req = (
+        f"GET {path} HTTP/1.1\\r\\n"
+        f"Host: {server_name}\\r\\n"
+        f"Upgrade: websocket\\r\\n"
+        f"Connection: Upgrade\\r\\n"
+        f"Sec-WebSocket-Key: {key}\\r\\n"
+        f"Sec-WebSocket-Version: 13\\r\\n"
+        f"\\r\\n"
+    )
+    with socket.create_connection((host, int(port)), timeout=10) as sock:
+        sock.sendall(req.encode())
+        header = b""
+        while b"\\r\\n\\r\\n" not in header:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            header += chunk
+        if b"\\r\\n\\r\\n" not in header:
+            sys.stderr.write("no websocket handshake\\n")
+            return 2
+        head, rest = header.split(b"\\r\\n\\r\\n", 1)
+        if b"101" not in head.split(b"\\r\\n", 1)[0]:
+            sys.stderr.write(head.decode("latin1", "replace") + "\\n")
+            return 2
+        data = rest
+        while len(data) < 2:
+            more = sock.recv(4096)
+            if not more:
+                break
+            data += more
+        if len(data) < 2:
+            return 3
+        opcode = data[0] & 0x0F
+        ln = data[1] & 0x7F
+        idx = 2
+        if ln == 126:
+            while len(data) < 4:
+                data += sock.recv(4096)
+            ln = int.from_bytes(data[2:4], "big")
+            idx = 4
+        elif ln == 127:
+            while len(data) < 10:
+                data += sock.recv(4096)
+            ln = int.from_bytes(data[2:10], "big")
+            idx = 10
+        while len(data) < idx + ln:
+            more = sock.recv(4096)
+            if not more:
+                break
+            data += more
+        payload = data[idx : idx + ln]
+        sys.stdout.write(payload.decode("utf-8", "replace"))
+        return 0 if opcode in (1, 2) and payload else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(*sys.argv[1:4], sys.argv[4] if len(sys.argv) > 4 else sys.argv[1]))
+"""
+
+
+def _ws_path(body):
+    if body.get("ws_path"):
+        return body["ws_path"]
+    nested = body.get("healthz") or {}
+    return nested.get("ws_path") or "/ws"
+
+
 def _ws_frame(desired):
     fetch = desired.get("ws_fetch")
     if fetch is not None:
         return fetch()
-    result = desired["transport"].probe(["websocat", "-n1", "ws://127.0.0.1/ws"])
+    transport = desired["transport"]
+    body = desired.get("manifest_body") or {}
+    host, _, port = _caddy_listen_hostport(desired).rpartition(":")
+    domain = desired.get("domain") or f"{desired['site_slug']}.local"
+    user = ssh_user_from(desired)
+    ensure_hub_dir(transport, user, desired.get("heartbeat"))
+    remote = hub_join("ws-probe.py", ssh_user=user)
+    transport.put(_WS_PROBE_PY, remote, mode=0o644)
+    result = transport.probe(["python3", remote, host, port, _ws_path(body), domain])
     if not result.ok:
         return None
     return result.stdout

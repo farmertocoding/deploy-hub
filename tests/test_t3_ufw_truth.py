@@ -117,7 +117,11 @@ def test_verify_hardening_target_profile_passes(t3_ready):
 @pytest.mark.skipif(not multipass_available(), reason="multipass is not available")
 @pytest.mark.req("HARNESS-T3-UFW-TRUTH")
 def test_inner_docker_is_overlay2_not_vfs(t3_ready):
-    """Guest docker storage driver is overlay2, not the T2 vfs false-green.
+    """Guest docker storage driver is real overlay CoW, not the T2 vfs false-green.
+
+    jammy's current docker.io reports the unified driver as `overlayfs`
+    (containerd snapshotter); older engines say `overlay2`. Both are the real
+    overlay filesystem this req demands — vfs is the false-green.
 
     What would make this fail: running this inside hub-test-target (vfs).
     """
@@ -126,7 +130,7 @@ def test_inner_docker_is_overlay2_not_vfs(t3_ready):
         ["sudo", "docker", "info", "--format", "{{.Driver}}"],
     )
     driver = (result.stdout or "").strip()
-    assert driver == "overlay2", driver
+    assert driver in {"overlay2", "overlayfs"}, driver
     assert "vfs" not in driver
 
 
