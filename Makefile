@@ -52,7 +52,7 @@ GNUMAKEFLAGS and MAKEFILES, and drop dry-run/ignore-errors/question/touch flags 
 any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the Makefile.)
 endif
 
-.PHONY: dev test test-frontend test-t2 test-t3 nightly nightly-gates lint \
+.PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
 	conformance conformance-2.5 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
@@ -126,6 +126,13 @@ test-t2:
 test-t3:
 	pytest -q -m t3
 
+# ONE all-tiers session (panel F2 ruling): nightly's gate. Three narrowed
+# sessions (test, test-t2, test-t3) each overwrite conformance/run-report.json
+# with full_run: false, so conformance-2.5 reading the last one hard-fails
+# even when everything passed — nightly could never exit 0.
+test-all:
+	pytest -q
+
 test-frontend:
 	cd frontend && node --import tsx --test "tests/*.test.ts"
 
@@ -144,9 +151,11 @@ scripts-lint:
 	shfmt -d -i 4 -ci $(SCRIPTS)
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
-# Review-round gate: phase 2.5 without Multipass-only (tier:t3) reqs (D-024, D-029).
+# Review-round gate: phase 2.5 without live-only reqs — tier:t3 (Multipass)
+# and tier:t2 (docker) both stay out so review-round grades the T1 report
+# honestly (D-024, D-029, panel F1). conformance-2.5 demands them all.
 conformance:
-	python conformance/check.py --phase 2.5 --exclude-tier t3
+	python conformance/check.py --phase 2.5 --exclude-tier t3 --exclude-tier t2
 
 # All-tiers phase 2.5 gate. Not a review-round prerequisite (D-023).
 conformance-2.5:
@@ -221,7 +230,10 @@ review-round: lint log-scrub scripts-lint test test-frontend mutation check-gene
 # not run a target's recipe when a prerequisite fails, so the filer cannot live
 # on a `nightly: lint …` rule. The wrapper invokes nightly-gates and, on
 # non-zero, calls scripts_dev/file_nightly_failure.py then exits N.
-nightly-gates: lint log-scrub scripts-lint test test-t2 test-t3 conformance-2.5
+# Panel F2 ruling: nightly grades ONE all-tiers pytest session, then
+# conformance-2.5 reads that session's full_run report. Listing test/test-t2/
+# test-t3 here would leave a narrowed report for conformance-2.5 to refuse.
+nightly-gates: lint log-scrub scripts-lint test-all conformance-2.5
 	@echo "nightly mechanical gates done"
 
 nightly:
