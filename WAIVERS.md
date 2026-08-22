@@ -83,7 +83,10 @@ WAIVED: tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-r
 # RETIRED 2026-08-22 (Task 13): simulation/seed_v0.json+review3-N2+warming-omits-elapsed-expected
 # — seed_v1 warming carries elapsed_s/expected_s and SiteObserved renders
 # "45s elapsed / 600s expected".
-WAIVED: deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns — commands + 0400 + no secrets hold; impact/DNS copy is Phase 3 operator UX. (2026-08-21)
+# RETIRED 2026-08-22 (Task 16): deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns
+# — tests/test_breakglass.py now asserts impact before commands, Hub-side
+# upsert_record only, freshness metadata, 0400 root-owned, no token/secret,
+# and the alert-protocol §3 advisory-only note.
 WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the 24h live form is the Phase 2.5 nightly drill. check.py verified file presence, not duration. (2026-08-21)
 
 # Phase 2.5 exit (Task 16, amended by the panel fix wave). D-024: a `tier: t3` req
