@@ -212,6 +212,75 @@ def test_verified_scope_is_cached_and_reverified_after_ttl(monkeypatch):
 
 
 @pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_token_rotation_reprobes_within_ttl(monkeypatch):
+    """A rotated secret under the SAME dns_token_ref never inherits the old
+    token's verification (D-034: no code path holds an over-scoped client).
+
+    What would make this fail: caching per (token_ref, zone) alone, so a new
+    token stored under the ref inside the TTL rides the old token's pass and
+    is handed a client without ever being probed.
+    """
+    from providers.registry import ScopeError, dns_provider_for
+    from vault import service as vault_service
+
+    zone = _zone()
+    http = _http(monkeypatch, _routes(zone))
+    ref = zone.account.dns_token_ref
+
+    dns_provider_for(zone)
+    dns_provider_for(zone)
+    assert len(http.requests) == 2  # same secret: cached inside the TTL
+
+    rotated = "t1-wall-rotated-token-not-a-credential"  # nosec B105
+    vault_service.put(kind="api_token", owner_type="dns_account",
+                      owner_id=ref, plaintext=rotated.encode())
+    dns_provider_for(zone)
+    assert len(http.requests) == 4  # new secret: re-verified immediately
+    assert http.requests[2][2].get("Authorization") == f"Bearer {rotated}"
+
+    # A rotation to a token that fails the probe refuses, TTL or no TTL.
+    vault_service.put(kind="api_token", owner_type="dns_account",
+                      owner_id=ref, plaintext=b"t1-wall-overscoped-rotation")
+    http.routes[PROBE] = {"success": True, "result": [
+        {"id": zone.provider_zone_id, "name": zone.name},
+        {"id": "zid-extra", "name": "extra.example"},
+    ]}
+    with pytest.raises(ScopeError):
+        dns_provider_for(zone)
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_auth_error_mid_use_invalidates_the_cached_verification(monkeypatch):
+    """A 401 mid-use drops the cached pass: the next construction re-probes.
+
+    What would make this fail: the on_auth_error hook not being wired (or not
+    popping the cache), so a token Cloudflare already refuses keeps being
+    handed out on the stale verification until the TTL expires.
+    """
+    from urllib.error import HTTPError
+
+    from providers.cloudflare import CloudflareApiError
+    from providers.registry import dns_provider_for
+
+    zone = _zone()
+    routes = _routes(zone)
+    list_path = f"/zones/{zone.provider_zone_id}/dns_records?per_page=100&page=1"
+    routes[("GET", list_path)] = HTTPError("u", 401, "denied", {}, None)
+    http = _http(monkeypatch, routes)
+
+    provider = dns_provider_for(zone)
+    assert len(http.requests) == 2  # verify + probe
+
+    with pytest.raises(CloudflareApiError):
+        provider.list_records(zone)
+
+    dns_provider_for(zone)
+    assert [req[1] for req in http.requests] == [
+        VERIFY[1], PROBE[1], list_path, VERIFY[1], PROBE[1],
+    ]
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
 def test_test_mode_requires_all_three_keys(monkeypatch):
     """HUB_TEST_MODE + purpose=test + allowlist — drop any one and it refuses.
 

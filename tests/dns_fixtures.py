@@ -13,7 +13,7 @@ def default_dns_zone(name="example.com", *, purpose="prod", provider_zone_id=Non
     account, _ = DnsAccount.objects.get_or_create(
         provider=DnsAccount.Provider.CLOUDFLARE, label="test-fixture",
     )
-    zone, _ = DnsZone.objects.get_or_create(
+    zone, created = DnsZone.objects.get_or_create(
         account=account,
         name=name,
         defaults={
@@ -21,4 +21,9 @@ def default_dns_zone(name="example.com", *, purpose="prod", provider_zone_id=Non
             "purpose": purpose,
         },
     )
+    if not created and zone.purpose != purpose:
+        # Never hand back a zone of the wrong purpose silently — a test asking
+        # for purpose=test must not receive the shared prod row (§B9).
+        zone.purpose = purpose
+        zone.save(update_fields=["purpose"])
     return zone

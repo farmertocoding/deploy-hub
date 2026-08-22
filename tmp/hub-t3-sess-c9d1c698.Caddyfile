@@ -1,0 +1,6 @@
+{
+	auto_https off
+}
+:80 {
+	respond "hub-t3-vm" 200
+}

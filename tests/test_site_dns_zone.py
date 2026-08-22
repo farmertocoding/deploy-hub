@@ -82,6 +82,47 @@ def test_dns_zone_unique_per_provider_and_name():
 
 
 @pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+@pytest.mark.django_db(transaction=True)
+def test_migration_refuses_preexisting_public_site_without_zone():
+    """0009 aborts with a named, actionable error on legacy public sites.
+
+    No backfill is honest (the Hub cannot invent a provider zone, D-033) and
+    silently flipping exposure would lie to the operator — so the migration
+    fails closed BEFORE the constraint lands, names the offending sites and
+    both fixes, and leaves the database untouched at 0008. What would make
+    this fail: the constraint ALTER dying with a bare IntegrityError, or the
+    migration recording itself applied despite the refusal.
+    """
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    at_0008 = [("core", "0008_checkrun")]
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes("core")
+    executor.migrate(at_0008)
+    old_apps = executor.loader.project_state(at_0008).apps
+    OldProject = old_apps.get_model("core", "Project")
+    OldSite = old_apps.get_model("core", "Site")
+    project = OldProject.objects.create(name="m9", slug="m9-upgrade")
+    OldSite.objects.create(project=project, name="legacy-pub")
+
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            MigrationExecutor(connection).migrate(latest)
+        message = str(exc.value)
+        assert "site_public_requires_dns_zone" in message
+        assert "legacy-pub" in message  # names the offender
+        assert "DnsZone" in message and "mesh_only" in message  # names both fixes
+        # The refusal rolled the migration back: 0009 is not recorded applied.
+        applied = MigrationExecutor(connection).loader.applied_migrations
+        assert ("core", "0009_phase3") not in applied
+    finally:
+        OldSite.objects.filter(name="legacy-pub").delete()
+        OldProject.objects.filter(slug="m9-upgrade").delete()
+        MigrationExecutor(connection).migrate(latest)
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
 def test_pipeline_passes_a_dnszone_not_a_networkzone():
     """The DNS step hands the provider Site.dns_zone, never a NetworkZone.
 

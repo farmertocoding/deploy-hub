@@ -14,10 +14,15 @@ Scope is enforced synchronously, before the client is usable (D-034 panel r2):
       (HUB_TEST_MODE + purpose=test + HUB_TEST_ZONE_SLUGS); outside it,
       never a purpose=test zone.
 
-A passed verification is cached per (token_ref, zone) for a bounded TTL and
-re-verified on expiry or on any auth error mid-use; a verification failure
-fails closed and files a Finding. Tokens are loaded from the vault by the
-owner-id ref on DnsAccount — refs, never values, live on the model.
+A passed verification is cached per (token_ref, resolved vault Secret, zone)
+for a bounded TTL and re-verified on expiry or on any auth error mid-use.
+The Secret pk in the key is what makes rotation safe: storing a new token
+under the same dns_token_ref changes the key, so the never-probed new token
+re-verifies instead of inheriting the old token's pass — D-034's "no code
+path holds an over-scoped client" wins over any per-ref shortcut. A
+verification failure fails closed and files a Finding. Tokens are loaded
+from the vault by the owner-id ref on DnsAccount — refs, never values, live
+on the model.
 """
 import time
 
@@ -35,7 +40,7 @@ from .cloudflare import (
 
 VERIFY_TTL_S = 900.0  # 15 min: the fail-closed re-verify window
 
-_verified = {}  # (token_ref, zone_pk) -> monotonic timestamp of the last pass
+_verified = {}  # (token_ref, secret_pk, zone_pk) -> monotonic time of the last pass
 
 
 class ScopeError(RuntimeError):
@@ -65,12 +70,13 @@ def dns_provider_for(zone, *, now=time.monotonic, ttl_s=VERIFY_TTL_S):
             f"DnsAccount {account.label!r} has no dns_token_ref; connect the "
             "account before constructing a client"
         )
+    secret_pk, raw = _load_token(ref)
     try:
-        token = refuse_global_api_key(_load_token(ref))
+        token = refuse_global_api_key(raw)
     except CloudflareError as error:
         raise ScopeError(str(error)) from None
 
-    key = (ref, zone.pk)
+    key = (ref, secret_pk, zone.pk)
     stamp = _verified.get(key)
     if stamp is None or now() - stamp >= ttl_s:
         _verified.pop(key, None)  # expired or absent: nothing to fall back to
@@ -100,19 +106,22 @@ def _purpose_wall(zone):
 
 
 def _load_token(ref):
-    """Resolve a vault owner-id ref to token bytes (the Target.ssh_key_ref
-    pattern): newest api_token secret owned by the ref."""
+    """Resolve a vault owner-id ref (the Target.ssh_key_ref pattern) to the
+    newest dns_account api_token secret, returning (secret_pk, token_bytes).
+    The pk feeds the verification-cache key so rotation re-probes."""
     from vault import service as vault_service
     from vault.models import Secret
 
     secret = (
-        Secret.objects.filter(kind=Secret.Kind.API_TOKEN, owner_id=ref)
-        .order_by("-created_at")
+        Secret.objects.filter(
+            kind=Secret.Kind.API_TOKEN, owner_type="dns_account", owner_id=ref,
+        )
+        .order_by("-created_at", "-pk")
         .first()
     )
     if secret is None:
         raise ScopeError(f"no api_token secret in the vault for ref {ref!r}")
-    return vault_service.get(secret, reason="dns scope verification")
+    return secret.pk, vault_service.get(secret, reason="dns scope verification")
 
 
 def _verify_scope(token, zone):
