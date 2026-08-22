@@ -122,6 +122,31 @@ tier t3; both fixture trees exist; the two t3 clauses
 (`test_t3_both_fixtures_ready_v2_rollback_reaper`, `test_t3_ufw_truth`) carry
 `@pytest.mark.t3` and are skipped-only here; REL-P2 24h is not claimed.
 
+## Review panel and merge authority (delegated 2026-08-22)
+
+Joseph delegated the sensitive-path merge click for this phase to a recorded
+expert-panel vote ("make this process automation decide and review by team of
+experts", 2026-08-22). The panel reviewed the whole branch diff
+(`2d6e99c..c3573c4`, 467KB package) on three independent seats/models:
+
+- **Architect** (claude-opus-5-thinking-high): MERGE-AFTER-FIXES — C1
+  (sample-site T3 env path), C2 (dummy-tailscale0 manufactured mesh green).
+- **Security** (gpt-5.6-sol-medium): MERGE-AFTER-FIXES — S1 (DNS zone binding),
+  S2 (nightly bundle scrubber), S3 (reaper custody).
+- **QE/SRE** (claude-fable-5-thinking-high): MERGE-AFTER-FIXES — F1
+  (review-round red-by-construction), F2 (nightly could never exit 0),
+  F3 (=C1), F4 (T3 VM isolation).
+
+One fix wave (`c3573c4..fc8e563`, 13 commits) addressed all ten findings plus
+the live-T3 boot defect; the scoped re-review verdicted every finding
+ADDRESSED, judged the three disclosed extras sound (`# nosec` markers,
+`_ws_frame` rewrite, no-route fail-fast), found no new Critical/Important
+breakage, and answered "safe to merge to master per the panel's conditional
+votes: yes". Findings parked for the next phase are in the SDD ledger:
+self-declared t3 marks (I1), `worker_entry` test-tree reach (I2), duplicated
+Multipass driver (I4), drill prober wiring (I5), restore-stub status (M1),
+`find_missed` prod inertness (M2), LE waiver probe (M4), ws-probe read loops.
+
 ## Follow-up, still open
 
 1. ~~First local Multipass T3 run — retires the two host-without-multipass
