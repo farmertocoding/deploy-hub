@@ -1,0 +1,216 @@
+"""T3 Multipass driver. Argv lists only; never bind Hub docker.sock."""
+from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+from dataclasses import dataclass
+
+NAME_PREFIX = "hub-t3-"
+DEFAULT_IMAGE = "22.04"
+DEFAULT_USER = "deploy"
+VERSION_TIMEOUT_S = 5
+
+CLOUD_INIT = """\
+#cloud-config
+package_update: true
+packages:
+  - openssh-server
+users:
+  - name: deploy
+    gecos: one-shot deploy user
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+runcmd:
+  - systemctl enable --now ssh
+  - systemctl enable --now sshd
+"""
+
+
+class T3NameError(ValueError):
+    """Name is outside the hub-t3- reaper prefix."""
+
+
+@dataclass(frozen=True)
+class MultipassVM:
+    name: str
+    ipv4: str
+    user: str
+
+
+def require_t3_name(name):
+    if not str(name).startswith(NAME_PREFIX):
+        raise T3NameError(
+            f"refusing {name!r}: test-plane names must start with {NAME_PREFIX!r}"
+        )
+    return name
+
+
+def version_argv():
+    return ["multipass", "version"]
+
+
+def list_argv():
+    return ["multipass", "list", "--format", "csv"]
+
+
+def launch_argv(name, cpus, mem, disk, image=DEFAULT_IMAGE, cloud_init_path=None):
+    require_t3_name(name)
+    argv = [
+        "multipass",
+        "launch",
+        image,
+        "--name",
+        name,
+        "--cpus",
+        str(cpus),
+        "--memory",
+        str(mem),
+        "--disk",
+        str(disk),
+    ]
+    if cloud_init_path:
+        argv.extend(["--cloud-init", str(cloud_init_path)])
+    return argv
+
+
+def exec_argv(vm, argv):
+    require_t3_name(vm.name)
+    if not isinstance(argv, (list, tuple)) or any(not isinstance(p, str) for p in argv):
+        raise TypeError("exec argv must be a list of str")
+    return ["multipass", "exec", vm.name, "--", *argv]
+
+
+def transfer_argv(src, dest):
+    if not isinstance(src, str) or not isinstance(dest, str):
+        raise TypeError("transfer paths must be str")
+    _require_transfer_name(src)
+    _require_transfer_name(dest)
+    return ["multipass", "transfer", src, dest]
+
+
+def delete_purge_argv(name):
+    require_t3_name(name)
+    return ["multipass", "delete", "--purge", name]
+
+
+def _require_transfer_name(spec):
+    if ":" in spec and not spec.startswith("/"):
+        require_t3_name(spec.split(":", 1)[0])
+
+
+def _run(argv, *, timeout=60):
+    if not isinstance(argv, (list, tuple)) or any(not isinstance(p, str) for p in argv):
+        raise TypeError("argv must be a list of str — never a shell string")
+    return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout)
+
+
+def multipass_available():
+    try:
+        result = subprocess.run(
+            version_argv(),
+            capture_output=True,
+            text=True,
+            timeout=VERSION_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def waiver_illegal_if(probe):
+    """A host-without-multipass waiver is illegal when Multipass is present.
+
+    `probe` is `multipass_available` (or a bool / thunk). Task 16 may plant a
+    dated waiver; this helper refuses that silent-green when the host can run T3.
+    """
+    present = probe() if callable(probe) else bool(probe)
+    return bool(present)
+
+
+def launch(name, cpus, mem, disk, image=DEFAULT_IMAGE, *, run_fn=None):
+    require_t3_name(name)
+    runner = run_fn or _run
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".yaml", prefix="hub-t3-cloud-init-", delete=False
+    ) as fh:
+        fh.write(CLOUD_INIT)
+        init_path = fh.name
+    argv = launch_argv(name, cpus, mem, disk, image=image, cloud_init_path=init_path)
+    result = runner(argv)
+    if getattr(result, "returncode", 0) != 0:
+        err = getattr(result, "stderr", "") or getattr(result, "stdout", "")
+        raise RuntimeError(f"multipass launch {name} failed: {err}")
+    ipv4 = info_ipv4(name, run_fn=runner)
+    return MultipassVM(name=name, ipv4=ipv4, user=DEFAULT_USER)
+
+
+def exec(vm, argv, *, run_fn=None):  # noqa: A001 — brief name; argv list only
+    runner = run_fn or _run
+    result = runner(exec_argv(vm, argv))
+    if getattr(result, "returncode", 0) != 0:
+        err = getattr(result, "stderr", "") or getattr(result, "stdout", "")
+        raise RuntimeError(f"multipass exec {vm.name} failed: {err}")
+    return result
+
+
+def transfer(src, dest, *, run_fn=None):
+    runner = run_fn or _run
+    result = runner(transfer_argv(src, dest))
+    if getattr(result, "returncode", 0) != 0:
+        err = getattr(result, "stderr", "") or getattr(result, "stdout", "")
+        raise RuntimeError(f"multipass transfer failed: {err}")
+    return result
+
+
+def delete_purge(name, *, run_fn=None):
+    require_t3_name(name)
+    runner = run_fn or _run
+    result = runner(delete_purge_argv(name))
+    if getattr(result, "returncode", 0) == 0:
+        return result
+    err = f"{getattr(result, 'stderr', '')} {getattr(result, 'stdout', '')}".lower()
+    if "does not exist" in err or "not found" in err:
+        return result
+    raise RuntimeError(
+        f"multipass delete --purge {name} failed: "
+        f"{getattr(result, 'stderr', '') or getattr(result, 'stdout', '')}"
+    )
+
+
+def info_ipv4(name, *, run_fn=None):
+    require_t3_name(name)
+    runner = run_fn or _run
+    result = runner(["multipass", "info", name, "--format", "json"])
+    if getattr(result, "returncode", 0) != 0:
+        return ""
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return ""
+    info = payload.get("info") or {}
+    entry = info.get(name) or {}
+    addrs = entry.get("ipv4") or []
+    if isinstance(addrs, list) and addrs:
+        return str(addrs[0])
+    return ""
+
+
+def list_names(*, run_fn=None):
+    runner = run_fn or _run
+    result = runner(list_argv())
+    if getattr(result, "returncode", 0) != 0:
+        err = f"{getattr(result, 'stderr', '')} {getattr(result, 'stdout', '')}".lower()
+        if "does not exist" in err or "not found" in err:
+            return []
+        raise RuntimeError(f"multipass list failed: {getattr(result, 'stderr', '')}")
+    names = []
+    for i, line in enumerate((result.stdout or "").splitlines()):
+        if i == 0 and line.lower().startswith("name"):
+            continue
+        raw = line.split(",", 1)[0].strip()
+        if raw:
+            names.append(raw)
+    return names
