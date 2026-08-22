@@ -61,6 +61,13 @@ class CloudProvider:
         raise NotImplementedError
 
 
+class Pager:
+    """One-call publish seam (D-036). Implementations live under providers/."""
+
+    def publish(self, severity, title, body, *, tags, click_url):
+        raise NotImplementedError
+
+
 class OriginCertIssuer:
     """Hub-side Origin CA issuance (D-035). The Hub generates the keypair
     and sends only the CSR; the issuer returns the signed certificate."""

@@ -118,6 +118,20 @@ CADDY = CatalogEntry(
     rollback=["systemctl", "disable", "--now", "caddy"],
 )
 
+# Hub-side probing handoff (D-036): remove server-watch.sh cron + revoke the
+# per-target ntfy publish token. Applied by provision.handoff_hub_probing,
+# never silently mutated — change check/fix/rollback ⇒ bump version.
+# Runtime also edits the user crontab (named test); this path is the
+# /etc/cron.d/server-watch unit that would otherwise keep paging.
+SERVER_WATCH_CRON_D = "/etc/cron.d/server-watch"
+SERVER_WATCH_HANDOFF = CatalogEntry(
+    id="server-watch-handoff",
+    version=1,
+    check=["test", "!", "-e", SERVER_WATCH_CRON_D],
+    fix=["rm", "-f", SERVER_WATCH_CRON_D],
+    rollback=["true"],
+)
+
 # Caddy's native roller (§C4): roll_size 100MiB, roll_keep 5 — target disk is
 # bounded no matter what the Hub does. Validate-first like sshd-dropin; the
 # logrotate entry above stays the backstop.
@@ -154,6 +168,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
     FAIL2BAN_IGNOREIP,
     CADDY,
     CADDY_LOG_ROLL,
+    SERVER_WATCH_HANDOFF,
 )
 
 ENTRIES = {entry.id: entry for entry in CATALOG}

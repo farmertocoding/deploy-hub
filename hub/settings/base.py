@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 
+from celery.schedules import crontab
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = os.environ.get("HUB_SECRET_KEY", "dev-only-insecure-key")
@@ -241,7 +243,66 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.scan_cert_expiry",
         "schedule": 86400.0,
     },
+    "alert-repeat-unacked": {
+        "task": "monitor.tasks.repeat_unacked",
+        "schedule": 300.0,
+    },
+    "alert-group-p2": {
+        "task": "monitor.tasks.deliver_grouped",
+        "schedule": 300.0,
+    },
+    "digest-daily": {
+        "task": "monitor.tasks.build_digest",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "digest-weekly": {
+        "task": "monitor.tasks.build_weekly_rollup",
+        "schedule": crontab(hour=8, minute=0, day_of_week="monday"),
+    },
 }
+# crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday).
+CELERY_TIMEZONE = TIME_ZONE
+
+# --- Pager (D-036) ---
+# Default fake so no test (and no unset-env boot) can page anyone.
+HUB_PAGER_BACKEND = os.environ.get("HUB_PAGER_BACKEND", "fake")
+HUB_NTFY_BASE_URL = os.environ.get("HUB_NTFY_BASE_URL", "https://ntfy.sh")
+HUB_NTFY_TOPIC_P1_REF = os.environ.get("HUB_NTFY_TOPIC_P1_REF", "ntfy-topic-p1")
+HUB_NTFY_TOPIC_P2_REF = os.environ.get("HUB_NTFY_TOPIC_P2_REF", "ntfy-topic-p2")
+HUB_NTFY_PUBLISHER_HUB_REF = os.environ.get(
+    "HUB_NTFY_PUBLISHER_HUB_REF", "ntfy-pub-hub",
+)
+HUB_NTFY_PUBLISHER_HEALTHCHECKS_REF = os.environ.get(
+    "HUB_NTFY_PUBLISHER_HEALTHCHECKS_REF", "ntfy-pub-healthchecks",
+)
+HUB_NTFY_SUBSCRIBER_REF = os.environ.get("HUB_NTFY_SUBSCRIBER_REF", "ntfy-sub")
+# Empty: ntfy account API is not configured; revoke marks the vault ref and
+# files a P2 Finding with the one manual step.
+HUB_NTFY_ACCOUNT_TOKEN_REF = os.environ.get("HUB_NTFY_ACCOUNT_TOKEN_REF", "")
+HUB_PUBLIC_URL = os.environ.get("HUB_PUBLIC_URL", "https://hub.local")
+
+# Email assumption (D-037): Django's mail backend — locmem in tests (the
+# test runner swaps EMAIL_BACKEND), env-configured SMTP (HUB_SMTP_*) in
+# prod. A failed send files a Finding and never blocks the push path.
+HUB_SMTP_HOST = os.environ.get("HUB_SMTP_HOST", "")
+HUB_SMTP_PORT = int(os.environ.get("HUB_SMTP_PORT", "587") or "587")
+HUB_SMTP_USER = os.environ.get("HUB_SMTP_USER", "")
+HUB_SMTP_PASSWORD = os.environ.get("HUB_SMTP_PASSWORD", "")
+HUB_SMTP_USE_TLS = os.environ.get("HUB_SMTP_USE_TLS", "true").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+HUB_ALERT_FROM = os.environ.get("HUB_ALERT_FROM", "hub@localhost")
+HUB_ALERT_TO = os.environ.get("HUB_ALERT_TO", "ops@localhost")
+DEFAULT_FROM_EMAIL = HUB_ALERT_FROM
+if HUB_SMTP_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = HUB_SMTP_HOST
+    EMAIL_PORT = HUB_SMTP_PORT
+    EMAIL_HOST_USER = HUB_SMTP_USER
+    EMAIL_HOST_PASSWORD = HUB_SMTP_PASSWORD
+    EMAIL_USE_TLS = HUB_SMTP_USE_TLS
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # --- Dead-man + canary (alert-protocol §5, D-039) ---
 # A vault owner-id ref (the Target.ssh_key_ref pattern) — never the receiver

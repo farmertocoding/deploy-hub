@@ -100,8 +100,12 @@ def suppressed_by(entity):
     return None
 
 
-def group_p2(window=GROUP_P2_WINDOW_S, *, now=None):
-    """A single P2 is not delayed; >1 P2 in `window` seconds → one grouped push."""
+def group_p2(window=GROUP_P2_WINDOW_S, *, now=None, mark=True):
+    """A single P2 is not delayed; >1 P2 in `window` seconds → one grouped push.
+
+    ``mark=False`` leaves the window pending so a caller can stamp
+    delivered only after a successful publish.
+    """
     now = now or timezone.now()
     log = _push_log()
     events = list(log.transitions or [])
@@ -125,12 +129,25 @@ def group_p2(window=GROUP_P2_WINDOW_S, *, now=None):
         if row is not None:
             findings.append(row)
     pending_fps = {event["fingerprint"] for event in pending}
+    if mark:
+        mark_p2_delivered_fps(pending_fps)
+    return [{"findings": findings, "grouped": len(findings) > 1}]
+
+
+def mark_p2_delivered(findings):
+    mark_p2_delivered_fps({row.fingerprint for row in findings})
+
+
+def mark_p2_delivered_fps(fps):
+    if not fps:
+        return
+    log = _push_log()
+    events = list(log.transitions or [])
     for event in events:
-        if event.get("severity") == "p2" and event["fingerprint"] in pending_fps:
+        if event.get("severity") == "p2" and event["fingerprint"] in fps:
             event["delivered"] = True
     log.transitions = events
     log.save(update_fields=["transitions"])
-    return [{"findings": findings, "grouped": len(findings) > 1}]
 
 
 def storm_breaker(now):

@@ -108,6 +108,44 @@ def probe_uptime():
 
 
 @shared_task(ignore_result=True)
+def repeat_unacked(*, now=None):
+    """Beat `alert-repeat-unacked` (300 s). Not probe-uptime."""
+    from monitor.alerts import repeat_unacked as body
+
+    return body(now=now)
+
+
+@shared_task(ignore_result=True)
+def deliver_grouped(*, window=600, now=None):
+    """Beat `alert-group-p2` (300 s). Flushes pending P2s; not probe-uptime."""
+    from monitor.pager import deliver_grouped as body
+
+    return {"ok": True, "n": body(window=window, now=now)}
+
+
+@shared_task(ignore_result=True)
+def build_digest():
+    """Beat `digest-daily` — 08:00 local, TIME_ZONE."""
+    from django.utils import timezone
+
+    from monitor.digest import build_digest as body
+
+    result = body(timezone.localdate())
+    return {"ok": True, "n": len(result["findings"])}
+
+
+@shared_task(ignore_result=True)
+def build_weekly_rollup():
+    """Beat `digest-weekly` — Monday 08:00 local."""
+    from django.utils import timezone
+
+    from monitor.digest import build_weekly_rollup as body
+
+    result = body(timezone.localdate())
+    return {"ok": True, "owner": result["owner"], "n": len(result["findings"])}
+
+
+@shared_task(ignore_result=True)
 def scan_cert_expiry():
     """Beat `cert-expiry-daily`. Takes no args so nothing credential-shaped
     can appear in task args or the result."""

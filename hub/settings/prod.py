@@ -31,3 +31,7 @@ VAULT_ALLOW_FAKE_KEK = False
 # HUB_TEST_DATABASE rebind gate both key off it — two stray env vars on a prod
 # box must not be able to repoint a worker's database or open the test plane.
 HUB_TEST_MODE = False
+
+# Email: HUB_SMTP_* is the prod contract (D-037). base.py wires Django's
+# SMTP backend when HUB_SMTP_HOST is set; a failed send files a Finding
+# and never blocks the push path.
