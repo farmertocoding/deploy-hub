@@ -51,3 +51,27 @@ def detect_missed_drills(*, now=None):
     for kind in missed:
         audit("drill-missed", source="celery", severity="warning", kind=kind)
     return {"ok": True, "n": len(missed)}
+
+
+@shared_task(ignore_result=True)
+def run_hub_down_drill(*, duration_s=1800):
+    from monitor.drills import run_hub_down_drill as body
+
+    run = body(duration_s=duration_s)
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_reaper_drill(*, planted_name="hub-t3-orphan-weekly"):
+    from monitor.drills import run_reaper_drill as body
+
+    run = body(planted_name=planted_name)
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_restore_clean_drill():
+    from monitor.drills import run_restore_clean_drill as body
+
+    run = body()
+    return {"ok": True, "status": run.status, "kind": run.kind}

@@ -216,6 +216,19 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.detect_missed_drills",
         "schedule": 3600.0,
     },
+    "drill-hub-down-monthly": {
+        "task": "monitor.tasks.run_hub_down_drill",
+        "schedule": 30 * 86400,
+        "kwargs": {"duration_s": 1800},
+    },
+    "drill-reaper-weekly": {
+        "task": "monitor.tasks.run_reaper_drill",
+        "schedule": 7 * 86400,
+    },
+    "drill-restore-monthly": {
+        "task": "monitor.tasks.run_restore_clean_drill",
+        "schedule": 30 * 86400,
+    },
 }
 
 LOGGING = {
