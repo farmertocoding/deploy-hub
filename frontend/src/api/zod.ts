@@ -17,6 +17,81 @@ const DemoJob = z
     confirm_warnings: z.boolean().optional().default(false),
   })
   .passthrough();
+const CloudflareConnect = z.object({ token: z.string().min(1) }).passthrough();
+const ProviderEnum = z.literal("cloudflare");
+const DnsAccountConnected = z
+  .object({
+    id: z.number().int(),
+    provider: ProviderEnum.optional(),
+    label: z.string().max(128),
+  })
+  .passthrough();
+const PurposeEnum = z.enum(["prod", "test"]);
+const DnsZoneConnected = z
+  .object({
+    id: z.number().int(),
+    name: z.string().max(253),
+    provider_zone_id: z.string().max(64).optional(),
+    purpose: PurposeEnum.optional(),
+  })
+  .passthrough();
+const CloudflareConnectResult = z
+  .object({ account: DnsAccountConnected, zone: DnsZoneConnected })
+  .passthrough();
+const SeverityEnum = z.enum(["p1", "p2", "p3"]);
+const StateEnum = z.enum(["open", "acked", "resolved", "accepted"]);
+const Finding = z
+  .object({
+    id: z.number().int(),
+    source_engine: z.string().max(64),
+    severity: SeverityEnum,
+    entity: z.string().max(128),
+    title: z.string().max(256),
+    body: z.string().optional(),
+    fix_action: z.string().max(256).optional(),
+    state: StateEnum.optional(),
+    first_seen: z.string().datetime({ offset: true }).optional(),
+    last_seen: z.string().datetime({ offset: true }).optional(),
+    fingerprint: z.string().max(128),
+    accepted_reason: z.string().max(256).optional(),
+  })
+  .passthrough();
+const FindingListSnapshot = z
+  .object({ seq: z.number().int(), data: z.array(Finding) })
+  .passthrough();
+const FindingDetailSnapshot = z
+  .object({ seq: z.number().int(), data: Finding })
+  .passthrough();
+const ActionEnum = z.enum(["ack", "resolve", "accept_risk"]);
+const Transition = z
+  .object({
+    action: ActionEnum,
+    reason: z.string().max(256).optional().default(""),
+  })
+  .passthrough();
+const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
+const MapNode = z
+  .object({
+    id: z.string(),
+    kind: KindEnum,
+    label: z.string(),
+    status: z.string(),
+    parent: z.string().optional(),
+  })
+  .passthrough();
+const PathEnum = z.enum(["public", "mesh"]);
+const MapEdge = z
+  .object({ a: z.string(), b: z.string(), path: PathEnum })
+  .passthrough();
+const MapGraph = z
+  .object({ nodes: z.array(MapNode), edges: z.array(MapEdge) })
+  .passthrough();
+const MapSnapshot = z
+  .object({ seq: z.number().int(), data: MapGraph })
+  .passthrough();
+const CertRefusal = z
+  .object({ detail: z.string(), finding_id: z.number().int() })
+  .passthrough();
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -24,6 +99,7 @@ const SiteSummary = z
     domain: z.string(),
     latest_manifest_version: z.number().int().nullable(),
     manifest_current: z.boolean().nullable(),
+    cert_refusal: CertRefusal.nullish(),
   })
   .passthrough();
 const ProjectSummary = z
@@ -69,6 +145,13 @@ const Materialize = z
   .object({ confirm_warnings: z.boolean().default(false) })
   .partial()
   .passthrough();
+const RollbackResult = z
+  .object({
+    deployment_id: z.number().int(),
+    original_id: z.number().int(),
+    status: z.string(),
+  })
+  .passthrough();
 const Question = z
   .object({
     id: z.string(),
@@ -96,6 +179,26 @@ export const schemas = {
   Login,
   Confirm,
   DemoJob,
+  CloudflareConnect,
+  ProviderEnum,
+  DnsAccountConnected,
+  PurposeEnum,
+  DnsZoneConnected,
+  CloudflareConnectResult,
+  SeverityEnum,
+  StateEnum,
+  Finding,
+  FindingListSnapshot,
+  FindingDetailSnapshot,
+  ActionEnum,
+  Transition,
+  KindEnum,
+  MapNode,
+  PathEnum,
+  MapEdge,
+  MapGraph,
+  MapSnapshot,
+  CertRefusal,
   SiteSummary,
   ProjectSummary,
   Readiness,
@@ -105,6 +208,7 @@ export const schemas = {
   PatchedEnvWrite,
   Manifest,
   Materialize,
+  RollbackResult,
   Question,
   WizardState,
   PatchedAnswers,

@@ -141,6 +141,148 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/cloudflare/connect/:
+    post:
+      operationId: v1_cloudflare_connect_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CloudflareConnect'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudflareConnectResult'
+          description: ''
+  /api/v1/findings/:
+    get:
+      operationId: v1_findings_retrieve
+      parameters:
+      - in: query
+        name: entity
+        schema:
+          type: string
+          maxLength: 128
+          minLength: 1
+      - in: query
+        name: severity
+        schema:
+          enum:
+          - p1
+          - p2
+          - p3
+          type: string
+          minLength: 1
+        description: |-
+          * `p1` - P1
+          * `p2` - P2
+          * `p3` - P3
+      - in: query
+        name: state
+        schema:
+          enum:
+          - open
+          - acked
+          - resolved
+          - accepted
+          type: string
+          minLength: 1
+        description: |-
+          * `open` - Open
+          * `acked` - Acked
+          * `resolved` - Resolved
+          * `accepted` - Accepted
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingListSnapshot'
+          description: ''
+  /api/v1/findings/{id}/:
+    get:
+      operationId: v1_findings_retrieve_2
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetailSnapshot'
+          description: ''
+  /api/v1/findings/{id}/transition/:
+    post:
+      operationId: v1_findings_transition_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Transition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Transition'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetailSnapshot'
+          description: ''
+  /api/v1/map/:
+    get:
+      operationId: v1_map_retrieve
+      description: Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1).
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapSnapshot'
+          description: ''
   /api/v1/projects/:
     get:
       operationId: v1_projects_list
@@ -350,6 +492,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/Manifest'
           description: ''
+  /api/v1/sites/{site_id}/rollback/:
+    post:
+      operationId: v1_sites_rollback_create
+      description: 'POST: roll the site back to its latest succeeded Deployment.'
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollbackResult'
+          description: ''
   /api/v1/sites/{site_id}/wizard/:
     get:
       operationId: v1_sites_wizard_retrieve
@@ -406,6 +569,45 @@ paths:
           description: ''
 components:
   schemas:
+    ActionEnum:
+      enum:
+      - ack
+      - resolve
+      - accept_risk
+      type: string
+      description: |-
+        * `ack` - ack
+        * `resolve` - resolve
+        * `accept_risk` - accept_risk
+    CertRefusal:
+      type: object
+      properties:
+        detail:
+          type: string
+        finding_id:
+          type: integer
+      required:
+      - detail
+      - finding_id
+    CloudflareConnect:
+      type: object
+      properties:
+        token:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - token
+    CloudflareConnectResult:
+      type: object
+      properties:
+        account:
+          $ref: '#/components/schemas/DnsAccountConnected'
+        zone:
+          $ref: '#/components/schemas/DnsZoneConnected'
+      required:
+      - account
+      - zone
     Confirm:
       type: object
       properties:
@@ -430,6 +632,37 @@ components:
           type: boolean
           default: false
       required:
+      - name
+    DnsAccountConnected:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        provider:
+          $ref: '#/components/schemas/ProviderEnum'
+        label:
+          type: string
+          maxLength: 128
+      required:
+      - id
+      - label
+    DnsZoneConnected:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        provider_zone_id:
+          type: string
+          maxLength: 64
+        purpose:
+          $ref: '#/components/schemas/PurposeEnum'
+      required:
+      - id
       - name
     EnvApply:
       type: object
@@ -461,6 +694,85 @@ components:
           description: name -> value. Values are write-only and stored in the vault.
       required:
       - env
+    Finding:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        source_engine:
+          type: string
+          maxLength: 64
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        entity:
+          type: string
+          maxLength: 128
+        title:
+          type: string
+          maxLength: 256
+        body:
+          type: string
+        fix_action:
+          type: string
+          maxLength: 256
+        state:
+          $ref: '#/components/schemas/StateEnum'
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        fingerprint:
+          type: string
+          maxLength: 128
+        accepted_reason:
+          type: string
+          maxLength: 256
+      required:
+      - entity
+      - fingerprint
+      - id
+      - severity
+      - source_engine
+      - title
+    FindingDetailSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/Finding'
+      required:
+      - data
+      - seq
+    FindingListSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+      required:
+      - data
+      - seq
+    KindEnum:
+      enum:
+      - zone
+      - host
+      - container
+      - hub
+      - edge
+      type: string
+      description: |-
+        * `zone` - zone
+        * `host` - host
+        * `container` - container
+        * `hub` - hub
+        * `edge` - edge
     Login:
       type: object
       properties:
@@ -492,6 +804,61 @@ components:
       - scan_report_hash
       - schema_version
       - version
+    MapEdge:
+      type: object
+      properties:
+        a:
+          type: string
+        b:
+          type: string
+        path:
+          $ref: '#/components/schemas/PathEnum'
+      required:
+      - a
+      - b
+      - path
+    MapGraph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MapNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/MapEdge'
+      required:
+      - edges
+      - nodes
+    MapNode:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        label:
+          type: string
+        status:
+          type: string
+        parent:
+          type: string
+      required:
+      - id
+      - kind
+      - label
+      - status
+    MapSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/MapGraph'
+      required:
+      - data
+      - seq
     Materialize:
       type: object
       properties:
@@ -517,6 +884,14 @@ components:
             type: string
           writeOnly: true
           description: name -> value. Values are write-only and stored in the vault.
+    PathEnum:
+      enum:
+      - public
+      - mesh
+      type: string
+      description: |-
+        * `public` - public
+        * `mesh` - mesh
     ProjectSummary:
       type: object
       properties:
@@ -545,6 +920,19 @@ components:
       - sites
       - slug
       - tiers
+    ProviderEnum:
+      enum:
+      - cloudflare
+      type: string
+      description: '* `cloudflare` - Cloudflare'
+    PurposeEnum:
+      enum:
+      - prod
+      - test
+      type: string
+      description: |-
+        * `prod` - Prod
+        * `test` - Test
     Question:
       type: object
       properties:
@@ -609,6 +997,29 @@ components:
       - scanned_at
       - summary
       - warnings
+    RollbackResult:
+      type: object
+      properties:
+        deployment_id:
+          type: integer
+        original_id:
+          type: integer
+        status:
+          type: string
+      required:
+      - deployment_id
+      - original_id
+      - status
+    SeverityEnum:
+      enum:
+      - p1
+      - p2
+      - p3
+      type: string
+      description: |-
+        * `p1` - P1
+        * `p2` - P2
+        * `p3` - P3
     SiteSummary:
       type: object
       properties:
@@ -624,12 +1035,39 @@ components:
         manifest_current:
           type: boolean
           nullable: true
+        cert_refusal:
+          allOf:
+          - $ref: '#/components/schemas/CertRefusal'
+          nullable: true
       required:
       - domain
       - id
       - latest_manifest_version
       - manifest_current
       - name
+    StateEnum:
+      enum:
+      - open
+      - acked
+      - resolved
+      - accepted
+      type: string
+      description: |-
+        * `open` - Open
+        * `acked` - Acked
+        * `resolved` - Resolved
+        * `accepted` - Accepted
+    Transition:
+      type: object
+      properties:
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+        reason:
+          type: string
+          default: ''
+          maxLength: 256
+      required:
+      - action
     WizardState:
       type: object
       properties:

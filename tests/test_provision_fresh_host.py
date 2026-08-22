@@ -39,6 +39,8 @@ def test_occupied_80_refuses_with_explanation():
     assert result.allowed is False
     assert "80" in result.explanation
     assert "occupied" in result.explanation.lower()
+    assert "Adopt-existing-site is Phase 3;" not in result.explanation
+    assert "Phase 3b" in result.explanation
 
 
 @pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
@@ -105,6 +107,7 @@ def test_pre_hardened_empty_host_is_allowed_and_imports_catalog_versions():
         "ufw-posture-target": 1,
         "fail2ban-ignoreip": 5,
         "caddy": 1,
+        "caddy-log-roll": 1,
     }
     assert "ufw-posture-hub" not in rows
     assert "ufw-posture-intake" not in rows

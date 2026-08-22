@@ -26,8 +26,11 @@ def _running_deployment(*, slug, heartbeat, step_statuses):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target,
+        dns_zone=default_dns_zone(),
     )
     manifest = Manifest.objects.create(site=site, version=1, body={})
     deployment = Deployment.objects.create(
@@ -59,10 +62,14 @@ def test_stale_running_is_resumed_or_aborted(monkeypatch):
 
     from deploys import pipeline
     from deploys.heartbeat import sweep
-    from providers.fakes import FakeDnsProvider
+    from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     assert "deploys.tasks.sweep_stale_deployments" in _beat_sweep_task_names()
 

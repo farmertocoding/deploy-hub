@@ -7,10 +7,20 @@ TOPIC_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,90}$")
 # Phase 0 topics. Later phases append here — never bypass this table.
 ALLOWED_PREFIXES = (
     "demo.",       # demo job log streams
-    "alerts",
+    "alerts",      # DEPRECATED alias of `findings` (D-045) — see DEPRECATED_ALIASES
     "site.",       # site.{id}.status (warming, data-stale, recreate-down)
     "deploy.",     # deploy.{id}.status (named §D2 step failure)
+    "findings",    # the one attention stream (§F2, D-038) — canonical since phase 3
+    "host.",       # host.{id}.metrics (collector load/mem/disk, §C4)
+                   # site.{id}.traffic (minute TrafficStat rows, §C4) rides "site."
+    "map.graph",   # topology snapshot/topic (§9.6.1, D-041) — table-backed
 )
+
+# D-045: `findings` is canonical; the Phase-0 `alerts` topic stays authorized
+# for exactly one phase as a deprecated alias mapping to the SAME group — same
+# seq counter, same payload (realtime/publish.py fans out). Remove the alias
+# (this entry and its ALLOWED_PREFIXES row) in Phase 4.
+DEPRECATED_ALIASES = {"alerts": "findings"}
 
 
 def authorize_topic(user, topic):
@@ -19,4 +29,5 @@ def authorize_topic(user, topic):
     if not TOPIC_RE.match(topic):
         return False
     prefixes = tuple(p for p in ALLOWED_PREFIXES if p.endswith("."))
-    return topic == "alerts" or topic.startswith(prefixes)
+    exact = tuple(p for p in ALLOWED_PREFIXES if not p.endswith("."))
+    return topic in exact or topic.startswith(prefixes)

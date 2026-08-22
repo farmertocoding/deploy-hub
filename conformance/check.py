@@ -35,6 +35,10 @@ What it does now, by SPEC-gate-integrity §3.2 rule number:
           check that had run and found nothing wrong.
   rule 7  matrix.json carries the real status plus a `sha` / `verified_at`
           header.
+  I1      (phase-2.5 panel, phase-3 Task 0) every `@pytest.mark.t3` test must
+          be host-gated by a skipif that DERIVES from `multipass_available()`;
+          a t3 mark with no gate, or gated on an env var / bare literal /
+          module constant, is red regardless of phase.
 
 Status vocabulary (§3.2):
   verified      >=1 collected marked test ran and passed, none failed   -> pass
@@ -236,6 +240,21 @@ def _decorator_mark_names(node):
     return names
 
 
+def _pytestmark_exprs(node):
+    """The mark expressions assigned to `pytestmark` on a module or class."""
+    exprs = []
+    for stmt in getattr(node, "body", []):
+        if not isinstance(stmt, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "pytestmark"
+                   for t in stmt.targets):
+            continue
+        value = stmt.value
+        exprs.extend(value.elts if isinstance(value, (ast.List, ast.Tuple))
+                     else [value])
+    return exprs
+
+
 def _pytestmark_names(node):
     """Mark names assigned to `pytestmark` on a module or class.
 
@@ -245,18 +264,10 @@ def _pytestmark_names(node):
     via module pytestmark was reported as wrong-marker (D-024).
     """
     names = []
-    for stmt in getattr(node, "body", []):
-        if not isinstance(stmt, ast.Assign):
-            continue
-        if not any(isinstance(t, ast.Name) and t.id == "pytestmark"
-                   for t in stmt.targets):
-            continue
-        value = stmt.value
-        elts = value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]
-        for elt in elts:
-            name = _mark_name_from_expr(elt)
-            if name:
-                names.append(name)
+    for elt in _pytestmark_exprs(node):
+        name = _mark_name_from_expr(elt)
+        if name:
+            names.append(name)
     return names
 
 
@@ -285,6 +296,91 @@ def collect_mark_nodeids(root, mark_name):
         _collect_mark_from(
             tree, str(py.relative_to(root)), [], module_marks, mark_name, found)
     return found
+
+
+# ── t3 host-gate integrity (phase-2.5 panel I1) ─────────────────────────────
+#
+# A self-declared `@pytest.mark.t3` used to be ungated: it collected everywhere,
+# so on a host without Multipass it failed or hung instead of skipping, and the
+# mark stopped meaning "runs only on the T3 host of record". The gate has to
+# DERIVE from `multipass_available()` — a skipif on an env var, a bare False, or
+# a module constant is an opinion nobody recomputes, not the host truth. A
+# module-level `pytestmark` carrying the derived gate satisfies this; extra
+# skipifs (e.g. a credential gate) alongside it are fine.
+
+T3_HOST_GATE_FN = "multipass_available"
+
+
+def _skipif_condition(expr):
+    """The condition of a `pytest.mark.skipif(...)` expression, else None."""
+    if not isinstance(expr, ast.Call) or _mark_name_from_expr(expr) != "skipif":
+        return None
+    if expr.args:
+        return expr.args[0]
+    for kw in expr.keywords:
+        if kw.arg == "condition":
+            return kw.value
+    return None
+
+
+def _skipif_conditions(exprs):
+    return [c for c in map(_skipif_condition, exprs) if c is not None]
+
+
+def _derives_from_host_probe(condition):
+    """True if the skipif condition contains a `multipass_available()` call."""
+    for node in ast.walk(condition):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name == T3_HOST_GATE_FN:
+            return True
+    return False
+
+
+def _collect_t3_gate_from(node, relpath, classes, inherited_t3, inherited_conds,
+                          problems):
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            t3 = inherited_t3 or "t3" in (
+                _decorator_mark_names(child) + _pytestmark_names(child))
+            conds = (inherited_conds
+                     + _skipif_conditions(child.decorator_list)
+                     + _skipif_conditions(_pytestmark_exprs(child)))
+            _collect_t3_gate_from(
+                child, relpath, classes + [child.name], t3, conds, problems)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not child.name.startswith("test"):
+                continue
+            if not (inherited_t3 or "t3" in _decorator_mark_names(child)):
+                continue
+            conds = inherited_conds + _skipif_conditions(child.decorator_list)
+            nodeid = "::".join([relpath, *classes, child.name])
+            if not conds:
+                problems.append(
+                    f"{nodeid}: @pytest.mark.t3 with no host gate — a t3 mark "
+                    f"must carry pytest.mark.skipif derived from "
+                    f"{T3_HOST_GATE_FN}() (2.5 panel I1); module-level "
+                    f"pytestmark carrying the gate satisfies this")
+            elif not any(_derives_from_host_probe(c) for c in conds):
+                problems.append(
+                    f"{nodeid}: t3 host gate does not derive from "
+                    f"{T3_HOST_GATE_FN}() — an env var, a bare literal, or a "
+                    f"module constant is not the host truth (2.5 panel I1)")
+
+
+def t3_host_gate_problems(root):
+    """Every t3-marked test whose host gate is absent or not derived (I1)."""
+    problems = []
+    for py in sorted((root / "tests").rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        module_t3 = "t3" in _pytestmark_names(tree)
+        module_conds = _skipif_conditions(_pytestmark_exprs(tree))
+        _collect_t3_gate_from(
+            tree, str(py.relative_to(root)), [], module_t3, module_conds,
+            problems)
+    return problems
 
 
 # ── run report (rule 1) ─────────────────────────────────────────────────────
@@ -704,6 +800,10 @@ def main():
             print(f"  - {p}")
         return 1
     outcomes = report["outcomes"]
+
+    # I1: an ungated (or wrongly gated) t3 mark is a defect, not accepted risk —
+    # red whatever the phase, like a wrong marker or a dead one.
+    failures.extend(t3_host_gate_problems(root))
 
     # Markers must resolve to a live registry id (rule 5 covers the retired case).
     for req_id, tests in sorted(markers.items()):

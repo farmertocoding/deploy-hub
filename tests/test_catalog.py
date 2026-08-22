@@ -92,6 +92,32 @@ RELEASED = {
         "fix": ["apt-get", "install", "-y", "caddy"],
         "rollback": ["systemctl", "disable", "--now", "caddy"],
     },
+    "caddy-log-roll": {
+        "version": 1,
+        "check": ["grep", "-q", "roll_size 100MiB", "/etc/caddy/caddy-log-roll.caddy"],
+        "fix": [
+            [
+                "caddy", "validate", "--adapter", "caddyfile", "--config",
+                "/usr/local/share/hub-catalog/caddy-log-roll.caddy",
+            ],
+            [
+                "install", "-m", "0644",
+                "/usr/local/share/hub-catalog/caddy-log-roll.caddy",
+                "/etc/caddy/caddy-log-roll.caddy",
+            ],
+            ["systemctl", "reload", "caddy"],
+        ],
+        "rollback": [
+            ["rm", "-f", "/etc/caddy/caddy-log-roll.caddy"],
+            ["systemctl", "reload", "caddy"],
+        ],
+    },
+    "server-watch-handoff": {
+        "version": 1,
+        "check": ["test", "!", "-e", "/etc/cron.d/server-watch"],
+        "fix": ["rm", "-f", "/etc/cron.d/server-watch"],
+        "rollback": ["true"],
+    },
 }
 
 PUBLIC_PORTS = {"80", "443", "80/tcp", "443/tcp", "80,443"}

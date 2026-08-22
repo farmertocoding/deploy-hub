@@ -23,7 +23,10 @@ def _site(name):
     from core.models import Project, Site
 
     project = Project.objects.create(name=name, slug=f"p-bak-{name}")
-    return Site.objects.create(project=project, name=name)
+    from dns_fixtures import default_dns_zone
+
+    return Site.objects.create(project=project, name=name,
+                               dns_zone=default_dns_zone())
 
 
 def _keyfile(tmp_path):

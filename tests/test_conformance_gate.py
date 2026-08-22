@@ -934,8 +934,10 @@ def test_issue_r7_registry_text_matches_what_the_declaration_tests_prove():
 
 
 T3_MARKED_TEST = (
-    "import pytest\n\n\n"
+    "import pytest\n\n"
+    "from tests.harness.multipass import multipass_available\n\n\n"
     "@pytest.mark.t3\n"
+    "@pytest.mark.skipif(not multipass_available(), reason='multipass is not available')\n"
     '@pytest.mark.req("{rid}")\n'
     "def {name}():\n"
     "    assert True\n"
@@ -1278,7 +1280,9 @@ def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
     """
     list_src = (
         "import pytest\n\n"
-        "pytestmark = [pytest.mark.t3, pytest.mark.skipif(False, reason='x')]\n\n"
+        "from tests.harness.multipass import multipass_available\n\n"
+        "pytestmark = [pytest.mark.t3, pytest.mark.skipif("
+        "not multipass_available(), reason='x')]\n\n"
         '@pytest.mark.req("FIX-T3-PYTESTMARK")\n'
         "def test_live():\n"
         "    assert True\n"
@@ -1297,12 +1301,16 @@ def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
     assert status_of(root, "FIX-T3-PYTESTMARK") == "verified"
     assert "wrong marker" not in res.stdout
 
+    # A bare (non-list) module pytestmark carrying t3; the derived host gate
+    # rides the function decorator — mixed scopes must combine (I1).
     bare = write_repo(
         tmp_path / "bare",
         reqs=[_req("FIX-T3-BARE", tier="t3")],
         tests_src={"tests/test_live.py":
                    "import pytest\n\n"
+                   "from tests.harness.multipass import multipass_available\n\n"
                    "pytestmark = pytest.mark.t3\n\n"
+                   "@pytest.mark.skipif(not multipass_available(), reason='x')\n"
                    '@pytest.mark.req("FIX-T3-BARE")\n'
                    "def test_live():\n"
                    "    assert True\n"},
@@ -1317,8 +1325,10 @@ def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
         reqs=[_req("FIX-T3-CLASS", tier="t3")],
         tests_src={"tests/test_live.py":
                    "import pytest\n\n"
+                   "from tests.harness.multipass import multipass_available\n\n"
                    "class TestLive:\n"
                    "    pytestmark = pytest.mark.t3\n\n"
+                   "    @pytest.mark.skipif(not multipass_available(), reason='x')\n"
                    "    @pytest.mark.req(\"FIX-T3-CLASS\")\n"
                    "    def test_live(self):\n"
                    "        assert True\n"},
@@ -1327,3 +1337,298 @@ def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
     res_cls = run_check(klass)
     assert res_cls.returncode == 0, res_cls.stdout + res_cls.stderr
     assert status_of(klass, "FIX-T3-CLASS") == "verified"
+
+
+# ── Phase 3 Task 0: due set, D-039 conversions, t3 host-gate integrity (I1) ──
+
+# The 18 phase-3 ids design note §3 adds in Task 0 (the other two of the 20 are
+# the phase-4 clause-split ids below). Spelled here so a registry edit that
+# drops or rephases one goes red with its name.
+PHASE_3_NEW_IDS = {
+    "SEC-B2-NO-TOKEN-ON-TARGET",
+    "UX-F5-T2-T3-FRICTION",
+    "DNS-CF-PRODUCT-ADAPTER",
+    "DNS-CF-T3-LIVE",
+    "TLS-B2-ORIGIN-CERT-PUSH",
+    "TLS-V9-CERT-THRESHOLDS",
+    "ALERT-M3-PAGER-AUTH",
+    "ALERT-RECOVERY-NOTICE",
+    "ALERT-DELIVERY-BEHAVIORS",
+    "ALERT-PAGER-DRILL",
+    "MON-UPTIME-EVENTS",
+    "MON-TRAFFIC-INGEST",
+    "MON-C7-RETENTION",
+    "UX-F1-IA-NAV",
+    "UX-F4-FAILURE-IMPACT",
+    "MAP-96-GRAPH-V1",
+    "PROV-E6-ADOPT-TEMP-SUBDOMAIN",
+    "P3-DNS-MONITOR-DEMO",
+}
+
+# Registered now, due at phase 4: the unbuilt clause of each split (D-035/D-040).
+PHASE_4_SPLIT_IDS = {"TLS-B2-HUB-DNS01-UNPROXIED", "SEC-F5-T1-HARDWARE-TOUCH"}
+
+
+def _live_registry():
+    data = yaml.safe_load(
+        (REPO / "conformance/requirements.yaml").read_text(encoding="utf-8"))
+    return {r["id"]: r for r in data["requirements"]}
+
+
+def test_phase_3_due_set_includes_every_phase_3_id(tmp_path):
+    """Every Task-0 phase-3 id exists at phase 3 with its exact fields, and
+    check.py grades a phase-3 req as due at `--phase 3`.
+
+    What would make this fail: a missing/rephased id, DNS-CF-T3-LIVE without
+    tier:t3, TLS-B2-ORIGIN-CERT-PUSH without tier:t2, or P3-DNS-MONITOR-DEMO
+    not naming its two demo artifacts.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_3_NEW_IDS - set(reg))
+    assert missing == [], f"phase-3 ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_3_NEW_IDS if reg[rid]["phase"] != 3)
+    assert wrong_phase == [], (
+        f"phase-3 ids not registered at phase 3: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+
+    assert reg["DNS-CF-T3-LIVE"].get("tier") == "t3", (
+        "DNS-CF-T3-LIVE must carry tier: t3 — a T1 sibling never proves the live leg")
+    assert reg["TLS-B2-ORIGIN-CERT-PUSH"].get("tier") == "t2", (
+        "TLS-B2-ORIGIN-CERT-PUSH must carry tier: t2")
+    demo = reg["P3-DNS-MONITOR-DEMO"]
+    assert demo["verify"] == "demo"
+    assert demo.get("demo") == [
+        "conformance/demos/phase-3.md", "conformance/demos/phase-3/"], (
+        f"P3-DNS-MONITOR-DEMO must name both demo artifacts: {demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P3-DUE", phase=3)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P3-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=3)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert matrix(root)["requirements"]["FIX-P3-DUE"]["due"] is True, (
+        "a phase-3 req must be due at --phase 3")
+
+
+def test_phase_4_ids_are_not_due_at_phase_3(tmp_path):
+    """The two clause-split phase-4 ids are registered but not due at phase 3.
+
+    What would make this fail: SEC-F5-T1-HARDWARE-TOUCH or
+    TLS-B2-HUB-DNS01-UNPROXIED registered at phase 3 (which would demand
+    proofs of clauses the phase deliberately does not build — D-035/D-040),
+    or check.py grading a phase-4 req as due at --phase 3.
+    """
+    reg = _live_registry()
+    for rid in sorted(PHASE_4_SPLIT_IDS):
+        assert rid in reg, f"{rid} is not in the registry"
+        assert reg[rid]["phase"] == 4, (
+            f"{rid} must be registered at phase 4, got {reg[rid]['phase']}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P3-DUE", phase=3), _req("FIX-P4-LATER", phase=4)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P3-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=3)
+    assert res.returncode == 0, (
+        f"an uncovered phase-4 req failed the --phase 3 gate:\n{res.stdout}")
+    assert matrix(root)["requirements"]["FIX-P4-LATER"]["due"] is False
+    assert matrix(root)["requirements"]["FIX-P3-DUE"]["due"] is True
+
+
+def test_verify_test_conversion_requires_a_marked_test(tmp_path):
+    """D-039: MON-DEADMAN-EXTERNAL and PROV-J7-COMPOSE-AWARE-ADOPT convert
+    `verify: checklist` → `verify: test` — neither has an honest gate to name
+    and R4-9 forbids inventing one. The conversion has teeth: a verify:test
+    phase-3 req with no marked test is uncovered red at --phase 3, where a
+    checklist req naming some Makefile target could ride green.
+    """
+    reg = _live_registry()
+    for rid in ("MON-DEADMAN-EXTERNAL", "PROV-J7-COMPOSE-AWARE-ADOPT"):
+        assert reg[rid]["verify"] == "test", (
+            f"{rid} must be verify: test (D-039), got {reg[rid]['verify']!r}")
+        assert "gate" not in reg[rid], (
+            f"{rid} converted to verify: test must not keep a gate: key")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-CONVERTED", phase=3)],
+        outcomes={},
+    )
+    res = run_check(root, phase=3)
+    assert res.returncode != 0, (
+        f"a verify:test req with no marked test passed the phase-3 gate:\n{res.stdout}")
+    assert status_of(root, "FIX-CONVERTED") == "uncovered"
+    assert "no @pytest.mark.req marker" in res.stdout
+
+
+UNGATED_T3_TEST = (
+    "import pytest\n\n\n"
+    "@pytest.mark.t3\n"
+    "def test_live():\n"
+    "    assert True\n"
+)
+
+
+def test_self_declared_t3_mark_without_host_gate_is_red(tmp_path):
+    """2.5 panel I1: a `@pytest.mark.t3` test with no skipif host gate is red.
+
+    A self-declared t3 mark with no gate collects everywhere — on a host
+    without Multipass it fails or hangs instead of skipping, and the mark
+    stops meaning "runs only on the T3 host of record".
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-DUE")],
+        tests_src={
+            "tests/test_ok.py": MARKED_TEST.format(rid="FIX-DUE", name="test_a"),
+            "tests/test_ungated.py": UNGATED_T3_TEST,
+        },
+        outcomes={"tests/test_ok.py::test_a": "passed",
+                  "tests/test_ungated.py::test_live": "skipped"},
+    )
+    res = run_check(root)
+    assert res.returncode != 0, (
+        f"an ungated @pytest.mark.t3 test passed the gate:\n{res.stdout}")
+    assert "tests/test_ungated.py::test_live" in res.stdout, (
+        f"the failure must name the ungated nodeid:\n{res.stdout}")
+    assert "multipass_available" in res.stdout, (
+        f"the failure must say what the gate has to derive from:\n{res.stdout}")
+
+
+def test_t3_gate_not_derived_from_multipass_available_is_red(tmp_path):
+    """A skipif on any condition but `multipass_available()` is not a host gate.
+
+    2.5 panel I1: `skipif(False, ...)` is vacuous, an env var is operator
+    opinion, and a module constant is a value nobody recomputes — none of them
+    is the host truth. The gate must derive from `multipass_available()`.
+    """
+    cases = {
+        "bare-false": "pytest.mark.skipif(False, reason='vacuous')",
+        "env-var": ("pytest.mark.skipif('HAVE_MULTIPASS' not in os.environ, "
+                    "reason='env opinion')"),
+        "module-constant": "pytest.mark.skipif(not HAVE_MULTIPASS, reason='constant')",
+    }
+    for label, gate in cases.items():
+        src = (
+            "import os\n\n"
+            "import pytest\n\n"
+            "HAVE_MULTIPASS = False\n\n"
+            f"pytestmark = [pytest.mark.t3, {gate}]\n\n\n"
+            "def test_live():\n"
+            "    assert True\n"
+        )
+        root = write_repo(
+            tmp_path / label,
+            reqs=[_req("FIX-DUE")],
+            tests_src={
+                "tests/test_ok.py": MARKED_TEST.format(rid="FIX-DUE", name="test_a"),
+                "tests/test_wrong_gate.py": src,
+            },
+            outcomes={"tests/test_ok.py::test_a": "passed",
+                      "tests/test_wrong_gate.py::test_live": "skipped"},
+        )
+        res = run_check(root)
+        assert res.returncode != 0, (
+            f"{label}: a t3 gate not derived from multipass_available() passed:\n"
+            f"{res.stdout}")
+        assert "tests/test_wrong_gate.py::test_live" in res.stdout, (label, res.stdout)
+        assert "multipass_available" in res.stdout, (label, res.stdout)
+
+
+def test_t3_gate_naming_multipass_available_without_a_derived_call_is_red(tmp_path):
+    """The gate derives from a CALL to multipass_available(), not from the name.
+
+    Review finding on Task 0: the red cases above would stay green if the
+    checker regressed to a substring match on "multipass_available" — every
+    condition here contains that string and none of them recomputes the host
+    truth, so each must stay red. A string literal is data, an uncalled name
+    is a reference nobody evaluates, a suffixed variable is a constant with a
+    flattering name, and a call to something ELSE with the string as its
+    argument is the substring-matcher's blind spot exactly.
+    """
+    cases = {
+        "string-literal": (
+            "pytest.mark.skipif(bool('multipass_available'), reason='data')"),
+        "uncalled-name": (
+            "pytest.mark.skipif(not multipass_available, reason='never called')"),
+        "suffixed-variable": (
+            "pytest.mark.skipif(not multipass_available_flag, reason='constant')"),
+        "string-arg-to-other-call": (
+            "pytest.mark.skipif(os.environ.get('multipass_available') is None, "
+            "reason='env keyed on the name')"),
+    }
+    for label, gate in cases.items():
+        src = (
+            "import os\n\n"
+            "import pytest\n\n"
+            "from tests.harness.multipass import multipass_available\n\n"
+            "multipass_available_flag = False\n\n"
+            f"pytestmark = [pytest.mark.t3, {gate}]\n\n\n"
+            "def test_live():\n"
+            "    assert True\n"
+        )
+        root = write_repo(
+            tmp_path / label,
+            reqs=[_req("FIX-DUE")],
+            tests_src={
+                "tests/test_ok.py": MARKED_TEST.format(rid="FIX-DUE", name="test_a"),
+                "tests/test_name_only.py": src,
+            },
+            outcomes={"tests/test_ok.py::test_a": "passed",
+                      "tests/test_name_only.py::test_live": "skipped"},
+        )
+        res = run_check(root)
+        assert res.returncode != 0, (
+            f"{label}: a skipif that only NAMES multipass_available (no derived "
+            f"call) passed the gate — a substring matcher would do this:\n{res.stdout}")
+        assert "tests/test_name_only.py::test_live" in res.stdout, (label, res.stdout)
+        assert "does not derive" in res.stdout, (label, res.stdout)
+
+
+def test_host_gated_t3_mark_is_accepted(tmp_path):
+    """The honest shapes stay green: a decorator skipif derived from
+    `multipass_available()`, and the same gate carried by module pytestmark.
+    """
+    decorator_src = (
+        "import pytest\n\n"
+        "from tests.harness.multipass import multipass_available\n\n\n"
+        "@pytest.mark.t3\n"
+        "@pytest.mark.skipif(not multipass_available(), "
+        "reason='multipass is not available')\n"
+        "def test_live():\n"
+        "    assert True\n"
+    )
+    pytestmark_src = (
+        "import pytest\n\n"
+        "from tests.harness.multipass import multipass_available\n\n"
+        "pytestmark = [\n"
+        "    pytest.mark.t3,\n"
+        "    pytest.mark.skipif(not multipass_available(), "
+        "reason='multipass is not available'),\n"
+        "]\n\n\n"
+        "def test_live():\n"
+        "    assert True\n"
+    )
+    for label, src in (("decorator", decorator_src), ("pytestmark", pytestmark_src)):
+        root = write_repo(
+            tmp_path / label,
+            reqs=[_req("FIX-DUE")],
+            tests_src={
+                "tests/test_ok.py": MARKED_TEST.format(rid="FIX-DUE", name="test_a"),
+                "tests/test_gated.py": src,
+            },
+            outcomes={"tests/test_ok.py::test_a": "passed",
+                      "tests/test_gated.py::test_live": "skipped"},
+        )
+        res = run_check(root)
+        assert res.returncode == 0, (
+            f"{label}: a multipass_available()-gated t3 mark was refused:\n"
+            f"{res.stdout}{res.stderr}")

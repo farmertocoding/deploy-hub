@@ -268,11 +268,14 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     )
     slug = f"t2s{uuid.uuid4().hex[:6]}"
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project,
         name=slug,
         domain=f"{slug}.example.test",
         primary_target=target,
+        dns_zone=default_dns_zone(),
         deploy_strategy=Site.DeployStrategy.RECREATE,
         readiness_path="/healthz.ready",
         warmup_timeout_s=30,
@@ -297,7 +300,9 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     rec = RecordingTransport(SshTransport(target))
 
     try:
-        result = execute(first.pk, transport=rec)
+        result = execute(
+            first.pk, transport=rec, dns=FakeDnsProvider(),
+        )
     except Exception as exc:
         ssh = SshTransport(target)
         name = f"site-{slug}-{first.pk}"
@@ -328,7 +333,7 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
 
     rec.calls.clear()
     _requeue_pending(first)
-    result2 = execute(first.pk, transport=rec)
+    result2 = execute(first.pk, transport=rec, dns=FakeDnsProvider())
     first.refresh_from_db()
     assert first.status == Deployment.Status.SUCCEEDED, result2
     mutating_docker = [

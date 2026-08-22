@@ -24,3 +24,7 @@
 /monitor/reaper.py @farmertocoding
 /core/test_mode.py @farmertocoding
 /providers/test_dns.py @farmertocoding
+/monitor/pager.py @farmertocoding
+/monitor/alert_rules.py @farmertocoding
+/deploys/certs.py @farmertocoding
+/provision/adopt.py @farmertocoding

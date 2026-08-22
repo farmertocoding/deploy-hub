@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-2.5 review-round generate-client check-generated \
+	conformance conformance-3 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -102,6 +102,7 @@ generate-client:
 	# directory and therefore the same staleness gate as the zod mirror below — a
 	# presentation decision made twice is what four filings in three rounds were.
 	python scripts_dev/generate_presentation.py
+	python scripts_dev/generate_actions.py
 	cd frontend && npx openapi-typescript src/api/openapi.yaml -o src/api/types.ts
 	cd frontend && npx openapi-zod-client src/api/openapi.yaml -o src/api/zod.ts \
 		-t node_modules/openapi-zod-client/src/templates/schemas-only.hbs --export-schemas
@@ -128,7 +129,7 @@ test-t3:
 
 # ONE all-tiers session (panel F2 ruling): nightly's gate. Three narrowed
 # sessions (test, test-t2, test-t3) each overwrite conformance/run-report.json
-# with full_run: false, so conformance-2.5 reading the last one hard-fails
+# with full_run: false, so conformance-3 reading the last one hard-fails
 # even when everything passed — nightly could never exit 0.
 test-all:
 	pytest -q
@@ -151,15 +152,16 @@ scripts-lint:
 	shfmt -d -i 4 -ci $(SCRIPTS)
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
-# Review-round gate: phase 2.5 without live-only reqs — tier:t3 (Multipass)
+# Review-round gate: phase 3 without live-only reqs — tier:t3 (Multipass)
 # and tier:t2 (docker) both stay out so review-round grades the T1 report
-# honestly (D-024, D-029, panel F1). conformance-2.5 demands them all.
+# honestly (D-024, D-029, panel F1). conformance-3 demands them all.
 conformance:
-	python conformance/check.py --phase 2.5 --exclude-tier t3 --exclude-tier t2
+	python conformance/check.py --phase 3 --exclude-tier t3 --exclude-tier t2
 
-# All-tiers phase 2.5 gate. Not a review-round prerequisite (D-023).
-conformance-2.5:
-	python conformance/check.py --phase 2.5
+# All-tiers phase 3 gate. Not a review-round prerequisite (D-023). Replaces
+# conformance-2.5 (phase 2.5 closed; one all-tiers gate, not two).
+conformance-3:
+	python conformance/check.py --phase 3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #
@@ -231,9 +233,9 @@ review-round: lint log-scrub scripts-lint test test-frontend mutation check-gene
 # on a `nightly: lint …` rule. The wrapper invokes nightly-gates and, on
 # non-zero, calls scripts_dev/file_nightly_failure.py then exits N.
 # Panel F2 ruling: nightly grades ONE all-tiers pytest session, then
-# conformance-2.5 reads that session's full_run report. Listing test/test-t2/
-# test-t3 here would leave a narrowed report for conformance-2.5 to refuse.
-nightly-gates: lint log-scrub scripts-lint test-all conformance-2.5
+# conformance-3 reads that session's full_run report. Listing test/test-t2/
+# test-t3 here would leave a narrowed report for conformance-3 to refuse.
+nightly-gates: lint log-scrub scripts-lint test-all conformance-3
 	@echo "nightly mechanical gates done"
 
 nightly:

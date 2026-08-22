@@ -12,6 +12,7 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
     from core.models import Target
     from core.ssh import SshTransport
     from monitor.collector import collect
+    from monitor.traffic import ingest as ingest_traffic
 
     factory = transport_for or SshTransport
     mono = monotonic or time.monotonic
@@ -22,10 +23,11 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
         if lock is None:
             continue
         try:
-            collect(
+            payload = collect(
                 target, factory(target), now=now, sleep=sleep,
                 tick_started=started, monotonic=mono,
             )
+            ingest_traffic(target, payload)
             n += 1
         except Exception as exc:
             audit(
@@ -44,34 +46,143 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
 def detect_missed_drills(*, now=None):
     from django.utils import timezone
 
-    from monitor.drills import find_missed
+    from monitor.drills import alert_missed_drill, find_missed
 
     clock = now or timezone.now()
     missed = find_missed(clock)
+
     for kind in missed:
         audit("drill-missed", source="celery", severity="warning", kind=kind)
+        alert_missed_drill(kind)
     return {"ok": True, "n": len(missed)}
 
 
 @shared_task(ignore_result=True)
 def run_hub_down_drill(*, duration_s=1800):
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_hub_down_drill as body
 
+    seed_due_at(CheckRun.Kind.HUB_DOWN, period_s=DRILL_PERIODS[CheckRun.Kind.HUB_DOWN])
     run = body(duration_s=duration_s)
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 
 @shared_task(ignore_result=True)
 def run_reaper_drill(*, planted_name="hub-t3-orphan-weekly"):
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_reaper_drill as body
 
+    seed_due_at(CheckRun.Kind.REAPER, period_s=DRILL_PERIODS[CheckRun.Kind.REAPER])
     run = body(planted_name=planted_name)
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 
 @shared_task(ignore_result=True)
 def run_restore_clean_drill():
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_restore_clean_drill as body
+
+    seed_due_at(
+        CheckRun.Kind.RESTORE_CLEAN,
+        period_s=DRILL_PERIODS[CheckRun.Kind.RESTORE_CLEAN],
+    )
+    run = body()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_pager_drill():
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
+    from monitor.drills import run_pager_drill as body
+
+    seed_due_at(CheckRun.Kind.PAGER, period_s=DRILL_PERIODS[CheckRun.Kind.PAGER])
+    run = body()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def audit_cf_token_scope():
+    """Daily SEC-B5 token-scope audit (Task 2). Takes no args by design:
+    nothing credential-shaped can ever appear in task args or the result."""
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    run = audit_cloudflare_credentials()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def probe_uptime():
+    """Beat `probe-uptime` (60 s, queue probes): one HTTP probe cycle, then
+    the dead-man ping — fired only when the cycle completed every target
+    (§C7). No secret ever appears in args or the returned dict."""
+    from monitor.deadman import ping_after_cycle
+    from monitor.uptime import probe_cycle
+
+    cycle = probe_cycle()
+    outcome = ping_after_cycle(cycle)
+    return {
+        "ok": True,
+        "completed": cycle["completed"],
+        "n": cycle["n"],
+        "pinged": outcome["pinged"],
+    }
+
+
+@shared_task(ignore_result=True)
+def repeat_unacked(*, now=None):
+    """Beat `alert-repeat-unacked` (300 s). Not probe-uptime."""
+    from monitor.alerts import repeat_unacked as body
+
+    return body(now=now)
+
+
+@shared_task(ignore_result=True)
+def deliver_grouped(*, window=600, now=None):
+    """Beat `alert-group-p2` (300 s). Flushes pending P2s; not probe-uptime."""
+    from monitor.pager import deliver_grouped as body
+
+    return {"ok": True, "n": body(window=window, now=now)}
+
+
+@shared_task(ignore_result=True)
+def build_digest():
+    """Beat `digest-daily` — 08:00 local, TIME_ZONE."""
+    from django.utils import timezone
+
+    from monitor.digest import build_digest as body
+
+    result = body(timezone.localdate())
+    return {"ok": True, "n": len(result["findings"])}
+
+
+@shared_task(ignore_result=True)
+def build_weekly_rollup():
+    """Beat `digest-weekly` — Monday 08:00 local."""
+    from django.utils import timezone
+
+    from monitor.digest import build_weekly_rollup as body
+
+    result = body(timezone.localdate())
+    return {"ok": True, "owner": result["owner"], "n": len(result["findings"])}
+
+
+@shared_task(ignore_result=True)
+def scan_cert_expiry():
+    """Beat `cert-expiry-daily`. Takes no args so nothing credential-shaped
+    can appear in task args or the result."""
+    from monitor.cert_watch import scan_cert_expiry as body
 
     run = body()
     return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_retention_janitor(*, now=None):
+    """Beat `retention-janitor-nightly`. Plain batched DELETEs (§C7)."""
+    from monitor.retention import sweep
+
+    return sweep(now=now)

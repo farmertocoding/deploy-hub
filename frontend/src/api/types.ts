@@ -127,6 +127,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cloudflare/connect/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_cloudflare_connect_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_findings_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_findings_retrieve_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/{id}/transition/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_findings_transition_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/map/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1). */
+        get: operations["v1_map_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/": {
         parameters: {
             query?: never;
@@ -212,6 +293,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/rollback/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description POST: roll the site back to its latest succeeded Deployment. */
+        post: operations["v1_sites_rollback_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/wizard/": {
         parameters: {
             query?: never;
@@ -234,6 +332,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description * `ack` - ack
+         *     * `resolve` - resolve
+         *     * `accept_risk` - accept_risk
+         * @enum {string}
+         */
+        ActionEnum: "ack" | "resolve" | "accept_risk";
+        CertRefusal: {
+            detail: string;
+            finding_id: number;
+        };
+        CloudflareConnect: {
+            token: string;
+        };
+        CloudflareConnectResult: {
+            account: components["schemas"]["DnsAccountConnected"];
+            zone: components["schemas"]["DnsZoneConnected"];
+        };
         Confirm: {
             otp_code: string;
         };
@@ -246,6 +362,17 @@ export interface components {
             delay: number;
             /** @default false */
             confirm_warnings: boolean;
+        };
+        DnsAccountConnected: {
+            readonly id: number;
+            provider?: components["schemas"]["ProviderEnum"];
+            label: string;
+        };
+        DnsZoneConnected: {
+            readonly id: number;
+            name: string;
+            provider_zone_id?: string;
+            purpose?: components["schemas"]["PurposeEnum"];
         };
         EnvApply: {
             deployment_id: number;
@@ -260,6 +387,39 @@ export interface components {
                 [key: string]: string;
             };
         };
+        Finding: {
+            readonly id: number;
+            source_engine: string;
+            severity: components["schemas"]["SeverityEnum"];
+            entity: string;
+            title: string;
+            body?: string;
+            fix_action?: string;
+            state?: components["schemas"]["StateEnum"];
+            /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            fingerprint: string;
+            accepted_reason?: string;
+        };
+        FindingDetailSnapshot: {
+            seq: number;
+            data: components["schemas"]["Finding"];
+        };
+        FindingListSnapshot: {
+            seq: number;
+            data: components["schemas"]["Finding"][];
+        };
+        /**
+         * @description * `zone` - zone
+         *     * `host` - host
+         *     * `container` - container
+         *     * `hub` - hub
+         *     * `edge` - edge
+         * @enum {string}
+         */
+        KindEnum: "zone" | "host" | "container" | "hub" | "edge";
         Login: {
             username: string;
             password: string;
@@ -272,6 +432,26 @@ export interface components {
             scan_report_hash: string;
             /** Format: date-time */
             created_at: string;
+        };
+        MapEdge: {
+            a: string;
+            b: string;
+            path: components["schemas"]["PathEnum"];
+        };
+        MapGraph: {
+            nodes: components["schemas"]["MapNode"][];
+            edges: components["schemas"]["MapEdge"][];
+        };
+        MapNode: {
+            id: string;
+            kind: components["schemas"]["KindEnum"];
+            label: string;
+            status: string;
+            parent?: string;
+        };
+        MapSnapshot: {
+            seq: number;
+            data: components["schemas"]["MapGraph"];
         };
         Materialize: {
             /** @default false */
@@ -289,6 +469,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description * `public` - public
+         *     * `mesh` - mesh
+         * @enum {string}
+         */
+        PathEnum: "public" | "mesh";
         ProjectSummary: {
             id: number;
             name: string;
@@ -300,6 +486,17 @@ export interface components {
             };
             sites: components["schemas"]["SiteSummary"][];
         };
+        /**
+         * @description * `cloudflare` - Cloudflare
+         * @enum {string}
+         */
+        ProviderEnum: "cloudflare";
+        /**
+         * @description * `prod` - Prod
+         *     * `test` - Test
+         * @enum {string}
+         */
+        PurposeEnum: "prod" | "test";
         Question: {
             id: string;
             prompt: string;
@@ -328,12 +525,38 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        RollbackResult: {
+            deployment_id: number;
+            original_id: number;
+            status: string;
+        };
+        /**
+         * @description * `p1` - P1
+         *     * `p2` - P2
+         *     * `p3` - P3
+         * @enum {string}
+         */
+        SeverityEnum: "p1" | "p2" | "p3";
         SiteSummary: {
             id: number;
             name: string;
             domain: string;
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
+            cert_refusal?: components["schemas"]["CertRefusal"] | null;
+        };
+        /**
+         * @description * `open` - Open
+         *     * `acked` - Acked
+         *     * `resolved` - Resolved
+         *     * `accepted` - Accepted
+         * @enum {string}
+         */
+        StateEnum: "open" | "acked" | "resolved" | "accepted";
+        Transition: {
+            action: components["schemas"]["ActionEnum"];
+            /** @default  */
+            reason: string;
         };
         WizardState: {
             questions: components["schemas"]["Question"][];
@@ -509,6 +732,132 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_cloudflare_connect_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudflareConnect"];
+                "application/x-www-form-urlencoded": components["schemas"]["CloudflareConnect"];
+                "multipart/form-data": components["schemas"]["CloudflareConnect"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareConnectResult"];
+                };
+            };
+        };
+    };
+    v1_findings_retrieve: {
+        parameters: {
+            query?: {
+                entity?: string;
+                /**
+                 * @description * `p1` - P1
+                 *     * `p2` - P2
+                 *     * `p3` - P3
+                 */
+                severity?: "p1" | "p2" | "p3";
+                /**
+                 * @description * `open` - Open
+                 *     * `acked` - Acked
+                 *     * `resolved` - Resolved
+                 *     * `accepted` - Accepted
+                 */
+                state?: "open" | "acked" | "resolved" | "accepted";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingListSnapshot"];
+                };
+            };
+        };
+    };
+    v1_findings_retrieve_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
+            };
+        };
+    };
+    v1_findings_transition_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Transition"];
+                "application/x-www-form-urlencoded": components["schemas"]["Transition"];
+                "multipart/form-data": components["schemas"]["Transition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
+            };
+        };
+    };
+    v1_map_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapSnapshot"];
+                };
             };
         };
     };
@@ -692,6 +1041,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Manifest"];
+                };
+            };
+        };
+    };
+    v1_sites_rollback_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RollbackResult"];
                 };
             };
         };

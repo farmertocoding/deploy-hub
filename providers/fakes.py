@@ -1,19 +1,32 @@
 """In-memory provider fakes (§A7/§D5) — what T1 tests plug into."""
 import itertools
 
-from .base import CloudProvider, DnsProvider, EdgeProtection
+from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer, Pager
 
 _ids = itertools.count(1)
 
 
 class FakeDnsProvider(DnsProvider):
+    """Zone keys may be strings, NetworkZones, or DnsZone rows — whatever the
+    caller hands over is recorded verbatim in `calls`, so tests can assert
+    the pipeline passed a DnsZone and never a NetworkZone (Task 1)."""
+
+    _MUTATING = {"upsert_record", "delete_record"}
+
     def __init__(self):
         self.zones = {}  # zone -> {record_id: record}
+        self.calls = []  # (method, zone-or-domain, *args)
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
 
     def list_records(self, zone):
+        self.calls.append(("list_records", zone))
         return list(self.zones.get(zone, {}).values())
 
     def upsert_record(self, zone, name, rtype, values, *, proxied=False, ttl=None):
+        self.calls.append(("upsert_record", zone, name, rtype, list(values),
+                           proxied, ttl))
         records = self.zones.setdefault(zone, {})
         for rid, rec in records.items():
             if rec["name"] == name and rec["rtype"] == rtype:
@@ -27,9 +40,11 @@ class FakeDnsProvider(DnsProvider):
         return rid
 
     def delete_record(self, zone, record_id):
+        self.calls.append(("delete_record", zone, record_id))
         self.zones.get(zone, {}).pop(record_id, None)  # absent == success
 
     def get_nameservers(self, domain):
+        self.calls.append(("get_nameservers", domain))
         return ["fake.ns1.example", "fake.ns2.example"]
 
     def capabilities(self):
@@ -81,3 +96,41 @@ class FakeCloudProvider(CloudProvider):
 
     def estimate_hourly_cost(self, spec):
         return 0.05
+
+
+class FakePager(Pager):
+    """Records publishes. Default backend in tests so nothing pages anyone."""
+
+    def __init__(self):
+        self.published = []
+        self.fail = False
+
+    def publish(self, severity, title, body, *, tags, click_url, **_kwargs):
+        record = {
+            "severity": severity,
+            "title": title,
+            "body": body,
+            "tags": tags,
+            "click_url": click_url,
+        }
+        self.published.append(record)
+        if self.fail:
+            raise RuntimeError("fake pager failed")
+        return record
+
+
+class FakeOriginCertIssuer(OriginCertIssuer):
+    """Locally-minted leaf so T1/T2 never call Cloudflare. The leaf public
+    key is taken from the Hub CSR so key/cert match still holds."""
+
+    def __init__(self):
+        self.calls = []
+
+    def issue(self, zone, hostnames, *, validity_days, csr):
+        from vault.tls import mint_local_leaf
+
+        self.calls.append((zone, list(hostnames), validity_days))
+        certificate, expires_at = mint_local_leaf(
+            csr, hostnames, validity_days=validity_days,
+        )
+        return {"certificate": certificate, "expires_at": expires_at}

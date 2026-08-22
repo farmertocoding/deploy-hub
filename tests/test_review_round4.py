@@ -116,8 +116,11 @@ def test_hub_shaped_inspect_curls_env_port_from_docker_run(tmp_path):
     slug = "hubhz"
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
     target = _zone_target(slug)
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst = SiteInstance.objects.create(
         site=site,
@@ -200,8 +203,11 @@ def test_tick_skips_restart_when_inspect_has_no_port(tmp_path):
     slug = "noport"
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
     target = _zone_target(slug)
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst = SiteInstance.objects.create(
         site=site,

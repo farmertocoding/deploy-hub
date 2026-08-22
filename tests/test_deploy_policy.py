@@ -17,9 +17,12 @@ def _git_site(*, slug, policy, cron=""):
         git_url="https://github.com/o/r.git",
         git_ref="main",
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project,
         name=slug,
+        dns_zone=default_dns_zone(),
         deploy_policy=policy,
         deploy_window_cron=cron,
     )

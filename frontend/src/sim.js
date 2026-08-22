@@ -1459,6 +1459,40 @@ const edgeRow = () => liveMaterialized.has(3) ? EDGE_PROJECT_AFTER : EDGE_PROJEC
 // an edit, and a test cannot walk a set of sites the simulation does not route.
 export const TAKKO_SITES = CLEAN_PROJECT.sites.map((s) => s.id);
 
+// Task 13: findings snapshots for ?sim= — same {seq, data} shape as
+// FindingListView, so the inbox is reviewable without a backend. Not a
+// *_REPORT constant: the scanner-drift gate must not parse these as scans.
+const SIM_FINDINGS = [
+  {
+    "id": 1, "source_engine": "uptime", "severity": "p1",
+    "entity": "site:shop.example.com", "title": "shop.example.com is down",
+    "body": "Three consecutive probes failed; visitors see connection errors.",
+    "fix_action": "Check docker ps on the target; restart the container.",
+    "state": "open", "fingerprint": "fp-shop-down", "accepted_reason": "",
+    "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z",
+  },
+  {
+    "id": 7, "source_engine": "certs", "severity": "p1",
+    "entity": "site:shop.example.com",
+    "title": "Unproxied site cannot be issued a certificate",
+    "body": "shop.example.com is public and unproxied; Hub-central DNS-01 is not built.",
+    "fix_action": "Proxy the site through Cloudflare, or wait for Phase 4's DNS-01.",
+    "state": "open", "fingerprint": "fp-unproxied", "accepted_reason": "",
+    "first_seen": "2026-08-22T00:00:00Z", "last_seen": "2026-08-22T00:05:00Z",
+  },
+];
+
+function findingsFixture(path) {
+  if (path === "v1/findings/")
+    return { status: 200, data: { seq: 1, data: SIM_FINDINGS } };
+  const m = /^v1\/findings\/(\d+)\/$/.exec(path);
+  if (!m) return null;
+  const row = SIM_FINDINGS.find((f) => f.id === Number(m[1]));
+  return row
+    ? { status: 200, data: { seq: 1, data: row } }
+    : { status: 404, data: { detail: "Not found" } };
+}
+
 // The self-identified synthetic refusal, and the established pattern for one: `degraded`
 // answers the routes it does not cover with a `[sim]`-prefixed 503 rather than a sentence
 // invented here and attributed to the server. Same rule, different reason — this one is
@@ -1480,8 +1514,11 @@ const notCovered = (what) => ({
 // Each fixture: (path, body, method) => {status, data}
 export const SIM_FIXTURES = {
   // No projects at all — first-run experience.
-  empty: (path) =>
-    path === "v1/projects/" ? { status: 200, data: [] } : { status: 404, data: {} },
+  empty: (path) => {
+    if (path === "v1/projects/") return { status: 200, data: [] };
+    if (path === "v1/findings/") return { status: 200, data: { seq: 0, data: [] } };
+    return { status: 404, data: {} };
+  },
 
   // THREE loading states, one per spinner, because there are three fetches in a chain
   // and hanging the first makes the other two unreachable (round-9 item 10): with no
@@ -1499,6 +1536,8 @@ export const SIM_FIXTURES = {
   // Healthy data: a clean project that can materialize, a blocked one that cannot, and
   // one that can materialize only after the warnings are acknowledged.
   live: (path, body, method) => {
+    const findings = findingsFixture(path);
+    if (findings) return findings;
     if (path === "v1/projects/")
       return { status: 200, data: [takkoRow(), MESSY_PROJECT, edgeRow()] };
     if (path.endsWith("/readiness/"))
@@ -1581,6 +1620,8 @@ export const SIM_FIXTURES = {
   //     through would answer with what the live state remembers, which is a screen the
   //     server behind this state cannot produce.
   stale: (path, body, method) => {
+    const findings = findingsFixture(path);
+    if (findings) return findings;
     if (path.endsWith("/manifest/") && idOf(path) === 1) {
       staleRescanServed = true;
       return { status: 409, data: STALE_REFUSAL_409 };

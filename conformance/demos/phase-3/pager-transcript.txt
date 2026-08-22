@@ -1,0 +1,18 @@
+Phase 3 pager transcript — recorded 2026-08-23 on this host.
+
+HUB_PAGER_BACKEND='fake' (settings default; no live ntfy).
+Resolved pager class: FakePager
+No operator was paged.
+
+Source nodeid (real, T1):
+  tests/acceptance/test_phase_3.py::test_push_body_is_minimized_and_scrubbed
+  transcribes tests/test_pager.py::test_push_body_has_no_raw_ip_no_secret_no_break_glass_command
+  and ::test_default_backend_in_tests_is_the_fake
+
+What that run asserted, naming the backend:
+  settings.HUB_PAGER_BACKEND == "fake"
+  isinstance(get_pager(), FakePager)
+  push body has no raw IP, no secret, no break-glass command
+  click_url is present; severity is present
+
+This is not a live ntfy.sh delivery.

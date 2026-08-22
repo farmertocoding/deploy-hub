@@ -77,10 +77,17 @@ WAIVED: mutation+hub/renderers.py+hub.renderers.xǁContainedJSONRendererǁrender
 WAIVED: tests.test_crash_kill_matrix+REL-P3+t1-runtimeerror-not-t2-crash — HUB_TEST_CRASH_AFTER_STEP as in-process RuntimeError is the Phase 2 kill-matrix; SIGKILL of a live worker is Phase 2.5 harness. The T1 1–9 matrix stays. (2026-08-21)
 WAIVED: tests.acceptance.test_phase_2+Q4-transcription+hub-test-target-is-t1 — T1 FakeTransport acceptance is allowed; hub-test-target is the T2 demo record. Retire when the acceptance clause is the T2/T3 nodeid. (2026-08-21)
 WAIVED: tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-ready-stub — T2 alpine COPY-from-tree is the recorded vfs exception; PIPE-S4 is proven on T1. Retire when T2 builds the fixture image. (2026-08-21)
-WAIVED: frontend/src/App.jsx+UX-F8-SIMULATION-STATES+demo-pane-no-site-deploy-topics — Task 20 is seed-only; screens are Phase 3. Named UX-F8 tests never claimed a pane. (2026-08-21)
-WAIVED: simulation/seed_v0.json+review3-N2+warming-omits-elapsed-expected — seed token is present; elapsed/expected copy waits for the site-card UI. (2026-08-21)
-WAIVED: deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns — commands + 0400 + no secrets hold; impact/DNS copy is Phase 3 operator UX. (2026-08-21)
-WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the 24h live form is the Phase 2.5 nightly drill. check.py verified file presence, not duration. (2026-08-21)
+# RETIRED 2026-08-22 (Task 13): frontend/src/App.jsx+UX-F8-SIMULATION-STATES+demo-pane-no-site-deploy-topics
+# — frontend/tests/simulation-states.test.ts::every_new_state_renders_in_simulation_mode
+# paints site/deploy/finding/map states on product screens, not the demo pane.
+# RETIRED 2026-08-22 (Task 13): simulation/seed_v0.json+review3-N2+warming-omits-elapsed-expected
+# — seed_v1 warming carries elapsed_s/expected_s and SiteObserved renders
+# "45s elapsed / 600s expected".
+# RETIRED 2026-08-22 (Task 16): deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns
+# — tests/test_breakglass.py now asserts impact before commands, Hub-side
+# upsert_record only, freshness metadata, 0400 root-owned, no token/secret,
+# and the alert-protocol §3 advisory-only note.
+WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the hub-down prober is now a real external HTTP GET (D-042); the 24 h form is a dated calendar item, not a claimed duration. check.py verified file presence, not duration. First recorded 2026-08-21. (2026-08-22)
 
 # Phase 2.5 exit (Task 16, amended by the panel fix wave). D-024: a `tier: t3` req
 # is verified only by a passed @pytest.mark.t3 test, and on a host that cannot run
@@ -93,3 +100,15 @@ WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-
 # tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3) that
 # forced that retirement stay armed for any future host-without-multipass line.
 WAIVED: HARNESS-T3-LE-STAGING — no-test-zone-credentials: HUB_TEST_DNS_ZONE / HUB_TEST_CF_TOKEN are not set on this host, so tests/test_t3_https.py is skipped-only per the req's own text and D-031 — HTTPS + LE staging + wss-through-CF run only when the test-zone token is present, and absent credentials must never become a T1-sibling green. Multipass itself is present and live since 2026-08-22 (conformance/demos/phase-2.5/t3-run.txt); only the Cloudflare test-zone token is missing. Retire with the first credentialed run against the Cloudflare TEST zone (2026-08-22)
+WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials: HUB_TEST_CF_TOKEN is not set on this host, so tests/test_t3_cf_live.py is skipped-only per the req's own text and D-043 — the product adapter's live upsert against the allowlisted purpose=test zone runs only when the test-zone token is present, and absent credentials must never become a T1-sibling green. Retire with the first credentialed run, in the change that records it under conformance/demos/phase-3/ (2026-08-22)
+
+# Phase 3 exit (Task 19). Clause-scoped full-text ids (SCAN-M4 shape, D-035 /
+# D-040): the buildable clauses are marked on their split ids; these two sit
+# uncovered because a marker would claim the unbuilt clause. Adopt (Task 15)
+# slipped to Phase 3b (D-044). REL-P2 24 h, D-025 alpine, and the D-022
+# checklist lines stay above. UX-F8 and SEC-P5 stay RETIRED. Do not read a
+# MON-C7 or MAP-96 line here — both landed.
+WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemented: the full-text id names two clauses; SEC-B2-NO-TOKEN-ON-TARGET is proven by the target-bound surface scan (tests/test_no_token_exfiltration.py, unmarked here); Hub-central DNS-01 for unproxied sites is unbuilt and the honest interim is the named refusal (Finding + Sites-screen state). Retire when TLS-B2-HUB-DNS01-UNPROXIED (registered at phase 4; built in Phase 3b) is verified and the full-text markers go back on. (2026-08-23)
+WAIVED: UX-F5-ACTION-TIERS — T1 hardware-touch clause unimplemented: the full-text id names T1/T2/T3 friction; UX-F5-T2-T3-FRICTION is proven (frontend/src/actions.js + tests/acceptance/test_phase_3.py::test_rollback_is_one_click_and_never_step_up_gated); WebAuthn hardware touch for T1 is unbuilt (D-040). Retire when SEC-F5-T1-HARDWARE-TOUCH (phase 4) is verified and the full-text markers go back on. (2026-08-23)
+WAIVED: PROV-J7-COMPOSE-AWARE-ADOPT — uncovered: Task 15 adopt-existing-site slipped to Phase 3b (D-044 / panel ruling 5); five open spec holes remain in docs/phase-3-design-note.md §1.12 (compose-as-unit vs V5, compose source, temp-subdomain naming/zone, DB/volume pointer, Caddy-ownership record). Retire when Phase 3b ships compose-aware adopt with a marked test. (2026-08-23)
+WAIVED: PROV-E6-ADOPT-TEMP-SUBDOMAIN — uncovered: Task 15 slipped to Phase 3b with PROV-J7; temp-subdomain naming, which zone it lives in, and who cleans it up on an abandoned flip is design-note §1.12(c). Retire when Phase 3b answers that hole and a marked test proves the temp subdomain. (2026-08-23)

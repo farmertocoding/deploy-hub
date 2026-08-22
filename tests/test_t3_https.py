@@ -59,6 +59,11 @@ def _credentialed():
 
 pytestmark = [
     pytest.mark.t3,
+    # I1 (phase-3 Task 0): the t3 host gate must derive from
+    # multipass_available() — the credential skipif below is this file's OWN
+    # precondition (D-031), not the host gate, and alone it left these t3
+    # marks collecting on a Multipass-less host.
+    pytest.mark.skipif(not multipass_available(), reason="multipass is not available"),
     pytest.mark.skipif(not _credentialed(), reason=SKIP_REASON),
     pytest.mark.django_db,
 ]

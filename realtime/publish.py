@@ -11,6 +11,15 @@ from their own tables instead; history is for log-style topics.
 Backend selection keys on the configured channel layer (round-1 finding: keying
 on REDIS_PASSWORD misroutes a passwordless-Redis deployment into process-local
 counters while events fan out cross-process).
+
+Phase 3 (§C4) topics: ``site.{id}.traffic`` (minute TrafficStat aggregates —
+counts, never raw log lines) and ``host.{id}.metrics`` (collector
+load/mem/disk). Producers live in monitor/ and reach publish() through
+core.events (see core/events.py for why the import is inverted); both topics
+snapshot from their own tables, so neither keeps history here.
+
+Phase 3 map (§9.6.1): ``map.graph`` is the same shape — table-backed from
+NetworkZone/Target/SiteInstance, published on graph change, no history list.
 """
 import json
 
@@ -18,7 +27,21 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings
 
+from .authorize import DEPRECATED_ALIASES
+
 HISTORY_CAP = 500  # per topic; log-style topics only
+
+# D-045: a deprecated alias IS its canonical topic — one seq counter, one
+# history, and every publish fans out to the alias group names so a Phase-0
+# `alerts` subscriber receives exactly what a `findings` subscriber does.
+# Delete alongside the DEPRECATED_ALIASES table in Phase 4.
+_ALIAS_GROUPS = {}
+for _alias, _canonical in DEPRECATED_ALIASES.items():
+    _ALIAS_GROUPS.setdefault(_canonical, []).append(_alias)
+
+
+def _canonical(topic):
+    return DEPRECATED_ALIASES.get(topic, topic)
 
 # KEYS[1]=seq key, KEYS[2]=history key; ARGV[1]=event json, ARGV[2]=history flag
 _PUBLISH_LUA = """
@@ -62,6 +85,7 @@ def _next_seq(topic, event, history):
 
 
 def current_seq(topic):
+    topic = _canonical(topic)
     if _uses_redis():
         return int(_redis().get(f"evt:seq:{topic}") or 0)
     return _local_seqs.get(topic, 0)
@@ -69,6 +93,7 @@ def current_seq(topic):
 
 def topic_history(topic):
     """[{seq, event}] recorded with history=True, oldest first (snapshot `data`)."""
+    topic = _canonical(topic)
     if _uses_redis():
         raw = _redis().lrange(f"evt:log:{topic}", 0, -1)
         return [json.loads(x) for x in raw]
@@ -76,9 +101,14 @@ def topic_history(topic):
 
 
 def publish(topic, event, history=False):
+    topic = _canonical(topic)
     seq = _next_seq(topic, event, history)
     layer = get_channel_layer()
-    async_to_sync(layer.group_send)(
-        topic, {"type": "topic.event", "topic": topic, "seq": seq, "event": event}
-    )
+    # Canonical group first, then its deprecated alias groups (D-045): same
+    # seq, same event; only the topic label differs, so a subscriber's own
+    # filter-by-topic keeps working on either name.
+    for group in (topic, *_ALIAS_GROUPS.get(topic, ())):
+        async_to_sync(layer.group_send)(
+            group, {"type": "topic.event", "topic": group, "seq": seq, "event": event}
+        )
     return seq

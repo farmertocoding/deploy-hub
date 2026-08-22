@@ -59,3 +59,19 @@ class CloudProvider:
 
     def estimate_hourly_cost(self, spec):
         raise NotImplementedError
+
+
+class Pager:
+    """One-call publish seam (D-036). Implementations live under providers/."""
+
+    def publish(self, severity, title, body, *, tags, click_url):
+        raise NotImplementedError
+
+
+class OriginCertIssuer:
+    """Hub-side Origin CA issuance (D-035). The Hub generates the keypair
+    and sends only the CSR; the issuer returns the signed certificate."""
+
+    def issue(self, zone, hostnames, *, validity_days, csr):
+        """Return ``{"certificate": pem, "expires_at": datetime}``."""
+        raise NotImplementedError

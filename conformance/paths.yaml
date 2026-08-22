@@ -54,3 +54,17 @@ sensitive:
   # `multipass delete --purge` argv from listings and lease files. A widened
   # prefix or a dropped require_t3_name deletes VMs outside the test plane.
   - monitor/reaper.py
+  # Phase 3 (Task 0): the custody set the phase's tasks will land code into,
+  # claimed before the code exists so the first line written there is already
+  # human-merged. monitor/pager.py publishes to the operator's pager with the
+  # per-identity tokens D-036 names; monitor/alert_rules.py is the one rules
+  # table transcribed from alert-protocol §2 (weaken a row and an outage goes
+  # undigested); deploys/certs.py pushes Origin cert material and vault-held
+  # keys through the 0400 path (D-035); provision/adopt.py touches live
+  # manually-managed sites during enrollment (§E6). Custody parity is two-way
+  # now: every CODEOWNERS entry has its counterpart here, and vice versa
+  # (tests/test_proc_rules.py, both directions).
+  - monitor/pager.py
+  - monitor/alert_rules.py
+  - deploys/certs.py
+  - provision/adopt.py

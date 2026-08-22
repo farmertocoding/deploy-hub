@@ -241,7 +241,7 @@ gunicorn `2×CPU+1` behind Caddy, never runserver, `/healthz` required · twelve
 
 > **UPDATE 2026-07-30:** superseded by the revised roadmap in `plan-addendum-2026-07-30.md` §I (golden-path spike first, WebAuthn → Phase 4, Router Advisor → Phase 7, webhook→polling per review3 §M2, adopt-existing-site added, Phase 6 gated post-v1) and by per-phase exit gates in `build-process.md`.
 
-**Phase 0 — Skeleton (weekend):** compose stack (queue split), login + second factor, demo Celery job streaming fake logs over Channels, §4.5 pipeline on the first form. **Phase 1 — Scanner & Wizard (1–2 weeks):** §5 complete; CLI parity. **UPDATE 2026-08-02:** Phase 1 = "scanner modules: django + node-ts" with the `sample-node-site/` fixture; cost per review3 §V10. **Phase 2 — Deploy to own machine.** **Phase 3 — DNS automation + monitoring + map v1.** **Phase 4 — Security suite.** **Phase 5 — AWS, then Azure.** **Phase 6 — Overflow auto-scaling.** **Phase 7 — Polish.**
+**Phase 0 — Skeleton (weekend):** compose stack (queue split), login + second factor, demo Celery job streaming fake logs over Channels, §4.5 pipeline on the first form. **Phase 1 — Scanner & Wizard (1–2 weeks):** §5 complete; CLI parity. **UPDATE 2026-08-02:** Phase 1 = "scanner modules: django + node-ts" with the `sample-node-site/` fixture; cost per review3 §V10. **Phase 2 — Deploy to own machine.** **Phase 3 — DNS automation + monitoring + map v1.** **Phase 3b — adopt-existing-site, app-log viewer, scheduled-jobs UI, first-run checklist, backup/restore surface, Hub-central DNS-01 (D-032/D-044).** **Phase 4 — Security suite.** **Phase 5 — AWS, then Azure.** **Phase 6 — Overflow auto-scaling.** **Phase 7 — Polish.**
 
 ---
 

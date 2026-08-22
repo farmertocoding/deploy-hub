@@ -25,8 +25,11 @@ def _world(slug):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst = SiteInstance.objects.create(
         site=site,
@@ -447,11 +450,15 @@ def test_tick_uses_fresh_collector_json_not_inspect():
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site_warm = Site.objects.create(
         project=project, name="warm", primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     site_sick = Site.objects.create(
         project=project, name="sick", primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst_warm = SiteInstance.objects.create(
         site=site_warm,

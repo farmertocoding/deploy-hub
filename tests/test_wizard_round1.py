@@ -8,6 +8,7 @@ import json
 
 import pytest
 from django.core.exceptions import ValidationError
+from dns_fixtures import default_dns_zone
 
 from core.models import Project, Site
 from core.validators import validate_domain
@@ -47,7 +48,8 @@ def test_plain_env_values_are_not_frozen_into_the_body():
     registry text for this very requirement says 'env NAMES only, never values' — the
     previous implementation wrote plain-classified values into body['env_plain']."""
     project = _project(slug="f1a")
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {
         "site.domain": "app.example.com",
         "django.env.DATABASE_URL": "postgres://user:hunter2-oops@db/prod",
@@ -66,7 +68,8 @@ def test_manifest_owns_one_env_bundle_in_the_vault():
     site:version — so v3 deploys with v3's env exactly as frozen, and a stolen DB
     dump holds only ciphertext."""
     project = _project(slug="f1b")
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {
         "site.domain": "app.example.com",
         "django.env.DATABASE_URL": "postgres://db/prod",
@@ -88,7 +91,8 @@ def test_manifest_owns_one_env_bundle_in_the_vault():
 def test_each_version_freezes_its_own_env():
     """Changing an answer after materializing must not mutate v1's env."""
     project = _project(slug="f1c")
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"site.domain": "app.example.com",
                                "django.env.DATABASE_URL": "postgres://db/one"})
     v1 = materialize(site, confirm_warnings=True)
@@ -153,7 +157,8 @@ def test_answered_state_carries_no_fingerprint():
     is a confirmation oracle for anyone with a stolen session. changed_at gives the
     UI its 'set on Tuesday' signal with nothing to test a guess against."""
     project = _project(slug="f3")
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"django.env.SECRET_KEY": "hunter2"})
     state = service.answered_state(site)
     entry = state["django.env.SECRET_KEY"]
@@ -174,7 +179,8 @@ def test_refusal_carries_all_problems_at_once():
     report["checks"].append({"id": "x.blocker", "tier": "blocker",
                              "title": "a blocker", "detail": "", "fix_hint": ""})
     project = _project(slug="f4", scan_report=report)
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     # No answers at all: blocker present AND required answer missing.
     with pytest.raises(MaterializeRefused) as exc:
         materialize(site)
@@ -202,7 +208,8 @@ def test_wizard_get_does_not_delete_answers(client, django_user_model):
     client.force_login(user)
 
     project = _project(slug="f5", scan_report=_report_with_kind("text"))
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"django.env.API_KEY": "sk-live-LEAK"})
     project.scan_report = _report_with_kind("secret")
     project.save()

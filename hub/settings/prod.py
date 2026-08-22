@@ -25,3 +25,13 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 if os.environ.get("HUB_VAULT_KEK_BACKEND", "local") == "fake":
     raise ImproperlyConfigured("HUB_VAULT_KEK_BACKEND=fake is not permitted in prod.")
 VAULT_ALLOW_FAKE_KEK = False
+
+# Pinned hard, never env-derived (task 18 review follow-up): base.py reads
+# HUB_TEST_MODE from the environment, and the §B9 wall plus worker_entry's
+# HUB_TEST_DATABASE rebind gate both key off it — two stray env vars on a prod
+# box must not be able to repoint a worker's database or open the test plane.
+HUB_TEST_MODE = False
+
+# Email: HUB_SMTP_* is the prod contract (D-037). base.py wires Django's
+# SMTP backend when HUB_SMTP_HOST is set; a failed send files a Finding
+# and never blocks the push path.

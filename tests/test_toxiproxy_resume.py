@@ -154,16 +154,24 @@ def test_proxy_teardown_removes_container():
 
 def _spawn_worker(pk, db_path):
     """Run worker_entry against the shared file db. Do not SIGKILL pytest."""
+    # HUB_TEST_MODE gates the child's HUB_TEST_DATABASE rebind (2.5 panel I2),
+    # and puts the child behind the §B9 wall — so the fixture zone becomes
+    # purpose=test and is allowlisted. tests/ stays off the child's path —
+    # worker_entry imports no test module.
+    zone = Deployment.objects.get(pk=pk).manifest.site.primary_target.zone
+    if zone.purpose != "test":
+        zone.purpose = "test"
+        zone.save(update_fields=["purpose"])
     connections.close_all()
     env = os.environ.copy()
     env["DJANGO_SETTINGS_MODULE"] = "hub.settings.dev"
+    env["HUB_TEST_MODE"] = "1"
+    env["HUB_TEST_ZONE_SLUGS"] = zone.slug
     env["HUB_TEST_DATABASE"] = str(db_path)
     env["CONFORMANCE_RUN_REPORT"] = "off"
     env.pop("HUB_TEST_CRASH_AFTER_STEP", None)
     env.pop("HUB_TEST_CRASH_SIGNAL", None)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(REPO), str(REPO / "tests"), env.get("PYTHONPATH", "")],
-    )
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO), env.get("PYTHONPATH", "")])
     return subprocess.Popen(
         [sys.executable, "-m", "deploys.worker_entry", str(pk)],
         cwd=str(REPO),
@@ -292,11 +300,14 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
         )
         slug = f"t2x{uuid.uuid4().hex[:6]}"
         project = Project.objects.create(name=slug, slug=f"p-{slug}")
+        from dns_fixtures import default_dns_zone
+
         site = Site.objects.create(
             project=project,
             name=slug,
             domain=f"{slug}.example.test",
             primary_target=target,
+            dns_zone=default_dns_zone(),
             deploy_strategy=Site.DeployStrategy.RECREATE,
             readiness_path="/healthz.ready",
             warmup_timeout_s=30,
@@ -363,11 +374,16 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
             pipeline, "_default_transport",
             lambda site: SshTransport(site.primary_target),
         )
+        from providers.fakes import FakeOriginCertIssuer
+        monkeypatch.setattr(
+            pipeline, "resolve_production_seams",
+            lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+        )
         result = sweep_stale_deployments()
         assert deployment.pk in result["resumed"]
         deployment.refresh_from_db()
         if deployment.status != Deployment.Status.SUCCEEDED:
-            pipeline.execute(deployment.pk)
+            pipeline.execute(deployment.pk, dns=FakeDnsProvider())
             deployment.refresh_from_db()
         assert deployment.status == Deployment.Status.SUCCEEDED
     finally:

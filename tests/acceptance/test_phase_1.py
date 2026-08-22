@@ -12,6 +12,7 @@ import json
 import pathlib
 
 import pytest
+from dns_fixtures import default_dns_zone
 
 from core.models import Project, Site
 from deploys.models import Manifest
@@ -67,7 +68,8 @@ def test_wizard_answers_materialize_one_frozen_manifest():
         name="accept", slug="accept", git_url="https://github.com/o/r.git",
         scan_report=json.loads(json.dumps(report)),  # exactly what storage would hold
     )
-    site = Site.objects.create(project=project, name="accept-prod")
+    site = Site.objects.create(project=project, name="accept-prod",
+                               dns_zone=default_dns_zone())
     wizard_service.set_answers(site, {"site.domain": "accept.example.com"})
 
     manifest = materialize(site, confirm_warnings=True)
@@ -95,7 +97,8 @@ def test_secret_answers_never_leave_the_vault():
         name="accept2", slug="accept2", git_url="https://github.com/o/r.git",
         scan_report=json.loads(json.dumps(report)),
     )
-    site = Site.objects.create(project=project, name="accept2-prod")
+    site = Site.objects.create(project=project, name="accept2-prod",
+                               dns_zone=default_dns_zone())
 
     marker = "ACCEPTANCE-SECRET-MARKER-9c1f"
     secret_qid = next(q["id"] for q in report["wizard_questions"]

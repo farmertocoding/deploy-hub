@@ -33,7 +33,10 @@ def _git_site(*, slug, git_sha=OLD_SHA, succeeded=True):
         git_url="https://github.com/o/r.git",
         git_ref="main",
     )
-    site = Site.objects.create(project=project, name=slug)
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name=slug,
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(
         site=site, version=1, body={"git_sha": git_sha, "keep": "yes"},
     )

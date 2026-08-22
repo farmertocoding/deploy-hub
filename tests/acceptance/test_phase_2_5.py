@@ -162,7 +162,7 @@ def test_sigkill_child_resumes(acceptance_sigkill_db, monkeypatch):
     from deploys import pipeline
     from deploys.models import Deployment, DeploymentStep
     from deploys.tasks import sweep_stale_deployments
-    from providers.fakes import FakeDnsProvider
+    from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     parent_pid = os.getpid()
     _site, deployment = queued_deployment("a25-sigkill")
@@ -177,6 +177,10 @@ def test_sigkill_child_resumes(acceptance_sigkill_db, monkeypatch):
     )
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     result = sweep_stale_deployments()
     assert deployment.pk in result["resumed"]
@@ -316,22 +320,23 @@ def test_t3_skip_cannot_verify_tier_t3(tmp_path):
 
 @pytest.mark.req("HARNESS-T3-SKIP-POLICY")
 def test_review_round_excludes_t3_tier():
-    """review-round grades phase 2.5 without tier:t3; conformance-2.5 grades all.
+    """review-round grades the current phase without tier:t3; the all-tiers
+    gate is a separate target that is never a review-round prerequisite.
 
-    Transcribes the D-024 Makefile shape: `conformance` (a review-round
-    prerequisite) runs `--phase 2.5 --exclude-tier t3`; `conformance-2.5` runs
-    `--phase 2.5` with no tier excluded and is not a review-round prerequisite.
+    Transcribes the D-024 Makefile shape. The phase number moved from 2.5 to 3
+    in phase-3 Task 0 (conformance-2.5 deleted, conformance-3 the all-tiers
+    gate); the D-024 substance this clause pins — a review round never demands
+    Multipass, and skips never verify tier:t3 — is unchanged.
     """
     prereqs = gates.review_round_prerequisites(REPO)
     assert "conformance" in prereqs
+    assert "conformance-3" not in prereqs
     assert "conformance-2.5" not in prereqs
 
     review_shape = gates.recipe(REPO, "conformance")
-    assert "--phase 2.5" in review_shape
     assert "--exclude-tier t3" in review_shape
 
-    full_shape = gates.recipe(REPO, "conformance-2.5")
-    assert "--phase 2.5" in full_shape
+    full_shape = gates.recipe(REPO, "conformance-3")
     assert "--exclude-tier" not in full_shape
 
 
