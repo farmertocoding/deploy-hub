@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# hub-upgrade.sh v2026-08-21
+# hub-upgrade.sh v2026-08-22
 # Canonical: scripts/hub-upgrade.sh (server-hardening.md)
 # C6: refuse running Deployment → pg_dump Hub DB → keep previous image →
 # pull + build → migrate → SIGTERM Celery → smoke login + one probe cycle.
 # --rollback restores the previous kept image.
+# HUB_DRAIN_TIMEOUT_S turns the refusal into a hold: wait for running
+# Deployments to drain, then refuse only if some are still running.
 set -euo pipefail
 
-SCRIPT_VERSION="2026-08-21"
+SCRIPT_VERSION="2026-08-22"
 DRY_RUN="${DRY_RUN:-0}"
 HUB_DB_NAME="${HUB_DB_NAME:-hub}"
 HUB_DUMP_DIR="${HUB_DUMP_DIR:-/var/lib/hub-upgrade}"
@@ -15,6 +17,8 @@ HUB_PREVIOUS_IMAGE="${HUB_PREVIOUS_IMAGE:-deploy-hub-web:previous}"
 HUB_SMOKE_URL="${HUB_SMOKE_URL:-http://127.0.0.1:8000/api/auth/me/}"
 HUB_LOGIN_URL="${HUB_LOGIN_URL:-http://127.0.0.1:8000/api/auth/login/}"
 HUB_CHECK_RUNNING="${HUB_CHECK_RUNNING:-}"
+HUB_DRAIN_TIMEOUT_S="${HUB_DRAIN_TIMEOUT_S:-}"
+HUB_DRAIN_POLL_S="${HUB_DRAIN_POLL_S:-10}"
 
 die() {
     echo "hub-upgrade.sh: $*" >&2
@@ -46,8 +50,13 @@ Usage:
   hub-upgrade.sh --help
 
 DRY_RUN=1 prints the plan and does not run docker, pg_dump, or systemctl.
-HUB_CHECK_RUNNING  command whose stdout is a count of running Deployments
-                   (default: manage.py one-liner on Deployment.status=running).
+HUB_CHECK_RUNNING   command whose stdout is a count of running Deployments
+                    (default: manage.py one-liner on Deployment.status=running).
+HUB_DRAIN_TIMEOUT_S unset (default): refuse immediately if any Deployment is
+                    running. Set to a number of seconds (600 is the suggested
+                    ops value) to hold: re-check until the count reaches 0,
+                    then refuse only if still running at the timeout.
+HUB_DRAIN_POLL_S    seconds between drain re-checks (default 10).
 EOF
 }
 
@@ -62,11 +71,41 @@ count_running_deployments() {
     printf '%s\n' "${raw}"
 }
 
-refuse_if_running() {
+checked_running_count() {
     local count
     count="$(count_running_deployments)"
     if [[ ! "${count}" =~ ^[0-9]+$ ]]; then
         die "running-deployment check did not print a count (got ${count:-empty})"
+    fi
+    printf '%s\n' "${count}"
+}
+
+# Hold-through-build (D-027): sleep and re-check until the running count
+# reaches 0 or HUB_DRAIN_TIMEOUT_S elapses. Prints the last count seen.
+wait_for_drain() {
+    local count elapsed
+    count="$1"
+    elapsed=0
+    while ((count > 0 && elapsed < HUB_DRAIN_TIMEOUT_S)); do
+        echo "hub-upgrade.sh: waiting for ${count} running Deployment(s) to drain (${elapsed}s of ${HUB_DRAIN_TIMEOUT_S}s)" >&2
+        sleep "${HUB_DRAIN_POLL_S}"
+        elapsed=$((elapsed + HUB_DRAIN_POLL_S))
+        count="$(checked_running_count)"
+    done
+    printf '%s\n' "${count}"
+}
+
+refuse_if_running() {
+    local count
+    count="$(checked_running_count)"
+    if ((count > 0)) && [[ -n "${HUB_DRAIN_TIMEOUT_S}" ]]; then
+        if [[ ! "${HUB_DRAIN_TIMEOUT_S}" =~ ^[0-9]+$ ]]; then
+            die "HUB_DRAIN_TIMEOUT_S must be a whole number of seconds (got ${HUB_DRAIN_TIMEOUT_S})"
+        fi
+        if [[ ! "${HUB_DRAIN_POLL_S}" =~ ^[1-9][0-9]*$ ]]; then
+            die "HUB_DRAIN_POLL_S must be a positive whole number of seconds (got ${HUB_DRAIN_POLL_S})"
+        fi
+        count="$(wait_for_drain "${count}")"
     fi
     if ((count > 0)); then
         die "refusing: ${count} running Deployment(s); drain them before upgrading the Hub"
