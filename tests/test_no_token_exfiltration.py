@@ -215,6 +215,126 @@ def test_recorded_transport_call_log_is_token_free():
     _assert_clean([_call_log_blob(transport)], where="transport call log")
 
 
+class _FactoryHttp:
+    """Wall-style urlopen double plus Origin-CA mint from the Hub CSR.
+
+    ``FakeCloudflare.__call__`` lives on the class, so a per-instance
+    assignment would never run — this wrapper owns ``__call__``.
+    """
+
+    def __init__(self, zone):
+        from test_cloudflare_adapter import FakeCloudflare, list_page, record
+
+        zid = zone.provider_zone_id
+        self._http = FakeCloudflare({
+            ("GET", "/user/tokens/verify"): {
+                "success": True, "result": {"id": "tok-1", "status": "active"},
+            },
+            ("GET", "/zones?per_page=50"): {
+                "success": True,
+                "result": [{"id": zid, "name": zone.name}],
+            },
+            ("GET", f"/zones/{zid}/dns_records?per_page=100&page=1"): list_page([]),
+            ("POST", f"/zones/{zid}/dns_records"): {
+                "success": True,
+                "result": record("rec1", f"factory.{zone.name}", "127.0.0.1"),
+            },
+        })
+
+    @property
+    def requests(self):
+        return self._http.requests
+
+    def __call__(self, request, timeout=None):
+        from test_cloudflare_adapter import _Resp
+        from providers.cloudflare import API
+        from vault.tls import mint_local_leaf
+
+        path = request.full_url[len(API):]
+        if request.get_method() == "POST" and path == "/certificates":
+            payload = json.loads(request.data.decode())
+            certificate, expires_at = mint_local_leaf(
+                payload["csr"],
+                payload["hostnames"],
+                validity_days=int(payload.get("requested_validity") or 5475),
+            )
+            self._http.requests.append((
+                "POST", path, dict(request.header_items()), request.data.decode(),
+            ))
+            return _Resp({
+                "success": True,
+                "result": {
+                    "certificate": certificate,
+                    "expires_on": expires_at.isoformat(),
+                },
+            })
+        return self._http(request, timeout=timeout)
+
+
+def _track_fakes(monkeypatch):
+    import providers.fakes as fakes
+
+    counts = {"dns": 0, "issuer": 0}
+    real_dns = fakes.FakeDnsProvider.__init__
+    real_issuer = fakes.FakeOriginCertIssuer.__init__
+
+    def dns_init(self, *args, **kwargs):
+        counts["dns"] += 1
+        return real_dns(self, *args, **kwargs)
+
+    def issuer_init(self, *args, **kwargs):
+        counts["issuer"] += 1
+        return real_issuer(self, *args, **kwargs)
+
+    monkeypatch.setattr(fakes.FakeDnsProvider, "__init__", dns_init)
+    monkeypatch.setattr(fakes.FakeOriginCertIssuer, "__init__", issuer_init)
+    return counts
+
+
+def test_factory_path_leaves_target_bound_blobs_clean(monkeypatch):
+    """Same planted secrets, production seams: execute(pk, transport=...).
+
+    What would make this fail: a token riding the registry-constructed
+    client onto put/run/env/artifacts/celery/call-log — the Fake-injected
+    scan cannot see that path.
+    """
+    import providers.cloudflare as cloudflare
+    import providers.registry as registry
+    from deploys.pipeline import execute
+    from deploys.tasks import run_deploy
+
+    registry.reset_scope_cache()
+    fake_counts = _track_fakes(monkeypatch)
+
+    bundle = _env_bundle("factoryscan")
+    body = fixture_body("factoryscan")
+    body["env_bundle_ref"] = bundle.pk
+    body["env_names"] = ["APP_SECRET"]
+    site, deployment = queued_deployment("factoryscan", body=body)
+    _plant_credentials(site)
+    http = _FactoryHttp(site.dns_zone)
+    monkeypatch.setattr(cloudflare, "urlopen", http)
+    transport = PipelineTransport()
+
+    execute(deployment.pk, transport=transport)
+
+    deployment.refresh_from_db()
+    assert deployment.status == "succeeded"
+    assert fake_counts == {"dns": 0, "issuer": 0}
+    assert any(path == "/user/tokens/verify" for _method, path, *_ in http.requests)
+    _assert_clean(_put_payloads(transport), where="factory put payload")
+    _assert_clean(_run_argv_blobs(transport), where="factory run argv")
+    _assert_clean(_env_surfaces(deployment, transport), where="factory env")
+    _assert_clean([deployment.manifest.body], where="factory manifest")
+    _assert_clean(
+        _artifact_and_generated(deployment, transport),
+        where="factory artifact/caddy",
+    )
+    _assert_clean([_call_log_blob(transport)], where="factory call log")
+    sig = run_deploy.s(deployment.pk)
+    _assert_clean([sig.args, sig.kwargs, sig.options], where="factory celery")
+
+
 def test_no_acme_dns_challenge_block_is_ever_generated():
     """Hub-central DNS-01 is Phase 3b; Caddy must not grow an ACME DNS block.
 

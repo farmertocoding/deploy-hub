@@ -225,6 +225,39 @@ def test_zero_target_cycle_does_not_ping():
     assert post.calls == []
 
 
+@pytest.mark.parametrize("bad_url", [
+    "http://hc-ping.example/0000-1111-2222-3333",
+    "file:///tmp/deadman-receiver",
+    "ftp://hc-ping.example/ping",
+])
+def test_non_https_receiver_is_refused_before_urlopen(monkeypatch, bad_url):
+    """A vaulted non-https URL must never reach urlopen.
+
+    What would make this fail: http_post_default honoring file:/http:/ftp:
+    because the nosec claimed a pin that does not exist.
+    """
+    from monitor.deadman import DEADMAN_FINDING_FINGERPRINT, ping
+
+    opened = []
+
+    def tripwire(*_args, **_kwargs):
+        opened.append(True)
+        raise AssertionError("urlopen must not run for a non-https receiver")
+
+    monkeypatch.setattr("monitor.deadman.urlopen", tripwire)
+    _plant_receiver_url(bad_url)
+
+    outcome = ping()
+
+    assert outcome["ok"] is False
+    assert opened == []
+    finding = Finding.objects.get(fingerprint=DEADMAN_FINDING_FINGERPRINT)
+    assert finding.state == Finding.State.OPEN
+    assert bad_url not in finding.body
+    assert bad_url not in finding.title
+    assert bad_url not in finding.fix_action
+
+
 def test_deadman_url_is_a_vault_ref_not_a_settings_literal():
     import inspect
 
