@@ -26,8 +26,11 @@ def _running_deployment(*, slug, heartbeat, step_statuses):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target,
+        dns_zone=default_dns_zone(),
     )
     manifest = Manifest.objects.create(site=site, version=1, body={})
     deployment = Deployment.objects.create(

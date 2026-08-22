@@ -217,11 +217,17 @@ def ensure_health_check(desired):
 
 
 def ensure_dns(desired):
-    """Skip mesh_only; public lists then upserts only on (name, rtype) diff."""
+    """Skip mesh_only; public lists then upserts only on (name, rtype) diff.
+
+    The zone handed to the provider is desired["dns_zone"] — the Site.dns_zone
+    row (the DnsZone the product adapter is constructed from, D-033). The
+    legacy string in desired["zone"] survives only as the fallback for callers
+    without a Site (artifact overlays, bare-desired tests).
+    """
     if _exposure(desired) == "mesh_only":
         return {"status": "skipped"}
     dns = desired["dns"]
-    zone = desired["zone"]
+    zone = desired.get("dns_zone") or desired["zone"]
     existing = {
         (rec["name"], rec["rtype"]): rec for rec in dns.list_records(zone)
     }

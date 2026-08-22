@@ -192,7 +192,10 @@ def test_cutover_after_ready_not_before():
     from deploys.steps import ensure_cutover
 
     project = Project.objects.create(name="cut", slug="p-cut")
-    site = Site.objects.create(project=project, name="cut")
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name="cut",
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(site=site, version=1, body={})
     deployment = Deployment.objects.create(manifest=manifest)
     step = DeploymentStep.objects.create(

@@ -71,7 +71,10 @@ def _site_pair(slug):
     from deploys.models import Deployment, Manifest
 
     project = Project.objects.create(name=slug, slug=f"p-vol-{slug}")
-    site = Site.objects.create(project=project, name=slug)
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name=slug,
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(
         site=site,
         version=1,

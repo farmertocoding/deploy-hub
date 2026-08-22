@@ -142,6 +142,8 @@ def fixture_body(slug, *, extra=None):
 
 
 def queued_deployment(slug, *, body=None):
+    from dns_fixtures import default_dns_zone
+
     from core.models import NetworkZone, Project, Site, Target
     from deploys.models import Deployment, Manifest
 
@@ -162,6 +164,7 @@ def queued_deployment(slug, *, body=None):
         name=slug,
         domain=f"{slug}.example.test",
         primary_target=target,
+        dns_zone=default_dns_zone("example.test"),
         deploy_strategy=Site.DeployStrategy.RECREATE,
     )
     manifest = Manifest.objects.create(

@@ -7,13 +7,26 @@ _ids = itertools.count(1)
 
 
 class FakeDnsProvider(DnsProvider):
+    """Zone keys may be strings, NetworkZones, or DnsZone rows — whatever the
+    caller hands over is recorded verbatim in `calls`, so tests can assert
+    the pipeline passed a DnsZone and never a NetworkZone (Task 1)."""
+
+    _MUTATING = {"upsert_record", "delete_record"}
+
     def __init__(self):
         self.zones = {}  # zone -> {record_id: record}
+        self.calls = []  # (method, zone-or-domain, *args)
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
 
     def list_records(self, zone):
+        self.calls.append(("list_records", zone))
         return list(self.zones.get(zone, {}).values())
 
     def upsert_record(self, zone, name, rtype, values, *, proxied=False, ttl=None):
+        self.calls.append(("upsert_record", zone, name, rtype, list(values),
+                           proxied, ttl))
         records = self.zones.setdefault(zone, {})
         for rid, rec in records.items():
             if rec["name"] == name and rec["rtype"] == rtype:
@@ -27,9 +40,11 @@ class FakeDnsProvider(DnsProvider):
         return rid
 
     def delete_record(self, zone, record_id):
+        self.calls.append(("delete_record", zone, record_id))
         self.zones.get(zone, {}).pop(record_id, None)  # absent == success
 
     def get_nameservers(self, domain):
+        self.calls.append(("get_nameservers", domain))
         return ["fake.ns1.example", "fake.ns2.example"]
 
     def capabilities(self):

@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from dns_fixtures import default_dns_zone
 
 from core.transport import FakeTransport
 from providers.fakes import FakeDnsProvider
@@ -85,6 +86,7 @@ def test_mesh_only_skips_dns():
 
     public_site = Site.objects.create(
         project=project, name="mesh-body", exposure=Site.Exposure.PUBLIC,
+        dns_zone=default_dns_zone(),
     )
     dns = CountingDns()
     ensure_dns(_desired(dns, exposure="mesh_only", site=public_site))
@@ -104,7 +106,8 @@ def test_public_list_then_diff_upsert():
     from deploys.steps import ensure_dns
 
     project = Project.objects.create(name="pub", slug="p-dns-pub")
-    site = Site.objects.create(project=project, name="pub", domain=DOMAIN)
+    site = Site.objects.create(project=project, name="pub", domain=DOMAIN,
+                               dns_zone=default_dns_zone())
     dns = CountingDns()
     _seed(dns, values=["1.1.1.1"])
     ensure_dns(_desired(dns, site=site))

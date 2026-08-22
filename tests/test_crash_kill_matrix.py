@@ -33,7 +33,9 @@ def _side_effect_happened(seq, transport, dns, slug, deployment_id):
             for kind, argv in transport.calls
         )
     if seq == 6:
-        return bool(dns.list_records("example.test"))
+        # ensure_dns now hands the provider the Site.dns_zone row (Task 1),
+        # so the record set lives under that key, not the zone-name string.
+        return any(call[0] == "upsert_record" for call in dns.calls)
     if seq == 7:
         return f"site-{slug}" in transport.routes
     if seq == 8:

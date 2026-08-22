@@ -112,9 +112,12 @@ def _site(*, slug, deploy_strategy="blue_green"):
     from core.models import Project, Site
 
     project = Project.objects.create(name=slug, slug=f"p-start-{slug}")
+    from dns_fixtures import default_dns_zone
+
     return Site.objects.create(
         project=project,
         name=slug,
+        dns_zone=default_dns_zone(),
         deploy_strategy=deploy_strategy,
     )
 

@@ -30,7 +30,10 @@ def _site(*, slug="envlife"):
     from core.models import Project, Site
 
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
-    return Site.objects.create(project=project, name=slug)
+    from dns_fixtures import default_dns_zone
+
+    return Site.objects.create(project=project, name=slug,
+                               dns_zone=default_dns_zone())
 
 
 @pytest.mark.req("PIPE-D2-STATE-MACHINE")
