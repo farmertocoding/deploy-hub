@@ -21,14 +21,18 @@ PINNED_KINDS = {
     "restore_clean",
     "reaper",
     "pager",
+    # Phase 3 schema wave (Task 1): the daily token-scope audit and the
+    # cert-expiry check get their CheckRun kinds with the rest of the schema.
+    "cf_token_scope",
+    "cert_expiry",
 }
 
 
 def test_checkrun_statuses_match_pinned_enums():
-    """Status and kind are the pinned Phase 2.5 sets, neither a subset nor a superset.
+    """Status and kind are the pinned sets, neither a subset nor a superset.
 
     What would make this fail: renaming skipped, dropping pager, or adding a
-    fifth-wave kind before Task 13 asks for one.
+    kind no design note asked for.
     """
     from core.models import CheckRun
 

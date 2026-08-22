@@ -242,7 +242,10 @@ def test_generated_dockerfile_uses_npm_ci_or_hashed_pip(tmp_path):
     from deploys.steps import ensure_build
 
     project = Project.objects.create(name="p", slug="p-df")
-    site = Site.objects.create(project=project, name="df")
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name="df",
+                               dns_zone=default_dns_zone())
     node_manifest = Manifest.objects.create(
         site=site, version=1, body={"runtime": "node"},
     )

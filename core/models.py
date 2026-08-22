@@ -121,6 +121,86 @@ class NetworkZone(models.Model):
         return self.name
 
 
+class DnsAccount(models.Model):
+    """A DNS provider account (§2, D-034): the home of the three credential
+    refs the product needs. Each ref is a vault owner id (string) — never a
+    token value, and never an FK, because vault must not import core."""
+
+    class Provider(models.TextChoices):
+        CLOUDFLARE = "cloudflare"
+
+    provider = models.CharField(
+        max_length=32, choices=Provider.choices, default=Provider.CLOUDFLARE,
+    )
+    label = models.CharField(max_length=128)
+    dns_token_ref = models.CharField(max_length=64, blank=True, default="")
+    edge_token_ref = models.CharField(max_length=64, blank=True, default="")
+    origin_ca_key_ref = models.CharField(max_length=64, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.label} ({self.provider})"
+
+
+class DnsZone(models.Model):
+    """The single DNS-zone identity (D-033) — a DNS-provider object, never a
+    NetworkZone, and never a node on the topology map (D-041)."""
+
+    class Purpose(models.TextChoices):
+        PROD = "prod"
+        TEST = "test"
+
+    account = models.ForeignKey(DnsAccount, on_delete=models.PROTECT,
+                                related_name="zones")
+    name = models.CharField(max_length=253)
+    provider_zone_id = models.CharField(max_length=64, blank=True, default="")
+    # Default prod: rows fail-closed under HUB_TEST_MODE, like NetworkZone (§B9).
+    purpose = models.CharField(
+        max_length=16, choices=Purpose.choices, default=Purpose.PROD,
+    )
+    proxied_default = models.BooleanField(
+        default=True,
+        help_text=(
+            "A Cloudflare capability surfaced by the provider's capabilities() "
+            "— not a provider-neutral setting."
+        ),
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "name"], name="uniq_dnszone_account_name",
+            ),
+        ]
+
+    @property
+    def provider(self):
+        return self.account.provider
+
+    def clean(self):
+        """(provider, name) is unique THROUGH the account (D-033): two accounts
+        of one provider must not both claim a zone name — dns_provider_for
+        would have two candidate credentials for one identity."""
+        clash = (
+            DnsZone.objects.filter(
+                name=self.name, account__provider=self.account.provider,
+            )
+            .exclude(pk=self.pk)
+            .exists()
+        )
+        if clash:
+            raise ValidationError(
+                {"name": f"a {self.account.provider} zone named {self.name!r} "
+                         "already exists under another account"}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.purpose})"
+
+
 class Site(models.Model):
     """Project + domain + config (§D9). One Site = ONE manifest (§V5)."""
 
@@ -164,6 +244,13 @@ class Site(models.Model):
         "Target", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="primary_for_sites",
     )
+    # Nullable ONLY for mesh_only (check-constrained below + clean()): a public
+    # site with no DnsZone has no provider to converge its records with (D-033).
+    dns_zone = models.ForeignKey(
+        DnsZone, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="sites",
+    )
+    proxied = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL,
@@ -171,8 +258,20 @@ class Site(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["project", "name"], name="uniq_site_name")
+            models.UniqueConstraint(fields=["project", "name"], name="uniq_site_name"),
+            models.CheckConstraint(
+                condition=models.Q(exposure="mesh_only")
+                | models.Q(dns_zone__isnull=False),
+                name="site_public_requires_dns_zone",
+            ),
         ]
+
+    def clean(self):
+        if self.exposure != Site.Exposure.MESH_ONLY and self.dns_zone_id is None:
+            raise ValidationError(
+                {"dns_zone": "a public site must name its DnsZone; only "
+                             "mesh_only sites may omit it"}
+            )
 
     def __str__(self):
         return f"{self.name} ({self.domain or 'no domain yet'})"
@@ -304,6 +403,8 @@ class DnsRecord(models.Model):
 
     site = models.ForeignKey(Site, on_delete=models.CASCADE,
                              related_name="dns_records")
+    zone = models.ForeignKey(DnsZone, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name="records")
     name = models.CharField(max_length=253)
     rtype = models.CharField(max_length=16)
     value = models.CharField(max_length=1024)
@@ -383,6 +484,9 @@ class CheckRun(models.Model):
         RESTORE_CLEAN = "restore_clean"
         REAPER = "reaper"
         PAGER = "pager"
+        # nosec B105 — a Kind label naming what the check audits, not a credential.
+        CF_TOKEN_SCOPE = "cf_token_scope"  # nosec B105
+        CERT_EXPIRY = "cert_expiry"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"
@@ -412,3 +516,136 @@ class CheckRun(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.status}"
+
+
+# ── Phase 3 schema wave (design note §2). Task 1 ships fields, constraints
+# and __str__s only; behaviour for these models lands in their own tasks. ──
+
+
+class TlsCertificate(models.Model):
+    """Certificate material record for a Site (§B6, D-035). key_ref is a vault
+    owner id string, never key bytes."""
+
+    class Mode(models.TextChoices):
+        ORIGIN_CERT = "origin_cert"
+        UPLOADED = "uploaded"
+        AUTO = "auto"
+        HUB_DNS01 = "hub_dns01"
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE,
+                             related_name="tls_certificates")
+    mode = models.CharField(max_length=16, choices=Mode.choices)
+    not_after = models.DateTimeField(null=True, blank=True)
+    fingerprint = models.CharField(max_length=64, blank=True, default="")
+    key_ref = models.CharField(max_length=64, blank=True, default="")
+    pushed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.site_id}:{self.mode}#{self.fingerprint[:12]}"
+
+
+class Finding(models.Model):
+    """The one attention queue (§F2, D-038): every alert is a Finding with the
+    same fingerprint; the pager is only the interrupt."""
+
+    class Severity(models.TextChoices):
+        P1 = "p1"
+        P2 = "p2"
+        P3 = "p3"
+
+    class State(models.TextChoices):
+        OPEN = "open"
+        ACKED = "acked"
+        RESOLVED = "resolved"
+        ACCEPTED = "accepted"
+
+    source_engine = models.CharField(max_length=64)
+    severity = models.CharField(max_length=8, choices=Severity.choices)
+    entity = models.CharField(max_length=128)
+    title = models.CharField(max_length=256)
+    body = models.TextField(blank=True, default="")
+    fix_action = models.CharField(max_length=256, blank=True, default="")
+    state = models.CharField(max_length=16, choices=State.choices,
+                             default=State.OPEN)
+    first_seen = models.DateTimeField(default=timezone.now)
+    last_seen = models.DateTimeField(default=timezone.now)
+    fingerprint = models.CharField(max_length=128, unique=True)
+    # Accept-risk requires a one-line reason and re-surfaces on fingerprint
+    # change (§F2).
+    accepted_reason = models.CharField(max_length=256, blank=True, default="")
+
+    def __str__(self):
+        return f"[{self.severity}] {self.title}"
+
+
+class AlertState(models.Model):
+    """Hysteresis/flap/storm counters (D-038), 1:1 with a Finding by the same
+    fingerprint — kept off Finding so that model stays §F2-shaped."""
+
+    fingerprint = models.CharField(max_length=128, unique=True)
+    consecutive_fail = models.PositiveIntegerField(default=0)
+    consecutive_ok = models.PositiveIntegerField(default=0)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    last_push_at = models.DateTimeField(null=True, blank=True)
+    acked_at = models.DateTimeField(null=True, blank=True)
+    transitions = models.JSONField(default=list, blank=True)
+
+    def __str__(self):
+        return f"alert-state {self.fingerprint}"
+
+
+class AlertDelivery(models.Model):
+    """One delivery attempt of one Finding on one channel (design note §1.6)."""
+
+    class Channel(models.TextChoices):
+        NTFY = "ntfy"
+        EMAIL = "email"
+
+    finding = models.ForeignKey(Finding, on_delete=models.CASCADE,
+                                related_name="deliveries")
+    channel = models.CharField(max_length=16, choices=Channel.choices)
+    severity = models.CharField(max_length=8, choices=Finding.Severity.choices)
+    backend = models.CharField(max_length=64, blank=True, default="")
+    sent_at = models.DateTimeField(default=timezone.now)
+    ok = models.BooleanField(default=False)
+    detail = models.CharField(max_length=512, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.channel}:{self.finding_id} ok={self.ok}"
+
+
+class UptimeEvent(models.Model):
+    """State transitions the hysteresis engine reads (design note §1.8)."""
+
+    entity = models.CharField(max_length=128)
+    kind = models.CharField(max_length=32)
+    state = models.CharField(max_length=32)
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    def __str__(self):
+        return f"{self.entity} {self.kind}={self.state}"
+
+
+class TrafficStat(models.Model):
+    """Per-site traffic buckets (§C4). sampled=True marks the byte-cap degrade
+    path's summary rows."""
+
+    class Granularity(models.TextChoices):
+        MINUTE = "minute"
+        HOUR = "hour"
+        DAY = "day"
+
+    site = models.ForeignKey(Site, on_delete=models.CASCADE,
+                             related_name="traffic_stats")
+    bucket_start = models.DateTimeField(db_index=True)
+    granularity = models.CharField(
+        max_length=16, choices=Granularity.choices, default=Granularity.MINUTE,
+    )
+    requests = models.BigIntegerField(default=0)
+    bytes = models.BigIntegerField(default=0)
+    status_counts = models.JSONField(default=dict, blank=True)
+    sampled = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.site_id}@{self.bucket_start:%Y-%m-%d %H:%M} ({self.granularity})"

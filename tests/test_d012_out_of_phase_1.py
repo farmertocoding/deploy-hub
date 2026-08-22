@@ -74,7 +74,10 @@ def _site(report, name="proj"):
         git_url="https://github.com/org/repo.git",
         scan_report=json.loads(json.dumps(report)),
     )
-    return Site.objects.create(project=project, name=f"{name}-prod")
+    from dns_fixtures import default_dns_zone
+
+    return Site.objects.create(project=project, name=f"{name}-prod",
+                               dns_zone=default_dns_zone())
 
 
 def _codes(problems):

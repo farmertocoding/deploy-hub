@@ -300,11 +300,14 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
         )
         slug = f"t2x{uuid.uuid4().hex[:6]}"
         project = Project.objects.create(name=slug, slug=f"p-{slug}")
+        from dns_fixtures import default_dns_zone
+
         site = Site.objects.create(
             project=project,
             name=slug,
             domain=f"{slug}.example.test",
             primary_target=target,
+            dns_zone=default_dns_zone(),
             deploy_strategy=Site.DeployStrategy.RECREATE,
             readiness_path="/healthz.ready",
             warmup_timeout_s=30,

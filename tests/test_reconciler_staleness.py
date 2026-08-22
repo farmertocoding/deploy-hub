@@ -20,8 +20,11 @@ def _world(slug):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst = SiteInstance.objects.create(
         site=site,

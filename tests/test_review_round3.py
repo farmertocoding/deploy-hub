@@ -201,8 +201,11 @@ def test_tick_uses_n2_healthz_json_on_listen_port(tmp_path, monkeypatch):
     slug = "n2hz"
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
     target = _zone_target(slug)
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target, reconcile_enabled=True,
+        dns_zone=default_dns_zone(),
     )
     inst = SiteInstance.objects.create(
         site=site,

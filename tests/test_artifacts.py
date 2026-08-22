@@ -17,7 +17,10 @@ def _deployment():
     from deploys.models import Deployment, Manifest
 
     project = Project.objects.create(name="art", slug="p-art")
-    site = Site.objects.create(project=project, name="art")
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name="art",
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(
         site=site,
         version=1,

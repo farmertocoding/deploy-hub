@@ -9,6 +9,7 @@ import json
 import pytest
 from django.core.exceptions import ValidationError
 from django.urls import reverse
+from dns_fixtures import default_dns_zone
 
 from core.models import Project, Site
 from deploys.models import Manifest
@@ -69,7 +70,8 @@ def project(db):
 
 @pytest.fixture
 def site(project):
-    return Site.objects.create(project=project, name="demo-prod")
+    return Site.objects.create(project=project, name="demo-prod",
+                               dns_zone=default_dns_zone())
 
 
 # ── question assembly ─────────────────────────────────────────────────────────
@@ -264,7 +266,8 @@ def test_wizard_secret_cut_and_paste_across_sites_still_fails(site, project):
     crypto columns, get raises. Binding AAD to the question must not flatten
     this (site pk stays in owner_id).
     """
-    other = Site.objects.create(project=project, name="other")
+    other = Site.objects.create(project=project, name="other",
+                                dns_zone=default_dns_zone())
     qid = "django.env.DATABASE_PASSWORD"
     service.set_answers(site, {qid: "SITE-A-PASSWORD"})
     service.set_answers(other, {qid: "SITE-B-PASSWORD"})
@@ -281,7 +284,8 @@ def test_wizard_secret_cut_and_paste_across_sites_still_fails(site, project):
 def test_unscanned_project_refuses_with_a_named_cause(db):
     bare = Project.objects.create(name="bare", slug="bare",
                                   git_url="https://github.com/o/r.git")
-    bare_site = Site.objects.create(project=bare, name="s")
+    bare_site = Site.objects.create(project=bare, name="s",
+                                    dns_zone=default_dns_zone())
     with pytest.raises(MaterializeRefused) as exc:
         materialize(bare_site)
     assert exc.value.code == "scan_required"
@@ -681,7 +685,8 @@ def test_plaintext_answer_is_scrubbed_when_question_becomes_secret(db):
     project = Project.objects.create(name="drift", slug="drift",
                                      git_url="https://github.com/o/r.git",
                                      scan_report=_report_with_kind("text"))
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"django.env.API_KEY": "sk-live-LEAK"})
     assert WizardAnswer.objects.get(site=site).value == "sk-live-LEAK"
 
@@ -700,7 +705,8 @@ def test_scrub_is_audited_as_security(db):
     project = Project.objects.create(name="drift2", slug="drift2",
                                      git_url="https://github.com/o/r.git",
                                      scan_report=_report_with_kind("text"))
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"django.env.API_KEY": "sk-live-LEAK"})
     project.scan_report = _report_with_kind("secret")
     project.save()
@@ -719,7 +725,8 @@ def test_materialize_refuses_and_names_the_values_to_reenter(db):
     project = Project.objects.create(name="drift3", slug="drift3",
                                      git_url="https://github.com/o/r.git",
                                      scan_report=_report_with_kind("text"))
-    site = Site.objects.create(project=project, name="s")
+    site = Site.objects.create(project=project, name="s",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"site.domain": "d.example.com",
                                "django.env.API_KEY": "sk-live-LEAK"})
     project.scan_report = make_report(questions=[
@@ -748,7 +755,8 @@ def test_project_list_reports_tier_counts_and_manifest_currency(auth_client):
     project = Project.objects.create(name="listme", slug="listme",
                                      git_url="https://github.com/o/r.git",
                                      scan_report=report)
-    site = Site.objects.create(project=project, name="prod")
+    site = Site.objects.create(project=project, name="prod",
+                               dns_zone=default_dns_zone())
 
     payload = auth_client.get("/api/v1/projects/").json()
     row = next(p for p in payload if p["slug"] == "listme")
@@ -1300,8 +1308,10 @@ def test_issue_r11_a1_the_project_row_wire_output_is_unchanged(auth_client):
             {"id": "s", "tier": "pending_sandbox", "title": "S"},
             {"id": "o", "tier": "ok", "title": "O"},
         ]))
-    first = Site.objects.create(project=project, name="prod", domain="p.example.com")
-    Site.objects.create(project=project, name="staging")
+    first = Site.objects.create(project=project, name="prod", domain="p.example.com",
+                                dns_zone=default_dns_zone())
+    Site.objects.create(project=project, name="staging",
+                        dns_zone=default_dns_zone())
 
     row = next(p for p in auth_client.get("/api/v1/projects/").json()
                if p["slug"] == "rowpin")
@@ -1356,7 +1366,8 @@ def test_issue_r11_a1_sites_are_listed_in_a_pinned_order(auth_client):
     project = Project.objects.create(name="ordered", slug="ordered",
                                      git_url="https://github.com/o/r.git",
                                      scan_report={})
-    ids = [Site.objects.create(project=project, name=f"s{i}").pk for i in range(4)]
+    ids = [Site.objects.create(project=project, name=f"s{i}",
+                               dns_zone=default_dns_zone()).pk for i in range(4)]
 
     reversed_prefetch = (Project.objects
                          .prefetch_related(Prefetch("sites",
@@ -1380,7 +1391,8 @@ def test_issue_r11_a1_the_row_body_reads_the_current_report(auth_client):
     project = Project.objects.create(name="fresh", slug="fresh",
                                      git_url="https://github.com/o/r.git",
                                      scan_report=report)
-    site = Site.objects.create(project=project, name="prod")
+    site = Site.objects.create(project=project, name="prod",
+                               dns_zone=default_dns_zone())
     service.set_answers(site, {"site.domain": "f.example.com"})
     materialize(site, confirm_warnings=True)
 

@@ -290,11 +290,14 @@ def test_t2_sigkill_worker_resumes_on_hub_test_target(
     )
     slug = f"t2k{uuid.uuid4().hex[:6]}"
     project = Project.objects.create(name=slug, slug=f"p-{slug}")
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project,
         name=slug,
         domain=f"{slug}.example.test",
         primary_target=target,
+        dns_zone=default_dns_zone(),
         deploy_strategy=Site.DeployStrategy.RECREATE,
         readiness_path="/healthz.ready",
         warmup_timeout_s=30,

@@ -323,6 +323,10 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
     if not zone and "." in domain:
         zone = domain.split(".", 1)[1]
     zone = zone or "example.test"
+    # The DNS hand-off is Site.dns_zone — a DnsZone row a provider can be
+    # constructed from — NEVER Site.primary_target.zone, which is a
+    # NetworkZone (panel r2). None only for mesh_only, where ensure_dns skips.
+    dns_zone = site.dns_zone
 
     from core.ssh import SshTransport
 
@@ -360,6 +364,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
         "old_container": old_container,
         "dns": dns,
         "zone": zone,
+        "dns_zone": dns_zone,
         "domain": domain,
         "dns_values": list(body.get("dns_values") or ["127.0.0.1"]),
         "poll_interval_s": poll,

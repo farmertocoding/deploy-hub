@@ -13,7 +13,10 @@ def _site_manifest_step(*, slug, body, step_status=None):
     from deploys.models import Deployment, DeploymentStep, Manifest
 
     project = Project.objects.create(name=slug, slug=f"p-mig-{slug}")
-    site = Site.objects.create(project=project, name=slug)
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name=slug,
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(site=site, version=1, body=body)
     deployment = Deployment.objects.create(manifest=manifest)
     kwargs = {
@@ -44,7 +47,10 @@ def test_migrate_is_rerunnable():
     from deploys.steps import ensure_migrate
 
     project = Project.objects.create(name="rerun", slug="p-mig-rerun")
-    site = Site.objects.create(project=project, name="rerun")
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(project=project, name="rerun",
+                               dns_zone=default_dns_zone())
     manifest = Manifest.objects.create(
         site=site,
         version=1,

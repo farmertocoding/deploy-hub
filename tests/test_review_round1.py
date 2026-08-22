@@ -4,6 +4,7 @@ that would make it fail; they must go red on HEAD 8855ef6.
 import json
 
 import pytest
+from dns_fixtures import default_dns_zone
 from pipeline_fakes import PipelineTransport, fixture_body, queued_deployment
 
 from core.models import AuditEvent, NetworkZone, Project, Site, Target
@@ -97,6 +98,7 @@ def test_site_db_password_absent_from_calls_and_exceptions(monkeypatch):
     site = Site.objects.create(
         project=Project.objects.create(name="shop", slug="p-r1-shop"),
         name="shop",
+        dns_zone=default_dns_zone(),
     )
     transport = ModePostgresTransport()
     ensure_site_db({"transport": transport, "site": site, "site_slug": "shop"})
@@ -241,7 +243,8 @@ def test_poll_skips_link_local_url_without_invoking_git(monkeypatch):
     project = Project.objects.create(
         name="ssrf", slug="p-ssrf", git_url=LINK_LOCAL_GIT, git_ref="main",
     )
-    site = Site.objects.create(project=project, name="ssrf")
+    site = Site.objects.create(project=project, name="ssrf",
+                               dns_zone=default_dns_zone())
     Manifest.objects.create(site=site, version=1, body={"git_sha": "aaa"})
 
     poll()

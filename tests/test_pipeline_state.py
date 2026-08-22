@@ -52,8 +52,11 @@ def _site_with_target(*, slug="pipe"):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+    from dns_fixtures import default_dns_zone
+
     site = Site.objects.create(
         project=project, name=slug, primary_target=target,
+        dns_zone=default_dns_zone(),
     )
     return site, target
 
