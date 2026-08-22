@@ -7,11 +7,13 @@ the Hub host.
 Usage:
     python scripts_dev/file_nightly_failure.py --exit-code N --log PATH
 
-Writes `conformance/demos/phase-2.5/failures/<utc>.md` with the pytest
-summary and the sha of `conformance/run-report.json` when that file exists.
-Obvious SECRET/KEY assignment values are redacted. If `GITHUB_TOKEN` (or
-`GH_TOKEN`) and `gh` are both present, opens an issue with the bundle;
-otherwise prints the path.
+Writes `conformance/demos/phase-2.5/failures/<utc>.md` with a pytest
+summary excerpt and the sha of `conformance/run-report.json` when that
+file exists. The raw log is never copied into the bundle (and therefore
+never attached to a GitHub issue). Assignment-like SECRET/KEY/TOKEN/
+PASSWORD/URL values and VAULT-TEST-PLAINTEXT-MARKER are redacted. If
+`GITHUB_TOKEN` (or `GH_TOKEN`) and `gh` are both present, opens an issue
+with that excerpt; otherwise prints the path.
 """
 from __future__ import annotations
 
@@ -28,14 +30,18 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# Identifier containing SECRET or KEY, then `=` or `:`, then a value.
+# Assignment-like NAME=value / name: value where the name carries a secret-ish
+# token. Hyphens allowed so CLOUDFLARE_API_TOKEN and similar still match.
 _SECRETISH = re.compile(
-    r"(?i)\b([A-Za-z0-9_]*(?:SECRET|KEY)[A-Za-z0-9_]*)\s*[:=]\s*\S+"
+    r"(?i)\b([A-Za-z0-9_-]*(?:SECRET|KEY|TOKEN|PASSWORD|URL)[A-Za-z0-9_-]*)"
+    r"\s*[:=]\s*\S+"
 )
+_VAULT_MARKER = re.compile(r"VAULT-TEST-PLAINTEXT-MARKER(?:=\S+)?")
 
 
 def scrub(text):
-    return _SECRETISH.sub(lambda m: f"{m.group(1)}=<redacted>", text)
+    text = _SECRETISH.sub(lambda m: f"{m.group(1)}=<redacted>", text)
+    return _VAULT_MARKER.sub("<redacted>", text)
 
 
 def pytest_summary(log_text):
@@ -89,7 +95,7 @@ def write_bundle(repo, exit_code, log_path, now=None):
         raw_log = log_path.read_text(encoding="utf-8", errors="replace")
     else:
         raw_log = f"(log not found: {log_path})"
-    cleaned = scrub(raw_log)
+    excerpt = scrub(pytest_summary(raw_log))
 
     body = (
         f"# nightly failure {stamp}\n"
@@ -101,17 +107,11 @@ def write_bundle(repo, exit_code, log_path, now=None):
         "\n"
         "## pytest summary\n"
         "\n"
-        f"{pytest_summary(cleaned)}\n"
+        f"{excerpt}\n"
         "\n"
         "## run-report.json\n"
         "\n"
         f"{report_sha_line(repo)}\n"
-        "\n"
-        "## log (scrubbed)\n"
-        "\n"
-        "```\n"
-        f"{cleaned}\n"
-        "```\n"
     )
     dest.write_text(body, encoding="utf-8")
     return dest

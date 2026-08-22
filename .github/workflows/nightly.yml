@@ -3,6 +3,10 @@
 # `make nightly`. A skipped GHA job is not the phase gate. Do not turn
 # Actions billing back on. Do not require a green GitHub Check for phase exit.
 #
+# The Phase 2 full-suite stub is deleted: an always-on echo job would post a
+# green Check if Actions billing were ever re-enabled. The only job is
+# t3-qemu, vars-gated (default unset → skipped).
+#
 # As in push-checks.yml: gate scope and arguments live in the Makefile, never here
 # (SPEC-gate-integrity.md §2).
 name: nightly
@@ -14,16 +18,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Slimmed remnant of the Phase 2 stub. Not a required Check. Local
-  # `make nightly` is the mechanical gate.
-  full-suite:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: local nightly is the gate
-        run: >-
-          echo "D-022/D-023 GHA is optional/dormant. Local make nightly is the phase gate."
-
   # Optional T3 recipe. vars.HUB_ENABLE_GHA_QEMU defaults unset → this job is
   # skipped. Skipped GHA is not the phase gate (D-022 / D-023).
   t3-qemu:

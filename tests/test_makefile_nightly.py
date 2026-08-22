@@ -33,14 +33,19 @@ def test_review_round_prereqs_exclude_test_t3_and_conformance_2_5():
 
 
 def test_nightly_prereqs_include_test_t3_and_conformance_2_5():
-    """What would make this fail: no nightly target, or nightly omitting the T3
-    suite / all-tiers conformance gate that D-023 named as the host of record.
+    """What would make this fail: no nightly-gates list, or that list omitting
+    the T3 suite / all-tiers conformance gate that D-023 named as the host of
+    record. `nightly` itself is a wrapper so a failed prereq still files a bundle.
     """
     targets = gates.makefile_targets(REPO)
     assert "nightly" in targets, "Makefile must declare nightly as the local T3 gate"
+    assert "nightly-gates" in targets, (
+        "Makefile must declare nightly-gates so the wrapper can run the list "
+        "and still file a bundle when a gate fails"
+    )
     assert "test-t3" in targets, "Makefile must declare test-t3"
 
-    prereqs = _target_prereqs("nightly")
+    prereqs = _target_prereqs("nightly-gates")
     assert "test-t3" in prereqs, prereqs
     assert "conformance-2.5" in prereqs, prereqs
     assert prereqs == {
@@ -53,8 +58,25 @@ def test_nightly_prereqs_include_test_t3_and_conformance_2_5():
         "conformance-2.5",
     }, prereqs
 
+    # GNU make never runs a target's recipe when a prerequisite fails. The
+    # public `nightly` target must therefore invoke the filer from its recipe
+    # (or a helper that recipe calls), not list the gates as its own prereqs.
+    assert "test-t3" not in _target_prereqs("nightly")
+    assert "conformance-2.5" not in _target_prereqs("nightly")
+    nightly_recipe = gates.recipe(REPO, "nightly")
+    helper_text = ""
+    helper = REPO / "scripts_dev" / "run_nightly.sh"
+    if helper.is_file():
+        helper_text = helper.read_text(encoding="utf-8")
+    combined = nightly_recipe + "\n" + helper_text
+    assert "file_nightly_failure.py" in combined, (
+        "make nightly must call file_nightly_failure.py on a non-zero gate run"
+    )
+    assert "nightly-gates" in combined, combined
+
     phony = gates.phony_targets(REPO)
     assert "nightly" in phony, "nightly must be .PHONY"
+    assert "nightly-gates" in phony, "nightly-gates must be .PHONY"
     assert "test-t3" in phony, "test-t3 must be .PHONY"
 
 
