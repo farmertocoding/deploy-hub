@@ -89,8 +89,12 @@ def reap_dns_names(provider, zone, names):
 def _dns_plane_impl(settings):
     """Yield a DnsPlane; the finally reaps even when the test body fails."""
     from providers.test_dns import TestDnsProvider
+    from tests.harness.t3_deploy import allow_test_zone
 
     settings.HUB_TEST_MODE = True
+    # S1: the configured DNS zone must itself pass the allowlist — the
+    # provider fails closed on a zone that is only named by the env var.
+    allow_test_zone(settings, _zone_name())
     plane = DnsPlane(provider=TestDnsProvider(), zone=_zone_name())
     try:
         yield plane

@@ -115,11 +115,14 @@ def test_refuses_prod_purpose_zone(monkeypatch):
 def test_allowlisted_test_zone_passes_the_wall(monkeypatch):
     """The wall admits purpose=test + allowlisted slug, and the configured zone
     name — otherwise the refuse tests above would pass with an unconditional
-    raise. Every zone-taking method goes through the wall, by source.
+    raise. The configured zone itself must be allowlisted (S1), so the slugs
+    list carries both. Every zone-taking method goes through the wall, by source.
     """
     import providers.test_dns as test_dns
 
-    with override_settings(HUB_TEST_MODE=True, HUB_TEST_ZONE_SLUGS=["hub-test"]):
+    with override_settings(
+        HUB_TEST_MODE=True, HUB_TEST_ZONE_SLUGS=["hub-test", TEST_ZONE_NAME],
+    ):
         provider = _provider(monkeypatch)
         allowed = NetworkZone(name="hub-test", slug="hub-test", purpose="test")
         provider.refuse_unless_test_zone(allowed)
@@ -131,6 +134,37 @@ def test_allowlisted_test_zone_passes_the_wall(monkeypatch):
         test_dns.TestDnsProvider.get_nameservers,
     ):
         assert "refuse_unless_test_zone" in inspect.getsource(method), method
+
+
+@pytest.mark.req("HARNESS-B9-TEST-MODE")
+def test_env_named_zone_off_allowlist_fails_closed(monkeypatch):
+    """S1: matching HUB_TEST_DNS_ZONE is not an authorization. The configured
+    zone — the one every API call actually mutates — must itself be on
+    HUB_TEST_ZONE_SLUGS, and an allowlisted NetworkZone must not authorize a
+    configured zone that never passed the allowlist.
+
+    What would make this fail: refuse_unless_test_zone accepting a bare name
+    merely because it equals the env var, or the NetworkZone branch skipping
+    the configured-zone check so the provider mutates whatever zone the env
+    var names.
+    """
+    with override_settings(HUB_TEST_MODE=True, HUB_TEST_ZONE_SLUGS=["hub-test"]):
+        provider = _provider(monkeypatch)
+        # The bare name equals HUB_TEST_DNS_ZONE — still refused: t12.example
+        # is not on HUB_TEST_ZONE_SLUGS.
+        with pytest.raises(TestModeError):
+            provider.refuse_unless_test_zone(TEST_ZONE_NAME)
+        # An allowlisted purpose=test NetworkZone must not smuggle a mutation
+        # into the off-allowlist configured zone.
+        allowed = NetworkZone(name="hub-test", slug="hub-test", purpose="test")
+        with pytest.raises(TestModeError):
+            provider.upsert_record(allowed, "a.t12.example", "A", ["203.0.113.10"])
+        with pytest.raises(TestModeError):
+            provider.list_records(allowed)
+        # And the zone-id resolver itself fails closed before any network I/O
+        # (the no_network tripwire proves nothing was called).
+        with pytest.raises(TestModeError):
+            provider._test_zone_id()
 
 
 @pytest.mark.req("HARNESS-B9-TEST-MODE")

@@ -43,18 +43,42 @@ class TestDnsProvider(DnsProvider):
         self.timeout = timeout
         self._zone_id = None
 
+    def _assert_configured_zone_allowlisted(self):
+        """S1 wall half: the zone this client mutates must itself be allowlisted.
+
+        Every mutating call resolves `_test_zone_id()` — i.e. the zone named by
+        HUB_TEST_DNS_ZONE — regardless of which zone object authorized the call.
+        Matching the env var is therefore not an authorization: the configured
+        name has to be on HUB_TEST_ZONE_SLUGS too, and absence fails closed.
+        """
+        if not self.zone_name:
+            raise TestModeError(
+                f"{ZONE_ENV} is unset; there is no test zone to talk to"
+            )
+        slugs = list(getattr(settings, "HUB_TEST_ZONE_SLUGS", None) or [])
+        if self.zone_name not in slugs:
+            raise TestModeError(
+                f"test-plane DNS refuses zone {self.zone_name!r}: {ZONE_ENV} "
+                f"names it but it is not on HUB_TEST_ZONE_SLUGS {slugs!r} — "
+                f"the env var alone never authorizes a mutation"
+            )
+
     def refuse_unless_test_zone(self, zone):
         """The §B9 wall, applied per call and before any network I/O.
 
         A NetworkZone goes through assert_test_zone (purpose=test AND slug on
         HUB_TEST_ZONE_SLUGS); a bare zone name must equal HUB_TEST_DNS_ZONE.
+        Either way the configured zone — the one the API calls actually mutate
+        — must itself pass the allowlist (S1: an allowlisted NetworkZone must
+        not authorize whatever zone the env var happens to name).
         """
         if not getattr(settings, "HUB_TEST_MODE", False):
             raise TestModeError("TestDnsProvider refuses every call outside HUB_TEST_MODE")
+        self._assert_configured_zone_allowlisted()
         if hasattr(zone, "purpose") and hasattr(zone, "slug"):
             assert_test_zone(zone)
             return
-        if not self.zone_name or str(zone) != self.zone_name:
+        if str(zone) != self.zone_name:
             raise TestModeError(
                 f"test-plane DNS refuses zone {zone!r}; the allowlist is "
                 f"[{self.zone_name!r}] ({ZONE_ENV})"
@@ -132,11 +156,14 @@ class TestDnsProvider(DnsProvider):
         return {"proxied"}
 
     def _test_zone_id(self):
-        """Resolve HUB_TEST_DNS_ZONE by name, once. Never any other zone."""
+        """Resolve HUB_TEST_DNS_ZONE by name, once. Never any other zone.
+
+        Re-walls on the configured name before the lookup so no caller can
+        reach Cloudflare with a zone that never passed the allowlist.
+        """
+        self._assert_configured_zone_allowlisted()
         if self._zone_id:
             return self._zone_id
-        if not self.zone_name:
-            raise TestModeError(f"{ZONE_ENV} is unset; there is no test zone to talk to")
         found = self._api("GET", f"/zones?name={quote(self.zone_name)}")["result"]
         if not found:
             raise TestModeError(
