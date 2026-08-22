@@ -24,6 +24,7 @@ from monitor.reaper import (
     list_names,
     multipass_available,
     require_t3_name,
+    test_zone_token_present,
     version_argv,
 )
 
@@ -50,11 +51,13 @@ __all__ = [
     "list_names",
     "multipass_available",
     "require_t3_name",
+    "test_zone_token_present",
     "transfer",
     "transfer_argv",
     "version_argv",
     "wait_exec",
     "waiver_illegal_if",
+    "credentials_present",
 ]
 
 DEFAULT_IMAGE = "22.04"
@@ -129,11 +132,34 @@ def _require_transfer_name(spec):
         require_t3_name(spec.split(":", 1)[0])
 
 
-def waiver_illegal_if(probe):
-    """A host-without-multipass waiver is illegal when Multipass is present.
+def credentials_present():
+    """True when HUB_TEST_CF_TOKEN and a purpose=test DnsZone both exist.
 
-    `probe` is `multipass_available` (or a bool / thunk). Task 16 may plant a
-    dated waiver; this helper refuses that silent-green when the host can run T3.
+    Reads only the pinned names: HUB_TEST_CF_TOKEN and HUB_TEST_ZONE_SLUGS.
+    A purpose=test zone that is not on the allowlist does not count — that is
+    the same triple-key the product adapter constructs under. The retired
+    zone env authorizes nothing.
+    """
+    if not test_zone_token_present():
+        return False
+    from django.conf import settings
+
+    from core.models import DnsZone
+
+    slugs = list(getattr(settings, "HUB_TEST_ZONE_SLUGS", None) or [])
+    zones = DnsZone.objects.filter(purpose="test")
+    if slugs:
+        zones = zones.filter(name__in=slugs)
+    return zones.exists()
+
+
+def waiver_illegal_if(probe):
+    """A skipped-only waiver is illegal when its enabling condition is present.
+
+    `probe` is `multipass_available` or `credentials_present` (or a bool /
+    thunk). A host-without-multipass waiver is illegal when Multipass is
+    here; a no-test-zone-credentials waiver is illegal the moment
+    HUB_TEST_CF_TOKEN and a purpose=test DnsZone both exist (M4 / D-043).
     """
     present = probe() if callable(probe) else bool(probe)
     return bool(present)
