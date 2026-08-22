@@ -17,7 +17,6 @@ could not observe (API/network failure) marks the run FAILED rather than
 guessing. No token values in Finding bodies, run results, logs (this module
 logs nothing), or task args (the Beat task takes none).
 """
-from django.utils import timezone
 
 RESULTS_SCHEMA_VERSION = 1
 SOURCE_ENGINE = "token_audit"
@@ -149,29 +148,19 @@ def _audit_credential(account, role, ref, declared, *, timeout):
 
 
 def _file_drift_finding(account, role, description):
-    """One P2 per (account, credential role): stable fingerprint, updated in
-    place on re-observation, re-opened if resolved while the drift persists."""
+    """One P2 per (account, credential role) through finding() so D-045 publishes."""
+    from core.findings import finding
     from core.models import Finding
 
-    fingerprint = f"cf-token-scope:{account.pk}:{role}"
-    finding, created = Finding.objects.get_or_create(
-        fingerprint=fingerprint,
-        defaults={
-            "source_engine": SOURCE_ENGINE,
-            "severity": Finding.Severity.P2,
-            "entity": f"dns_account:{account.label}",
-            "title": f"Cloudflare {role} token scope drift on {account.label}",
-            "body": description,
-            "fix_action": (
-                f"Re-issue the {role} token scoped to exactly the account's "
-                "declared zones and update the DnsAccount ref"
-            ),
-        },
+    return finding(
+        SOURCE_ENGINE,
+        f"cf-token-scope:{account.pk}:{role}",
+        severity=Finding.Severity.P2,
+        entity=f"dns_account:{account.label}",
+        title=f"Cloudflare {role} token scope drift on {account.label}",
+        body=description,
+        fix_action=(
+            f"Re-issue the {role} token scoped to exactly the account's "
+            "declared zones and update the DnsAccount ref"
+        ),
     )
-    if not created:
-        finding.body = description
-        finding.last_seen = timezone.now()
-        if finding.state == Finding.State.RESOLVED:
-            finding.state = Finding.State.OPEN
-        finding.save(update_fields=["body", "last_seen", "state"])
-    return finding

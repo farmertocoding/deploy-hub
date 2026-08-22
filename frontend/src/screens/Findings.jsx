@@ -188,7 +188,26 @@ export function FindingsView({
   );
 }
 
-export default function Findings({ route, onNav }) {
+export async function findingsSnapshot() {
+  const { status, data } = await api("v1/findings/");
+  if (status !== 200 || !Array.isArray(data?.data)) throw { status };
+  return data;
+}
+
+export function attachFindings(events, onRows) {
+  const handler = (event) => {
+    if (event.__snapshot) {
+      onRows(event.data);
+      return;
+    }
+    if (event.__snapshot_failed) return;
+    findingsSnapshot().then((snap) => onRows(snap.data)).catch(() => {});
+  };
+  events.subscribe("findings", handler, findingsSnapshot);
+  return () => events.unsubscribe("findings");
+}
+
+export default function Findings({ route, onNav, events }) {
   const [bundle, setBundle] = useState(undefined);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState(filterFromSearch);
@@ -201,7 +220,16 @@ export default function Findings({ route, onNav }) {
       else setError(data.detail || `Could not load findings (HTTP ${status})`);
     });
   };
+  const subscribe = events?.subscribe;
+  const unsubscribe = events?.unsubscribe;
   useEffect(load, [route?.id]);
+  useEffect(() => {
+    if (!subscribe || route?.id) return undefined;
+    return attachFindings({ subscribe, unsubscribe }, (rows) => {
+      setError("");
+      setBundle({ data: rows });
+    });
+  }, [subscribe, unsubscribe, route?.id]);
 
   const phase = error ? "error" : bundle === undefined ? "loading" : "live";
   const onError = { text: error, retry: load };

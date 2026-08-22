@@ -190,9 +190,9 @@ def _issuer(desired, site):
         from providers.registry import origin_cert_issuer_for
 
         return origin_cert_issuer_for(zone)
-    from providers.fakes import FakeOriginCertIssuer
-
-    return FakeOriginCertIssuer()
+    raise RuntimeError(
+        "no cert_issuer and no dns_zone — refuse rather than mint a local leaf"
+    )
 
 
 def _ensure_tls_dir(transport, directory, heartbeat):

@@ -10,9 +10,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
+import { readFileSync } from "node:fs";
 import {
   FindingDetail, FindingsView, SeverityChip,
-  acceptRisk, ackFinding, reasonIsValid,
+  acceptRisk, ackFinding, attachFindings, findingsSnapshot, reasonIsValid,
 } from "../src/screens/Findings.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -203,4 +204,43 @@ test("inbox_row_opens_finding_detail_which_can_ack_and_accept_risk", () => {
   assert.doesNotMatch(acceptedMarkup, />Ack</);
   assert.doesNotMatch(visibleText(acceptedMarkup), /Accept risk/i);
   assert.match(visibleText(acceptedMarkup), /lab only/, acceptedMarkup);
+});
+
+test("findings_subscribes_to_the_canonical_topic_on_the_shell_client", async () => {
+  const calls: Array<any> = [];
+  const events = {
+    subscribe(topic: string, handler: Function, snapshotFn: Function) {
+      calls.push({ topic, handler, snapshotFn });
+    },
+    unsubscribe(topic: string) {
+      calls.push({ unsubscribe: topic });
+    },
+  };
+  let rows: any = null;
+  const detach = attachFindings(events, (data: any) => { rows = data; });
+  assert.equal(calls[0].topic, "findings");
+  assert.equal(calls[0].snapshotFn, findingsSnapshot);
+
+  calls[0].handler({ __snapshot: true, data: [OPEN] });
+  assert.deepEqual(rows, [OPEN]);
+
+  const urls: string[] = [];
+  const prevFetch = (globalThis as any).fetch;
+  (globalThis as any).fetch = async (url: string) => {
+    urls.push(String(url));
+    return { status: 200, json: async () => ({ seq: 3, data: [OPEN] }) };
+  };
+  try {
+    calls[0].handler({ kind: "finding", action: "filed", id: 7 });
+    await new Promise<void>((r) => setImmediate(r));
+    assert.ok(urls.some((u) => /\/api\/v1\/findings\/$/.test(u)), `urls: ${urls}`);
+  } finally {
+    (globalThis as any).fetch = prevFetch;
+  }
+
+  detach();
+  assert.deepEqual(calls[1], { unsubscribe: "findings" });
+
+  const appSrc = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(appSrc, /<Findings route=\{route\} onNav=\{onNav\} events=\{events\} \/>/);
 });

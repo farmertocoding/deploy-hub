@@ -11,11 +11,19 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { ActionButton } from "../Tiers.jsx";
-import { tierFor } from "../actions.js";
+import { ACTION_TIERS, tierFor } from "../actions.js";
 import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+
+export function t3SiteActions() {
+  return ACTION_TIERS.filter((row) => row.tier === "T3").map((row) => row.id);
+}
+
+export async function rollbackSite(siteId) {
+  return api(`v1/sites/${siteId}/rollback/`, {});
+}
 
 export function flattenSites(projects) {
   return (projects || []).flatMap((p) =>
@@ -62,10 +70,9 @@ export function CertState({ site }) {
   );
 }
 
-// §F6 phone screen: site status + its T3 actions. `actions` is the list of action
-// ids the server says are available for THIS site — Task 13 supplies it from the
-// generated payload; today no site action endpoints exist, so callers pass [] and
-// the row renders nothing rather than buttons that would 404.
+// §F6 phone screen: site status + its T3 actions. Live Sites passes the T3
+// ids; only site.rollback has HTTP (pipeline.rollback). Restart / re-run
+// render so the table is visible; they do not invent engines.
 export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () => {} }) {
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%",
@@ -107,7 +114,10 @@ export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }
           <CertState site={s} />
         </div>
       ))}
-      {selected && <SiteStatus site={selected} />}
+      {selected && (
+        <SiteStatus site={selected} actions={t3SiteActions()}
+          onRun={(id, site) => id === "site.rollback" && rollbackSite(site.id)} />
+      )}
     </div>
   );
 }

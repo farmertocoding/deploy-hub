@@ -63,7 +63,9 @@ export function CloudflarePanel() {
     <div style={{ maxWidth: 720 }}>
       <h2>Cloudflare</h2>
       <p>Paste a single-zone API token. The Hub verifies it and stores it in the
-        vault — the token never comes back.</p>
+        vault — the token never comes back. This screen stores a DNS token only;
+        Origin certificates refuse until <code>origin_ca_key_ref</code> is set
+        on the account in the vault. It does not accept an Origin CA key.</p>
       <form onSubmit={handleSubmit(submit)}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>

@@ -492,6 +492,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/Manifest'
           description: ''
+  /api/v1/sites/{site_id}/rollback/:
+    post:
+      operationId: v1_sites_rollback_create
+      description: 'POST: roll the site back to its latest succeeded Deployment.'
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollbackResult'
+          description: ''
   /api/v1/sites/{site_id}/wizard/:
     get:
       operationId: v1_sites_wizard_retrieve
@@ -558,6 +579,16 @@ components:
         * `ack` - ack
         * `resolve` - resolve
         * `accept_risk` - accept_risk
+    CertRefusal:
+      type: object
+      properties:
+        detail:
+          type: string
+        finding_id:
+          type: integer
+      required:
+      - detail
+      - finding_id
     CloudflareConnect:
       type: object
       properties:
@@ -966,6 +997,19 @@ components:
       - scanned_at
       - summary
       - warnings
+    RollbackResult:
+      type: object
+      properties:
+        deployment_id:
+          type: integer
+        original_id:
+          type: integer
+        status:
+          type: string
+      required:
+      - deployment_id
+      - original_id
+      - status
     SeverityEnum:
       enum:
       - p1
@@ -990,6 +1034,10 @@ components:
           nullable: true
         manifest_current:
           type: boolean
+          nullable: true
+        cert_refusal:
+          allOf:
+          - $ref: '#/components/schemas/CertRefusal'
           nullable: true
       required:
       - domain

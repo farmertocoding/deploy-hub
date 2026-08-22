@@ -180,12 +180,18 @@ def readiness_body(report, scanned_at):
     }).data
 
 
+class CertRefusalSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    finding_id = serializers.IntegerField()
+
+
 class SiteSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
     domain = serializers.CharField(allow_blank=True)
     latest_manifest_version = serializers.IntegerField(allow_null=True)
     manifest_current = serializers.BooleanField(allow_null=True)
+    cert_refusal = CertRefusalSerializer(allow_null=True, required=False)
 
 
 class ProjectSummarySerializer(serializers.Serializer):
@@ -195,6 +201,21 @@ class ProjectSummarySerializer(serializers.Serializer):
     scanned_at = serializers.DateTimeField(allow_null=True)
     tiers = serializers.DictField(child=serializers.IntegerField())
     sites = SiteSummarySerializer(many=True)
+
+
+def _open_cert_refusals(sites):
+    """Open `unproxied-cert:{pk}` Findings, keyed by fingerprint (D-035)."""
+    from core.models import Finding
+
+    fingerprints = [f"unproxied-cert:{site.pk}" for site in sites]
+    if not fingerprints:
+        return {}
+    return {
+        row.fingerprint: row
+        for row in Finding.objects.filter(
+            fingerprint__in=fingerprints, state=Finding.State.OPEN,
+        )
+    }
 
 
 def project_row_body(project):
@@ -232,15 +253,22 @@ def project_row_body(project):
     report = project.scan_report or {}
     checks = report.get("checks", [])
     current_hash = report_hash(report) if report else None
+    site_rows = sorted(project.sites.all(), key=lambda s: s.pk)
+    refusals = _open_cert_refusals(site_rows)
     sites = []
-    for site in sorted(project.sites.all(), key=lambda s: s.pk):
+    for site in site_rows:
         latest = site.manifests.order_by("-version").first()
+        refused = refusals.get(f"unproxied-cert:{site.pk}")
         sites.append({
             "id": site.pk, "name": site.name, "domain": site.domain,
             "latest_manifest_version": latest.version if latest else None,
             "manifest_current": (
                 None if latest is None or current_hash is None
                 else latest.scan_report_hash == current_hash),
+            "cert_refusal": (
+                {"detail": refused.body or refused.title, "finding_id": refused.pk}
+                if refused else None
+            ),
         })
     return ProjectSummarySerializer({
         "id": project.pk, "name": project.name, "slug": project.slug,

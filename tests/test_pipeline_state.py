@@ -160,7 +160,7 @@ def test_env_snapshot_goes_through_vault(monkeypatch):
     from deploys.models import DeploymentArtifact
     from deploys.pipeline import load_env_snapshot
     from deploys.tasks import run_deploy
-    from providers.fakes import FakeDnsProvider
+    from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     site, _ = _site_with_target(slug="env")
     bundle = vault_service.put(
@@ -186,6 +186,10 @@ def test_env_snapshot_goes_through_vault(monkeypatch):
     fake = PipelineTransport()
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: fake)
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     run_deploy.delay(deployment.pk)
     bundle.refresh_from_db()

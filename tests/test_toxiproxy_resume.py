@@ -374,11 +374,16 @@ def test_ssh_timeout_mid_deploy_resumes(hub_target, toxiproxy_db, tmp_path, monk
             pipeline, "_default_transport",
             lambda site: SshTransport(site.primary_target),
         )
+        from providers.fakes import FakeOriginCertIssuer
+        monkeypatch.setattr(
+            pipeline, "resolve_production_seams",
+            lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+        )
         result = sweep_stale_deployments()
         assert deployment.pk in result["resumed"]
         deployment.refresh_from_db()
         if deployment.status != Deployment.Status.SUCCEEDED:
-            pipeline.execute(deployment.pk)
+            pipeline.execute(deployment.pk, dns=FakeDnsProvider())
             deployment.refresh_from_db()
         assert deployment.status == Deployment.Status.SUCCEEDED
     finally:

@@ -540,8 +540,11 @@ def test_rollback_is_one_click_and_never_step_up_gated():
     UX-F5 id (the T1 hardware clause is unbuilt).
     """
     src = (REPO / "frontend" / "src" / "actions.js").read_text(encoding="utf-8")
+    table = (REPO / "frontend" / "src" / "api" / "action_tiers.js").read_text(
+        encoding="utf-8")
     for action_id in ("site.rollback", "site.restart", "check.rerun"):
-        assert f'id: "{action_id}", tier: "T3"' in src
+        assert f'"id": "{action_id}"' in table
+        assert '"tier": "T3"' in table
     assert (
         'if (row.tier === "T3") return { confirm: false, undo: true, stepUp: "none" }'
         in src

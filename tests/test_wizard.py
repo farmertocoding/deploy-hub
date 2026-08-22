@@ -1324,9 +1324,11 @@ def test_issue_r11_a1_the_project_row_wire_output_is_unchanged(auth_client):
                             "pending_sandbox": 1}
     assert row["sites"] == [
         {"id": first.pk, "name": "prod", "domain": "p.example.com",
-         "latest_manifest_version": None, "manifest_current": None},
+         "latest_manifest_version": None, "manifest_current": None,
+         "cert_refusal": None},
         {"id": first.pk + 1, "name": "staging", "domain": "",
-         "latest_manifest_version": None, "manifest_current": None},
+         "latest_manifest_version": None, "manifest_current": None,
+         "cert_refusal": None},
     ]
 
 
