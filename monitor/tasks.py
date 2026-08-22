@@ -75,3 +75,13 @@ def run_restore_clean_drill():
 
     run = body()
     return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def audit_cf_token_scope():
+    """Daily SEC-B5 token-scope audit (Task 2). Takes no args by design:
+    nothing credential-shaped can ever appear in task args or the result."""
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    run = audit_cloudflare_credentials()
+    return {"ok": True, "status": run.status, "kind": run.kind}
