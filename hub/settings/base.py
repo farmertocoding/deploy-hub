@@ -263,8 +263,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.run_pager_drill",
         "schedule": 30 * 86400,
     },
+    "retention-janitor-nightly": {
+        "task": "monitor.tasks.run_retention_janitor",
+        "schedule": crontab(hour=0, minute=0),
+    },
 }
-# crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday).
+# crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday,
+# retention janitor midnight).
 CELERY_TIMEZONE = TIME_ZONE
 
 # --- Pager (D-036) ---

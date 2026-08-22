@@ -178,3 +178,11 @@ def scan_cert_expiry():
 
     run = body()
     return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_retention_janitor(*, now=None):
+    """Beat `retention-janitor-nightly`. Plain batched DELETEs (§C7)."""
+    from monitor.retention import sweep
+
+    return sweep(now=now)
