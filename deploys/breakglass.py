@@ -18,9 +18,11 @@ def write_runbook(desired):
     transport = desired["transport"]
     slug = desired["site_slug"]
     path = f"/srv/sites/{slug}/BREAK-GLASS.md"
-    # Root-owned 0400 cannot be overwritten by the deploy user; unlock, put, relock.
-    transport.run(["sudo", "chmod", "u+w", path])
-    transport.put(_render_runbook(desired).encode(), path, mode=0o400)
+    # Root-owned 0400 cannot be overwritten by the deploy user. Put a
+    # deploy-writable temp, then sudo mv onto the final path (certs._atomic_write).
+    tmp = f"{path}.tmp"
+    transport.put(_render_runbook(desired).encode(), tmp, mode=0o400)
+    transport.run(["sudo", "mv", tmp, path])
     transport.run(["sudo", "chown", "root:root", path])
     transport.run(["sudo", "chmod", "0400", path])
     return {"status": "written", "path": path}

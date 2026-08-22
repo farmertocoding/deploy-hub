@@ -182,7 +182,7 @@ def test_cutover_writes_runbook_when_artifacts_exist_but_remote_missing():
 
     assert runbook in transport.files
     assert any(
-        kind == "put" and remote == runbook
+        kind == "put" and remote == f"{runbook}.tmp"
         for kind, remote in transport.mutating_calls()
     )
     assert deployment.text_artifacts.count() == 6

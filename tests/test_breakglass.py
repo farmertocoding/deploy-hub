@@ -1,10 +1,11 @@
 """Break-glass runbook on the target: mode 0400, no vault plaintext (P5 / VAL-45)."""
+import errno
 import pathlib
 import re
 
 import pytest
 
-from core.transport import FakeTransport
+from core.transport import CommandResult, FakeTransport
 
 SECRET = "VAULT-TEST-PLAINTEXT-MARKER-do-not-log"
 TOKEN = "cf-dns-t1-planted-token-do-not-exfiltrate-bg16"
@@ -26,6 +27,52 @@ class ModeTransport(FakeTransport):
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         super().put(local_path_or_bytes, remote_path, mode=mode)
         self.put_modes[remote_path] = mode
+
+
+class RootOwnedTransport(ModeTransport):
+    """SFTP-like: put onto a root-owned path raises EACCES.
+
+    chmod u+w unlocks the owner (root), not deploy — the T2 miss. sudo mv
+    as root replaces the final path the way the live install does.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.owners = {}
+
+    def plant_root_0400(self, path, content):
+        self.files[path] = content
+        self.put_modes[path] = 0o400
+        self.owners[path] = "root"
+
+    def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
+        if self.owners.get(remote_path) == "root":
+            raise PermissionError(errno.EACCES, "Permission denied", remote_path)
+        super().put(local_path_or_bytes, remote_path, mode=mode)
+        self.owners.setdefault(remote_path, "deploy")
+
+    def run(self, argv, *, timeout=60):
+        if not isinstance(argv, (list, tuple)):
+            raise TypeError("argv must be a list — never a shell string (§4.5)")
+        argv = list(argv)
+        self.calls.append(("run", argv))
+        cmd = argv[1:] if argv and argv[0] == "sudo" else argv
+        if cmd[:1] == ["mv"] and len(cmd) >= 3:
+            src, dst = cmd[1], cmd[2]
+            if src in self.files:
+                self.files[dst] = self.files.pop(src)
+            if src in self.put_modes:
+                self.put_modes[dst] = self.put_modes[src]
+            self.owners.pop(src, None)
+            if argv and argv[0] == "sudo":
+                self.owners[dst] = "root"
+            else:
+                self.owners[dst] = self.owners.get(dst, "deploy")
+        elif cmd[:1] == ["chown"] and len(cmd) >= 3:
+            spec = cmd[1]
+            path = cmd[2]
+            self.owners[path] = "root" if spec.startswith("root") else spec
+        return CommandResult(argv)
 
 
 def _text(payload):
@@ -94,6 +141,7 @@ def test_runbook_mode_0400():
     assert puts, "expected transport.put of the runbook"
     remote = puts[0]
     assert SLUG in remote
+    assert remote.endswith(".tmp")
     assert transport.put_modes[remote] == 0o400
     text = _text(transport.files[remote])
     assert text.strip()
@@ -245,6 +293,7 @@ def test_runbook_is_0400_and_root_owned():
     """
     transport, remote, text = _written()
     assert SLUG in remote
+    assert remote.endswith(".tmp")
     assert transport.put_modes[remote] == 0o400
     assert text.strip()
     chowns = [
@@ -274,3 +323,54 @@ def test_advisory_only_note_present():
     lower = text.lower()
     assert "advisory only" in lower
     assert "findings inbox" in lower
+
+
+@pytest.mark.req("SEC-P5-BREAK-GLASS")
+@pytest.mark.req("VAL-45-SHELL-ARGLISTS")
+def test_second_write_over_root_0400_uses_temp_then_sudo_mv():
+    """A planted root-owned 0400 runbook is replaced via tmp + sudo mv.
+
+    What would make this fail: chmod u+w then put on the final path (SFTP
+    EACCES — u+w unlocks root, not deploy), or skipping sudo mv.
+    """
+    from deploys.breakglass import write_runbook
+
+    path = f"/srv/sites/{SLUG}/BREAK-GLASS.md"
+    extra = {
+        "step": "cutover",
+        "strategy": "blue_green",
+        "image_tag": IMAGE,
+        "generated_at": GENERATED_AT,
+    }
+
+    fresh = RootOwnedTransport()
+    write_runbook(_desired(fresh, extra=extra))
+    assert GENERATED_AT in _text(fresh.files[path])
+
+    transport = RootOwnedTransport()
+    transport.plant_root_0400(path, b"# stale-runbook-v1\n")
+    write_runbook(_desired(transport, extra=extra))
+
+    text = _text(transport.files[path])
+    assert "stale-runbook-v1" not in text
+    assert GENERATED_AT in text
+    assert SLUG in text
+
+    puts = [remote for kind, remote in transport.calls if kind == "put"]
+    assert puts, "expected transport.put of the runbook"
+    assert all(remote.endswith(".tmp") for remote in puts)
+    assert transport.put_modes[puts[0]] == 0o400
+
+    mvs = [
+        argv for kind, argv in transport.calls
+        if kind == "run" and isinstance(argv, list) and "mv" in argv
+    ]
+    assert mvs, "expected sudo mv of the temp file onto the runbook"
+    assert any(argv[:2] == ["sudo", "mv"] for argv in mvs)
+    assert any(path in argv and any(str(part).endswith(".tmp") for part in argv) for argv in mvs)
+
+    for kind, payload in transport.calls:
+        if kind in {"run", "probe"}:
+            assert isinstance(payload, list)
+            assert "u+w" not in payload
+            assert "<<" not in payload
