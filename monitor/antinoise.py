@@ -193,8 +193,12 @@ def recovery_notice(finding, *, now=None):
     finding.will_push = True
     finding.push_priority = "default"
     finding.respects_quiet_hours = True
-    _record_push(finding, now, title=title)
-    storm_breaker(now)
+    # The notice that closes the storm is not itself a storm-rate event:
+    # counting it would re-cross >10 and re-open the just-resolved storm.
+    counts_for_storm = finding.fingerprint != STORM_FINDING_FP
+    _record_push(finding, now, title=title, counts_for_storm=counts_for_storm)
+    if counts_for_storm:
+        storm_breaker(now)
     return {"title": title, "finding": finding, "minutes": minutes}
 
 
@@ -469,16 +473,19 @@ def _push_log():
     return state
 
 
-def _record_push(row, now, title=None):
+def _record_push(row, now, title=None, *, counts_for_storm=True):
     log = _push_log()
     events = list(log.transitions or [])
-    events.append({
+    event = {
         "at": now.isoformat(),
         "fingerprint": row.fingerprint,
         "severity": row.severity,
         "delivered": False,
         "title": title or row.title,
-    })
+    }
+    if not counts_for_storm:
+        event["counts_for_storm"] = False
+    events.append(event)
     log.transitions = events
     log.last_push_at = now
     log.save()
@@ -490,6 +497,8 @@ def _recent_pushes(now):
         return []
     recent = []
     for event in log.transitions or []:
+        if event.get("counts_for_storm") is False:
+            continue
         at = _parse_dt(event["at"])
         if now - at <= STORM_WINDOW:
             recent.append(event)

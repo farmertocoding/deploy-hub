@@ -3,7 +3,7 @@
 Named tests from Task 6. Delivery (ntfy) is Task 7 — these assert the
 engine's decisions (open/close, suppress, group, storm, recovery, ack).
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.utils import timezone
@@ -326,6 +326,28 @@ def _age_push_log(minutes=11):
     log.save(update_fields=["transitions"])
 
 
+def _age_n_recent_pushes(n, minutes=11):
+    """Age the oldest n still-in-window pushes out of the storm window."""
+    from monitor.antinoise import STORM_WINDOW
+
+    log = AlertState.objects.get(fingerprint="__pushes__")
+    now = timezone.now()
+    past = (now - timedelta(minutes=minutes)).isoformat()
+    aged = 0
+    for event in log.transitions or []:
+        if aged >= n:
+            break
+        if event.get("counts_for_storm") is False:
+            continue
+        at = datetime.fromisoformat(event["at"])
+        if timezone.is_naive(at):
+            at = timezone.make_aware(at, timezone.get_current_timezone())
+        if now - at <= STORM_WINDOW:
+            event["at"] = past
+            aged += 1
+    log.save(update_fields=["transitions"])
+
+
 def _non_prod_site():
     from dns_fixtures import default_dns_zone
 
@@ -448,3 +470,44 @@ def test_non_prod_site_down_does_not_file_prod_site_hard_down():
     assert row.severity == Finding.Severity.P2
     assert "prod-site-hard-down" not in kinds
     assert "staging-or-flapping" in kinds
+
+
+@pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
+@pytest.mark.req("ALERT-RECOVERY-NOTICE")
+def test_storm_exit_at_exactly_ten_does_not_reopen_on_recovery():
+    """What would make this fail: rate 11→10 closing the storm, then the
+    recovery notice counting as the 11th push, reopening alert-storm, and
+    muting a later real P1."""
+    from monitor.alerts import raise_alert
+    from monitor.antinoise import storm_breaker
+
+    for i in range(11):
+        raise_alert(
+            "disk-critical",
+            f"host:storm-edge-{i}",
+            fingerprint=f"disk-storm-edge:{i}",
+            **_copy(),
+        )
+    storm = Finding.objects.get(fingerprint="alert-storm")
+    assert storm.state == Finding.State.OPEN
+
+    _age_n_recent_pushes(1)
+    storm_breaker(timezone.now())
+    storm.refresh_from_db()
+    assert storm.state == Finding.State.RESOLVED
+    assert _recovery_for("alert-storm")
+    state = AlertState.objects.get(fingerprint="__storm__")
+    assert state.closed_at is not None
+
+    # Keep the later P1 from being the 11th page in the window. Recovery
+    # already left the rate at 10; one more original push ages out.
+    _age_n_recent_pushes(1)
+    later = raise_alert(
+        "ssh-host-key-mismatch",
+        "host:real-edge",
+        fingerprint="ssh-host-key-mismatch:host:real-edge",
+        **_copy(),
+    )
+    assert later.will_push is True
+    storm.refresh_from_db()
+    assert storm.state == Finding.State.RESOLVED
