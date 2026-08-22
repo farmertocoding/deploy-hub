@@ -43,7 +43,7 @@ requirements:
     phase: 0
     verify: test
     source: plan-addendum-2026-07-30.md §I Phase 0 / §E9
-    text_hash: sha256:3da72f9bd931c4c9d24ef0f97dd8a457cedc2aa06c9c79aa95c719911fd07e5a
+    text_hash: sha256:56c43acf494e2fcc0495d177d03102e4899cfce54ed0f760e5984fe1a1a16d4b
     text: TOTP second factor enforced for enrolled users at login.
   - id: P0-VALIDATION
     phase: 0
@@ -295,7 +295,7 @@ requirements:
     demo:
       - conformance/demos/phase-2.md
       - conformance/demos/phase-2/
-    text_hash: sha256:5529aa22dae0bac7bc53903c2c454ef6e27940cf752ae7e3ebabde6f05a6e539
+    text_hash: sha256:17e50083fde97bba89201878e4c87147878810376f34d039949359a6a26e9642
     text: >
       The phase-2 milestone demo is recorded: sample-node-site through the real
       pipeline to hub-test-target twice (CI half); TAKKO real-world pipeline
