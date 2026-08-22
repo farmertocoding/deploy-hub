@@ -188,6 +188,7 @@ class T3VM:
     ssh_from: str = ""
     provision_result: object = None
     hardened: bool = False
+    harden_result: object = None
 
     def mp(self):
         return MultipassVM(name=self.name, ipv4=self.ipv4, user=self.user)
@@ -288,12 +289,14 @@ def transfer_scripts(vm):
     transfer(str(VERIFY_SH), f"{vm.name}:/tmp/verify-hardening.sh")
     _mp_exec(
         vm,
-        ["sudo", "install", "-m", "0755", "/tmp/harden-ubuntu.sh", "/usr/local/sbin/harden-ubuntu.sh"],
+        ["sudo", "install", "-m", "0755", "/tmp/harden-ubuntu.sh",
+         "/usr/local/sbin/harden-ubuntu.sh"],
         timeout=30,
     )
     _mp_exec(
         vm,
-        ["sudo", "install", "-m", "0755", "/tmp/verify-hardening.sh", "/usr/local/sbin/verify-hardening.sh"],
+        ["sudo", "install", "-m", "0755", "/tmp/verify-hardening.sh",
+         "/usr/local/sbin/verify-hardening.sh"],
         timeout=30,
     )
 
@@ -315,7 +318,8 @@ def harden_target_profile(vm):
         f"HUB_T3_SSH_FROM={ssh_from}",
         "/usr/local/sbin/harden-ubuntu.sh",
     ]
-    return _mp_exec(vm, argv, timeout=600)
+    vm.harden_result = _mp_exec(vm, argv, timeout=600)
+    return vm.harden_result
 
 
 def enroll_target(vm, settings, *, slug=None):
@@ -372,6 +376,10 @@ def sample_site_body(slug, *, source_dir=None):
         "source_dir": str(source_dir or SAMPLE_SITE),
         "deploy_strategy": "recreate",
         "local_state": True,
+        # sample-site/config/settings.py hard-fails without DJANGO_SECRET_KEY
+        # (os.environ[...]). queued_site freezes this into a vault env bundle
+        # the way wizard.materialize does; the value never enters the manifest.
+        "env": {"DJANGO_SECRET_KEY": f"t3-{uuid.uuid4().hex}"},
         "runtime": "django",
         "exposure": "mesh_only",
         "domain": f"{slug}.example.test",
@@ -415,6 +423,32 @@ def node_site_body(slug, *, source_dir=None):
     }
 
 
+def _vault_env_bundle(site, body):
+    """Freeze `body["env"]` into a vault env bundle, as wizard.materialize does.
+
+    Env VALUES never enter the persisted manifest body (round-1 F1): the body
+    keeps env_bundle_ref + the names, the pipeline decrypts the bundle via
+    `deploys.pipeline.load_env_snapshot` and ships it as a 0600 env file.
+    """
+    values = body.get("env")
+    if not isinstance(values, dict) or not values:
+        return body
+    from vault import service as vault_service
+    from vault.models import Secret
+
+    bundle = vault_service.put(
+        kind=Secret.Kind.ENV_BUNDLE,
+        owner_type="manifest",
+        owner_id=f"{site.pk}:v1",
+        plaintext=json.dumps(values, sort_keys=True).encode("utf-8"),
+    )
+    body = dict(body)
+    del body["env"]
+    body["env_names"] = sorted(values)
+    body["env_bundle_ref"] = bundle.pk
+    return body
+
+
 def queued_site(vm, settings, *, slug, body):
     from core.models import Project, Site
     from deploys.models import Deployment, Manifest
@@ -431,6 +465,7 @@ def queued_site(vm, settings, *, slug, body):
         readiness_path="/healthz.ready",
         warmup_timeout_s=60,
     )
+    body = _vault_env_bundle(site, body)
     manifest = Manifest.objects.create(site=site, version=1, body=body)
     return site, target, Deployment.objects.create(manifest=manifest)
 
@@ -560,8 +595,69 @@ def t3_vm():
         reap_test_plane()
 
 
+def remove_site_containers(vm):
+    """Remove leftover site-* containers on the session VM between tests.
+
+    The T2 fix (286c9ea) for the shared hub-test-target, ported to T3: every
+    node-site body publishes 127.0.0.1:8080 and `--restart unless-stopped`
+    even resurrects a stopped survivor, so the next test's docker run fails
+    with "port is already allocated". Listing is tolerant — docker may not be
+    installed yet if the test deployed nothing — but a failed rm raises so a
+    broken cleanup names itself instead of the next test.
+    """
+    listing = _mp_result(
+        vm,
+        ["sudo", "docker", "ps", "-aq", "--filter", "name=^site-"],
+        timeout=60,
+    )
+    if listing.returncode != 0:
+        return
+    ids = (listing.stdout or "").split()
+    if ids:
+        _mp_exec(vm, ["sudo", "docker", "rm", "-f", *ids], timeout=120)
+
+
+def remove_site_caddy_servers(vm):
+    """DELETE leftover site-* Caddy servers on the session VM between tests.
+
+    ensure_route_tls PUTs a per-slug server on the shared 127.0.0.1:8089
+    (node) / :8088 (django) listen, so a survivor makes the next test's PUT
+    fail ("caddy put failed": listen address already bound). Same tolerance
+    contract as remove_site_containers.
+    """
+    listing = _mp_result(
+        vm,
+        ["curl", "-sf", "http://127.0.0.1:2019/config/apps/http/servers"],
+        timeout=30,
+    )
+    if listing.returncode != 0:
+        return
+    try:
+        servers = json.loads(listing.stdout or "null") or {}
+    except json.JSONDecodeError:
+        return
+    for server_id in servers:
+        if server_id.startswith("site-"):
+            _mp_exec(
+                vm,
+                [
+                    "curl", "-sf", "-X", "DELETE",
+                    f"http://127.0.0.1:2019/config/apps/http/servers/{server_id}",
+                ],
+                timeout=30,
+            )
+
+
 @pytest.fixture
 def t3_ready(t3_vm, db, settings):
-    """Provision (first caller) then harden. Shared across Task 10 and 11."""
+    """Provision (first caller) then harden; per-test view of the session VM.
+
+    Shared across Task 10 and 11. Teardown removes site-* containers and
+    Caddy servers so tests never collide on the shared ports (QE F4).
+    """
     ensure_provisioned_and_hardened(t3_vm, settings)
-    return t3_vm
+    try:
+        yield t3_vm
+    finally:
+        remove_site_containers(t3_vm)
+        remove_site_caddy_servers(t3_vm)
