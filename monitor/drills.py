@@ -257,15 +257,20 @@ def run_restore_clean_drill():
     )
 
 
-def run_pager_drill():
-    """Synthetic P1 through deliver(). SUCCEEDED only when a real backend sent."""
+def run_pager_drill(*, now=None):
+    """Synthetic P1 through deliver(). SUCCEEDED only when this run's real backend sent."""
+    from core.models import AlertDelivery, Finding
     from monitor.alerts import raise_alert
 
+    clock = now or timezone.now()
+    drill_start = timezone.now()
     backend = getattr(settings, "HUB_PAGER_BACKEND", "fake")
+    period = timezone.localtime(clock).strftime("%Y-%m")
+    fingerprint = f"pager-drill:{period}"
     raise_alert(
         "pager-drill",
         "check:pager",
-        fingerprint="pager-drill:synthetic",
+        fingerprint=fingerprint,
         source_engine="monitor.drills",
         title="TEST — ack me",
         body=(
@@ -277,14 +282,23 @@ def run_pager_drill():
     results = {"schema_version": RESULTS_SCHEMA_VERSION, "backend": backend}
     if backend == "fake":
         return record_run(CheckRun.Kind.PAGER, CheckRun.Status.SKIPPED, results)
-    from core.models import AlertDelivery, Finding
-
-    finding = Finding.objects.get(fingerprint="pager-drill:synthetic")
-    delivered = AlertDelivery.objects.filter(
-        finding=finding,
-        channel=AlertDelivery.Channel.NTFY,
-        ok=True,
-    ).exists()
+    finding = Finding.objects.get(fingerprint=fingerprint)
+    latest = (
+        AlertDelivery.objects.filter(
+            finding=finding,
+            channel=AlertDelivery.Channel.NTFY,
+            sent_at__gte=drill_start,
+            backend=backend,
+        )
+        .order_by("-sent_at", "-pk")
+        .first()
+    )
+    delivered = (
+        backend != "fake"
+        and latest is not None
+        and latest.ok
+        and latest.backend == backend
+    )
     status = CheckRun.Status.SUCCEEDED if delivered else CheckRun.Status.FAILED
     return record_run(CheckRun.Kind.PAGER, status, results)
 

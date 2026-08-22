@@ -440,7 +440,8 @@ def test_pager_drill_records_which_backend_delivered(monkeypatch):
     assert published, "synthetic P1 must go through deliver()"
     from core.models import Finding
 
-    filed = Finding.objects.get(fingerprint="pager-drill:synthetic")
+    period = timezone.localtime(timezone.now()).strftime("%Y-%m")
+    filed = Finding.objects.get(fingerprint=f"pager-drill:{period}")
     assert filed.title == "TEST — ack me"
     assert filed.severity == Finding.Severity.P1
 
@@ -479,6 +480,127 @@ def test_missed_pager_drill_alerts_like_a_down_site():
 
     row = Finding.objects.get(fingerprint="drill-missed:pager")
     assert row.severity == Finding.Severity.P1
+
+
+class _RecordingPager:
+    """Injectable pager for ALERT-PAGER-DRILL. fail=True raises after record."""
+
+    def __init__(self):
+        self.published = []
+        self.fail = False
+
+    def publish(self, severity, title, body, *, tags, click_url, **_kwargs):
+        self.published.append({"severity": severity, "title": title, "body": body})
+        if self.fail:
+            raise RuntimeError("ntfy down")
+
+
+@pytest.mark.req("ALERT-PAGER-DRILL")
+def test_historical_fake_ok_does_not_succeed_a_failed_ntfy_run(monkeypatch):
+    """Months of FakePager ok=True must not make a failed ntfy run SUCCEEDED.
+
+    What would make this fail: unbounded AlertDelivery.ok.exists() treating
+    a prior fake-backend row as this run's real delivery.
+    """
+    from monitor.drills import run_pager_drill
+    from monitor.pager import reset_pager
+
+    assert settings.HUB_PAGER_BACKEND == "fake"
+    fake_run = run_pager_drill()
+    assert fake_run.status == CheckRun.Status.SKIPPED
+
+    pager = _RecordingPager()
+    pager.fail = True
+    monkeypatch.setattr("monitor.pager.get_pager", lambda: pager)
+    reset_pager()
+    with override_settings(HUB_PAGER_BACKEND="ntfy"):
+        reset_pager()
+        run = run_pager_drill()
+
+    assert run.status != CheckRun.Status.SUCCEEDED
+    assert run.results["backend"] == "ntfy"
+
+
+@pytest.mark.req("ALERT-PAGER-DRILL")
+def test_later_ntfy_failure_is_not_succeeded_from_an_earlier_ok(monkeypatch):
+    """A later ntfy fail must not inherit SUCCEEDED from this finding's past ok.
+
+    What would make this fail: judging the CheckRun on any historical NTFY
+    ok=True instead of this call's delivery.
+    """
+    from monitor.drills import run_pager_drill
+    from monitor.pager import reset_pager
+
+    pager = _RecordingPager()
+    monkeypatch.setattr("monitor.pager.get_pager", lambda: pager)
+    reset_pager()
+    with override_settings(HUB_PAGER_BACKEND="ntfy"):
+        reset_pager()
+        first = run_pager_drill()
+        assert first.status == CheckRun.Status.SUCCEEDED
+        pager.fail = True
+        second = run_pager_drill()
+
+    assert second.status != CheckRun.Status.SUCCEEDED
+    assert second.results["backend"] == "ntfy"
+
+
+@pytest.mark.req("ALERT-PAGER-DRILL")
+def test_acked_finding_without_this_run_push_is_not_succeeded(monkeypatch):
+    """Ack must not let the next run SUCCEEDED without paging this month.
+
+    What would make this fail: stable fingerprint + finding() leaving ACKED
+    + maybe_deliver skip + historical ok.exists() still writing SUCCEEDED.
+    """
+    from core.findings import ack
+    from core.models import Finding
+    from monitor.drills import run_pager_drill
+    from monitor.pager import reset_pager
+
+    pager = _RecordingPager()
+    monkeypatch.setattr("monitor.pager.get_pager", lambda: pager)
+    reset_pager()
+    with override_settings(HUB_PAGER_BACKEND="ntfy"):
+        reset_pager()
+        first = run_pager_drill()
+        assert first.status == CheckRun.Status.SUCCEEDED
+        filed = Finding.objects.get(title="TEST — ack me")
+        ack(filed)
+        before = len(pager.published)
+        second = run_pager_drill()
+
+    assert second.status != CheckRun.Status.SUCCEEDED
+    assert len(pager.published) == before
+
+
+@pytest.mark.req("ALERT-PAGER-DRILL")
+def test_next_month_pager_drill_pages_after_last_month_ack(monkeypatch):
+    """A new YYYY-MM fingerprint must still page after last month was acked.
+
+    What would make this fail: one stable fingerprint so ack + maybe_deliver
+    skip the next month's synthetic P1.
+    """
+    from core.findings import ack
+    from core.models import Finding
+    from monitor.drills import run_pager_drill
+    from monitor.pager import reset_pager
+
+    pager = _RecordingPager()
+    monkeypatch.setattr("monitor.pager.get_pager", lambda: pager)
+    reset_pager()
+    january = timezone.now().replace(year=2026, month=1, day=15)
+    february = timezone.now().replace(year=2026, month=2, day=15)
+    with override_settings(HUB_PAGER_BACKEND="ntfy"):
+        reset_pager()
+        first = run_pager_drill(now=january)
+        assert first.status == CheckRun.Status.SUCCEEDED
+        ack(Finding.objects.get(fingerprint="pager-drill:2026-01"))
+        before = len(pager.published)
+        second = run_pager_drill(now=february)
+
+    assert second.status == CheckRun.Status.SUCCEEDED
+    assert len(pager.published) > before
+    assert Finding.objects.filter(fingerprint="pager-drill:2026-02").exists()
 
 
 @pytest.mark.req("REL-P2-DRILL-STUB")
