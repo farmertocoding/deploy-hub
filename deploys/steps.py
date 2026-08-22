@@ -265,6 +265,9 @@ def ensure_route_tls(desired):
     route = _caddy_route(desired, route_id)
     current = _probe_caddy_route(transport, route_id)
     if current == route:
+        # Route match must not leave a missing tag unrestored — other sites
+        # share apps/tls, and a later PUT can wipe this pair.
+        _put_caddy_origin_certs(desired, route)
         return {"status": "skipped", "id": route_id}
     ensure_hub_dir(transport, ssh_user_from(desired), desired.get("heartbeat"))
     _put_caddy_origin_certs(desired, route)
@@ -435,8 +438,93 @@ def _attach_origin_tls(route, desired):
     return attached
 
 
+def _caddy_tls_admin_url():
+    return "http://127.0.0.1:2019/config/apps/tls"
+
+
+def _as_tls_app(data):
+    """Keep a Caddy tls app; drop healthz-shaped JSON a sloppy probe might return."""
+    if not isinstance(data, dict):
+        return {}
+    if "certificates" in data or "automation" in data:
+        return data
+    if not data:
+        return {}
+    if {"live", "ready"} & set(data) and "certificates" not in data:
+        return {}
+    return data
+
+
+def _remember_tls_app(transport, app):
+    if isinstance(app, dict):
+        transport._hub_origin_tls_app = app
+
+
+def _last_known_tls_app(transport):
+    cached = getattr(transport, "_hub_origin_tls_app", None)
+    return dict(cached) if isinstance(cached, dict) else {}
+
+
+def _probe_caddy_tls(transport):
+    """Live apps/tls object, or {} when the tls app is missing / unreadable."""
+    result = transport.probe(["curl", "-sf", _caddy_tls_admin_url()])
+    if not result.ok or not (result.stdout or "").strip():
+        return {}
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    app = _as_tls_app(data)
+    if app:
+        _remember_tls_app(transport, app)
+    return app
+
+
+def _origin_tls_entry(files, tag):
+    return {
+        "certificate": files["certificate"],
+        "key": files["key"],
+        "tags": [tag],
+    }
+
+
+def _entry_has_tag(entry, tag):
+    if not isinstance(entry, dict):
+        return False
+    return tag in (entry.get("tags") or [])
+
+
+def _origin_tls_already_loaded(live, files, tag):
+    certs = live.get("certificates") if isinstance(live, dict) else None
+    entries = certs.get("load_files") if isinstance(certs, dict) else None
+    if not isinstance(entries, list):
+        return False
+    wanted_cert = files["certificate"]
+    wanted_key = files["key"]
+    for entry in entries:
+        if not _entry_has_tag(entry, tag):
+            continue
+        if entry.get("certificate") == wanted_cert and entry.get("key") == wanted_key:
+            return True
+    return False
+
+
+def _merge_caddy_origin_tls(live, files, tag):
+    """Upsert this site's tagged load_files entry; keep every other tls key."""
+    merged = dict(live) if isinstance(live, dict) else {}
+    raw_certs = merged.get("certificates")
+    certs = dict(raw_certs) if isinstance(raw_certs, dict) else {}
+    raw_files = certs.get("load_files")
+    previous = list(raw_files) if isinstance(raw_files, list) else []
+    kept = [entry for entry in previous if not _entry_has_tag(entry, tag)]
+    kept.append(_origin_tls_entry(files, tag))
+    certs["load_files"] = kept
+    merged["certificates"] = certs
+    return merged
+
+
 def _put_caddy_origin_certs(desired, route):
-    """PUT apps/tls load_files so the live server uses the pushed pair."""
+    """GET apps/tls, upsert this site's tagged pair, PUT the merged object."""
     if "tls_connection_policies" not in route:
         return
     files = _origin_tls_files(desired)
@@ -445,15 +533,13 @@ def _put_caddy_origin_certs(desired, route):
     transport = desired["transport"]
     slug = desired["site_slug"]
     tag = f"site-{slug}"
-    payload = {
-        "certificates": {
-            "load_files": [{
-                "certificate": files["certificate"],
-                "key": files["key"],
-                "tags": [tag],
-            }]
-        }
-    }
+    live = _probe_caddy_tls(transport)
+    if not live:
+        live = _last_known_tls_app(transport)
+    if _origin_tls_already_loaded(live, files, tag):
+        return
+    payload = _merge_caddy_origin_tls(live, files, tag)
+    ensure_hub_dir(transport, ssh_user_from(desired), desired.get("heartbeat"))
     remote = hub_join(f"caddy-tls-{slug}.json", ssh_user=ssh_user_from(desired))
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     transport.put(body, remote)
@@ -461,7 +547,7 @@ def _put_caddy_origin_certs(desired, route):
         transport,
         [
             "curl", "-sf", "-X", "PUT",
-            "http://127.0.0.1:2019/config/apps/tls",
+            _caddy_tls_admin_url(),
             "-H", "Content-Type: application/json",
             "--data-binary", f"@{remote}",
         ],
@@ -469,6 +555,7 @@ def _put_caddy_origin_certs(desired, route):
     )
     if not result.ok:
         raise RuntimeError(f"caddy tls put failed: {result.stderr}")
+    _remember_tls_app(transport, payload)
 
 
 def _caddy_listen_hostport(desired):

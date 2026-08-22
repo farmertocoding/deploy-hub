@@ -10,6 +10,9 @@ ROUTE_ID = f"site-{SLUG}"
 ADMIN = f"http://127.0.0.1:2019/id/{ROUTE_ID}"
 
 
+CADDY_TLS_ADMIN = "http://127.0.0.1:2019/config/apps/tls"
+
+
 class RouteTransport(FakeTransport):
     """Remembers the last PUT body so a second ensure can probe and skip."""
 
@@ -17,6 +20,7 @@ class RouteTransport(FakeTransport):
         super().__init__()
         self.routes = {}
         self.put_modes = {}
+        self.tls = None
 
     def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
         super().put(local_path_or_bytes, remote_path, mode=mode)
@@ -27,6 +31,11 @@ class RouteTransport(FakeTransport):
             raise TypeError("argv must be a list — never a shell string (§4.5)")
         argv = list(argv)
         self.calls.append(("probe", argv))
+        if argv and argv[0] == "curl" and "PUT" not in argv and _is_caddy_tls_admin(argv):
+            if self.tls is None:
+                return CommandResult(argv, exit_code=1, stderr="404")
+            stdout = self.tls.decode() if isinstance(self.tls, (bytes, bytearray)) else self.tls
+            return CommandResult(argv, stdout=stdout)
         route_id = _route_id_from_argv(argv)
         if argv and argv[0] == "curl" and "PUT" not in argv and route_id:
             raw = self.routes.get(route_id)
@@ -39,12 +48,20 @@ class RouteTransport(FakeTransport):
     def run(self, argv, *, timeout=60):
         result = super().run(argv, timeout=timeout)
         argv = list(argv)
-        route_id = _route_id_from_argv(argv)
-        if argv and argv[0] == "curl" and "PUT" in argv and route_id:
+        if argv and argv[0] == "curl" and "PUT" in argv:
             path = _data_binary_path(argv)
             raw = self.files.get(path, b"{}")
-            self.routes[route_id] = raw
+            if _is_caddy_tls_admin(argv):
+                self.tls = raw
+            else:
+                route_id = _route_id_from_argv(argv)
+                if route_id:
+                    self.routes[route_id] = raw
         return result
+
+
+def _is_caddy_tls_admin(argv):
+    return any(str(part).rstrip("/") == CADDY_TLS_ADMIN for part in argv)
 
 
 def _route_id_from_argv(argv):
@@ -221,3 +238,93 @@ def test_overlay_caddy_route_is_put_not_derived():
     put = _put_json(transport)
     assert put["listen"] == ["127.0.0.1:9999"]
     assert put["listen"] != derived.get("listen")
+
+
+def _tls_app(transport):
+    raw = getattr(transport, "tls", None)
+    if raw is None:
+        raise AssertionError("expected a live apps/tls PUT")
+    text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+    return json.loads(text)
+
+
+def _tls_load_files(transport):
+    return list((_tls_app(transport).get("certificates") or {}).get("load_files") or [])
+
+
+def _tagged_paths(entries):
+    out = {}
+    for entry in entries:
+        paths = (entry.get("certificate"), entry.get("key"))
+        for tag in entry.get("tags") or []:
+            out[tag] = paths
+    return out
+
+
+def _public_desired(transport, slug, domain):
+    return {
+        "transport": transport,
+        "site_slug": slug,
+        "deployment_id": 8,
+        "manifest_body": {"exposure": "public", "domain": domain},
+        "domain": domain,
+    }
+
+
+def test_tls_load_files_merges_by_tag_and_restores_on_route_skip():
+    """Two public sites share apps/tls; a wiped tag is restored on re-ensure.
+
+    What would make this fail: PUT replacing load_files with one site, or
+    skipping the tls PUT when the route is unchanged and the tag is gone.
+    """
+    from deploys.steps import ensure_route_tls
+
+    transport = RouteTransport()
+    alpha = _public_desired(transport, "alpha", "alpha.example.com")
+    bravo = _public_desired(transport, "bravo", "bravo.example.com")
+    ensure_route_tls(alpha)
+    ensure_route_tls(bravo)
+
+    files = _tls_load_files(transport)
+    assert _tagged_paths(files) == {
+        "site-alpha": ("/srv/sites/alpha/tls/cert.pem", "/srv/sites/alpha/tls/key.pem"),
+        "site-bravo": ("/srv/sites/bravo/tls/cert.pem", "/srv/sites/bravo/tls/key.pem"),
+    }
+    dumped = json.dumps(_tls_app(transport))
+    assert "BEGIN" not in dumped
+    assert "-----" not in dumped
+
+    wiped = {
+        "certificates": {
+            "load_files": [
+                entry for entry in files
+                if "site-alpha" not in (entry.get("tags") or [])
+            ]
+        }
+    }
+    transport.tls = json.dumps(wiped, sort_keys=True, separators=(",", ":")).encode()
+    assert "site-alpha" not in _tagged_paths(_tls_load_files(transport))
+
+    transport.calls.clear()
+    ensure_route_tls(alpha)
+    restored = _tls_load_files(transport)
+    assert _tagged_paths(restored) == {
+        "site-alpha": ("/srv/sites/alpha/tls/cert.pem", "/srv/sites/alpha/tls/key.pem"),
+        "site-bravo": ("/srv/sites/bravo/tls/cert.pem", "/srv/sites/bravo/tls/key.pem"),
+    }
+    assert "BEGIN" not in json.dumps(_tls_app(transport))
+    tls_puts = [
+        argv for kind, argv in transport.mutating_calls()
+        if kind == "run" and any("/config/apps/tls" in str(part) for part in argv)
+    ]
+    assert tls_puts, "unchanged route must still PUT tls when the tag is missing"
+    server_puts = [
+        argv for kind, argv in transport.mutating_calls()
+        if kind == "run" and any(
+            "/servers/site-alpha" in str(part) or "/id/site-alpha" in str(part)
+            for part in argv
+        )
+    ]
+    assert not server_puts
+    probes = [argv for kind, argv in transport.calls if kind == "probe"]
+    assert any(any("/config/apps/tls" in str(part) for part in argv) for argv in probes)
