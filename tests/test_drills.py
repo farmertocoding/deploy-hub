@@ -1,8 +1,11 @@
 """Beat drill job bodies: short Hub-down, reaper, honest restore stub."""
+import ast
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.test import override_settings
 from django.utils import timezone
 
 from core.models import CheckRun
@@ -11,6 +14,13 @@ from monitor.drills import (
     run_hub_down_drill,
     run_reaper_drill,
     run_restore_clean_drill,
+)
+
+REPO = Path(__file__).resolve().parent.parent
+PRODUCT_DRILL_MODULES = (
+    "monitor/tasks.py",
+    "monitor/drills.py",
+    "monitor/reaper.py",
 )
 
 pytestmark = [pytest.mark.django_db]
@@ -61,8 +71,6 @@ def test_hub_down_does_not_claim_24h():
     What would make this fail: writing duration_s >= 86400, setting a 24h
     success key, or deleting the REL-P2 24h waiver line.
     """
-    from pathlib import Path
-
     run = run_hub_down_drill(
         duration_s=1800,
         site_prober=lambda: True,
@@ -169,3 +177,69 @@ def test_beat_schedule_lists_three_drills():
     assert float(restore["schedule"]) == 30 * DAY
     assert hub.get("kwargs", {}).get("duration_s") == 1800
     assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+
+
+@pytest.mark.req("HARNESS-DRILLS-BEAT")
+def test_product_drill_modules_do_not_import_tests():
+    """Beat/product drill path must not import the tests package.
+
+    What would make this fail: monitor.tasks / drills / reaper importing
+    tests.harness so a probes worker runs Multipass on the Hub host.
+    """
+    for rel in PRODUCT_DRILL_MODULES:
+        path = REPO / rel
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        imported = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+        offenders = [
+            name
+            for name in imported
+            if name == "tests" or name.startswith("tests.")
+        ]
+        assert not offenders, f"{rel} imports {offenders}"
+        assert "tests.harness" not in source
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+@pytest.mark.req("HARNESS-DRILLS-BEAT")
+def test_beat_hub_down_without_prober_is_skipped_not_failed():
+    """Unconfigured monthly Hub-down is skipped/stub, not a fake FAILED.
+
+    What would make this fail: default site_prober returning False so Beat
+    writes failed without stopping workers or GET-ing a site.
+    """
+    from monitor.tasks import run_hub_down_drill as beat_hub_down
+
+    result = beat_hub_down()
+    stored = CheckRun.objects.get(kind=CheckRun.Kind.HUB_DOWN)
+    assert stored.status == CheckRun.Status.SKIPPED
+    assert stored.status != CheckRun.Status.FAILED
+    assert stored.results["schema_version"] == 1
+    assert stored.results["stub"] is True
+    assert stored.results["duration_s"] == 1800
+    assert stored.results["duration_s"] < DAY
+    assert result["status"] == CheckRun.Status.SKIPPED
+
+
+@pytest.mark.req("HARNESS-REAPER-TEST-PLANE")
+def test_beat_reaper_skips_when_not_test_plane():
+    """Weekly reaper on a non-test Hub writes skipped, and does not crash.
+
+    What would make this fail: importing tests.harness or calling Multipass
+    on the crown-jewel host when HUB_TEST_MODE is off.
+    """
+    from monitor.tasks import run_reaper_drill as beat_reaper
+
+    with override_settings(HUB_TEST_MODE=False):
+        result = beat_reaper()
+
+    stored = CheckRun.objects.get(kind=CheckRun.Kind.REAPER)
+    assert stored.status == CheckRun.Status.SKIPPED
+    assert stored.results["schema_version"] == 1
+    assert stored.results["stub"] is True
+    assert result["status"] == CheckRun.Status.SKIPPED

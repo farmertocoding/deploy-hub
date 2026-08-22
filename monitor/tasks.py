@@ -64,14 +64,8 @@ def run_hub_down_drill(*, duration_s=1800):
 @shared_task(ignore_result=True)
 def run_reaper_drill(*, planted_name="hub-t3-orphan-weekly"):
     from monitor.drills import run_reaper_drill as body
-    from tests.harness.multipass import list_names
-    from tests.harness.reaper import delete_purge
 
-    run = body(
-        list_fn=list_names,
-        delete_fn=delete_purge,
-        planted_name=planted_name,
-    )
+    run = body(planted_name=planted_name)
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 

@@ -67,12 +67,22 @@ def run_hub_down_drill(
     """Stop Hub-side workers, probe the site, write kind=hub_down. Never claims 24h."""
     if duration_s >= _MAX_HUB_DOWN_S:
         raise ValueError("hub_down duration_s must be < 86400; 24h stays waived")
+    if site_prober is None:
+        return record_run(
+            CheckRun.Kind.HUB_DOWN,
+            CheckRun.Status.SKIPPED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "duration_s": duration_s,
+                "stub": True,
+                "reason": "no site_prober configured",
+            },
+        )
     stop = stop_hub or (lambda: None)
     start = start_hub or (lambda: None)
-    probe = site_prober or (lambda: False)
     stop()
     try:
-        serving = bool(probe())
+        serving = bool(site_prober())
     except Exception:
         serving = False
     finally:
@@ -87,9 +97,32 @@ def run_hub_down_drill(
     )
 
 
-def run_reaper_drill(*, list_fn, delete_fn, planted_name):
+def run_reaper_drill(*, list_fn=None, delete_fn=None, planted_name="hub-t3-orphan-weekly"):
     """Call reap_test_plane against a planted hub-t3-orphan-* name."""
-    from tests.harness.reaper import reap_test_plane
+    from django.conf import settings
+
+    from monitor.reaper import (
+        ReaperUnavailable,
+        delete_purge,
+        list_names,
+        multipass_available,
+        reap_test_plane,
+    )
+
+    injected = list_fn is not None and delete_fn is not None
+    if not injected:
+        if not getattr(settings, "HUB_TEST_MODE", False) or not multipass_available():
+            return record_run(
+                CheckRun.Kind.REAPER,
+                CheckRun.Status.SKIPPED,
+                {
+                    "schema_version": RESULTS_SCHEMA_VERSION,
+                    "stub": True,
+                    "reason": "not a test plane or multipass absent",
+                },
+            )
+        list_fn = list_fn or list_names
+        delete_fn = delete_fn or delete_purge
 
     names = list(list_fn())
     if planted_name not in names:
@@ -100,7 +133,18 @@ def run_reaper_drill(*, list_fn, delete_fn, planted_name):
         deleted.append(name)
         delete_fn(name)
 
-    reap_test_plane(list_fn=lambda: names, delete_fn=_delete)
+    try:
+        reap_test_plane(list_fn=lambda: names, delete_fn=_delete)
+    except ReaperUnavailable:
+        return record_run(
+            CheckRun.Kind.REAPER,
+            CheckRun.Status.SKIPPED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "stub": True,
+                "reason": "not a test plane or multipass absent",
+            },
+        )
     removed = planted_name in deleted
     return record_run(
         CheckRun.Kind.REAPER,
