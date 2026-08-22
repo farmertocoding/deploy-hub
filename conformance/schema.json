@@ -21,7 +21,7 @@
             "multipleOf": 0.5
           },
           "tier": {
-            "description": "Proof tier (default t1). D-024: tier:t3 is verified only by a passed @pytest.mark.t3 test; skipped/xfailed/T1 siblings never verify it.",
+            "description": "Proof tier (default t1). D-024 + panel F1 ruling: tier:t2 / tier:t3 is verified only by a passed test carrying that tier's pytest mark; skipped/xfailed/wrong-tier siblings never verify it.",
             "enum": ["t1", "t2", "t3"]
           },
           "verify": {"enum": ["test", "demo", "checklist", "static-gate"]},

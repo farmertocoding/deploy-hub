@@ -562,23 +562,25 @@ def text_hash_of(bodies):
 
 # ── main ────────────────────────────────────────────────────────────────────
 
-def evaluate_test_req(req_id, ast_ids, outcomes, *, tier="t1", t3_nodeids=frozenset()):
+def evaluate_test_req(req_id, ast_ids, outcomes, *, tier="t1", tier_nodeids=None):
     """Status + detail lines for a `verify: test` requirement (rules 1 and 2).
 
-    D-024: `tier: t3` is verified only by a passed `@pytest.mark.t3` test. A T1
-    (or otherwise non-t3) test that carries the id is red (wrong marker).
-    skipped/xfailed never count as verified.
+    D-024 (extended to t2 by the phase-2.5 panel F1 ruling): a `tier: t2` /
+    `tier: t3` req is verified only by a passed test carrying that tier's
+    pytest mark. A T1 (or wrong-tier) test that carries the id is red (wrong
+    marker). skipped/xfailed never count as verified.
     """
     details = []
     if not ast_ids:
         return "uncovered", [f"{req_id} (test) has no @pytest.mark.req marker"], {}
 
-    if tier == "t3":
-        wrong = [nid for nid in ast_ids if nid not in t3_nodeids]
+    if tier in ("t2", "t3"):
+        allowed = (tier_nodeids or {}).get(tier, frozenset())
+        wrong = [nid for nid in ast_ids if nid not in allowed]
         if wrong:
             return "failed", [
-                f"{req_id} (test) wrong marker: a test without @pytest.mark.t3 "
-                f"carries a tier:t3 req id: " + ", ".join(wrong)
+                f"{req_id} (test) wrong marker: a test without @pytest.mark.{tier} "
+                f"carries a tier:{tier} req id: " + ", ".join(wrong)
             ], {}
 
     seen, missing, failed, passed, inconclusive = {}, [], [], [], []
@@ -658,7 +660,10 @@ def main():
         return 0
 
     markers = collect_markers(root)
-    t3_nodeids = collect_mark_nodeids(root, "t3")
+    tier_nodeids = {
+        "t2": collect_mark_nodeids(root, "t2"),
+        "t3": collect_mark_nodeids(root, "t3"),
+    }
     waived, waiver_problems = gates.parse_waivers(root)
     failures = []
     warnings = []
@@ -737,7 +742,7 @@ def main():
             status = "retired"
         elif kind == "test":
             status, details, seen = evaluate_test_req(
-                req_id, ast_ids, outcomes, tier=tier, t3_nodeids=t3_nodeids)
+                req_id, ast_ids, outcomes, tier=tier, tier_nodeids=tier_nodeids)
             entry["outcomes"] = seen
         elif kind == "demo":
             paths = req.get("demo")

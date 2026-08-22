@@ -27,8 +27,10 @@
 #              under docs/plan/ (claude/project-inventory.md, DECISIONS.md), so there is
 #              nothing to hash. HARD-V2-MESH-BEFORE-FIREWALL was the fifth: it is now
 #              pinned to `### Quick start` in server-hardening.md plus review3 §V2.
-#   tier:      t1|t2|t3 (default t1). D-024: tier:t3 is verified only by a passed
-#              @pytest.mark.t3 test. --exclude-tier t3 omits them from the due set.
+#   tier:      t1|t2|t3 (default t1). D-024 + panel F1: tier:t2 / tier:t3 is verified
+#              only by a passed test carrying that tier's pytest mark.
+#              --exclude-tier t3 --exclude-tier t2 omit them from the due set
+#              (review-round); conformance-2.5 stays all-tiers.
 schema_version: 1
 requirements:
   - id: P0-LOGIN
@@ -654,6 +656,11 @@ requirements:
   - id: HARNESS-T3-TOXIPROXY
     phase: 2.5
     verify: test
+    # Panel F1 ruling: proven live on T2 (real SshTransport through toxiproxy
+    # on docker), so tier: t2 — a passed @pytest.mark.t2 test verifies, a T1
+    # sibling or a skip never does, and review-round's T1-only report grades
+    # it excluded (--exclude-tier t2) instead of red-by-construction.
+    tier: t2
     source: phase-2.5-design-note.md §4
     text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
     text: toxiproxy on the SSH path injects a mid-deploy timeout and the heartbeat sweep resumes the deploy.

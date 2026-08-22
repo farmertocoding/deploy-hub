@@ -1077,6 +1077,143 @@ def test_t3_tier_req_verified_only_after_t3_pass(tmp_path):
     assert status_of(root, "FIX-T3-PASS") == "verified"
 
 
+T2_MARKED_TEST = (
+    "import pytest\n\n\n"
+    "@pytest.mark.t2\n"
+    '@pytest.mark.req("{rid}")\n'
+    "def {name}():\n"
+    "    assert True\n"
+)
+
+
+def test_t2_tier_req_not_verified_by_t1_sibling(tmp_path):
+    """A T1 pass must not verify a `tier: t2` req (panel F1 ruling, same teeth
+    as D-024's t3 rule). Carrying the id on a non-t2 test is red (wrong marker).
+
+    What would make this fail: marker enforcement special-cased to t3 only, so
+    a T1 sibling greens HARNESS-T3-TOXIPROXY without ever touching docker.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T2-ONLY", tier="t2")],
+        tests_src={
+            "tests/test_unit.py": MARKED_TEST.format(
+                rid="FIX-T2-ONLY", name="test_unit"),
+            "tests/test_live.py": T2_MARKED_TEST.format(
+                rid="FIX-T2-ONLY", name="test_live"),
+        },
+        outcomes={
+            "tests/test_unit.py::test_unit": "passed",
+            "tests/test_live.py::test_live": "skipped",
+        },
+    )
+    res = run_check(root)
+    assert res.returncode != 0, (
+        f"a T1 sibling pass verified a tier:t2 req:\n{res.stdout}"
+    )
+    assert status_of(root, "FIX-T2-ONLY") != "verified"
+    assert "wrong marker" in res.stdout, (
+        f"a T1 test carrying a tier:t2 id must be named as wrong marker:\n{res.stdout}"
+    )
+
+
+def test_t2_tier_wrong_marker_is_red_even_when_tier_excluded(tmp_path):
+    """`--exclude-tier t2` drops the req from the due set, but a wrong marker
+    is a defect, not accepted risk — red regardless of the exclusion.
+
+    What would make this fail: gating the wrong-marker check on `due`.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T2-WRONG", tier="t2")],
+        tests_src={"tests/test_unit.py":
+                   MARKED_TEST.format(rid="FIX-T2-WRONG", name="test_unit")},
+        outcomes={"tests/test_unit.py::test_unit": "passed"},
+    )
+    res = run_check(root, extra=("--exclude-tier", "t2"))
+    assert res.returncode != 0, (
+        f"--exclude-tier t2 forgave a wrong marker:\n{res.stdout}"
+    )
+    assert "wrong marker" in res.stdout
+
+
+def test_t2_tier_req_skipped_only_when_all_t2_skipped(tmp_path):
+    """Every `@pytest.mark.t2` outcome skipped/xfailed is skipped-only, never
+    verified — a docker-less host does not earn the live green.
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T2-SKIP", tier="t2")],
+        tests_src={"tests/test_live.py":
+                   T2_MARKED_TEST.format(rid="FIX-T2-SKIP", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "skipped"},
+    )
+    res = run_check(root)
+    assert res.returncode != 0, (
+        f"a skipped-only tier:t2 req went green:\n{res.stdout}"
+    )
+    assert status_of(root, "FIX-T2-SKIP") == "skipped-only"
+
+    xfail = write_repo(
+        tmp_path / "xfail",
+        reqs=[_req("FIX-T2-SKIP", tier="t2")],
+        tests_src={"tests/test_live.py":
+                   T2_MARKED_TEST.format(rid="FIX-T2-SKIP", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "xfailed"},
+    )
+    assert run_check(xfail).returncode != 0
+    assert status_of(xfail, "FIX-T2-SKIP") == "skipped-only"
+
+
+def test_t2_tier_req_verified_only_after_t2_pass(tmp_path):
+    """`tier: t2` is verified when ≥1 `@pytest.mark.t2` test passed, none failed."""
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T2-PASS", tier="t2")],
+        tests_src={"tests/test_live.py":
+                   T2_MARKED_TEST.format(rid="FIX-T2-PASS", name="test_live")},
+        outcomes={"tests/test_live.py::test_live": "passed"},
+    )
+    res = run_check(root)
+    assert res.returncode == 0, (
+        f"a passed @pytest.mark.t2 test did not verify a tier:t2 req:\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    assert status_of(root, "FIX-T2-PASS") == "verified"
+
+
+def test_exclude_tier_t2_omits_t2_reqs_from_due_set(tmp_path):
+    """`--exclude-tier t2` drops `tier: t2` reqs from the due set, so
+    review-round's T1 report grades them excluded instead of skipped-only red
+    (make review-round red-by-construction was panel F1).
+    """
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-T2-EXCL", tier="t2"), _req("FIX-T1-DUE")],
+        tests_src={
+            "tests/test_t1.py": MARKED_TEST.format(rid="FIX-T1-DUE", name="test_t1"),
+            "tests/test_live.py": T2_MARKED_TEST.format(
+                rid="FIX-T2-EXCL", name="test_live"),
+        },
+        outcomes={
+            "tests/test_t1.py::test_t1": "passed",
+            "tests/test_live.py::test_live": "skipped",
+        },
+    )
+    res_all = run_check(root)
+    assert res_all.returncode != 0, (
+        f"a skipped-only tier:t2 req was not due at --phase 1:\n{res_all.stdout}"
+    )
+    assert status_of(root, "FIX-T2-EXCL") == "skipped-only"
+
+    res = run_check(root, extra=("--exclude-tier", "t2"))
+    assert res.returncode == 0, (
+        f"--exclude-tier t2 still failed the gate:\n{res.stdout}{res.stderr}"
+    )
+    assert matrix(root)["requirements"]["FIX-T2-EXCL"]["due"] is False
+    assert status_of(root, "FIX-T1-DUE") == "verified"
+
+
 def test_exclude_tier_t3_omits_t3_reqs_from_due_set(tmp_path):
     """`--exclude-tier t3` drops `tier: t3` reqs from the due set (review-round).
 
