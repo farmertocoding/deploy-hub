@@ -1,0 +1,21 @@
+Phase 3 canary-fail clause — dated artifact (design note §4 / P3-DNS-MONITOR-DEMO)
+
+Date: 2026-08-23
+Host: this workstation (p3-t19)
+
+No live canary-fail was run on this host. A mass-outage declaration against
+production sites was not forced, and no pager received a Hub-egress page.
+
+What exists (T1 proof, not a live page):
+- tests/test_canary.py::test_canary_failure_collapses_n_site_alerts_to_one_p2
+  (source is unmarked; module pytestmark is django_db only)
+- tests/acceptance/test_phase_3.py::test_canary_fail_degrades_to_one_hub_egress_p2
+  transcribes that nodeid: three site-down candidates + failed canary GET
+  → one alert, severity p2, kind hub-egress-degraded, suppressed == candidates
+
+What does not exist and was not invented:
+- no live Multipass canary-fail run
+- no ntfy (or other) page of "Hub egress degraded"
+- no production mass-outage declaration
+
+The §4 "canary-fail → one P2" clause is this T1 transcript, not a live event.

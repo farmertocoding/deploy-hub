@@ -523,7 +523,7 @@ def test_caddy_route_puts_tls_files_for_a_public_site():
 
     route = None
     tls_payload = None
-    for remote, raw in transport.files.items():
+    for _remote, raw in transport.files.items():
         blob = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
         if not isinstance(blob, str) or not blob.lstrip().startswith("{"):
             continue

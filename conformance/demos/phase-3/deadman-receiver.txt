@@ -1,0 +1,23 @@
+Phase 3 dead-man receiver registration — dated artifact (panel ruling 3 / D-039)
+
+Date: 2026-08-23
+Host: this workstation (p3-t19)
+
+No external dead-man receiver is registered on this host.
+
+What exists:
+- settings.HUB_DEADMAN_URL_REF is a vault owner-id (default "deadman-ping"),
+  never a URL literal
+- monitor/deadman.py resolves the URL from the vault; a missing secret files
+  Finding fingerprint deadman:post-failed (P2) instead of staying silent
+- T1 proof: tests/acceptance/test_phase_3.py::test_deadman_pings_only_after_a_completed_cycle_and_failure_files_a_finding
+  transcribes tests/test_deadman.py::test_ping_only_after_every_target_completed
+  and ::test_failed_ping_files_its_own_finding (planted vault URL, Fake POST)
+
+What does not exist and was not invented:
+- no healthchecks.io (or other) receiver account on this host
+- no dated signup email, no ping URL in settings, no live POST to a third party
+
+A failed POST still files its own Finding. That is the product behaviour.
+The registration itself is this dated "none registered" line, not a fake
+receiver.

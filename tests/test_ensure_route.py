@@ -158,7 +158,7 @@ def test_caddy_put_by_id():
     ]
     assert tls_puts, "expected a load_files PUT of the pushed cert/key paths"
     tls_blob = None
-    for remote, raw in transport.files.items():
+    for _remote, raw in transport.files.items():
         text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
         if isinstance(text, str) and "load_files" in text:
             tls_blob = text

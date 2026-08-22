@@ -24,7 +24,7 @@ API = "https://api.cloudflare.com/client/v4"
 # monitor/token_audit.py (the daily audit) both consume observe_token, so the
 # enforcement and the audit that backs it up cannot drift into two spellings
 # — tests/test_cf_token_audit.py scans both consumers for a re-spelling.
-TOKEN_VERIFY_PATH = "/user/tokens/verify"
+TOKEN_VERIFY_PATH = "/user/tokens/verify"  # nosec B105 — API path, not a password
 ZONE_PROBE_PATH = "/zones?per_page=50"
 
 # Header names whose presence marks the legacy Global API Key credential

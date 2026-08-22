@@ -1,0 +1,14 @@
+Phase 3 digest sample — recorded 2026-08-23.
+
+Beat owner: digest-daily at 08:00 local (settings.TIME_ZONE).
+Source nodeid (real, T1):
+  tests/test_delivery_behaviors.py::test_daily_digest_runs_at_0800_local_and_contains_only_p3
+  composed by the acceptance transcription of ALERT-DELIVERY-BEHAVIORS
+
+Contract this sample records (not a live 08:00 SMTP send):
+- schedule is crontab hour={8} minute={0}
+- build_digest(localdate) includes advice-tier / P3 findings
+- prod-site-hard-down (P1) and feed-data-stale (P2) planted in that test
+  do not appear in the digest set
+
+This is the P3 digest the 08:00 Beat entry renders. No mailbox was touched.

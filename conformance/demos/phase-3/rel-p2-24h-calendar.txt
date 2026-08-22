@@ -1,0 +1,15 @@
+REL-P2 24 h calendar item — dated 2026-08-23 (D-042)
+
+Waiver still in force:
+  REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven
+
+What Phase 3 proved, without claiming 24 h:
+- hub-down drill uses a real external HTTP GET prober at the §G 30-min form
+- no-eligible-site → CheckRun SKIPPED + reason + P2 Finding
+  tests/acceptance/test_phase_3.py::test_nightly_is_green_on_a_host_with_no_live_site
+- duration_s=86400 is refused
+  tests/test_drills.py::test_hub_down_still_refuses_to_claim_24h
+
+Calendar: run the 24 h live Hub-down drill on a later date when a host can
+stay down for a wall-clock day. That dated record retires the waiver.
+Do not read this file as a 24 h run.
