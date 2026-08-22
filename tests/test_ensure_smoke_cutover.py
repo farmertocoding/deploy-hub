@@ -78,6 +78,12 @@ def _assert_caddy_smoke_curl(transport, listen="127.0.0.1:443"):
     assert any(listen in str(part) for argv in curls for part in argv), (
         f"curl argv must include Caddy listen {listen}, got {curls}"
     )
+    if listen.endswith(":443"):
+        assert any(
+            any(isinstance(p, str) and p.startswith("https://") for p in argv)
+            for argv in curls
+        ), f"public :443 smoke must be HTTPS, got {curls}"
+        assert any("-skf" in argv or "-k" in argv for argv in curls)
     assert all(kind == "probe" for kind, argv in transport.calls
                if isinstance(argv, list) and argv[:1] == ["curl"])
     inspects = [

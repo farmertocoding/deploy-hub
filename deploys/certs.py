@@ -49,6 +49,12 @@ def ensure_site_certificate(desired):
         .order_by("-pushed_at", "-pk")
         .first()
     )
+    slug = desired.get("site_slug") or site.name
+    directory = tls_dir(slug)
+    desired["tls_files"] = {
+        "certificate": f"{directory}/cert.pem",
+        "key": f"{directory}/key.pem",
+    }
     if existing is not None and existing.mode == TlsCertificate.Mode.UPLOADED:
         return {"status": "skipped", "reason": "uploaded"}
     if existing is not None and _still_fresh(existing):
@@ -56,8 +62,6 @@ def ensure_site_certificate(desired):
 
     transport = desired["transport"]
     heartbeat = desired.get("heartbeat")
-    slug = desired.get("site_slug") or site.name
-    directory = tls_dir(slug)
     hostnames = _hostnames(desired, site, slug)
 
     from vault.tls import generate_ec_keypair_and_csr, public_keys_match
@@ -116,10 +120,6 @@ def ensure_site_certificate(desired):
         key_ref=key_ref,
         pushed_at=timezone.now(),
     )
-    desired["tls_files"] = {
-        "certificate": f"{directory}/cert.pem",
-        "key": f"{directory}/key.pem",
-    }
     return {"status": "issued", "id": row.pk, "key_ref": key_ref}
 
 
@@ -197,6 +197,10 @@ def _issuer(desired, site):
 
 def _ensure_tls_dir(transport, directory, heartbeat):
     _run(transport, ["sudo", "mkdir", "-p", directory], heartbeat)
+    _relock_tls_dir(transport, directory, heartbeat)
+
+
+def _relock_tls_dir(transport, directory, heartbeat):
     _run(transport, ["sudo", "chown", "root:root", directory], heartbeat)
     _run(transport, ["sudo", "chmod", "0700", directory], heartbeat)
 
@@ -205,19 +209,20 @@ def _atomic_write(transport, content, final_path, heartbeat):
     tmp = f"{final_path}.tmp"
     parent = str(Path(final_path).parent)
     # Open the 0700 dir just long enough for SFTP put as the deploy user.
-    _run(transport, ["sudo", "chown", "root:deploy", parent], heartbeat)
-    _run(transport, ["sudo", "chmod", "0770", parent], heartbeat)
-    transport.put(content, tmp, mode=0o400)
-    written = transport.get(tmp)
-    if written and hashlib.sha256(_as_bytes(written)).digest() != hashlib.sha256(
-        _as_bytes(content)
-    ).digest():
-        raise RuntimeError(f"checksum mismatch after write of {final_path}")
-    _run(transport, ["sudo", "chown", "root:root", tmp], heartbeat)
-    _run(transport, ["sudo", "chmod", "0400", tmp], heartbeat)
-    _run(transport, ["sudo", "mv", tmp, final_path], heartbeat)
-    _run(transport, ["sudo", "chown", "root:root", parent], heartbeat)
-    _run(transport, ["sudo", "chmod", "0700", parent], heartbeat)
+    try:
+        _run(transport, ["sudo", "chown", "root:deploy", parent], heartbeat)
+        _run(transport, ["sudo", "chmod", "0770", parent], heartbeat)
+        transport.put(content, tmp, mode=0o400)
+        written = transport.get(tmp)
+        if written and hashlib.sha256(_as_bytes(written)).digest() != hashlib.sha256(
+            _as_bytes(content)
+        ).digest():
+            raise RuntimeError(f"checksum mismatch after write of {final_path}")
+        _run(transport, ["sudo", "chown", "root:root", tmp], heartbeat)
+        _run(transport, ["sudo", "chmod", "0400", tmp], heartbeat)
+        _run(transport, ["sudo", "mv", tmp, final_path], heartbeat)
+    finally:
+        _relock_tls_dir(transport, parent, heartbeat)
 
 
 def _reload_caddy(desired):
@@ -244,7 +249,8 @@ def _restore_prev(transport, directory, heartbeat):
 
 
 def _remote_exists(transport, path):
-    result = transport.probe(["test", "-f", path])
+    # The tls dir is 0700 root:root; deploy cannot traverse it without sudo.
+    result = transport.probe(["sudo", "test", "-f", path])
     return bool(result.ok)
 
 

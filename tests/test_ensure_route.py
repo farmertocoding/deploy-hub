@@ -78,10 +78,18 @@ def _upstream_dials(route):
 def _put_json(transport):
     puts = [remote for kind, remote in transport.calls if kind == "put"]
     assert puts, "expected put of Caddy route JSON"
-    raw = transport.files[puts[0]]
-    if isinstance(raw, (bytes, bytearray)):
-        return json.loads(raw.decode())
-    return json.loads(raw)
+    for remote in puts:
+        raw = transport.files.get(remote)
+        if raw is None:
+            continue
+        text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+        try:
+            data = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and data.get("@id"):
+            return data
+    raise AssertionError("expected put of Caddy route JSON with @id")
 
 
 def _mutating_runs(transport):
@@ -120,10 +128,28 @@ def test_caddy_put_by_id():
     route = _put_json(transport)
     assert route["@id"] == ROUTE_ID
     assert route.get("listen") == [":443"]
+    assert route.get("tls_connection_policies") == [{
+        "certificate_selection": {"any_tag": [ROUTE_ID]},
+    }]
     dumped = json.dumps(route)
     assert "BEGIN CERTIFICATE" not in dumped
     assert "-----BEGIN" not in dumped
     assert _upstream_dials(route) == ["127.0.0.1:21000"]
+    tls_puts = [
+        argv for argv in _mutating_runs(transport)
+        if any("/config/apps/tls" in str(part) for part in argv)
+    ]
+    assert tls_puts, "expected a load_files PUT of the pushed cert/key paths"
+    tls_blob = None
+    for remote, raw in transport.files.items():
+        text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+        if isinstance(text, str) and "load_files" in text:
+            tls_blob = text
+            break
+    assert tls_blob is not None
+    assert "/srv/sites/blog/tls/cert.pem" in tls_blob
+    assert "/srv/sites/blog/tls/key.pem" in tls_blob
+    assert "BEGIN" not in tls_blob
 
     runs = _mutating_runs(transport)
     assert runs, "expected a curl/caddy run after put"
@@ -142,6 +168,11 @@ def test_caddy_put_by_id():
     assert mesh_route["@id"] == ROUTE_ID
     assert mesh_route.get("listen") == ["100.64.1.8:443"]
     assert ":443" not in mesh_route["listen"]
+    assert "tls_connection_policies" not in mesh_route
+    mesh_runs = _mutating_runs(mesh)
+    assert not any(
+        "/config/apps/tls" in str(part) for argv in mesh_runs for part in argv
+    )
 
 
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")

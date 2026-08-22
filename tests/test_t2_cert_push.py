@@ -121,9 +121,11 @@ def test_t2_caddy_reload_serves_the_pushed_cert(hub_target):
     What would make this fail: files on disk that Caddy never loads, or a
     reload that keeps serving the previous (or no) certificate.
     """
+    import json
+
     from core.ssh import SshTransport
-    from deploys.certs import ensure_site_certificate
-    from tests.harness.target import _exec, _wait_exec
+    from deploys.steps import ensure_route_tls
+    from tests.harness.target import _wait_exec
 
     _wait_exec(
         hub_target.container,
@@ -135,36 +137,26 @@ def test_t2_caddy_reload_serves_the_pushed_cert(hub_target):
     slug = f"t2s{uuid.uuid4().hex[:6]}"
     target, site = _target_and_site(hub_target, slug)
     transport = SshTransport(target)
-    ensure_site_certificate(_desired(site, transport))
+    desired = _desired(site, transport)
+    desired["caddy_route"] = json.dumps({
+        "@id": f"site-{slug}",
+        "listen": [":443"],
+        "automatic_https": {"disable": True},
+        "routes": [{
+            "match": [{"host": [site.domain]}],
+            "handle": [{
+                "handler": "static_response",
+                "status_code": 200,
+                "body": "tls-ok",
+            }],
+        }],
+    })
+    ensure_route_tls(desired)
 
-    tls_dir = f"/srv/sites/{slug}/tls"
     domain = site.domain
-    caddyfile = (
-        "{\n\tauto_https off\n}\n"
-        f"{domain} {{\n"
-        f"\ttls {tls_dir}/cert.pem {tls_dir}/key.pem\n"
-        "\trespond tls-ok 200\n"
-        "}\n"
-    )
-    _exec(
-        hub_target.container,
-        ["tee", "/etc/caddy/Caddyfile"],
-        stdin=caddyfile,
-        check=True,
-    )
-    reload = _exec(
-        hub_target.container,
-        ["systemctl", "reload", "caddy"],
-        check=True,
-    )
-    assert reload.returncode == 0
-
-    served = _exec(
-        hub_target.container,
-        [
-            "curl", "-sfk", "--resolve", f"{domain}:443:127.0.0.1",
-            f"https://{domain}/",
-        ],
-        check=True,
-    )
-    assert "tls-ok" in served.stdout
+    served = transport.probe([
+        "curl", "-sfk", "--resolve", f"{domain}:443:127.0.0.1",
+        f"https://{domain}/",
+    ])
+    assert served.ok, served.stderr
+    assert "tls-ok" in (served.stdout or "")

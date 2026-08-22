@@ -266,9 +266,10 @@ def ensure_route_tls(desired):
     current = _probe_caddy_route(transport, route_id)
     if current == route:
         return {"status": "skipped", "id": route_id}
+    ensure_hub_dir(transport, ssh_user_from(desired), desired.get("heartbeat"))
+    _put_caddy_origin_certs(desired, route)
     remote = hub_join(f"caddy-{route_id}.json", ssh_user=ssh_user_from(desired))
     payload = json.dumps(route, sort_keys=True, separators=(",", ":")).encode()
-    ensure_hub_dir(transport, ssh_user_from(desired), desired.get("heartbeat"))
     transport.put(payload, remote)
     result = _run(
         transport,
@@ -364,7 +365,7 @@ def _persist_dns_rows(desired, records):
 def _caddy_route(desired, route_id):
     overlay = _overlay_json(desired.get("caddy_route"))
     if isinstance(overlay, dict) and overlay:
-        return overlay
+        return _attach_origin_tls(overlay, desired)
     body = desired.get("manifest_body") or {}
     override = desired.get("caddy_listen") or body.get("caddy_listen")
     if override:
@@ -375,7 +376,7 @@ def _caddy_route(desired, route_id):
     else:
         listen = [":443"]
     domain = desired.get("domain") or f"{desired['site_slug']}.local"
-    return {
+    route = {
         "@id": route_id,
         "listen": listen,
         "automatic_https": {"disable": True},
@@ -387,6 +388,7 @@ def _caddy_route(desired, route_id):
             }],
         }],
     }
+    return _attach_origin_tls(route, desired)
 
 
 def _caddy_upstream(desired):
@@ -395,8 +397,82 @@ def _caddy_upstream(desired):
     return f"127.0.0.1:{desired.get('internal_port', 20000)}"
 
 
+def _origin_tls_files(desired):
+    files = desired.get("tls_files")
+    if files:
+        return files
+    if _exposure(desired) == "mesh_only":
+        return None
+    slug = desired.get("site_slug")
+    if not slug:
+        return None
+    from deploys.certs import tls_dir
+
+    directory = tls_dir(slug)
+    return {
+        "certificate": f"{directory}/cert.pem",
+        "key": f"{directory}/key.pem",
+    }
+
+
+def _listen_is_https(listen):
+    return str(listen).endswith(":443")
+
+
+def _attach_origin_tls(route, desired):
+    """Point a :443 server at the pushed Origin cert/key via load_files tags."""
+    files = _origin_tls_files(desired)
+    listen = (route.get("listen") or [":443"])[0]
+    if not files or not _listen_is_https(listen):
+        attached = dict(route)
+        attached.pop("tls_connection_policies", None)
+        return attached
+    tag = f"site-{desired['site_slug']}"
+    attached = dict(route)
+    attached["tls_connection_policies"] = [{
+        "certificate_selection": {"any_tag": [tag]},
+    }]
+    return attached
+
+
+def _put_caddy_origin_certs(desired, route):
+    """PUT apps/tls load_files so the live server uses the pushed pair."""
+    if "tls_connection_policies" not in route:
+        return
+    files = _origin_tls_files(desired)
+    if not files:
+        return
+    transport = desired["transport"]
+    slug = desired["site_slug"]
+    tag = f"site-{slug}"
+    payload = {
+        "certificates": {
+            "load_files": [{
+                "certificate": files["certificate"],
+                "key": files["key"],
+                "tags": [tag],
+            }]
+        }
+    }
+    remote = hub_join(f"caddy-tls-{slug}.json", ssh_user=ssh_user_from(desired))
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    transport.put(body, remote)
+    result = _run(
+        transport,
+        [
+            "curl", "-sf", "-X", "PUT",
+            "http://127.0.0.1:2019/config/apps/tls",
+            "-H", "Content-Type: application/json",
+            "--data-binary", f"@{remote}",
+        ],
+        desired.get("heartbeat"),
+    )
+    if not result.ok:
+        raise RuntimeError(f"caddy tls put failed: {result.stderr}")
+
+
 def _caddy_listen_hostport(desired):
-    """Host:port smoke curls. Public :443 becomes 127.0.0.1:443 (no TLS this phase)."""
+    """Host:port smoke curls. Public :443 becomes 127.0.0.1:443 over HTTPS."""
     route_id = f"site-{desired['site_slug']}"
     listen = (_caddy_route(desired, route_id).get("listen") or [":443"])[0]
     if listen.startswith(":"):
@@ -404,13 +480,27 @@ def _caddy_listen_hostport(desired):
     return listen
 
 
+def _smoke_uses_https(desired):
+    files = _origin_tls_files(desired)
+    if not files:
+        return False
+    route_id = f"site-{desired['site_slug']}"
+    listen = (_caddy_route(desired, route_id).get("listen") or [":443"])[0]
+    return _listen_is_https(listen)
+
+
 def _caddy_smoke_payload(desired):
     transport = desired["transport"]
-    url = f"http://{_caddy_listen_hostport(desired)}{_readiness_path(desired)}"
+    hostport = _caddy_listen_hostport(desired)
+    path = _readiness_path(desired)
     domain = desired.get("domain") or f"{desired['site_slug']}.local"
-    result = transport.probe([
-        "curl", "-sf", "-H", f"Host: {domain}", url,
-    ])
+    if _smoke_uses_https(desired):
+        url = f"https://{hostport}{path}"
+        argv = ["curl", "-skf", "-H", f"Host: {domain}", url]
+    else:
+        url = f"http://{hostport}{path}"
+        argv = ["curl", "-sf", "-H", f"Host: {domain}", url]
+    result = transport.probe(argv)
     if not result.ok or not (result.stdout or "").strip():
         return {"live": False, "ready": False}
     try:
@@ -452,10 +542,11 @@ _WS_PROBE_PY = b"""\
 import base64
 import os
 import socket
+import ssl
 import sys
 
 
-def main(host, port, path, server_name):
+def main(host, port, path, server_name, use_tls="0"):
     key = base64.b64encode(os.urandom(16)).decode()
     req = (
         f"GET {path} HTTP/1.1\\r\\n"
@@ -466,7 +557,12 @@ def main(host, port, path, server_name):
         f"Sec-WebSocket-Version: 13\\r\\n"
         f"\\r\\n"
     )
-    with socket.create_connection((host, int(port)), timeout=10) as sock:
+    raw = socket.create_connection((host, int(port)), timeout=10)
+    if use_tls in ("1", "tls", "https"):
+        raw = ssl._create_unverified_context().wrap_socket(
+            raw, server_hostname=server_name,
+        )
+    with raw as sock:
         sock.sendall(req.encode())
         header = b""
         while b"\\r\\n\\r\\n" not in header:
@@ -523,7 +619,10 @@ def main(host, port, path, server_name):
 
 
 if __name__ == "__main__":
-    sys.exit(main(*sys.argv[1:4], sys.argv[4] if len(sys.argv) > 4 else sys.argv[1]))
+    extra = sys.argv[4:]
+    sni = extra[0] if extra else sys.argv[1]
+    tls = extra[1] if len(extra) > 1 else "0"
+    sys.exit(main(*sys.argv[1:4], sni, tls))
 """
 
 
@@ -546,7 +645,10 @@ def _ws_frame(desired):
     ensure_hub_dir(transport, user, desired.get("heartbeat"))
     remote = hub_join("ws-probe.py", ssh_user=user)
     transport.put(_WS_PROBE_PY, remote, mode=0o644)
-    result = transport.probe(["python3", remote, host, port, _ws_path(body), domain])
+    tls_flag = "1" if _smoke_uses_https(desired) else "0"
+    result = transport.probe([
+        "python3", remote, host, port, _ws_path(body), domain, tls_flag,
+    ])
     if not result.ok:
         return None
     return result.stdout

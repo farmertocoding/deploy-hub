@@ -29,9 +29,10 @@ class TlsTransport(RouteTransport):
 
     def probe(self, argv, *, timeout=60):
         argv = list(argv)
-        if argv[:2] == ["test", "-f"] and len(argv) >= 3:
+        cmd = argv[1:] if argv and argv[0] == "sudo" else argv
+        if cmd[:2] == ["test", "-f"] and len(cmd) >= 3:
             self.calls.append(("probe", argv))
-            path = argv[2]
+            path = cmd[2]
             if path in self.files:
                 return CommandResult(argv, exit_code=0)
             return CommandResult(argv, exit_code=1, stderr="No such file")
@@ -396,6 +397,186 @@ def test_unproxied_public_site_refusal_files_a_finding_with_a_fix_action():
     assert row.title
     assert row.body
     assert row.entity
+
+
+class PermissionFaithfulTlsTransport(TlsTransport):
+    """probe as deploy cannot see into a 0700 root:root tls dir."""
+
+    def _deploy_can_traverse(self, path):
+        from pathlib import Path
+
+        parent = str(Path(path).parent)
+        mode = self.dirs.get(parent, 0o755)
+        owner = self.owners.get(parent, "root:root")
+        if owner.startswith("deploy"):
+            return True
+        group = owner.split(":")[-1] if ":" in owner else ""
+        if group == "deploy" and (mode & 0o010):
+            return True
+        if mode & 0o001:
+            return True
+        return False
+
+    def probe(self, argv, *, timeout=60):
+        argv = list(argv)
+        sudo = bool(argv and argv[0] == "sudo")
+        cmd = argv[1:] if sudo else argv
+        if cmd[:2] == ["test", "-f"] and len(cmd) >= 3:
+            self.calls.append(("probe", argv))
+            path = cmd[2]
+            if not sudo and not self._deploy_can_traverse(path):
+                return CommandResult(argv, exit_code=1, stderr="Permission denied")
+            if path in self.files:
+                return CommandResult(argv, exit_code=0)
+            return CommandResult(argv, exit_code=1, stderr="No such file")
+        return super().probe(argv, timeout=timeout)
+
+
+def test_permission_faithful_probe_still_restores_and_rms():
+    """deploy cannot see 0700 root:root; sudo probes still restore and rm.
+
+    What would make this fail: `test -f` without sudo after the dir is locked,
+    so had_previous stays false — no .prev, no restore, no post-serve rm.
+    """
+    from core.models import TlsCertificate
+    from deploys.certs import ensure_site_certificate
+
+    site = _site(slug="perm")
+    tls = f"/srv/sites/{site.name}/tls"
+    cert_path = f"{tls}/cert.pem"
+    key_path = f"{tls}/key.pem"
+    transport = PermissionFaithfulTlsTransport()
+    desired = _desired(site, transport)
+    ensure_site_certificate(desired)
+    old_cert = transport.files[cert_path]
+    old_key = transport.files[key_path]
+
+    row = TlsCertificate.objects.get(site=site)
+    row.not_after = timezone.now() + timedelta(days=2)
+    row.save(update_fields=["not_after"])
+
+    transport.fail_reload = True
+    transport.calls.clear()
+    with pytest.raises(RuntimeError, match="reload"):
+        ensure_site_certificate(desired)
+    assert transport.files[cert_path] == old_cert
+    assert transport.files[key_path] == old_key
+    assert any(
+        argv[:3] == ["sudo", "test", "-f"]
+        for kind, argv in transport.calls if kind == "probe"
+    )
+
+    row.not_after = timezone.now() + timedelta(days=2)
+    row.save(update_fields=["not_after"])
+    transport.fail_reload = False
+    transport.calls.clear()
+    ensure_site_certificate(desired)
+    assert transport.files[cert_path] != old_cert
+    assert f"{cert_path}.prev" not in transport.files
+    assert f"{key_path}.prev" not in transport.files
+    rm_calls = [argv for argv in _runs(transport) if argv and (
+        argv[0] == "rm" or (len(argv) > 1 and argv[0] == "sudo" and argv[1] == "rm")
+    )]
+    assert rm_calls, "expected rm of the superseded pair after a successful reload"
+
+
+def test_failed_put_relocks_tls_dir_0700():
+    """A failed SFTP put still leaves /srv/sites/{slug}/tls/ at 0700 root:root.
+
+    What would make this fail: opening the dir as 0770 root:deploy and
+    returning on put/checksum failure without a finally relock.
+    """
+    from deploys.certs import ensure_site_certificate
+
+    site = _site(slug="relock")
+    tls = f"/srv/sites/{site.name}/tls"
+    transport = TlsTransport()
+    orig = transport.put
+
+    def boom(content, remote_path, *, mode=0o644):
+        if str(remote_path).endswith(".tmp"):
+            raise RuntimeError("sftp put failed")
+        return orig(content, remote_path, mode=mode)
+
+    transport.put = boom
+    with pytest.raises(RuntimeError, match="put failed"):
+        ensure_site_certificate(_desired(site, transport))
+    assert transport.dirs.get(tls) == 0o700
+    assert transport.owners.get(tls) == "root:root"
+
+
+def test_caddy_route_puts_tls_files_for_a_public_site():
+    """ensure_route_tls JSON PUTs name the pushed cert/key; smoke is HTTPS.
+
+    What would make this fail: automatic_https.disable + reverse_proxy only,
+    so Caddy never loads the pair the cert step just wrote.
+    """
+    import json
+
+    from deploys.steps import ensure_route_tls, ensure_smoke
+
+    site = _site(slug="routetls")
+    transport = TlsTransport()
+    desired = _desired(site, transport)
+    desired["internal_port"] = 21000
+    ensure_route_tls(desired)
+
+    route = None
+    tls_payload = None
+    for remote, raw in transport.files.items():
+        blob = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+        if not isinstance(blob, str) or not blob.lstrip().startswith("{"):
+            continue
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and data.get("@id") == f"site-{site.name}":
+            route = data
+        if isinstance(data, dict) and "load_files" in str(data):
+            tls_payload = data
+    assert route is not None
+    assert route.get("tls_connection_policies") == [{
+        "certificate_selection": {"any_tag": [f"site-{site.name}"]},
+    }]
+    dumped = json.dumps(route)
+    assert "BEGIN CERTIFICATE" not in dumped
+    assert "-----BEGIN" not in dumped
+    assert tls_payload is not None
+    files = (tls_payload.get("certificates") or {}).get("load_files") or []
+    assert files
+    assert files[0]["certificate"] == f"/srv/sites/{site.name}/tls/cert.pem"
+    assert files[0]["key"] == f"/srv/sites/{site.name}/tls/key.pem"
+    assert "BEGIN" not in json.dumps(tls_payload)
+
+    transport.routes[f"site-{site.name}"] = json.dumps(
+        {"live": True, "ready": True, "checks": {}}
+    ).encode()
+
+    class _ReadyOnce(TlsTransport):
+        def probe(self, argv, *, timeout=60):
+            argv = list(argv)
+            if argv and argv[0] == "curl" and any(
+                isinstance(p, str) and p.startswith("https://") for p in argv
+            ):
+                self.calls.append(("probe", argv))
+                return CommandResult(
+                    argv, stdout=json.dumps({"live": True, "ready": True}),
+                )
+            return super().probe(argv, timeout=timeout)
+
+    smoke_t = _ReadyOnce()
+    ensure_smoke(_desired(site, smoke_t))
+    curls = [
+        argv for kind, argv in smoke_t.calls
+        if kind == "probe" and argv[:1] == ["curl"]
+    ]
+    assert curls
+    assert any(
+        any(isinstance(p, str) and p.startswith("https://") for p in argv)
+        for argv in curls
+    )
+    assert any("-skf" in argv or "-k" in argv for argv in curls)
 
 
 def test_refusal_leaves_zero_mutating_calls():
