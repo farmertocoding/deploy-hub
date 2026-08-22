@@ -304,3 +304,147 @@ def test_p1_ignores_quiet_hours():
     )
     assert row.respects_quiet_hours is False
     assert row.push_priority == "max"
+
+
+def _recovery_for(fingerprint):
+    log = AlertState.objects.filter(fingerprint="__pushes__").first()
+    if log is None:
+        return []
+    return [
+        event.get("title", "")
+        for event in (log.transitions or [])
+        if event.get("fingerprint") == fingerprint
+        and str(event.get("title", "")).startswith("UP after")
+    ]
+
+
+def _age_push_log(minutes=11):
+    log = AlertState.objects.get(fingerprint="__pushes__")
+    past = (timezone.now() - timedelta(minutes=minutes)).isoformat()
+    for event in log.transitions or []:
+        event["at"] = past
+    log.save(update_fields=["transitions"])
+
+
+def _non_prod_site():
+    from dns_fixtures import default_dns_zone
+
+    from core.models import NetworkZone, Project, Site, Target
+
+    project, _ = Project.objects.get_or_create(
+        slug="antinoise-staging",
+        defaults={"name": "antinoise-staging", "git_url": "https://example.com/s.git"},
+    )
+    zone, _ = NetworkZone.objects.get_or_create(
+        slug="antinoise-test-net",
+        defaults={"name": "antinoise-test-net", "purpose": NetworkZone.Purpose.TEST},
+    )
+    if zone.purpose != NetworkZone.Purpose.TEST:
+        zone.purpose = NetworkZone.Purpose.TEST
+        zone.save(update_fields=["purpose"])
+    target = Target.objects.create(
+        zone=zone, host="box.staging.antinoise.example", status=Target.Status.READY,
+    )
+    site = Site.objects.create(
+        project=project,
+        name="staging-web",
+        domain="staging-web.antinoise.example",
+        primary_target=target,
+        dns_zone=default_dns_zone(name="staging.antinoise.example", purpose="test"),
+    )
+    return site
+
+
+@pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
+def test_later_p1_after_storm_window_will_push():
+    """What would make this fail: an open __storm__ latch still muting a
+    real P1 after the 10-minute rate has dropped."""
+    from monitor.alerts import raise_alert
+
+    for i in range(11):
+        raise_alert(
+            "disk-critical",
+            f"host:storm-later-{i}",
+            fingerprint=f"disk-storm-later:{i}",
+            **_copy(),
+        )
+    storm = Finding.objects.get(fingerprint="alert-storm")
+    assert storm.state == Finding.State.OPEN
+
+    _age_push_log(11)
+    later = raise_alert(
+        "ssh-host-key-mismatch",
+        "host:real",
+        fingerprint="ssh-host-key-mismatch:host:real",
+        **_copy(),
+    )
+    assert later.will_push is True
+    storm.refresh_from_db()
+    assert storm.state == Finding.State.RESOLVED
+    assert _recovery_for("alert-storm")
+
+
+@pytest.mark.req("ALERT-RECOVERY-NOTICE")
+def test_storm_finding_resolves_with_recovery_when_rate_drops():
+    """What would make this fail: closing __storm__ while alert-storm stays
+    OPEN and never sending UP after."""
+    from monitor.alerts import raise_alert
+    from monitor.antinoise import storm_breaker
+
+    for i in range(11):
+        raise_alert(
+            "disk-critical",
+            f"host:storm-recover-{i}",
+            fingerprint=f"disk-storm-recover:{i}",
+            **_copy(),
+        )
+    storm_breaker(timezone.now() + timedelta(minutes=11))
+    storm = Finding.objects.get(fingerprint="alert-storm")
+    assert storm.state == Finding.State.RESOLVED
+    assert _recovery_for("alert-storm")
+
+
+@pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
+@pytest.mark.req("ALERT-RECOVERY-NOTICE")
+def test_flapping_finding_resolves_with_recovery_when_stable():
+    """What would make this fail: FLAPPING staying OPEN after 30 minutes
+    stable, or closing it without the recovery notice."""
+    from monitor.antinoise import observe
+
+    fp = "site-down:flappy-resolve"
+
+    def cycle():
+        _fail_until_open(fp)
+        observe(fp, True)
+        observe(fp, True)
+
+    cycle()
+    cycle()
+    cycle()
+    flap = Finding.objects.get(title="FLAPPING")
+    assert flap.state == Finding.State.OPEN
+
+    later = timezone.now() + timedelta(minutes=31)
+    observe(fp, True, now=later)
+    flap.refresh_from_db()
+    assert flap.state == Finding.State.RESOLVED
+    assert _recovery_for(flap.fingerprint)
+
+
+def test_non_prod_site_down_does_not_file_prod_site_hard_down():
+    """What would make this fail: a test-zone / staging site opening as the
+    prod-site-hard-down P1 row."""
+    from unittest.mock import patch
+
+    import monitor.antinoise as antinoise
+
+    site = _non_prod_site()
+    with patch.object(
+        antinoise, "raise_alert", wraps=antinoise.raise_alert,
+    ) as spy:
+        row = _fail_until_open(f"site-down:{site.name}")
+    kinds = [call.args[0] for call in spy.call_args_list if call.args]
+    assert row is not None
+    assert row.severity == Finding.Severity.P2
+    assert "prod-site-hard-down" not in kinds
+    assert "staging-or-flapping" in kinds

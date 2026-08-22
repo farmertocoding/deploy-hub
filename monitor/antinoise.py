@@ -29,6 +29,7 @@ _after_raise_depth = 0
 def observe(fingerprint, ok, *, now=None):
     """Open after 3 consecutive failures; close after 2 consecutive successes."""
     now = now or timezone.now()
+    _maybe_resolve_flap(fingerprint, now)
     state, _ = AlertState.objects.get_or_create(fingerprint=fingerprint)
     if ok:
         state.consecutive_ok += 1
@@ -174,6 +175,9 @@ def storm_breaker(now):
     if _is_open(storm):
         storm.closed_at = now
         storm.save(update_fields=["closed_at"])
+        row = Finding.objects.filter(fingerprint=STORM_FINDING_FP).first()
+        if row is not None and row.state != Finding.State.RESOLVED:
+            _resolve_engine_finding(row, now)
     return None
 
 
@@ -198,11 +202,14 @@ def after_raise(row, *, now=None):
     """See a just-filed Finding: ack, suppress, quiet-hours priority, storm."""
     global _after_raise_depth
     now = now or timezone.now()
-    _annotate_delivery(row, now)
     if _after_raise_depth:
+        _annotate_delivery(row, now)
         return row
     _after_raise_depth += 1
     try:
+        _maybe_resolve_flap(row.fingerprint, now)
+        storm_breaker(now)
+        _annotate_delivery(row, now)
         return _after_raise_body(row, now)
     finally:
         _after_raise_depth -= 1
@@ -216,11 +223,10 @@ def _after_raise_body(row, now):
             state.save(update_fields=["acked_at"])
         row.will_push = False
         return row
-    if not row.will_push:
-        return row
-    _record_push(row, now)
-    state.last_push_at = now
-    state.save(update_fields=["last_push_at"])
+    if row.will_push:
+        _record_push(row, now)
+        state.last_push_at = now
+        state.save(update_fields=["last_push_at"])
     storm_breaker(now)
     return row
 
@@ -237,15 +243,14 @@ def _annotate_delivery(row, now):
         }
         and not _flap_holds(row.fingerprint, now)
         and suppressed_by(row.entity) is None
-        and not _storming_except(row)
+        and not _storming_except(row, now)
     )
 
 
-def _storming_except(row):
+def _storming_except(row, now):
     if row.fingerprint == STORM_FINDING_FP:
         return False
-    storm = AlertState.objects.filter(fingerprint=STORM_STATE_FP).first()
-    return storm is not None and _is_open(storm)
+    return len(_recent_pushes(now)) > STORM_LIMIT
 
 
 def _open(state, fingerprint, now):
@@ -284,7 +289,54 @@ def _file_open(fingerprint, entity, title, body, fix_action):
     )
     if fingerprint.startswith("host-down:") or fingerprint.startswith("zone-down:"):
         return raise_alert("partner-aggregate-down", entity, **kwargs)
+    kind = _site_down_kind(entity)
+    if kind == "staging-or-flapping":
+        return raise_alert("staging-or-flapping", entity, **kwargs)
+    if kind == "partner-site-hard-down":
+        return raise_alert("partner-site-hard-down", entity, **kwargs)
     return raise_alert("prod-site-hard-down", entity, **kwargs)
+
+
+def _site_down_kind(entity):
+    """§2 site-down class from Site/Target env/role (or zone purpose)."""
+    kind, _, name = entity.partition(":")
+    if kind != "site":
+        return "prod-site-hard-down"
+    site = (
+        Site.objects.filter(name=name)
+        .select_related("primary_target", "primary_target__zone", "dns_zone")
+        .first()
+    )
+    if site is None:
+        return "prod-site-hard-down"
+    label = _env_role_label(site)
+    if label == "partner":
+        return "partner-site-hard-down"
+    if label in {"staging", "experiment", "test"}:
+        return "staging-or-flapping"
+    return "prod-site-hard-down"
+
+
+def _env_role_label(site):
+    for obj in (site, getattr(site, "primary_target", None)):
+        if obj is None:
+            continue
+        for attr in ("tier", "role", "env"):
+            raw = getattr(obj, attr, None)
+            if raw in (None, ""):
+                continue
+            return str(getattr(raw, "value", raw)).lower()
+    zone = getattr(getattr(site, "primary_target", None), "zone", None)
+    if zone is not None:
+        purpose = getattr(zone, "purpose", None)
+        if purpose not in (None, ""):
+            return str(getattr(purpose, "value", purpose)).lower()
+    dns = getattr(site, "dns_zone", None)
+    if dns is not None:
+        purpose = getattr(dns, "purpose", None)
+        if purpose not in (None, ""):
+            return str(getattr(purpose, "value", purpose)).lower()
+    return "prod"
 
 
 def _open_copy(fingerprint, entity):
@@ -380,6 +432,36 @@ def _flap_holds(fingerprint, now):
         return True
     last = _parse_dt(state.transitions[-1]["at"])
     return now - last < FLAP_WINDOW
+
+
+def _maybe_resolve_flap(fingerprint, now):
+    if fingerprint.startswith("FLAPPING:"):
+        base = fingerprint[len("FLAPPING:"):]
+        flap_fp = fingerprint
+    else:
+        base = fingerprint
+        flap_fp = _flap_fp(fingerprint)
+    flap = (
+        Finding.objects.filter(fingerprint=flap_fp)
+        .exclude(state=Finding.State.RESOLVED)
+        .first()
+    )
+    if flap is None:
+        return
+    state = AlertState.objects.filter(fingerprint=base).first()
+    if state is None or not state.transitions:
+        return
+    last = _parse_dt(state.transitions[-1]["at"])
+    if now - last >= FLAP_WINDOW:
+        _resolve_engine_finding(flap, now)
+
+
+def _resolve_engine_finding(row, now):
+    if row.state == Finding.State.RESOLVED:
+        return
+    resolve(row)
+    row.refresh_from_db()
+    recovery_notice(row, now=now)
 
 
 def _push_log():
