@@ -39,11 +39,12 @@ def test_provision_fresh_multipass_then_harden(t3_ready):
 
 @pytest.mark.t3
 @pytest.mark.skipif(not multipass_available(), reason="multipass is not available")
+@pytest.mark.req("HARNESS-T3-NIGHTLY")
 def test_deploy_sample_site_http_ready(t3_ready, settings):
     """execute sample-site/ then HTTP GET ready through on-VM Caddy.
 
-    Skips without sample-site/; that skip does not carry HARNESS-T3-NIGHTLY
-    or PIPE-S4 (sibling Task 5 may be absent on this worktree).
+    sample-site/ is required (Task 5). A missing fixture fails; it must not
+    skip and let node-site tests alone verify HARNESS-T3-NIGHTLY.
     """
     from deploys.models import Deployment
     from tests.harness.t3_deploy import (
@@ -52,11 +53,12 @@ def test_deploy_sample_site_http_ready(t3_ready, settings):
         queued_site,
         sample_site_available,
         sample_site_body,
-        sample_site_missing_reason,
     )
 
-    if not sample_site_available():
-        pytest.skip(sample_site_missing_reason())
+    assert sample_site_available(), (
+        "sample-site/ must exist on this tree (Task 5); "
+        "do not skip and green HARNESS-T3-NIGHTLY from node-site alone"
+    )
 
     slug = f"t3s{uuid.uuid4().hex[:6]}"
     _site, target, deployment = queued_site(

@@ -6,14 +6,15 @@
 # fail2ban-ignoreip, caddy.
 #
 # Test-only env (T3 Multipass — never set on a real host):
-#   HUB_T3_ALLOW_NO_MESH=1 / HUB_T3_UFW_ONLY=1
-#     Skip the mesh-before-firewall refuse so ufw+fail2ban can still be
-#     enabled on a throwaway VM with no tailnet. HUB_MESH_IP is still
-#     required (singular IPv4, never 100.64.0.0/10). This path does NOT
-#     prove HARD-V2; the default path still fail-closes when the env is unset.
-#   HUB_T3_SSH_FROM=<ipv4>
-#     Extra ufw allow of tcp/22 from that address so pytest can SSH after
-#     ufw enable (Multipass is not on tailscale0).
+#   The no-mesh bypass is true only when ALL of:
+#     HUB_TEST_MODE=1 (or true/yes/on) AND PROFILE=target AND
+#     (HUB_T3_ALLOW_NO_MESH=1 OR HUB_T3_UFW_ONLY=1).
+#   Then ufw+fail2ban can still enable on a throwaway VM with no tailnet.
+#   HUB_MESH_IP is still required (singular IPv4, never 100.64.0.0/10).
+#   This path does NOT prove HARD-V2. Unset HUB_TEST_MODE, PROFILE=hub/intake,
+#   or a lone T3 skip var still fail-closes the V2 refuse.
+#   HUB_T3_SSH_FROM=<ipv4> is honored only on that same gated path
+#   (never on hub/intake, never when HUB_TEST_MODE is unset).
 set -euo pipefail
 
 SCRIPT_VERSION="2026-08-22"
@@ -22,6 +23,7 @@ PROFILE="${PROFILE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 HUB_MESH_IP="${HUB_MESH_IP:-}"
 HUB_CONFIRM_LOCAL="${HUB_CONFIRM_LOCAL:-0}"
+HUB_TEST_MODE="${HUB_TEST_MODE:-}"
 HUB_T3_ALLOW_NO_MESH="${HUB_T3_ALLOW_NO_MESH:-0}"
 HUB_T3_UFW_ONLY="${HUB_T3_UFW_ONLY:-0}"
 HUB_T3_SSH_FROM="${HUB_T3_SSH_FROM:-}"
@@ -173,7 +175,18 @@ session_rides_mesh() {
     [[ "${HUB_CONFIRM_LOCAL}" == "1" ]]
 }
 
+t3_test_mode() {
+    case "${HUB_TEST_MODE}" in
+        1 | true | TRUE | yes | YES | on | ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 t3_allow_no_mesh() {
+    # Second gate: test-plane + target profile + an explicit T3 skip var.
+    # A leaked HUB_T3_UFW_ONLY=1 on PROFILE=hub must not open the bypass.
+    t3_test_mode || return 1
+    [[ "${PROFILE}" == "target" ]] || return 1
     [[ "${HUB_T3_ALLOW_NO_MESH}" == "1" || "${HUB_T3_UFW_ONLY}" == "1" ]]
 }
 
@@ -357,7 +370,7 @@ apply_ufw_target() {
     fi
     run ufw allow proto tcp from 173.245.48.0/20 to any port 80 comment 'cloudflare-edge'
     run ufw allow proto tcp from 173.245.48.0/20 to any port 443 comment 'cloudflare-edge'
-    if [[ -n "${HUB_T3_SSH_FROM}" ]]; then
+    if t3_allow_no_mesh && [[ -n "${HUB_T3_SSH_FROM}" ]]; then
         is_ipv4 "${HUB_T3_SSH_FROM}" || die "HUB_T3_SSH_FROM must be a single IPv4"
         run ufw allow proto tcp from "${HUB_T3_SSH_FROM}" to any port 22 comment 't3-multipass-ssh'
     fi
@@ -376,7 +389,7 @@ main() {
 
     if ! mesh_is_up || ! session_rides_mesh; then
         if t3_allow_no_mesh; then
-            echo "harden-ubuntu.sh: HUB_T3_UFW_ONLY/HUB_T3_ALLOW_NO_MESH set; skipping mesh-before-firewall (does not prove HARD-V2)"
+            echo "harden-ubuntu.sh: HUB_TEST_MODE+PROFILE=target T3 skip-mesh; skipping mesh-before-firewall (does not prove HARD-V2)"
             if [[ -n "${HUB_T3_SSH_FROM}" ]]; then
                 is_ipv4 "${HUB_T3_SSH_FROM}" || die "HUB_T3_SSH_FROM must be a single IPv4"
             fi

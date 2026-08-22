@@ -307,6 +307,7 @@ def harden_target_profile(vm):
         "sudo",
         "env",
         "PROFILE=target",
+        "HUB_TEST_MODE=1",
         f"HUB_MESH_IP={HUB_MESH_IP}",
         "HUB_T3_UFW_ONLY=1",
         "HUB_T3_ALLOW_NO_MESH=1",
