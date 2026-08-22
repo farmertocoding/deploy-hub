@@ -39,6 +39,8 @@ def test_occupied_80_refuses_with_explanation():
     assert result.allowed is False
     assert "80" in result.explanation
     assert "occupied" in result.explanation.lower()
+    assert "Adopt-existing-site is Phase 3;" not in result.explanation
+    assert "Phase 3b" in result.explanation
 
 
 @pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")

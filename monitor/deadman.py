@@ -11,7 +11,7 @@ watcher that cannot be reached is exactly the silence the switch exists to
 break, and the misconfigured-URL failure mode must never be permanent quiet.
 The receiver's registration itself is a Task 19 demo artifact.
 """
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -27,11 +27,19 @@ CANARY_TIMEOUT_S = 10
 DEADMAN_FINDING_FINGERPRINT = "deadman:post-failed"
 
 
+def _https_receiver(url):
+    """The pin the nosec claims: only https:// ever reaches urlopen."""
+    return isinstance(url, str) and url.startswith("https://")
+
+
 def http_post_default(url, *, timeout=DEADMAN_TIMEOUT_S):
     """Default POST seam: empty body, bounded timeout, returns the status."""
+    if not _https_receiver(url):
+        raise URLError("dead-man receiver is not https")
     request = Request(url, data=b"", method="POST")
     # nosec justification: the URL comes from the operator-stored vault
-    # secret, scheme pinned https at registration; never caller input.
+    # secret; scheme is pinned https immediately above, before urlopen;
+    # never caller input.
     try:
         with urlopen(request, timeout=timeout) as response:  # nosec B310
             return response.status
@@ -102,6 +110,9 @@ def ping(*, http_post=None, now=None):
     if url is None:
         _file_deadman_finding("no vault secret under the configured ref")
         return {"pinged": False, "ok": False, "reason": "unconfigured"}
+    if not _https_receiver(url):
+        _file_deadman_finding("receiver URL is not https")
+        return {"pinged": False, "ok": False, "reason": "not-https"}
     try:
         status = post(url, timeout=DEADMAN_TIMEOUT_S)
         ok = status is not None and 200 <= int(status) < 300
