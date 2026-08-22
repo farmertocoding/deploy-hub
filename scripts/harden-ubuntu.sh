@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# harden-ubuntu.sh v2026-08-22
+# harden-ubuntu.sh v2026-08-22.1
 # Canonical: scripts/harden-ubuntu.sh (server-hardening.md)
 # Pre-Hub interim of catalog ids: ntp-chrony, log-rotation, docker-daemon-json,
 # sshd-dropin, ufw-posture-hub, ufw-posture-target, ufw-posture-intake,
@@ -17,7 +17,7 @@
 #   (never on hub/intake, never when HUB_TEST_MODE is unset).
 set -euo pipefail
 
-SCRIPT_VERSION="2026-08-22"
+SCRIPT_VERSION="2026-08-22.1"
 STAMP_DIR="${HUB_STAMP_DIR:-/var/lib/hub-harden}"
 PROFILE="${PROFILE:-}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -188,19 +188,6 @@ t3_allow_no_mesh() {
     t3_test_mode || return 1
     [[ "${PROFILE}" == "target" ]] || return 1
     [[ "${HUB_T3_ALLOW_NO_MESH}" == "1" || "${HUB_T3_UFW_ONLY}" == "1" ]]
-}
-
-ensure_t3_tailscale0_standin() {
-    # Dummy iface so `ufw allow in on tailscale0` can still be applied.
-    # Not a mesh; HARD-V2 is not proven on this path.
-    if ip link show tailscale0 >/dev/null 2>&1; then
-        return 0
-    fi
-    if command -v modprobe >/dev/null 2>&1; then
-        run modprobe dummy || true
-    fi
-    run ip link add tailscale0 type dummy || true
-    run ip link set tailscale0 up || true
 }
 
 require_profile() {
@@ -389,11 +376,14 @@ main() {
 
     if ! mesh_is_up || ! session_rides_mesh; then
         if t3_allow_no_mesh; then
+            # No dummy tailscale0 standin: a manufactured interface would let
+            # `ufw allow in on tailscale0` apply and verify-hardening grep
+            # green on a VM with no mesh. apply_ufw_target's honest branch
+            # skips the rule and says HARD-V2 is not proven.
             echo "harden-ubuntu.sh: HUB_TEST_MODE+PROFILE=target T3 skip-mesh; skipping mesh-before-firewall (does not prove HARD-V2)"
             if [[ -n "${HUB_T3_SSH_FROM}" ]]; then
                 is_ipv4 "${HUB_T3_SSH_FROM}" || die "HUB_T3_SSH_FROM must be a single IPv4"
             fi
-            ensure_t3_tailscale0_standin
         else
             die "refusing tailscale0-only firewall: mesh is not up or this session does not ride it (V2)"
         fi

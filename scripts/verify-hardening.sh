@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-hardening.sh v2026-08-20
+# verify-hardening.sh v2026-08-22
 # Canonical: scripts/verify-hardening.sh (server-hardening.md)
 # Read-only drift check. Maps to catalog check argv (Task 5 ids).
 set -euo pipefail
@@ -68,6 +68,13 @@ main() {
         ok "docker daemon.json"
     else
         fail "missing /etc/docker/daemon.json"
+    fi
+
+    # A `type dummy` tailscale0 is a manufactured standin, not a mesh: it
+    # would make the ufw grep below (and any tailscale0-shaped posture) a
+    # false green on a host that never joined a tailnet.
+    if ip -d link show tailscale0 2>/dev/null | grep -qw dummy; then
+        fail "tailscale0 exists but is a dummy interface, not a mesh"
     fi
 
     case "${PROFILE}" in

@@ -78,8 +78,11 @@ def test_verify_hardening_target_profile_passes(t3_ready):
     """verify-hardening.sh PROFILE=target exits 0 on the hardened VM.
 
     Does not mark HARD-V2: mesh was skipped via documented HUB_T3_UFW_ONLY.
-    What would make this fail: verify red after harden, or claiming V2 on skip.
+    What would make this fail: verify red after harden, harden claiming V2 on
+    the skip-mesh path, or a manufactured tailscale0 standin greening the
+    mesh posture on a VM with no tailnet (panel C2).
     """
+    from tests.harness.multipass import exec_result
     from tests.harness.t3_deploy import HUB_MESH_IP
 
     result = _exec(
@@ -94,7 +97,20 @@ def test_verify_hardening_target_profile_passes(t3_ready):
     )
     text = f"{result.stdout or ''} {result.stderr or ''}"
     assert "PASS" in text, text
-    assert "HARD-V2" not in text
+    # The honest no-mesh output: harden said, in so many words, that HARD-V2
+    # is not proven on this path.
+    harden = t3_ready.harden_result
+    assert harden is not None, "harden_target_profile never ran on this VM"
+    harden_text = f"{harden.stdout or ''} {harden.stderr or ''}"
+    assert "does not prove HARD-V2" in harden_text, harden_text
+    # And no dummy standin exists to grep green: no tailscale0 interface, no
+    # tailscale0 ufw rule on the no-mesh VM.
+    link = exec_result(t3_ready.mp(), ["ip", "link", "show", "tailscale0"], timeout=30)
+    assert link.returncode != 0, (
+        f"tailscale0 exists on a no-mesh VM: {link.stdout!r}"
+    )
+    verbose = _exec(t3_ready, ["sudo", "ufw", "status", "verbose"])
+    assert "tailscale0" not in (verbose.stdout or ""), verbose.stdout
 
 
 @pytest.mark.t3
