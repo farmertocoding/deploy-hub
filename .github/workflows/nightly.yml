@@ -1,10 +1,10 @@
-# CI workflow 2 — nightly. T3 live e2e (Multipass/QEMU VM, test DNS zone, LE
-# staging) lands in Phase 2.5; this stub keeps the schedule slot warm and runs
-# the full suite + conformance until then.
+# CI workflow 2 — nightly. D-022: GitHub Actions billing is broken; this file
+# is optional/dormant. D-023: the host of record is local Multipass +
+# `make nightly`. A skipped GHA job is not the phase gate. Do not turn
+# Actions billing back on. Do not require a green GitHub Check for phase exit.
 #
 # As in push-checks.yml: gate scope and arguments live in the Makefile, never here
-# (SPEC-gate-integrity.md §2). This file had its own copy of the conformance phase and
-# went on running --phase 0 long after the Makefile moved to --phase 1.
+# (SPEC-gate-integrity.md §2).
 name: nightly
 permissions:
   contents: read
@@ -14,7 +14,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Slimmed remnant of the Phase 2 stub. Not a required Check. Local
+  # `make nightly` is the mechanical gate.
   full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: local nightly is the gate
+        run: >-
+          echo "D-022/D-023 GHA is optional/dormant. Local make nightly is the phase gate."
+
+  # Optional T3 recipe. vars.HUB_ENABLE_GHA_QEMU defaults unset → this job is
+  # skipped. Skipped GHA is not the phase gate (D-022 / D-023).
+  t3-qemu:
+    if: "${{ vars.HUB_ENABLE_GHA_QEMU == 'true' }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -23,7 +36,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: full test suite
-        run: make test
-      - name: conformance gate
-        run: make conformance
+      # Recipe when opted in (do not turn Actions billing back on):
+      #   1. udev kvm (nested virt / /dev/kvm)
+      #   2. QEMU + cloud-init equivalent of local Multipass
+      #   3. make test-t3
+      - name: t3 qemu
+        run: make test-t3

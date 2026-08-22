@@ -52,8 +52,8 @@ GNUMAKEFLAGS and MAKEFILES, and drop dry-run/ignore-errors/question/touch flags 
 any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the Makefile.)
 endif
 
-.PHONY: dev test test-frontend test-t2 lint conformance conformance-2.5 review-round \
-	generate-client check-generated log-scrub py-roots mutation scripts-lint
+.PHONY: dev test test-frontend test-t2 test-t3 nightly lint conformance conformance-2.5 \
+	review-round generate-client check-generated log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -119,6 +119,11 @@ test:
 # runnable without waiting on a container. Default `test` is `-m "not t2 and not t3"`.
 test-t2:
 	pytest -q -m t2
+
+# T3 live Multipass tests (D-023). Not a review-round prerequisite: Cloud Agent
+# review-round stays T1 (D-022). Local `make nightly` is the host of record.
+test-t3:
+	pytest -q -m t3
 
 test-frontend:
 	cd frontend && node --import tsx --test "tests/*.test.ts"
@@ -207,3 +212,8 @@ log-scrub:
 # front of it, and the conformance read is the last thing that happens either way.
 review-round: lint log-scrub scripts-lint test test-frontend mutation check-generated conformance
 	@echo "mechanical gates green — run the agent review sweep against REVIEW_CHECKLIST.md"
+
+# Local T3 host of record (D-023). Not a review-round prerequisite. GHA is
+# optional/dormant (D-022 billing); do not treat a GitHub Check as phase exit.
+nightly: lint log-scrub scripts-lint test test-t2 test-t3 conformance-2.5
+	@echo "nightly mechanical gates done"
