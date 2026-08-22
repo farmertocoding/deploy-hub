@@ -13,6 +13,7 @@ ALLOWED_PREFIXES = (
     "findings",    # the one attention stream (§F2, D-038) — canonical since phase 3
     "host.",       # host.{id}.metrics (collector load/mem/disk, §C4)
                    # site.{id}.traffic (minute TrafficStat rows, §C4) rides "site."
+    "map.graph",   # topology snapshot/topic (§9.6.1, D-041) — table-backed
 )
 
 # D-045: `findings` is canonical; the Phase-0 `alerts` topic stays authorized

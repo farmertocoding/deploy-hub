@@ -268,6 +268,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/FindingDetailSnapshot'
           description: ''
+  /api/v1/map/:
+    get:
+      operationId: v1_map_retrieve
+      description: Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1).
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapSnapshot'
+          description: ''
   /api/v1/projects/:
     get:
       operationId: v1_projects_list
@@ -713,6 +728,20 @@ components:
       required:
       - data
       - seq
+    KindEnum:
+      enum:
+      - zone
+      - host
+      - container
+      - hub
+      - edge
+      type: string
+      description: |-
+        * `zone` - zone
+        * `host` - host
+        * `container` - container
+        * `hub` - hub
+        * `edge` - edge
     Login:
       type: object
       properties:
@@ -744,6 +773,61 @@ components:
       - scan_report_hash
       - schema_version
       - version
+    MapEdge:
+      type: object
+      properties:
+        a:
+          type: string
+        b:
+          type: string
+        path:
+          $ref: '#/components/schemas/PathEnum'
+      required:
+      - a
+      - b
+      - path
+    MapGraph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MapNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/MapEdge'
+      required:
+      - edges
+      - nodes
+    MapNode:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        label:
+          type: string
+        status:
+          type: string
+        parent:
+          type: string
+      required:
+      - id
+      - kind
+      - label
+      - status
+    MapSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/MapGraph'
+      required:
+      - data
+      - seq
     Materialize:
       type: object
       properties:
@@ -769,6 +853,14 @@ components:
             type: string
           writeOnly: true
           description: name -> value. Values are write-only and stored in the vault.
+    PathEnum:
+      enum:
+      - public
+      - mesh
+      type: string
+      description: |-
+        * `public` - public
+        * `mesh` - mesh
     ProjectSummary:
       type: object
       properties:

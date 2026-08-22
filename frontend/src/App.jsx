@@ -79,7 +79,7 @@ function Shell({ user }) {
     <div>
       <NavBar route={route} onNav={onNav} status={events.status} asOf={events.asOf}
         username={user.username} />
-      {route.screen === "home" && <Home width={width} />}
+      {route.screen === "home" && <Home width={width} events={events} />}
       {route.screen === "sites" && <Sites route={route} onNav={onNav} />}
       {route.screen === "targets" && <Targets />}
       {route.screen === "deploys" && <Deploys onNav={onNav} />}

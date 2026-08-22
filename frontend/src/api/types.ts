@@ -191,6 +191,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/map/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1). */
+        get: operations["v1_map_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/": {
         parameters: {
             query?: never;
@@ -373,6 +390,15 @@ export interface components {
             seq: number;
             data: components["schemas"]["Finding"][];
         };
+        /**
+         * @description * `zone` - zone
+         *     * `host` - host
+         *     * `container` - container
+         *     * `hub` - hub
+         *     * `edge` - edge
+         * @enum {string}
+         */
+        KindEnum: "zone" | "host" | "container" | "hub" | "edge";
         Login: {
             username: string;
             password: string;
@@ -385,6 +411,26 @@ export interface components {
             scan_report_hash: string;
             /** Format: date-time */
             created_at: string;
+        };
+        MapEdge: {
+            a: string;
+            b: string;
+            path: components["schemas"]["PathEnum"];
+        };
+        MapGraph: {
+            nodes: components["schemas"]["MapNode"][];
+            edges: components["schemas"]["MapEdge"][];
+        };
+        MapNode: {
+            id: string;
+            kind: components["schemas"]["KindEnum"];
+            label: string;
+            status: string;
+            parent?: string;
+        };
+        MapSnapshot: {
+            seq: number;
+            data: components["schemas"]["MapGraph"];
         };
         Materialize: {
             /** @default false */
@@ -402,6 +448,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description * `public` - public
+         *     * `mesh` - mesh
+         * @enum {string}
+         */
+        PathEnum: "public" | "mesh";
         ProjectSummary: {
             id: number;
             name: string;
@@ -759,6 +811,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
+            };
+        };
+    };
+    v1_map_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapSnapshot"];
                 };
             };
         };
