@@ -15,7 +15,12 @@ def test_hub_target_run_argv_never_binds_docker_sock():
     docker.sock) on the list `hub_target` actually runs, or a helper the fixture
     does not call.
     """
-    from tests.harness.target import IMAGE, SOCK, hub_target, hub_target_run_argv
+    from tests.harness.target import (
+        IMAGE,
+        SOCK,
+        hub_target_run_argv,
+        hub_target_session,
+    )
 
     argv = hub_target_run_argv("hub-test-target-probe")
     assert isinstance(argv, list)
@@ -28,7 +33,42 @@ def test_hub_target_run_argv_never_binds_docker_sock():
     assert "127.0.0.1::22" in argv
     assert IMAGE in argv
     assert IMAGE == "hub-test-target:local"
-    assert "hub_target_run_argv" in inspect.getsource(hub_target)
+    assert "hub_target_run_argv" in inspect.getsource(hub_target_session)
+
+
+def test_hub_target_removes_site_state_between_tests():
+    """The per-test hub_target wrapper removes site-* containers and Caddy
+    servers on teardown.
+
+    Every T2 site publishes 127.0.0.1:20000 and a site-{slug} Caddy server on
+    127.0.0.1:8088 inside the shared session target, so survivors from one test
+    make the next test fail with "port is already allocated" on docker run
+    (seen in the combined nightly run) or "caddy put failed" on the route PUT.
+
+    What would make this fail: a session-only hub_target with no per-test
+    cleanup, a wrapper that never calls the cleanup helpers, or a cleanup
+    built from an interpolated shell string instead of an argv list.
+    """
+    from tests.harness.target import (
+        hub_target,
+        remove_site_caddy_servers,
+        remove_site_containers,
+    )
+
+    wrapper_src = inspect.getsource(hub_target)
+    assert "remove_site_containers" in wrapper_src
+    assert "remove_site_caddy_servers" in wrapper_src
+    assert "hub_target_session" in wrapper_src
+
+    containers_src = inspect.getsource(remove_site_containers)
+    assert "shell=True" not in containers_src
+    assert "name=^site-" in containers_src
+    assert '"docker", "rm", "-f"' in containers_src
+
+    caddy_src = inspect.getsource(remove_site_caddy_servers)
+    assert "shell=True" not in caddy_src
+    assert 'startswith("site-")' in caddy_src
+    assert '"DELETE"' in caddy_src
 
 
 def test_t2_modules_share_one_hub_target_definition():

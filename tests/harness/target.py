@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -109,8 +110,73 @@ class HubTarget:
     client_key_pem: bytes = field(repr=False)
 
 
+def remove_site_containers(container):
+    """Remove leftover site-* containers inside the target between tests.
+
+    Every T2 site publishes 127.0.0.1:20000 inside the shared target
+    (deploys/steps.py internal_port default), so a survivor from one test makes
+    the next test's docker run fail with "port is already allocated". Listing
+    is tolerant — inner dockerd may not be active if the test deployed nothing
+    — but a failed rm raises so a broken cleanup names itself instead of the
+    next test.
+    """
+    listing = _exec(
+        container,
+        ["docker", "ps", "-aq", "--filter", "name=^site-"],
+        timeout=60,
+    )
+    if listing.returncode != 0:
+        return
+    ids = listing.stdout.split()
+    if ids:
+        _exec(container, ["docker", "rm", "-f", *ids], timeout=60, check=True)
+
+
+def remove_site_caddy_servers(container):
+    """DELETE leftover site-* Caddy servers inside the target between tests.
+
+    ensure_route_tls PUTs a per-slug server listening on the shared
+    127.0.0.1:8088, so a survivor makes the next test's PUT fail ("caddy put
+    failed": the listen address is already bound). Listing is tolerant — caddy
+    admin may be unreachable if the test routed nothing — but a failed DELETE
+    raises so a broken cleanup names itself instead of the next test.
+    """
+    listing = _exec(
+        container,
+        ["curl", "-sf", "http://127.0.0.1:2019/config/apps/http/servers"],
+        timeout=30,
+    )
+    if listing.returncode != 0:
+        return
+    try:
+        servers = json.loads(listing.stdout or "null") or {}
+    except json.JSONDecodeError:
+        return
+    for server_id in servers:
+        if server_id.startswith("site-"):
+            _exec(
+                container,
+                [
+                    "curl", "-sf", "-X", "DELETE",
+                    f"http://127.0.0.1:2019/config/apps/http/servers/{server_id}",
+                ],
+                timeout=30,
+                check=True,
+            )
+
+
+@pytest.fixture
+def hub_target(hub_target_session):
+    """Per-test view of the session target; isolates T2 tests from each other."""
+    try:
+        yield hub_target_session
+    finally:
+        remove_site_containers(hub_target_session.container)
+        remove_site_caddy_servers(hub_target_session.container)
+
+
 @pytest.fixture(scope="session")
-def hub_target(tmp_path_factory):
+def hub_target_session(tmp_path_factory):
     """One privileged systemd container. Does not bind the Hub docker.sock."""
     home = tmp_path_factory.mktemp("t2-home")
     (home / ".ssh").mkdir()

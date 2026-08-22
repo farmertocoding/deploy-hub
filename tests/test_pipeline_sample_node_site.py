@@ -286,7 +286,10 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
         "source_dir": str(ctx),
         "dockerfile_template": T2_DOCKERFILE,
         "docker_run_extra": ["-p", "127.0.0.1:20000:80"],
-        "internal_port": 20000,
+        # Health curls container_ip:internal_port (a66c865); T2_SERVE_PY
+        # listens on 80. Caddy proxies the published 127.0.0.1:20000 mapping.
+        "internal_port": 80,
+        "upstream": "127.0.0.1:20000",
         "caddy_listen": "127.0.0.1:8088",
     })
     manifest = Manifest.objects.create(site=site, version=1, body=body)
