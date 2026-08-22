@@ -1,0 +1,19 @@
+# HARNESS-T3-NIGHTLY / HARNESS-T3-UFW-TRUTH — host-without-multipass evidence
+# Recorded 2026-08-22 on the Task 16 session host (darwin 25.6.0, zsh).
+# This is the real shell exchange, not a synthesized log.
+
+$ multipass version
+(eval):1: command not found: multipass
+exit=127
+
+$ which multipass
+multipass not found
+exit=1
+
+Consequence (D-024): every @pytest.mark.t3 test skips
+("multipass is not available"), so the two tier:t3 ids above are skipped-only
+on this host and carry dated host-without-multipass waivers in WAIVERS.md.
+tests/harness/multipass.py::waiver_illegal_if and
+tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3 make
+those waivers illegal the moment `multipass version` starts succeeding here.
+No Multipass run is claimed anywhere in this record.

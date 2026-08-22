@@ -1,0 +1,10 @@
+# Gate 1 — full T1 run (Task 16 session, 2026-08-22)
+# Command: python -m pytest -q -m "not t2 and not t3"
+# Tail of the real output:
+
+core/test_mode.py:5
+  /Users/j/j/deploy-hub/core/test_mode.py:5: PytestCollectionWarning: cannot collect test class 'TestModeError' because it has a __init__ constructor (from: tests/test_test_dns_provider.py)
+    class TestModeError(Exception):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1293 passed, 6 skipped, 31 deselected, 2 warnings in 207.60s (0:03:27)

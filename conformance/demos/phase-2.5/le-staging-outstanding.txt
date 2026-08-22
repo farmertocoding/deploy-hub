@@ -1,0 +1,18 @@
+# HARNESS-T3-LE-STAGING — not run: no test-zone credentials (D-031)
+# Recorded 2026-08-22, Task 16 session.
+
+HUB_TEST_DNS_ZONE and HUB_TEST_CF_TOKEN are not set on this host, and
+Multipass is also absent (see multipass-absent.txt), so
+tests/test_t3_https.py::test_https_and_security_headers_le_staging,
+tests/test_t3_https.py::test_wss_one_frame_through_cf_caddy and
+tests/test_t3_https.py::test_dns_records_reaped_in_finally are skipped-only:
+
+  skip reason: "HUB_TEST_DNS_ZONE / HUB_TEST_CF_TOKEN not set: no test-zone
+  credentials on this host (HARNESS-T3-LE-STAGING stays skipped-only; D-031
+  waiver)"
+
+There is no LE-staging issuance log, no HSTS probe and no wss-through-CF frame
+in this record because none happened. The id is waived in WAIVERS.md
+(HARNESS-T3-LE-STAGING, no-test-zone-credentials, 2026-08-22) rather than
+greened from a T1 sibling. Retire the waiver with the first credentialed run
+against the Cloudflare TEST zone.

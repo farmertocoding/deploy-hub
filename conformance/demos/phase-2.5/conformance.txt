@@ -1,0 +1,19 @@
+# Conformance outputs (Task 16 session, 2026-08-22), in run order.
+
+## python conformance/check.py --phase 2.5 --exclude-tier t3  (off the T1-only report)
+# The one honest red: the toxiproxy proof is a t2 test, deselected by the T1 markexpr.
+# Not waived - the live T2 pass below verifies it.
+
+warning: PROC-SENSITIVE-HUMAN-MERGE: 1 of 2 cited section(s) are covered by text_hash; nothing watches 'conformance/paths.yaml' in 'build-process.md §5 / conformance/paths.yaml' — re-word the citation to a heading or bold-lead in a frozen docs/plan/ copy, or accept that it is unanchorable
+conformance-check FAILED:
+  - HARNESS-T3-TOXIPROXY (test) skipped-only: every marked test was skipped/xfailed: tests/test_toxiproxy_resume.py::test_ssh_timeout_mid_deploy_resumes (skipped)
+
+## python conformance/check.py --phase 2.5  (off the all-tiers report)
+
+warning: PROC-SENSITIVE-HUMAN-MERGE: 1 of 2 cited section(s) are covered by text_hash; nothing watches 'conformance/paths.yaml' in 'build-process.md §5 / conformance/paths.yaml' — re-word the citation to a heading or bold-lead in a frozen docs/plan/ copy, or accept that it is unanchorable
+conformance-check ok — 94 reqs (skipped-only=3, uncovered=19, verified=72); run report 30c93e45b812 @ 2026-08-22T03:10:26Z; matrix.json written
+
+## python conformance/check.py --phase 2.5 --exclude-tier t3  (off the all-tiers report)
+
+warning: PROC-SENSITIVE-HUMAN-MERGE: 1 of 2 cited section(s) are covered by text_hash; nothing watches 'conformance/paths.yaml' in 'build-process.md §5 / conformance/paths.yaml' — re-word the citation to a heading or bold-lead in a frozen docs/plan/ copy, or accept that it is unanchorable
+conformance-check ok — 94 reqs (skipped-only=3, uncovered=19, verified=72); run report 30c93e45b812 @ 2026-08-22T03:10:26Z; matrix.json written

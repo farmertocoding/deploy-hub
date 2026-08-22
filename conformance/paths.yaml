@@ -40,3 +40,13 @@ sensitive:
   # edits, and making every one of them a human merge would spend the guard's meaning.
   - scripts_dev/mutation_gate.py
   - scripts_dev/mutation_scope.py
+  # Phase 2.5 (Task 16): the harness custody set. tests/harness/** drives real
+  # SSH/docker/Multipass argv against test-plane targets; monitor/drills.py is
+  # the Beat body that stops workers and probes sites; core/test_mode.py is the
+  # §B9 credential wall itself; providers/test_dns.py is the only test-plane
+  # DNS client and must never grow a prod-zone path (D-028). Weaken any of
+  # these and the wall, the drills, or the reaper weakens with it.
+  - tests/harness/**
+  - monitor/drills.py
+  - core/test_mode.py
+  - providers/test_dns.py

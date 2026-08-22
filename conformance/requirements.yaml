@@ -694,5 +694,6 @@ requirements:
     source: phase-2.5-design-note.md §4
     demo:
       - conformance/demos/phase-2.5.md
+      - conformance/demos/phase-2.5/
     text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
     text: The phase-2.5 harness demo is recorded under conformance/demos/phase-2.5.md from a local Multipass run or a dated host-without-multipass waiver.

@@ -81,3 +81,15 @@ WAIVED: frontend/src/App.jsx+UX-F8-SIMULATION-STATES+demo-pane-no-site-deploy-to
 WAIVED: simulation/seed_v0.json+review3-N2+warming-omits-elapsed-expected — seed token is present; elapsed/expected copy waits for the site-card UI. (2026-08-21)
 WAIVED: deploys/breakglass.py+SEC-P5+runbook-lacks-impact-and-dns — commands + 0400 + no secrets hold; impact/DNS copy is Phase 3 operator UX. (2026-08-21)
 WAIVED: REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven — demo record is T2-now and honest; the 24h live form is the Phase 2.5 nightly drill. check.py verified file presence, not duration. (2026-08-21)
+
+# Phase 2.5 exit (Task 16). D-024: a `tier: t3` req is verified only by a passed
+# @pytest.mark.t3 test, and on a host that cannot run one the honest state is
+# skipped-only plus a dated line here — never a T1-sibling green. These waivers are
+# host-conditional and self-refusing: tests/harness/multipass.py::waiver_illegal_if
+# plus tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3 go red
+# the moment `multipass version` starts succeeding on this host while the
+# host-without-multipass lines still stand. Evidence for the state waived is in
+# conformance/demos/phase-2.5/ (multipass-absent.txt, le-staging-outstanding.txt).
+WAIVED: HARNESS-T3-NIGHTLY — host-without-multipass: `multipass version` is command-not-found on this host (exit 127, recorded in conformance/demos/phase-2.5/multipass-absent.txt), so the T3 nightly — provision + harden + both fixtures HTTP-ready + v2 + rollback-within-60s + reaper-empty teardown — is skipped-only; its tests (tests/test_t3_deploy.py, tests/acceptance/test_phase_2_5.py::test_t3_both_fixtures_ready_v2_rollback_reaper) are all @pytest.mark.t3 + skipif. Retire with the first recorded local Multipass nightly (`make test-t3`) on a host that has it (2026-08-22)
+WAIVED: HARNESS-T3-UFW-TRUTH — host-without-multipass: same absent `multipass version`; ufw/fail2ban truth needs a real VM because container ufw is the known false-green the req text names, so tests/test_t3_ufw_truth.py and the acceptance t3 ufw clause are skipped-only. Retire with the same Multipass nightly run that retires HARNESS-T3-NIGHTLY (2026-08-22)
+WAIVED: HARNESS-T3-LE-STAGING — no-test-zone-credentials: HUB_TEST_DNS_ZONE / HUB_TEST_CF_TOKEN are not set on this host (and Multipass is also absent), so tests/test_t3_https.py is skipped-only per the req's own text and D-031 — HTTPS + LE staging + wss-through-CF run only when the test-zone token is present, and absent credentials must never become a T1-sibling green. Retire with the first credentialed run against the Cloudflare TEST zone (2026-08-22)

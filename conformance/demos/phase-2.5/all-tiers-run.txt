@@ -1,0 +1,10 @@
+# Gate 3 — all-tiers run (Task 16 session, 2026-08-22; docker live, T3 skipped on skipif)
+# Command: python -m pytest -q
+# Tail of the real output:
+
+core/test_mode.py:5
+  /Users/j/j/deploy-hub/core/test_mode.py:5: PytestCollectionWarning: cannot collect test class 'TestModeError' because it has a __init__ constructor (from: tests/test_test_dns_provider.py)
+    class TestModeError(Exception):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1304 passed, 26 skipped, 2 warnings in 292.92s (0:04:52)
