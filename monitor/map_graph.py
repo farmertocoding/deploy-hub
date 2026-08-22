@@ -82,7 +82,7 @@ def _site_target_ids(site, instances):
 
 
 def _node(nid, kind, label, status, parent=None):
-    assert kind in _NODE_KINDS
+    assert kind in _NODE_KINDS  # nosec B101 — closed kind set, not a test assert
     row = {"id": nid, "kind": kind, "label": label, "status": status}
     if parent:
         row["parent"] = parent

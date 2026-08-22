@@ -1,0 +1,17 @@
+Phase 3 map v1 list dump — recorded 2026-08-23.
+
+Source nodeids (real, T1):
+  tests/acceptance/test_phase_3.py::test_map_v1_snapshot_and_list_view
+  transcribes tests/test_map_graph.py::test_graph_is_derived_from_models_not_a_stored_blob
+  and ::test_zone_nodes_are_networkzones_not_dnszones
+  plus frontend/tests/map.test.ts::list_view_toggle_shows_the_same_nodes
+
+Snapshot contract asserted on this run:
+  kinds >= {zone, host, container, hub, edge}
+  zone labels are NetworkZone.name (prod-vlan / p3-map-vlan), never a DnsZone
+  no stored MapGraph / topology blob
+  frontend Map.jsx exposes listView + "List view" toggle; SVG and list render
+  the same node labels (Hub, Cloudflare, zone, host, container)
+
+This dump is the list-view of that T1 snapshot, not a live 30-node fleet
+screenshot. MAP-96-GRAPH-V1 is marked and passing; there is no slip waiver.

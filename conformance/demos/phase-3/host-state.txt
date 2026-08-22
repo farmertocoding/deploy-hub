@@ -1,0 +1,25 @@
+Phase 3 host-of-record — 2026-08-23
+
+branch: p3-t19
+HEAD at record start: 261160d
+host: darwin (this workstation)
+
+multipass: 1.16.3+mac CLI present (`multipass version` succeeds, so
+  multipass_available() is true and T3 is not skipped). The daemon socket
+  is down this session (`multipass list` → "cannot connect to the
+  multipass socket"; /var/run/multipass_socket absent). Live T3 therefore
+  ERRORED at setup rather than skipped. That is not a host-without-multipass
+  waiver — those lines are retired and the self-refusing probe would go red.
+HUB_TEST_CF_TOKEN: unset
+HUB_TEST_DNS_ZONE: unset (retired name; product allowlist is HUB_TEST_ZONE_SLUGS)
+HUB_PAGER_BACKEND: fake (settings default; no test pages anyone)
+
+Consequence (D-031 / D-043), not a T1-sibling green:
+- DNS-CF-T3-LIVE stays skipped-only + WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials
+- HARNESS-T3-LE-STAGING stays skipped-only + WAIVED: HARNESS-T3-LE-STAGING — no-test-zone-credentials
+Self-refusing probes remain armed:
+  tests/test_le_waiver_self_refusal.py
+  tests/harness/multipass.py::waiver_illegal_if / credentials_present
+
+docker: present on this host (T2 can build hub-test-target). This record does
+not claim a credentialed CF/LE run and does not invent HTTPS/LE artifacts.

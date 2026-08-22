@@ -83,6 +83,7 @@ def _desired(site, transport):
     }
 
 
+@pytest.mark.req("TLS-B2-ORIGIN-CERT-PUSH")
 def test_t2_cert_and_key_land_0400_in_a_0700_dir_on_hub_test_target(hub_target):
     """Live sshd: cert+key are 0400 root:root in a 0700 root:root tls dir.
 
@@ -115,6 +116,7 @@ def test_t2_cert_and_key_land_0400_in_a_0700_dir_on_hub_test_target(hub_target):
         assert stat == "400 root:root", f"{name} was {stat}"
 
 
+@pytest.mark.req("TLS-B2-ORIGIN-CERT-PUSH")
 def test_t2_caddy_reload_serves_the_pushed_cert(hub_target):
     """Caddy reloads and presents the pushed certificate on HTTPS.
 

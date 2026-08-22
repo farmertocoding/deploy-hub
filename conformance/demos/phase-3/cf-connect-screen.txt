@@ -1,0 +1,18 @@
+Phase 3 Cloudflare-connect screen record — 2026-08-23
+
+Honest: the Settings surface exists. Live token paste against Cloudflare is
+NOT claimed. HUB_TEST_CF_TOKEN is unset on this host.
+
+Surface (frontend/src/screens/Settings.jsx):
+- SETTINGS_TABS = cloudflare, developer, vault (default tab: cloudflare)
+- CloudflarePanel: password input ("API token") → connectCloudflare(token)
+  → POST /api/v1/cloudflare/connect/
+- Copy on the panel: "Paste a single-zone API token. The Hub verifies it
+  and stores it in the vault — the token never comes back."
+- Backend (core/zone_views.py): observe_token before any vault write; a
+  token that returns two zones is refused; success creates DnsAccount +
+  DnsZone. Proven T1 by tests/test_cloudflare_connect.py (7 tests), not by
+  a live paste on this host.
+
+This file is a screen record of the product surface as it ships, not a
+recording of a successful live connect.

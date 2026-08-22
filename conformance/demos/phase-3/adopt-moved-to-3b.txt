@@ -1,0 +1,13 @@
+Adopt-existing-site moved to Phase 3b — 2026-08-23
+
+Task 15 did not land on phase-3 @ 261160d. Panel ruling 5 / D-044: five open
+spec holes in docs/phase-3-design-note.md §1.12 make adopt the wrong thing
+to implement under phase-exit pressure.
+
+Registry ids, waived this exit (not greened, not phase-bumped silently):
+  WAIVED: PROV-J7-COMPOSE-AWARE-ADOPT
+  WAIVED: PROV-E6-ADOPT-TEMP-SUBDOMAIN
+
+The Scribe amends the §I Phase-3 line so Phase 3b owns adopt-existing-site
+alongside the other D-032 deferrals (app-log viewer, scheduled-jobs UI,
+first-run checklist, backup/restore surface, Hub-central DNS-01).
