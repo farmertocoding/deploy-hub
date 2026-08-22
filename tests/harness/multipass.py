@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 
 NAME_PREFIX = "hub-t3-"
@@ -130,9 +131,16 @@ def waiver_illegal_if(probe):
     return bool(present)
 
 
-def launch(name, cpus, mem, disk, image=DEFAULT_IMAGE, *, run_fn=None):
+def _runner(run_fn, timeout):
+    """Use an injected run_fn as-is; default _run gets an explicit timeout."""
+    if run_fn is not None:
+        return run_fn
+    return lambda argv: _run(argv, timeout=timeout)
+
+
+def launch(name, cpus, mem, disk, image=DEFAULT_IMAGE, *, run_fn=None, timeout=900):
     require_t3_name(name)
-    runner = run_fn or _run
+    runner = _runner(run_fn, timeout)
     with tempfile.NamedTemporaryFile(
         "w", suffix=".yaml", prefix="hub-t3-cloud-init-", delete=False
     ) as fh:
@@ -147,8 +155,8 @@ def launch(name, cpus, mem, disk, image=DEFAULT_IMAGE, *, run_fn=None):
     return MultipassVM(name=name, ipv4=ipv4, user=DEFAULT_USER)
 
 
-def exec(vm, argv, *, run_fn=None):  # noqa: A001 — brief name; argv list only
-    runner = run_fn or _run
+def exec(vm, argv, *, run_fn=None, timeout=300):  # noqa: A001 — brief name; argv list only
+    runner = _runner(run_fn, timeout)
     result = runner(exec_argv(vm, argv))
     if getattr(result, "returncode", 0) != 0:
         err = getattr(result, "stderr", "") or getattr(result, "stdout", "")
@@ -156,8 +164,29 @@ def exec(vm, argv, *, run_fn=None):  # noqa: A001 — brief name; argv list only
     return result
 
 
-def transfer(src, dest, *, run_fn=None):
-    runner = run_fn or _run
+def exec_result(vm, argv, *, run_fn=None, timeout=120):
+    """multipass exec; return the CompletedProcess even when the command is red."""
+    runner = _runner(run_fn, timeout)
+    return runner(exec_argv(vm, argv))
+
+
+def wait_exec(vm, argv, *, ready, deadline, timeout=30, run_fn=None):
+    """Poll exec_result until `ready(result)` or `deadline`."""
+    last = None
+    while time.time() < deadline:
+        last = exec_result(vm, argv, run_fn=run_fn, timeout=timeout)
+        if ready(last):
+            return last
+        time.sleep(2)
+    stdout = getattr(last, "stdout", "") if last is not None else ""
+    stderr = getattr(last, "stderr", "") if last is not None else ""
+    raise TimeoutError(
+        f"waiting for {argv!r} on {vm.name}: stdout={stdout!r} stderr={stderr!r}"
+    )
+
+
+def transfer(src, dest, *, run_fn=None, timeout=120):
+    runner = _runner(run_fn, timeout)
     result = runner(transfer_argv(src, dest))
     if getattr(result, "returncode", 0) != 0:
         err = getattr(result, "stderr", "") or getattr(result, "stdout", "")
