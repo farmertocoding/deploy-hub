@@ -293,6 +293,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/rollback/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description POST: roll the site back to its latest succeeded Deployment. */
+        post: operations["v1_sites_rollback_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/wizard/": {
         parameters: {
             query?: never;
@@ -322,6 +339,10 @@ export interface components {
          * @enum {string}
          */
         ActionEnum: "ack" | "resolve" | "accept_risk";
+        CertRefusal: {
+            detail: string;
+            finding_id: number;
+        };
         CloudflareConnect: {
             token: string;
         };
@@ -504,6 +525,11 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        RollbackResult: {
+            deployment_id: number;
+            original_id: number;
+            status: string;
+        };
         /**
          * @description * `p1` - P1
          *     * `p2` - P2
@@ -517,6 +543,7 @@ export interface components {
             domain: string;
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
+            cert_refusal?: components["schemas"]["CertRefusal"] | null;
         };
         /**
          * @description * `open` - Open
@@ -1014,6 +1041,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Manifest"];
+                };
+            };
+        };
+    };
+    v1_sites_rollback_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RollbackResult"];
                 };
             };
         };

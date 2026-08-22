@@ -89,6 +89,9 @@ const MapGraph = z
 const MapSnapshot = z
   .object({ seq: z.number().int(), data: MapGraph })
   .passthrough();
+const CertRefusal = z
+  .object({ detail: z.string(), finding_id: z.number().int() })
+  .passthrough();
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -96,6 +99,7 @@ const SiteSummary = z
     domain: z.string(),
     latest_manifest_version: z.number().int().nullable(),
     manifest_current: z.boolean().nullable(),
+    cert_refusal: CertRefusal.nullish(),
   })
   .passthrough();
 const ProjectSummary = z
@@ -140,6 +144,13 @@ const Manifest = z
 const Materialize = z
   .object({ confirm_warnings: z.boolean().default(false) })
   .partial()
+  .passthrough();
+const RollbackResult = z
+  .object({
+    deployment_id: z.number().int(),
+    original_id: z.number().int(),
+    status: z.string(),
+  })
   .passthrough();
 const Question = z
   .object({
@@ -187,6 +198,7 @@ export const schemas = {
   MapEdge,
   MapGraph,
   MapSnapshot,
+  CertRefusal,
   SiteSummary,
   ProjectSummary,
   Readiness,
@@ -196,6 +208,7 @@ export const schemas = {
   PatchedEnvWrite,
   Manifest,
   Materialize,
+  RollbackResult,
   Question,
   WizardState,
   PatchedAnswers,

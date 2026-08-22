@@ -142,6 +142,29 @@ def test_failed_ping_files_its_own_finding():
     assert RECEIVER_URL not in finding.title
 
 
+def test_failed_ping_publishes_on_the_findings_topic(monkeypatch):
+    """Dead-man filing is the canonical findings stream, not a silent ORM row.
+
+    What would make this fail: _file_finding creating the row without
+    core.findings.finding(), so RT-35 never refreshes the inbox.
+    """
+    from monitor.deadman import DEADMAN_FINDING_FINGERPRINT, ping
+
+    published = []
+    monkeypatch.setattr(
+        "core.events.publish",
+        lambda topic, event, **_kw: published.append((topic, event)),
+    )
+    _plant_receiver_url()
+    ping(http_post=RecordingPost(status=500))
+    topics = [topic for topic, _event in published]
+    assert "findings" in topics
+    assert any(
+        event.get("fingerprint") == DEADMAN_FINDING_FINGERPRINT
+        for _topic, event in published
+    )
+
+
 def test_recurrence_reopens_a_resolved_finding():
     from monitor.deadman import DEADMAN_FINDING_FINGERPRINT, ping
 

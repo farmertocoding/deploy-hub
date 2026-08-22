@@ -155,6 +155,32 @@ def test_excess_zone_access_files_a_p2_finding(monkeypatch):
     assert DNS_TOKEN not in finding.title
 
 
+def test_drift_finding_publishes_on_the_findings_topic(monkeypatch):
+    """Token-audit drift is the canonical findings stream (D-045).
+
+    What would make this fail: _file_drift_finding get_or_create without
+    finding(), so the inbox never sees daily SEC-B5 drift.
+    """
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    published = []
+    monkeypatch.setattr(
+        "core.events.publish",
+        lambda topic, event, **_kw: published.append((topic, event)),
+    )
+    account = _account(zones=(("zid-a", "audit.example"),))
+    http = _http(monkeypatch)
+    http.route(DNS_TOKEN, zones=(
+        ("zid-a", "audit.example"), ("zid-crept", "crept.example"),
+    ))
+    audit_cloudflare_credentials()
+    assert any(topic == "findings" for topic, _event in published)
+    assert any(
+        event.get("fingerprint") == f"cf-token-scope:{account.pk}:dns"
+        for _topic, event in published
+    )
+
+
 @pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
 def test_global_api_key_shape_is_refused_not_warned(monkeypatch):
     """A Global-API-Key credential never reaches the wire AND files a P2.

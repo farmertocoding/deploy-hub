@@ -15,7 +15,6 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from django.conf import settings
-from django.utils import timezone
 
 from core.audit import audit
 from core.models import Finding
@@ -62,39 +61,14 @@ def _resolve_receiver_url():
 
 def _file_finding(*, source_engine, severity, entity, title, body,
                   fix_action, fingerprint):
-    """File through the Finding primitive Task 4's service layer wraps.
+    """File through the one findings service so the inbox stream publishes."""
+    from core.findings import finding
 
-    SEAM (named in the task report): when Task 4's core.findings.finding()
-    merges, this body becomes the one line
-    `return finding(source_engine, fingerprint, severity=..., ...)`.
-    """
-    row = Finding.objects.filter(fingerprint=fingerprint).first()
-    if row is not None:
-        row.last_seen = timezone.now()
-        update_fields = ["last_seen"]
-        # §F2 recurrence semantics: a RESOLVED finding that recurs REOPENS —
-        # otherwise a recurring dead-man failure after one operator resolve
-        # is permanent silence, the exact D-039 hole. ACKED and ACCEPTED are
-        # left alone: the operator has already seen it (ack != resolve).
-        if row.state == Finding.State.RESOLVED:
-            row.state = Finding.State.OPEN
-            update_fields.append("state")
-            audit("finding-reopened", row, source="system",
-                  severity="warning", fingerprint=fingerprint)
-        row.save(update_fields=update_fields)
-        return row
-    row = Finding.objects.create(
-        source_engine=source_engine,
-        severity=severity,
-        entity=entity,
-        title=title,
-        body=body,
+    return finding(
+        source_engine, fingerprint,
+        severity=severity, entity=entity, title=title, body=body,
         fix_action=fix_action,
-        fingerprint=fingerprint,
     )
-    audit("finding-filed", row, source="system", severity="warning",
-          fingerprint=fingerprint)
-    return row
 
 
 def _file_deadman_finding(reason):
