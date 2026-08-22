@@ -192,6 +192,23 @@ CMD ["python3", "/app/serve.py"]
 
 
 @pytest.mark.t2
+def test_t2_real_node_image_builds_on_vfs():
+    """Documented D-025 skip: vfs did not land the real sample-node-site image.
+
+    What would make this fail: hanging PIPE-S4-READINESS-GATE on this skip,
+    or retiring the alpine waiver without a green real-image build.
+    """
+    pytest.skip(
+        "D-025 2026-08-22: hub-test-target vfs refused the real node image "
+        "within 240s. NPM_CI_DOCKERFILE: npm ci exit 1 (no package-lock). "
+        "pnpm frozen fixture Dockerfile: ERR_PNPM_TARBALL_INTEGRITY on "
+        "zod/ccxt fetch. Alpine T2_DOCKERFILE + waiver "
+        "tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+"
+        "t2-instant-ready-stub stay. This skip does not verify PIPE-S4."
+    )
+
+
+@pytest.mark.t2
 @pytest.mark.skipif(not _docker_available(), reason="docker is not available")
 @pytest.mark.req("PIPE-D6-IDEMPOTENT-STEPS")
 @pytest.mark.req("PIPE-N5-VOLUMES-MODELED")
