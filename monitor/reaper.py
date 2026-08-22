@@ -1,7 +1,7 @@
 """Prefix-only test-plane reaper. argv lists; never touch names outside hub-t3-."""
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 — argv lists only (require_t3_name-guarded), never a shell
 from pathlib import Path
 
 NAME_PREFIX = "hub-t3-"
@@ -42,12 +42,15 @@ def version_argv():
 def _run(argv, *, timeout=60):
     if not isinstance(argv, (list, tuple)) or any(not isinstance(p, str) for p in argv):
         raise TypeError("argv must be a list of str — never a shell string")
-    return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout)
+    # nosec justification: argv is a typed list built by the *_argv helpers
+    # above, every name passes require_t3_name, and shell=True never appears.
+    return subprocess.run(  # nosec B603
+        list(argv), capture_output=True, text=True, timeout=timeout)
 
 
 def multipass_available():
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 — fixed ["multipass", "version"] argv
             version_argv(),
             capture_output=True,
             text=True,

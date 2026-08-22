@@ -22,7 +22,7 @@ from core.test_mode import TestModeError, assert_test_zone
 from .base import DnsProvider
 
 API = "https://api.cloudflare.com/client/v4"
-TOKEN_ENV = "HUB_TEST_CF_TOKEN"
+TOKEN_ENV = "HUB_TEST_CF_TOKEN"  # nosec B105 — the env var NAME, never a credential
 ZONE_ENV = "HUB_TEST_DNS_ZONE"
 
 
@@ -184,7 +184,10 @@ class TestDnsProvider(DnsProvider):
             },
             method=method,
         )
-        with urlopen(request, timeout=self.timeout) as response:
+        # nosec justification: the scheme is pinned — every URL is API + path
+        # where API is the https:// Cloudflare constant above; no caller input
+        # can change the scheme to file:/ or custom.
+        with urlopen(request, timeout=self.timeout) as response:  # nosec B310
             body = json.loads(response.read().decode("utf-8"))
         if not body.get("success", False):
             raise RuntimeError(
