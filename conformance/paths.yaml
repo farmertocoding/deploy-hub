@@ -50,3 +50,7 @@ sensitive:
   - monitor/drills.py
   - core/test_mode.py
   - providers/test_dns.py
+  # Panel S3: monitor/reaper.py is the deletion-capable module — it composes
+  # `multipass delete --purge` argv from listings and lease files. A widened
+  # prefix or a dropped require_t3_name deletes VMs outside the test plane.
+  - monitor/reaper.py

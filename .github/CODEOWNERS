@@ -19,3 +19,8 @@
 /conformance/check.py @farmertocoding
 /scripts_dev/mutation_gate.py @farmertocoding
 /scripts_dev/mutation_scope.py @farmertocoding
+/tests/harness/ @farmertocoding
+/monitor/drills.py @farmertocoding
+/monitor/reaper.py @farmertocoding
+/core/test_mode.py @farmertocoding
+/providers/test_dns.py @farmertocoding
