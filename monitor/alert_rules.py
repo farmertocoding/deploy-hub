@@ -328,6 +328,18 @@ RULES = (
         "10-min summaries until the rate drops",
         "alert-protocol.md §4 / D-038",
     ),
+    _r(
+        "pager-email-failed",
+        "p2",
+        "A failed alert email send; the push path must not block",
+        "alert-protocol.md §1 / D-037",
+    ),
+    _r(
+        "ntfy-token-revoke-pending",
+        "p2",
+        "Target publish token marked revoked; one manual ntfy-account step remains",
+        "D-036 / review3 §M3",
+    ),
 )
 
 RULES_BY_KIND = {rule.kind: rule for rule in RULES}

@@ -1,7 +1,7 @@
 """In-memory provider fakes (§A7/§D5) — what T1 tests plug into."""
 import itertools
 
-from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer
+from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer, Pager
 
 _ids = itertools.count(1)
 
@@ -96,6 +96,27 @@ class FakeCloudProvider(CloudProvider):
 
     def estimate_hourly_cost(self, spec):
         return 0.05
+
+
+class FakePager(Pager):
+    """Records publishes. Default backend in tests so nothing pages anyone."""
+
+    def __init__(self):
+        self.published = []
+        self.fail = False
+
+    def publish(self, severity, title, body, *, tags, click_url, **_kwargs):
+        record = {
+            "severity": severity,
+            "title": title,
+            "body": body,
+            "tags": tags,
+            "click_url": click_url,
+        }
+        self.published.append(record)
+        if self.fail:
+            raise RuntimeError("fake pager failed")
+        return record
 
 
 class FakeOriginCertIssuer(OriginCertIssuer):

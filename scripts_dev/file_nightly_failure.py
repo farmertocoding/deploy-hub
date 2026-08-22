@@ -23,49 +23,22 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# Assignment-like NAME=value / name: value where the name carries a secret-ish
-# token. Hyphens allowed so CLOUDFLARE_API_TOKEN and similar still match.
-_SECRETISH = re.compile(
-    r"(?i)\b([A-Za-z0-9_-]*(?:SECRET|KEY|TOKEN|PASSWORD|URL)[A-Za-z0-9_-]*)"
-    r"\s*[:=]\s*\S+"
+_spec = importlib.util.spec_from_file_location(
+    "hub_scrub", pathlib.Path(__file__).with_name("scrub.py"),
 )
-_VAULT_MARKER = re.compile(r"VAULT-TEST-PLAINTEXT-MARKER(?:=\S+)?")
-# Panel S2: pytest summary lines quote raw values with no assignment shape
-# (`assert 'cf-Abc123...' not in body`). Catch the shapes tokens actually
-# take, not the names they were assigned to:
-#   - an Authorization-style `Bearer <anything>`;
-#   - a bare high-entropy run: >=20 chars of token/base64 alphabet carrying
-#     at least one lowercase, one uppercase AND one digit. Mixed-class is the
-#     discriminator that keeps pytest nodeids (lowercase_with_underscores)
-#     and file paths readable while real API tokens are redacted.
-_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
-_TOKENISH = re.compile(r"[A-Za-z0-9+/_=.-]{20,}")
-
-
-def _mixed_class(run):
-    return (
-        any(c.islower() for c in run)
-        and any(c.isupper() for c in run)
-        and any(c.isdigit() for c in run)
-    )
-
-
-def scrub(text):
-    text = _SECRETISH.sub(lambda m: f"{m.group(1)}=<redacted>", text)
-    text = _VAULT_MARKER.sub("<redacted>", text)
-    text = _BEARER.sub("Bearer <redacted>", text)
-    return _TOKENISH.sub(
-        lambda m: "<redacted>" if _mixed_class(m.group(0)) else m.group(0), text)
+_scrub_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_scrub_mod)
+scrub = _scrub_mod.scrub
 
 
 def pytest_summary(log_text):

@@ -26,6 +26,8 @@ UFW_BY_PROFILE = {
     "intake": "ufw-posture-intake",
 }
 UFW_IDS = frozenset(UFW_BY_PROFILE.values())
+HANDOFF_IDS = frozenset({"server-watch-handoff"})
+SERVER_WATCH_SCRIPT = "server-watch.sh"
 
 
 @dataclass(frozen=True)
@@ -73,7 +75,25 @@ def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
 
     _import_catalog_versions(target, transport, profile=profile)
     _delete_script_crons(transport, live_beat_jobs, target=target)
+    _issue_target_publisher(target)
     return ProvisionResult(allowed=True)
+
+
+def handoff_hub_probing(target, transport):
+    """Hub-side probing is live: drop server-watch.sh and revoke its token."""
+    _delete_script_crons(transport, (SERVER_WATCH_SCRIPT,), target=target)
+    _revoke_target_publisher(target)
+    from catalog.entries import ENTRIES
+    from catalog.models import AppliedCatalogEntry
+
+    entry = ENTRIES["server-watch-handoff"]
+    AppliedCatalogEntry.objects.create(
+        target=target,
+        entry_id=entry.id,
+        version=entry.version,
+        mode="handoff",
+        result={"ok": True, "script": SERVER_WATCH_SCRIPT},
+    )
 
 
 def _refuse(target, reason):
@@ -93,6 +113,8 @@ def _import_catalog_versions(target, transport, *, profile):
     wanted_ufw = UFW_BY_PROFILE.get(profile)
     for entry in CATALOG:
         if entry.id in UFW_IDS and entry.id != wanted_ufw:
+            continue
+        if entry.id in HANDOFF_IDS:
             continue
         if not _checks_ok(transport, entry):
             continue
@@ -129,3 +151,42 @@ def _delete_script_crons(transport, live_beat_jobs, *, target=None):
     ensure_hub_dir(transport, user)
     transport.put(body.encode(), path, mode=0o600)
     transport.run(["crontab", path])
+
+
+def _issue_target_publisher(target):
+    import os
+
+    from providers.ntfy import TokenRevoked, issue_publisher_token
+
+    try:
+        issue_publisher_token(f"target:{target.pk}", os.urandom(24))
+    except TokenRevoked:
+        return
+
+
+def _revoke_target_publisher(target):
+    from monitor.alerts import raise_alert
+    from providers.ntfy import mark_revoked, revoke_via_account_api
+
+    identity = f"target:{target.pk}"
+    via_api = False
+    try:
+        via_api = revoke_via_account_api(identity)
+    except Exception:
+        via_api = False
+    mark_revoked(identity)
+    if via_api:
+        return
+    raise_alert(
+        "ntfy-token-revoke-pending",
+        f"host:{target.host}",
+        fingerprint=f"ntfy-revoke:{target.pk}",
+        source_engine="provision.handoff",
+        title=f"Revoke ntfy publish token for {target.host}",
+        body=(
+            f"Hub probing is live on {target.host}; server-watch.sh is gone. "
+            "The vault ref is marked revoked. Delete the token in the ntfy "
+            "account UI (account API was not configured)."
+        ),
+        fix_action="Delete the target's ntfy publish token in the ntfy account.",
+    )

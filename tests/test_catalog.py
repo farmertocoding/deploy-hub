@@ -112,6 +112,12 @@ RELEASED = {
             ["systemctl", "reload", "caddy"],
         ],
     },
+    "server-watch-handoff": {
+        "version": 1,
+        "check": ["test", "!", "-e", "/etc/cron.d/server-watch"],
+        "fix": ["rm", "-f", "/etc/cron.d/server-watch"],
+        "rollback": ["true"],
+    },
 }
 
 PUBLIC_PORTS = {"80", "443", "80/tcp", "443/tcp", "80,443"}
