@@ -20,6 +20,8 @@ from core import findings as findings_service
 from core.findings import findings_seq
 from core.models import Finding
 
+from .map_graph import graph_snapshot
+
 
 class FindingSerializer(serializers.ModelSerializer):
     class Meta:
@@ -110,3 +112,40 @@ class FindingTransitionView(APIView):
         # client would discard it.
         seq = findings_seq()
         return Response({"seq": seq, "data": FindingSerializer(row).data})
+
+
+class MapNodeSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    kind = serializers.ChoiceField(choices=["zone", "host", "container", "hub", "edge"])
+    label = serializers.CharField()
+    status = serializers.CharField()
+    parent = serializers.CharField(required=False)
+
+
+class MapEdgeSerializer(serializers.Serializer):
+    a = serializers.CharField()
+    b = serializers.CharField()
+    path = serializers.ChoiceField(choices=["public", "mesh"])
+
+
+class MapGraphSerializer(serializers.Serializer):
+    nodes = MapNodeSerializer(many=True)
+    edges = MapEdgeSerializer(many=True)
+
+
+class MapSnapshotSerializer(serializers.Serializer):
+    seq = serializers.IntegerField()
+    data = MapGraphSerializer()
+
+
+class MapSnapshotView(APIView):
+    """Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1)."""
+
+    @extend_schema(responses={200: MapSnapshotSerializer})
+    def get(self, request):
+        snap = graph_snapshot()
+        return Response({
+            "seq": snap["seq"],
+            "data": {"nodes": snap["nodes"], "edges": snap["edges"]},
+        })
+

@@ -17,6 +17,9 @@ counts, never raw log lines) and ``host.{id}.metrics`` (collector
 load/mem/disk). Producers live in monitor/ and reach publish() through
 core.events (see core/events.py for why the import is inverted); both topics
 snapshot from their own tables, so neither keeps history here.
+
+Phase 3 map (§9.6.1): ``map.graph`` is the same shape — table-backed from
+NetworkZone/Target/SiteInstance, published on graph change, no history list.
 """
 import json
 

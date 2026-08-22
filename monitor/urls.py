@@ -8,4 +8,5 @@ urlpatterns = [
          name="findings-detail"),
     path("findings/<int:pk>/transition/", views.FindingTransitionView.as_view(),
          name="findings-transition"),
+    path("map/", views.MapSnapshotView.as_view(), name="map-snapshot"),
 ]

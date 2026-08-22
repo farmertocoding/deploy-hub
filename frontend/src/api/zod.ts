@@ -69,6 +69,26 @@ const Transition = z
     reason: z.string().max(256).optional().default(""),
   })
   .passthrough();
+const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
+const MapNode = z
+  .object({
+    id: z.string(),
+    kind: KindEnum,
+    label: z.string(),
+    status: z.string(),
+    parent: z.string().optional(),
+  })
+  .passthrough();
+const PathEnum = z.enum(["public", "mesh"]);
+const MapEdge = z
+  .object({ a: z.string(), b: z.string(), path: PathEnum })
+  .passthrough();
+const MapGraph = z
+  .object({ nodes: z.array(MapNode), edges: z.array(MapEdge) })
+  .passthrough();
+const MapSnapshot = z
+  .object({ seq: z.number().int(), data: MapGraph })
+  .passthrough();
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -161,6 +181,12 @@ export const schemas = {
   FindingDetailSnapshot,
   ActionEnum,
   Transition,
+  KindEnum,
+  MapNode,
+  PathEnum,
+  MapEdge,
+  MapGraph,
+  MapSnapshot,
   SiteSummary,
   ProjectSummary,
   Readiness,
