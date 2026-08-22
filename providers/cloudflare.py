@@ -112,10 +112,14 @@ def observe_token(token, *, timeout=20):
     credential's reach is not worth a second request, and the construction
     wall's tests pin that an inactive token sends exactly one request.
 
-    Read-only, GETs only. Judgment stays with the callers: the registry
-    refuses construction on anything but exactly the one expected zone; the
-    daily audit files Findings on drift against the declared zone rows.
+    Read-only, GETs only, and safe by construction: the token is shape-refused
+    here (refuse_global_api_key), so no consumer can put a Global API Key on
+    the wire by handing this helper a raw vault value. Judgment stays with the
+    callers: the registry refuses construction on anything but exactly the one
+    expected zone; the daily audit files Findings on drift against the
+    declared zone rows.
     """
+    token = refuse_global_api_key(token)
     verify = api_request(token, "GET", TOKEN_VERIFY_PATH, timeout=timeout)
     status = (verify.get("result") or {}).get("status")
     if status != "active":
@@ -132,13 +136,13 @@ def verify_token(token_ref, *, timeout=20):
     """Resolve a DnsAccount vault ref and observe it (Task 2's audit entry).
 
     The ref is loaded through the registry's vault seam (never a raw value in
-    a signature the caller might log), refused pre-network on a Global-API-Key
-    shape, then observed through observe_token. No mutation anywhere.
+    a signature the caller might log), then observed through observe_token,
+    which shape-refuses pre-network itself. No mutation anywhere.
     """
     from .registry import _load_token
 
     _, raw = _load_token(token_ref)
-    return observe_token(refuse_global_api_key(raw), timeout=timeout)
+    return observe_token(raw, timeout=timeout)
 
 
 class CloudflareDnsProvider(DnsProvider):

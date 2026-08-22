@@ -202,6 +202,87 @@ def test_inactive_token_files_a_finding(monkeypatch):
 
 
 @pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
+@pytest.mark.parametrize("http_status", [401, 403])
+def test_revoked_token_is_drift_not_an_observation_error(monkeypatch, http_status):
+    """A 401/403 at verify is the token being dead, not Cloudflare being down:
+    it files the drift Finding and the run result records the credential as
+    drifted, on a SUCCEEDED CheckRun (the audit observed and judged fine).
+
+    What would make this fail: routing every CloudflareApiError into
+    {"status": "error"} — a revoked token (the STRONGER form of the inactive
+    drift) then hides inside the same FAILED CheckRun as a network blip, and
+    no Finding ever reaches the operator.
+    """
+    from urllib.error import HTTPError
+
+    from core.models import CheckRun
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    account = _account(zones=(("zid-a", "audit.example"),))
+    http = _http(monkeypatch)
+    http.routes[(DNS_TOKEN, "GET", VERIFY_PATH)] = HTTPError(
+        "u", http_status, "denied", {}, None,
+    )
+
+    run = audit_cloudflare_credentials()
+    assert run.status == CheckRun.Status.SUCCEEDED
+    finding = _findings().get()
+    assert finding.fingerprint == f"cf-token-scope:{account.pk}:dns"
+    assert str(http_status) in finding.body
+    assert "revoked" in finding.body
+    assert DNS_TOKEN not in finding.body
+    entry = run.results["accounts"][0]["credentials"]["dns"]
+    assert entry["drift"] == "revoked"
+
+
+@pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
+def test_api_5xx_is_an_observation_error_not_drift(monkeypatch):
+    """A 500 from Cloudflare is a failure to observe: FAILED CheckRun, no
+    Finding — the audit reports that it could not see, never a guessed drift.
+
+    What would make this fail: treating every HTTP error as drift, so a
+    Cloudflare outage would file a false 'scope drift' P2 against every
+    account and train the operator to resolve-without-reading.
+    """
+    from urllib.error import HTTPError
+
+    from core.models import CheckRun
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    _account(zones=(("zid-a", "audit.example"),))
+    http = _http(monkeypatch)
+    http.routes[(DNS_TOKEN, "GET", VERIFY_PATH)] = HTTPError(
+        "u", 500, "boom", {}, None,
+    )
+
+    run = audit_cloudflare_credentials()
+    assert run.status == CheckRun.Status.FAILED
+    assert _findings().count() == 0
+    entry = run.results["accounts"][0]["credentials"]["dns"]
+    assert entry["status"] == "error"
+
+
+@pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
+def test_observe_token_refuses_the_global_key_shape_itself(monkeypatch):
+    """The exported shared helper is safe by construction: handed a
+    Global-API-Key credential directly, it refuses before any request.
+
+    What would make this fail: observe_token trusting its caller to have
+    shape-checked — a future consumer (Task 3/8) calling it with a raw vault
+    value would put the omnipotent key on the wire inside a Bearer header.
+    """
+    import providers.cloudflare as cloudflare
+
+    http = _http(monkeypatch)
+    global_key = json.dumps(
+        {"X-Auth-Key": "gk-direct-999", "X-Auth-Email": "op@example.com"}
+    )
+    with pytest.raises(cloudflare.CloudflareError):
+        cloudflare.observe_token(global_key)
+    assert http.requests == []
+
+
+@pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
 def test_edge_token_ref_is_audited_from_its_model_home(monkeypatch):
     """The edge ref on DnsAccount is a real audited credential (panel r2),
     judged against the same declared zones; its Phase-4 minimum is modelled
@@ -314,7 +395,10 @@ def test_audit_and_construction_share_one_verification_helper(monkeypatch):
     real = cloudflare.observe_token
 
     def spy(token, **kwargs):
-        calls.append(token)
+        # The audit hands observe_token the RAW vault bytes (the helper is
+        # safe by construction and shape-refuses/decodes itself); normalize
+        # for comparison against the registry's already-decoded pass.
+        calls.append(token.decode() if isinstance(token, bytes) else token)
         return real(token, **kwargs)
 
     monkeypatch.setattr(cloudflare, "observe_token", spy)

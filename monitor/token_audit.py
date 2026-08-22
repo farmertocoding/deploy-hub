@@ -86,6 +86,22 @@ def _audit_credential(account, role, ref, declared, *, timeout):
         # refuses and files its own Finding; the audit records the hole.
         return {"status": "no_secret", "detail": str(error)}
     except cloudflare.CloudflareApiError as error:
+        if error.status in (401, 403):
+            # Cloudflare itself rejected the credential: a revoked/deleted
+            # token — the stronger form of the inactive drift, never to be
+            # conflated with an outage the operator cannot act on.
+            _file_drift_finding(
+                account, role,
+                f"Cloudflare rejected the {role} token with HTTP "
+                f"{error.status} — the token was likely revoked or deleted; "
+                "the wall will refuse it at the next construction",
+            )
+            return {
+                "status": "rejected",
+                "drift": "revoked",
+                "http_status": error.status,
+            }
+        # 5xx / malformed success=false: the audit could not observe.
         return {"status": "error", "detail": str(error)}
     except cloudflare.CloudflareError as error:
         # refuse_global_api_key fired: the credential has the Global API Key
