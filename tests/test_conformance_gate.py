@@ -1543,6 +1543,56 @@ def test_t3_gate_not_derived_from_multipass_available_is_red(tmp_path):
         assert "multipass_available" in res.stdout, (label, res.stdout)
 
 
+def test_t3_gate_naming_multipass_available_without_a_derived_call_is_red(tmp_path):
+    """The gate derives from a CALL to multipass_available(), not from the name.
+
+    Review finding on Task 0: the red cases above would stay green if the
+    checker regressed to a substring match on "multipass_available" — every
+    condition here contains that string and none of them recomputes the host
+    truth, so each must stay red. A string literal is data, an uncalled name
+    is a reference nobody evaluates, a suffixed variable is a constant with a
+    flattering name, and a call to something ELSE with the string as its
+    argument is the substring-matcher's blind spot exactly.
+    """
+    cases = {
+        "string-literal": (
+            "pytest.mark.skipif(bool('multipass_available'), reason='data')"),
+        "uncalled-name": (
+            "pytest.mark.skipif(not multipass_available, reason='never called')"),
+        "suffixed-variable": (
+            "pytest.mark.skipif(not multipass_available_flag, reason='constant')"),
+        "string-arg-to-other-call": (
+            "pytest.mark.skipif(os.environ.get('multipass_available') is None, "
+            "reason='env keyed on the name')"),
+    }
+    for label, gate in cases.items():
+        src = (
+            "import os\n\n"
+            "import pytest\n\n"
+            "from tests.harness.multipass import multipass_available\n\n"
+            "multipass_available_flag = False\n\n"
+            f"pytestmark = [pytest.mark.t3, {gate}]\n\n\n"
+            "def test_live():\n"
+            "    assert True\n"
+        )
+        root = write_repo(
+            tmp_path / label,
+            reqs=[_req("FIX-DUE")],
+            tests_src={
+                "tests/test_ok.py": MARKED_TEST.format(rid="FIX-DUE", name="test_a"),
+                "tests/test_name_only.py": src,
+            },
+            outcomes={"tests/test_ok.py::test_a": "passed",
+                      "tests/test_name_only.py::test_live": "skipped"},
+        )
+        res = run_check(root)
+        assert res.returncode != 0, (
+            f"{label}: a skipif that only NAMES multipass_available (no derived "
+            f"call) passed the gate — a substring matcher would do this:\n{res.stdout}")
+        assert "tests/test_name_only.py::test_live" in res.stdout, (label, res.stdout)
+        assert "does not derive" in res.stdout, (label, res.stdout)
+
+
 def test_host_gated_t3_mark_is_accepted(tmp_path):
     """The honest shapes stay green: a decorator skipif derived from
     `multipass_available()`, and the same gate carried by module pytestmark.
