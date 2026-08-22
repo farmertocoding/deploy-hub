@@ -1,56 +1,226 @@
-// Findings (§F1/§F2): the inbox is Task 13's (it needs the Finding model); this
-// screen is its frame — the designed empty state, and the FindingDetail contract the
-// Sites cert-refusal link and every alert deep link land on. FindingDetail is one of
-// §F6's three phone-width screens: an alert at 2 a.m. opens THIS, never the map.
-import React from "react";
-import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
+// Findings inbox (§F2): one attention queue over /api/v1/findings/. Filters are
+// the contract (state / severity / entity). Severity chips carry an icon AND a
+// label. Accept-risk will not POST without a reason (grey chip shows why). Ack
+// does not drop the row. FindingDetail stays a §F6 phone-width screen and
+// renders the §6.6 what / why / exact-fix fields (API: title / body / fix_action;
+// the 12a frame still accepts detail / fix_hint / site).
+import React, { useEffect, useState } from "react";
+import { api } from "../api.js";
+import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
+
+function filterFromSearch() {
+  try {
+    const entity = new URLSearchParams(window.location.search || "").get("entity");
+    return entity ? { entity } : {};
+  } catch {
+    return {};
+  }
+}
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
-// finding = { id, title, severity, site, detail, fix_hint } — Task 13's serializer
-// shape. Server prose can quote repo/site content, so it takes the display sanitizer
-// like every repo-controlled string on the readiness screen (dom-bidi-display).
-export function FindingDetail({ finding, onBack }) {
+const SEVERITY = {
+  p1: { icon: "⛔", label: "P1" },
+  p2: { icon: "⚠", label: "P2" },
+  p3: { icon: "ℹ", label: "P3" },
+};
+
+export function reasonIsValid(reason) {
+  return Boolean((reason || "").trim());
+}
+
+export async function acceptRisk(id, reason) {
+  if (!reasonIsValid(reason)) {
+    return {
+      status: 400,
+      data: { errors: { reason: [{
+        code: "required",
+        message: "Accept-risk requires a one-line reason (§F2).",
+      }] } },
+    };
+  }
+  return api(`v1/findings/${id}/transition/`, {
+    action: "accept_risk", reason: (reason || "").trim(),
+  });
+}
+
+export async function ackFinding(id) {
+  return api(`v1/findings/${id}/transition/`, { action: "ack" });
+}
+
+export function SeverityChip({ severity }) {
+  const row = SEVERITY[severity] || { icon: "●", label: String(severity || "").toUpperCase() };
+  return (
+    <span aria-label={`severity ${row.label}`}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      {row.icon} {row.label}
+    </span>
+  );
+}
+
+export function StateChip({ finding }) {
+  if (finding.state === "accepted") {
+    return (
+      <span style={{ background: "#6e7681", color: "#e6e6e6",
+        padding: "2px 8px", borderRadius: 12 }}>
+        accepted — {safeText(finding.accepted_reason)}
+      </span>
+    );
+  }
+  return <span>{finding.state}</span>;
+}
+
+export function AcceptRiskForm({ finding, onAccept }) {
+  const [reason, setReason] = useState("");
+  const ok = reasonIsValid(reason);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+      <input aria-label="Accept-risk reason" value={reason} style={box}
+        placeholder="one-line reason"
+        onChange={(e) => setReason(e.target.value)} />
+      <button style={box} disabled={!ok}
+        onClick={() => ok && onAccept?.(finding.id, reason)}>
+        Accept risk
+      </button>
+    </div>
+  );
+}
+
+export function FindingDetail({ finding, onBack, onAck, onAccept }) {
+  const site = finding.site || finding.entity || "";
+  const why = finding.detail || finding.body || "";
+  const fix = finding.fix_hint || finding.fix_action || "";
+  const canAck = finding.state === "open";
+  const canAccept = finding.state === "open" || finding.state === "acked";
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%", display: "grid", gap: 8 }}>
       <h3 style={{ margin: 0 }}>{safeText(finding.title)}</h3>
       <div style={{ color: "#8b949e" }}>
-        {finding.severity}{finding.site ? ` · ${finding.site}` : ""}</div>
+        <SeverityChip severity={finding.severity} />
+        {site ? ` · ${site}` : ""}
+        {finding.state ? <>{" · "}<StateChip finding={finding} /></> : null}
+      </div>
       <p style={{ margin: 0, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
-        {safeText(finding.detail)}</p>
-      {finding.fix_hint && (
+        {safeText(why)}</p>
+      {fix && (
         <p style={{ margin: 0, color: "#8b949e", whiteSpace: "pre-line",
-          overflowWrap: "anywhere" }}>Fix: {safeText(finding.fix_hint)}</p>
+          overflowWrap: "anywhere" }}>Fix: {safeText(fix)}</p>
       )}
+      {canAck && (
+        <div>
+          <button style={box} onClick={() => onAck?.(finding.id)}>Ack</button>
+        </div>
+      )}
+      {canAccept && <AcceptRiskForm finding={finding} onAccept={onAccept} />}
       <div><button style={box} onClick={onBack}>Back to findings</button></div>
     </div>
   );
 }
 
-export function FindingsView({ phase, findings = [], onError, onNav }) {
+export function FindingsView({
+  phase, findings = [], filter = {}, onFilter, onError, onNav, onAck, onAccept,
+}) {
   if (phase === "loading") return <LoadingLine what="findings" />;
   if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
   if (!findings.length)
     return <EmptyState
       sentence="No findings yet — scans and monitors file what they refuse or notice here."
       button="Open Home and scan a project" onAction={() => onNav("home")} />;
-  return <div style={{ padding: 16 }}>{findings.map((f) => (
-    <div key={f.id} style={{ ...box, marginBottom: 8 }}>{safeText(f.title)}</div>
-  ))}</div>;
+  const rows = findings.filter((f) => {
+    if (filter.state && f.state !== filter.state) return false;
+    if (filter.severity && f.severity !== filter.severity) return false;
+    if (filter.entity && f.entity !== filter.entity) return false;
+    return true;
+  });
+  const entities = [...new Set(findings.map((f) => f.entity).filter(Boolean))].sort();
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <label>severity{" "}
+          <select aria-label="Filter by severity" value={filter.severity || ""}
+            onChange={(e) => onFilter?.({ ...filter, severity: e.target.value || undefined })}>
+            <option value="">all</option>
+            <option value="p1">p1</option>
+            <option value="p2">p2</option>
+            <option value="p3">p3</option>
+          </select>
+        </label>
+        <label>state{" "}
+          <select aria-label="Filter by state" value={filter.state || ""}
+            onChange={(e) => onFilter?.({ ...filter, state: e.target.value || undefined })}>
+            <option value="">all</option>
+            <option value="open">open</option>
+            <option value="acked">acked</option>
+            <option value="accepted">accepted</option>
+            <option value="resolved">resolved</option>
+          </select>
+        </label>
+        <label>entity{" "}
+          <select aria-label="Filter by entity" value={filter.entity || ""}
+            onChange={(e) => onFilter?.({ ...filter, entity: e.target.value || undefined })}>
+            <option value="">all</option>
+            {entities.map((entity) => (
+              <option key={entity} value={entity}>{entity}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {rows.map((f) => (
+        <div key={f.id} style={{ ...box, marginBottom: 8 }}>
+          <SeverityChip severity={f.severity} />{" "}
+          <StateChip finding={f} />{" "}
+          <a href={routeHash("findings", f.id)}
+            onClick={(e) => { e.preventDefault(); onNav?.("findings", f.id); }}>
+            <strong>{safeText(f.title)}</strong>
+          </a>
+          {(f.state === "open") && (
+            <div style={{ marginTop: 8 }}>
+              <button style={box} onClick={() => onAck?.(f.id)}>Ack</button>
+            </div>
+          )}
+          {(f.state === "open" || f.state === "acked") && (
+            <AcceptRiskForm finding={f} onAccept={onAccept} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function Findings({ route, onNav }) {
-  // The inbox fetch lands with Task 13's Finding model; the frame is honest about
-  // holding nothing until then — including for a deep link to a finding it cannot
-  // fetch yet, which must say so rather than render a blank detail.
-  if (route?.id)
+  const [bundle, setBundle] = useState(undefined);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState(filterFromSearch);
+  const load = () => {
+    setError("");
+    setBundle(undefined);
+    const path = route?.id ? `v1/findings/${route.id}/` : "v1/findings/";
+    api(path).then(({ status, data }) => {
+      if (status === 200) setBundle(data);
+      else setError(data.detail || `Could not load findings (HTTP ${status})`);
+    });
+  };
+  useEffect(load, [route?.id]);
+
+  const phase = error ? "error" : bundle === undefined ? "loading" : "live";
+  const onError = { text: error, retry: load };
+  if (route?.id) {
+    if (phase === "loading") return <LoadingLine what="finding" />;
+    if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
+    if (bundle?.data)
+      return <FindingDetail finding={bundle.data} onBack={() => onNav("findings")}
+        onAck={(id) => ackFinding(id).then(load)}
+        onAccept={(id, reason) => acceptRisk(id, reason).then(load)} />;
     return (
       <div style={{ padding: 16 }}>
-        <p style={{ color: "#8b949e" }}>Finding {route.id} — the findings inbox lands
-          with the Finding model (Task 13); nothing to show yet.</p>
+        <p style={{ color: "#8b949e" }}>Finding {route.id} was not found.</p>
         <button style={box} onClick={() => onNav("findings")}>Back to findings</button>
       </div>
     );
-  return <FindingsView phase="live" findings={[]} onNav={onNav} />;
+  }
+  return <FindingsView phase={phase} findings={bundle?.data || []} filter={filter}
+    onFilter={setFilter} onError={onError} onNav={onNav}
+    onAck={(id) => ackFinding(id).then(load)}
+    onAccept={(id, reason) => acceptRisk(id, reason).then(load)} />;
 }

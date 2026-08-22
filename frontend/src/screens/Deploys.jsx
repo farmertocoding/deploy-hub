@@ -8,19 +8,36 @@ import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
-// deploy = { site, version, state, headline, steps: [{name, state}] } — Task 13's
-// serializer shape; typed here as the interface the phone-width pin renders against.
+// The nine §D2 names, in seq order. A payload may send a subset; the stepper
+// still draws every step so a failure at N is visible against the rest.
+export const DEPLOY_STEP_NAMES = [
+  "build", "ship", "migrate", "start_green", "health_check",
+  "dns", "route_tls", "smoke_test", "cutover",
+];
+
+// deploy = { site, version, state, headline, steps, actions } — headline is
+// the §F4 impact line from deploys/failure_impact.py (the one table).
 export function DeployStatus({ deploy }) {
+  const byName = Object.fromEntries((deploy.steps || []).map((s) => [s.name, s]));
+  const steps = DEPLOY_STEP_NAMES.map((name) => byName[name] || { name, state: "pending" });
+  const failed = deploy.state === "failed"
+    || steps.some((s) => (s.state || s.status) === "failed");
+  const impact = deploy.headline || deploy.impact;
+  const actions = (deploy.actions || []).slice(0, 3);
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%", display: "grid", gap: 8 }}>
       <h3 style={{ margin: 0 }}>{deploy.site} — v{deploy.version}</h3>
-      {deploy.headline && <p style={{ margin: 0 }}>{deploy.headline}</p>}
+      {failed && impact && <p role="alert" style={{ margin: 0 }}>{impact}</p>}
+      {!failed && deploy.headline && <p style={{ margin: 0 }}>{deploy.headline}</p>}
       <div style={{ color: "#8b949e" }}>{deploy.state}</div>
       <ol style={{ margin: 0, paddingLeft: "1.4em" }}>
-        {(deploy.steps || []).map((s) => (
-          <li key={s.name}>{s.name} — {s.state}</li>
+        {steps.map((s) => (
+          <li key={s.name}>{s.name} — {s.state || s.status}</li>
         ))}
       </ol>
+      {failed && actions.map((a) => (
+        <button key={a.id} style={box}>{a.label} — {a.does}</button>
+      ))}
     </div>
   );
 }

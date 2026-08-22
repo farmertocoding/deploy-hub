@@ -33,6 +33,24 @@ export function ManifestLine({ site }) {
 // The unproxied-cert refusal as a SITE STATE, not a buried log line: the pipeline
 // refused this site a certificate and said why, and the Finding carries the full
 // story — the link routes to the finding detail, never through the map (§F6).
+// Observed-state badges the §F8 seed paints: warming (elapsed/expected),
+// data-stale, single-instance, cert-expiring. Symbol + words, never colour.
+export function SiteObserved({ site }) {
+  if (!site) return null;
+  const bits = [];
+  if (site.observed === "warming" || site.warming) {
+    const elapsed = site.elapsed_s ?? site.elapsed;
+    const expected = site.expected_s ?? site.expected;
+    bits.push(`warming ${elapsed}s elapsed / ${expected}s expected`);
+  }
+  if (site.badge === "data-stale" || site.data_stale || site.observed === "data-stale")
+    bits.push("data-stale");
+  if (site.single_instance || site.instances === 1) bits.push("single-instance");
+  if (site.cert_expiring) bits.push("cert expiring");
+  if (!bits.length) return null;
+  return <span>{bits.join(" · ")}</span>;
+}
+
 export function CertState({ site }) {
   if (!site.cert_refusal) return null;
   return (
@@ -55,6 +73,7 @@ export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () =
       <h3 style={{ margin: 0 }}>{site.name}{site.domain ? ` — ${site.domain}` : ""}</h3>
       <div style={{ color: "#8b949e" }}>project: {site.project}</div>
       <div><ManifestLine site={site} /></div>
+      <div><SiteObserved site={site} /></div>
       <CertState site={site} />
       {actions.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
