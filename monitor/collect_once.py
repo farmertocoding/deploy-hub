@@ -73,31 +73,44 @@ def _log_chunk(path, offset, expected_inode=0):
         st = os.stat(path)
         inode = st.st_ino
         start = offset
-        if expected_inode and inode != expected_inode:
-            start = 0  # rotated: a new inode is a new file, resume at byte 0
+        # Rotated: a new inode is a new file — resume at byte 0. Whatever the
+        # old file grew past `offset` before the roll is gone; flag it so the
+        # Hub records the discontinuity (§C4: a dropped window is a recorded
+        # fact, not silence).
+        rotated = bool(expected_inode) and inode != expected_inode
+        if rotated:
+            start = 0
         if start > st.st_size:
             start = 0  # truncated in place
         with open(path, "rb") as fh:
             fh.seek(start)
             if st.st_size - start <= CHUNK:
                 data = fh.read(CHUNK)
-                return {
+                chunk = {
                     "file": path,
                     "inode": inode,
                     "offset": fh.tell(),
                     "bytes": data.decode("utf-8", "replace"),
                 }
-            summary, new_off = _summarize(fh, start)
-        return {
-            "file": path,
-            "inode": inode,
-            "offset": new_off,
-            "bytes": "",
-            "sampled": True,
-            "summary": summary,
-        }
+            else:
+                summary, new_off = _summarize(fh, start)
+                chunk = {
+                    "file": path,
+                    "inode": inode,
+                    "offset": new_off,
+                    "bytes": "",
+                    "sampled": True,
+                    "summary": summary,
+                }
+        if rotated:
+            chunk["rotated"] = True
+        return chunk
     except OSError:
-        return {"file": path, "inode": 0, "offset": 0, "bytes": ""}
+        # Echo the caller's cursor: a transient stat/open failure (mid-rotation
+        # rename, permission blip) must not zero the stored offset — the next
+        # healthy pull would re-read the whole file as a "new" (inode, offset)
+        # window and double-count every line into existing minute rows.
+        return {"file": path, "inode": expected_inode, "offset": offset, "bytes": ""}
 
 
 def _summarize(fh, start):

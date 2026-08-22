@@ -25,7 +25,7 @@ CURSOR_KEY = "traffic_cursor"
 def ingest(target, payload):
     """Land minute TrafficStat rows and publish the topics for this pull.
 
-    Returns {"ok", "rows", "malformed", "unmatched", "deduped"}. Publishes
+    Returns {"ok", "rows", "malformed", "unmatched", "rotated", "deduped"}. Publishes
     ``site.{id}.traffic`` per touched row and ``host.{id}.metrics`` when the
     payload carries metrics. Never raises on bad log content.
     """
@@ -34,7 +34,7 @@ def ingest(target, payload):
     stored = getattr(target, "collect_payload", None)
     if isinstance(stored, dict) and stored.get(CURSOR_KEY) == cursor:
         return {"ok": True, "rows": 0, "malformed": 0, "unmatched": 0,
-                "deduped": True}
+                "rotated": False, "deduped": True}
 
     fallback = _payload_minute(payload)
     if chunk.get("sampled"):
@@ -42,11 +42,19 @@ def ingest(target, payload):
     else:
         agg, malformed, unmatched = _from_lines(chunk, fallback)
 
+    # Rotation dropped the old file's un-drained tail (§C4): the gap minute's
+    # counts are not exact, so its rows carry sampled=True — the dropped
+    # window is a recorded fact, not silence.
+    rotated = bool(chunk.get("rotated"))
+    if rotated:
+        for data in agg.values():
+            data["sampled"] = True
+
     rows = _land(agg)
     _publish_metrics(target, payload)
     _remember_cursor(target, cursor)
     return {"ok": True, "rows": rows, "malformed": malformed,
-            "unmatched": unmatched, "deduped": False}
+            "unmatched": unmatched, "rotated": rotated, "deduped": False}
 
 
 def _int(raw):

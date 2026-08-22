@@ -228,6 +228,85 @@ def test_rotated_inode_resets_offset_without_losing_the_new_file(tmp_path):
 
 
 @pytest.mark.req("MON-C4-LOG-BACKPRESSURE")
+@pytest.mark.django_db
+def test_oserror_pull_keeps_the_stored_cursor_and_never_double_counts(tmp_path):
+    """A transient stat/open failure must not zero the cursor.
+
+    What would make this fail: the OSError branch returning {"inode": 0,
+    "offset": 0} and the collector persisting it — the next healthy pull
+    re-reads the whole file as a "new" (inode, offset) window and re-lands
+    every line into the existing minute rows, unflagged. With the Caddy
+    roller shipping alongside, the rename race that triggers this is real.
+    """
+    from core.models import TrafficStat
+    from monitor.collector import _persist_collect
+    from monitor.traffic import ingest
+
+    target, site = _world("oserr")
+    log = tmp_path / "access.log"
+    log.write_text(_line() + "\n" + _line(404) + "\n", encoding="utf-8")
+
+    first, _ = _run(log, target_id=target.pk)
+    _persist_collect(target, first)
+    ingest(target, first)
+    inode, offset = first["log_chunk"]["inode"], first["log_chunk"]["offset"]
+    assert TrafficStat.objects.get(site=site).requests == 2
+
+    # The file is momentarily unreadable (mid-rotation rename, permission blip).
+    errored, _ = _run(tmp_path / "gone.log", offset=offset, inode=inode,
+                      target_id=target.pk)
+    chunk = errored["log_chunk"]
+    assert chunk["inode"] == inode      # echoed back, not zeroed
+    assert chunk["offset"] == offset
+    assert chunk["bytes"] == ""
+    _persist_collect(target, errored)
+    ingest(target, errored)
+    target.refresh_from_db()
+    assert target.collect_log_inode == inode
+    assert target.collect_log_offset == offset
+
+    # The next healthy pull resumes at the stored cursor: nothing lands twice.
+    healthy, _ = _run(log, offset=target.collect_log_offset,
+                      inode=target.collect_log_inode, target_id=target.pk)
+    assert healthy["log_chunk"]["bytes"] == ""
+    _persist_collect(target, healthy)
+    ingest(target, healthy)
+    assert TrafficStat.objects.get(site=site).requests == 2  # not 4
+
+
+@pytest.mark.req("MON-C4-LOG-BACKPRESSURE")
+@pytest.mark.django_db
+def test_rotated_pull_is_a_recorded_fact_in_trafficstat(tmp_path):
+    """Rotation drops the old file's un-drained tail — that window is recorded.
+
+    What would make this fail: the inode reset shipping the new file with no
+    discontinuity marker, so the gap minute's rows read as exact counts.
+    """
+    from core.models import TrafficStat
+    from monitor.traffic import ingest
+
+    target, site = _world("rot-fact")
+    log = tmp_path / "access.log"
+    log.write_text(_line() + "\n", encoding="utf-8")
+    before, _ = _run(log, target_id=target.pk)
+    old = before["log_chunk"]
+    assert "rotated" not in old  # a plain pull carries no discontinuity flag
+
+    log.unlink()  # roll: whatever the old file grew past `offset` is gone
+    log.write_text(_line(200) + "\n" + _line(404) + "\n", encoding="utf-8")
+    after, _ = _run(log, offset=old["offset"], inode=old["inode"],
+                    target_id=target.pk)
+    chunk = after["log_chunk"]
+    assert chunk["rotated"] is True
+
+    result = ingest(target, _payload(target, chunk))
+    assert result["rotated"] is True
+    row = TrafficStat.objects.get(site=site)
+    assert row.requests == 2
+    assert row.sampled is True  # the dropped window is a recorded fact, not silence
+
+
+@pytest.mark.req("MON-C4-LOG-BACKPRESSURE")
 def test_catalog_rotation_entry_has_check_fix_rollback_and_version(tmp_path):
     """Caddy's native roller is a versioned catalog entry; logrotate stays backstop.
 

@@ -164,3 +164,36 @@ def test_ingest_publishes_to_the_site_traffic_topic(monkeypatch):
     assert authorize_topic(user, f"host.{target.pk}.metrics")
     assert not authorize_topic(SimpleNamespace(is_authenticated=False),
                                f"host.{target.pk}.metrics")
+
+
+@pytest.mark.req("MON-TRAFFIC-INGEST")
+def test_ready_wires_core_events_through_realtime_publish(monkeypatch):
+    """RealtimeConfig.ready() routes core.events through realtime.publish, live.
+
+    What would make this fail: a second module-level publisher slot the
+    registration misses, a ready() that stops registering, or a port that
+    silently no-ops when unwired instead of failing loud (boot-order bug).
+    """
+    from django.apps import apps as django_apps
+
+    import core.events as events
+    import realtime.publish as rt
+
+    monkeypatch.setattr(events, "_stream", None)
+    with pytest.raises(RuntimeError, match="not wired"):
+        events.publish("demo.wiring.log", {"n": 0})
+    with pytest.raises(RuntimeError, match="not wired"):
+        events.current_seq("demo.wiring.log")
+
+    django_apps.get_app_config("realtime").ready()
+    assert events._stream == (rt.publish, rt.current_seq)  # the real seam, unpatched
+
+    before = rt.current_seq("demo.wiring.log")
+    seq = events.publish("demo.wiring.log", {"n": 1})
+    assert seq == before + 1
+    assert events.current_seq("demo.wiring.log") == seq == rt.current_seq("demo.wiring.log")
+
+    # ONE slot serves both consumers: findings_seq reads through the same port.
+    from core.findings import FINDINGS_TOPIC, findings_seq
+
+    assert findings_seq() == rt.current_seq(FINDINGS_TOPIC)

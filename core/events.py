@@ -1,28 +1,38 @@
-"""The publish seam product apps are allowed to hold (§D7, ARCH-V6).
+"""The ONE event-stream port product apps hold (§D7 · §F2 D-045 · §C4).
 
-`realtime.publish.publish` is the only event API producers need — but the
-import-rule gate walks the first-party graph at package granularity, and
-`realtime` (consumers.py) legitimately imports `scanner` for outbound-frame
-sanitization. A `monitor -> realtime` (or `core -> realtime`) import line
-would therefore read as a monitor/core -> scanner edge, which ARCH-V6 forbids.
-
-So the dependency is inverted: this module never mentions realtime; realtime's
-AppConfig.ready() registers the real publisher here at startup, and producers
-in monitor/ (traffic, later alerts) call `core.events.publish`. Before apps
-are ready there is nothing to publish to, so the forwarder is a no-op then.
+`realtime.publish` owns publish()/current_seq() — but core and monitor may not
+import the realtime package: it reaches scanner via consumers.py's wire
+escaping (R19-ARCH-1), and the ARCH-V6 gates walk the first-party import graph
+at package granularity, keeping core and monitor scanner-free. So the
+dependency points the only legal direction: realtime/apps.py::ready() calls
+register_stream(publish, current_seq) once at startup, and every producer —
+core.findings filing/transitioning, monitor.traffic landing TrafficStat rows —
+calls through this module. There is exactly one slot: a second module-level
+publisher (an earlier core.findings held its own) is how the two consumers
+drift. Publishing or reading seq before the wiring is a boot-order bug and
+fails loud rather than dropping events silently.
 """
 
-_publisher = None
+_stream = None  # (publish_fn, current_seq_fn)
 
 
-def set_publisher(fn):
+def register_stream(publish_fn, current_seq_fn):
     """Called once from realtime.apps.RealtimeConfig.ready()."""
-    global _publisher
-    _publisher = fn
+    global _stream
+    _stream = (publish_fn, current_seq_fn)
+
+
+def _require():
+    if _stream is None:
+        raise RuntimeError(
+            "event stream not wired — realtime.apps.RealtimeConfig.ready() "
+            "must call core.events.register_stream()")
+    return _stream
 
 
 def publish(topic, event, history=False):
-    """Forward to the registered realtime publisher; no-op before apps.ready()."""
-    if _publisher is None:
-        return None
-    return _publisher(topic, event, history=history)
+    return _require()[0](topic, event, history=history)
+
+
+def current_seq(topic):
+    return _require()[1](topic)
