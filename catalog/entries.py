@@ -118,6 +118,31 @@ CADDY = CatalogEntry(
     rollback=["systemctl", "disable", "--now", "caddy"],
 )
 
+# Caddy's native roller (§C4): roll_size 100MiB, roll_keep 5 — target disk is
+# bounded no matter what the Hub does. Validate-first like sshd-dropin; the
+# logrotate entry above stays the backstop.
+CADDY_LOG_ROLL = CatalogEntry(
+    id="caddy-log-roll",
+    version=1,
+    check=["grep", "-q", "roll_size 100MiB", "/etc/caddy/caddy-log-roll.caddy"],
+    fix=[
+        [
+            "caddy", "validate", "--adapter", "caddyfile", "--config",
+            "/usr/local/share/hub-catalog/caddy-log-roll.caddy",
+        ],
+        [
+            "install", "-m", "0644",
+            "/usr/local/share/hub-catalog/caddy-log-roll.caddy",
+            "/etc/caddy/caddy-log-roll.caddy",
+        ],
+        ["systemctl", "reload", "caddy"],
+    ],
+    rollback=[
+        ["rm", "-f", "/etc/caddy/caddy-log-roll.caddy"],
+        ["systemctl", "reload", "caddy"],
+    ],
+)
+
 CATALOG: tuple[CatalogEntry, ...] = (
     NTP_CHRONY,
     LOG_ROTATION,
@@ -128,6 +153,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
     UFW_POSTURE_INTAKE,
     FAIL2BAN_IGNOREIP,
     CADDY,
+    CADDY_LOG_ROLL,
 )
 
 ENTRIES = {entry.id: entry for entry in CATALOG}

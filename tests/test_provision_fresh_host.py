@@ -105,6 +105,7 @@ def test_pre_hardened_empty_host_is_allowed_and_imports_catalog_versions():
         "ufw-posture-target": 1,
         "fail2ban-ignoreip": 5,
         "caddy": 1,
+        "caddy-log-roll": 1,
     }
     assert "ufw-posture-hub" not in rows
     assert "ufw-posture-intake" not in rows

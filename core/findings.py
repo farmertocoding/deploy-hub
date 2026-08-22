@@ -16,36 +16,21 @@ after resolve would be the queue lying.
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from . import events
 from .audit import audit
 from .models import Finding
 
 FINDINGS_TOPIC = "findings"
 
-# The stream port. core may not import realtime — realtime imports scanner for
-# its wire escaping (R19-ARCH-1), and the ARCH-V6 gates keep core and monitor
-# scanner-free — so the dependency points the only legal direction:
-# realtime/apps.py::ready() calls register_stream(publish, current_seq) at
-# startup. Filing or transitioning before that wiring is a boot-order bug and
-# fails loud rather than dropping events silently.
-_stream = None
-
-
-def register_stream(publish_fn, current_seq_fn):
-    global _stream
-    _stream = (publish_fn, current_seq_fn)
+# The stream port lives in core.events — ONE module-level slot for every
+# producer (findings here, traffic in monitor/), wired once by
+# realtime/apps.py::ready() and fail-loud before that. This module used to
+# hold its own second slot; two slots is how two consumers drift.
 
 
 def findings_seq():
     """Current seq of the `findings` topic — the {seq, data} snapshot half (§D7)."""
-    return _require_stream()[1](FINDINGS_TOPIC)
-
-
-def _require_stream():
-    if _stream is None:
-        raise RuntimeError(
-            "findings stream not wired — realtime.apps.RealtimeConfig.ready() "
-            "must call core.findings.register_stream()")
-    return _stream
+    return events.current_seq(FINDINGS_TOPIC)
 
 # Copy fields the §6.6 contract requires non-blank at filing time.
 _COPY_FIELDS = ("title", "body", "fix_action")
@@ -81,7 +66,7 @@ def finding_event(row, action):
 
 
 def _publish(row, action):
-    _require_stream()[0](FINDINGS_TOPIC, finding_event(row, action))
+    events.publish(FINDINGS_TOPIC, finding_event(row, action))
 
 
 def finding(source_engine, fingerprint, **fields):

@@ -11,6 +11,8 @@ ALLOWED_PREFIXES = (
     "site.",       # site.{id}.status (warming, data-stale, recreate-down)
     "deploy.",     # deploy.{id}.status (named §D2 step failure)
     "findings",    # the one attention stream (§F2, D-038) — canonical since phase 3
+    "host.",       # host.{id}.metrics (collector load/mem/disk, §C4)
+                   # site.{id}.traffic (minute TrafficStat rows, §C4) rides "site."
 )
 
 # D-045: `findings` is canonical; the Phase-0 `alerts` topic stays authorized

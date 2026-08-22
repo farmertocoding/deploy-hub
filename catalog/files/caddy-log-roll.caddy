@@ -1,0 +1,14 @@
+# hub-catalog: caddy-log-roll — Caddy's native roller bounds the access log on
+# the target no matter what the Hub does (§C4): an unrotated log during a spike
+# plus a Hub outage must not let an attacker fill the disk via the monitoring
+# system. logrotate (catalog entry log-rotation) stays the backstop.
+{
+	log access {
+		output file /var/log/caddy/access.log {
+			roll_size 100MiB
+			roll_keep 5
+		}
+		format json
+		include http.log.access
+	}
+}
