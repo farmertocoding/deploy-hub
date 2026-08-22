@@ -17,9 +17,10 @@ def _target_prereqs(target):
     return set(match.group(1).replace("\\", " ").split()) if match else set()
 
 
-def test_review_round_prereqs_exclude_test_t3_and_conformance_2_5():
-    """What would make this fail: adding test-t3 or conformance-2.5 to review-round,
-    which would pull Multipass into the T1 Cloud Agent (D-022 / D-023).
+def test_review_round_prereqs_exclude_test_t3_and_all_tiers_conformance():
+    """What would make this fail: adding test-t3 or the all-tiers conformance-3
+    (or a resurrected conformance-2.5) to review-round, which would pull
+    Multipass into the T1 Cloud Agent (D-022 / D-023).
     """
     prereqs = gates.review_round_prerequisites(REPO)
     assert "test" in prereqs
@@ -27,17 +28,21 @@ def test_review_round_prereqs_exclude_test_t3_and_conformance_2_5():
     assert "test-t3" not in prereqs, (
         "review-round must not require test-t3 (D-022 / D-023)"
     )
+    assert "conformance-3" not in prereqs, (
+        "review-round must not require conformance-3 (D-022 / D-023)"
+    )
     assert "conformance-2.5" not in prereqs, (
-        "review-round must not require conformance-2.5 (D-022 / D-023)"
+        "conformance-2.5 is deleted (phase-3 Task 0); it must not come back "
+        "as a review-round prerequisite"
     )
 
 
-def test_nightly_grades_one_all_tiers_session_feeding_conformance_2_5():
-    """Panel F2 ruling: nightly is ONE all-tiers pytest session (`test-all`,
-    bare `pytest -q`) followed by conformance-2.5 reading that session's
-    full_run report. Three narrowed sessions (test, test-t2, test-t3) each
-    left a full_run:false report the gate hard-refuses, so the old prereq
-    list could never exit 0 even when everything passed.
+def test_nightly_grades_one_all_tiers_session_feeding_conformance_3():
+    """Panel F2 ruling (2.5, carried to phase 3): nightly is ONE all-tiers
+    pytest session (`test-all`, bare `pytest -q`) followed by conformance-3
+    reading that session's full_run report. Three narrowed sessions (test,
+    test-t2, test-t3) each left a full_run:false report the gate hard-refuses,
+    so a narrowed prereq list could never exit 0 even when everything passed.
 
     `nightly` itself is a wrapper so a failed prereq still files a bundle.
     """
@@ -62,19 +67,19 @@ def test_nightly_grades_one_all_tiers_session_feeding_conformance_2_5():
         "log-scrub",
         "scripts-lint",
         "test-all",
-        "conformance-2.5",
+        "conformance-3",
     }, prereqs
     for narrowed in ("test", "test-t2", "test-t3"):
         assert narrowed not in prereqs, (
             f"nightly-gates runs the narrowed `{narrowed}` session — its "
-            f"run-report is full_run:false and conformance-2.5 refuses it"
+            f"run-report is full_run:false and conformance-3 refuses it"
         )
 
     # GNU make never runs a target's recipe when a prerequisite fails. The
     # public `nightly` target must therefore invoke the filer from its recipe
     # (or a helper that recipe calls), not list the gates as its own prereqs.
     assert "test-all" not in _target_prereqs("nightly")
-    assert "conformance-2.5" not in _target_prereqs("nightly")
+    assert "conformance-3" not in _target_prereqs("nightly")
     nightly_recipe = gates.recipe(REPO, "nightly")
     helper_text = ""
     helper = REPO / "scripts_dev" / "run_nightly.sh"
@@ -100,3 +105,42 @@ def test_test_target_markexpr_excludes_t2_and_t3():
     recipe = gates.recipe(REPO, "test")
     assert recipe, "Makefile has no `test` recipe"
     assert 'pytest -q -m "not t2 and not t3"' in recipe, recipe
+
+
+def test_review_round_conformance_is_phase_3_minus_live_tiers():
+    """The review-round gate grades phase 3 without the live tiers: t3
+    (Multipass) and t2 (docker) stay out so the T1 report is graded honestly
+    (D-024, D-029, panel F1 — all carried from 2.5 to phase 3 by Task 0).
+    """
+    recipe = gates.recipe(REPO, "conformance")
+    assert recipe, "Makefile has no `conformance` recipe"
+    assert "--phase 3" in recipe, recipe
+    assert "--phase 2.5" not in recipe, (
+        f"conformance still grades phase 2.5 — the phase-3 gate never arms:\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"review-round conformance must omit t3 (no Multipass on the T1 host):\n{recipe}")
+    assert "--exclude-tier t2" in recipe, (
+        f"review-round conformance must omit t2 (no docker on the T1 host):\n{recipe}")
+
+
+def test_nightly_gates_use_conformance_3():
+    """conformance-3 is the all-tiers phase-3 gate and nightly-gates runs it;
+    conformance-2.5 is deleted in the same change (2.5 is closed — grading it
+    forever would let phase-3 obligations rot ungraded on the nightly host).
+    """
+    targets = gates.makefile_targets(REPO)
+    assert "conformance-3" in targets, (
+        "Makefile must declare conformance-3 as the all-tiers phase-3 gate")
+    assert "conformance-2.5" not in targets, (
+        "conformance-2.5 must be deleted in the same change that adds "
+        "conformance-3 — two all-tiers gates is one gate nobody runs")
+
+    full = gates.recipe(REPO, "conformance-3")
+    assert "--phase 3" in full, full
+    assert "--exclude-tier" not in full, (
+        f"conformance-3 must grade every tier, not omit t2/t3:\n{full}")
+
+    prereqs = _target_prereqs("nightly-gates")
+    assert "conformance-3" in prereqs, (
+        f"nightly-gates must run conformance-3: {prereqs}")
+    assert "conformance-2.5" not in prereqs, prereqs

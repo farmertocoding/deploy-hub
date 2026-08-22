@@ -30,7 +30,7 @@
 #   tier:      t1|t2|t3 (default t1). D-024 + panel F1: tier:t2 / tier:t3 is verified
 #              only by a passed test carrying that tier's pytest mark.
 #              --exclude-tier t3 --exclude-tier t2 omit them from the due set
-#              (review-round); conformance-2.5 stays all-tiers.
+#              (review-round); conformance-3 stays all-tiers.
 schema_version: 1
 requirements:
   - id: P0-LOGIN
@@ -498,9 +498,13 @@ requirements:
     source: plan-addendum-2026-07-30.md §C4
     text_hash: sha256:54546eabfc1651075046dc639401c29cb09bdc2bfcb49eb212b6de49e1f3538d
     text: Caddy logs are rotated by catalog entry; log pulls have a byte cap with a sampled degrade mode.
+  # D-039 (panel ruling 3, 2-1): checklist → test. Neither this nor PROV-J7 had
+  # an honest gate to name and R4-9 forbids inventing one. text:/text_hash:
+  # untouched. Conditions ride the phase-3 tasks: a failed dead-man POST files
+  # its own Finding; the receiver's registration is a dated demo artifact.
   - id: MON-DEADMAN-EXTERNAL
     phase: 3
-    verify: checklist
+    verify: test
     source: alert-protocol.md §5
     text_hash: sha256:4d56b385d0500fafa1c518789ff088524c85475e2f00a6a9e4ea3b289cfc4ca5
     text: An external dead-man's switch receives a heartbeat after each completed probe cycle; a canary probe precedes any mass-outage declaration.
@@ -544,9 +548,12 @@ requirements:
     source: plan-addendum-2026-07-30.md §E6
     text_hash: sha256:e3b4c27253b89708b191c62032aba493919e2dc40926e0c8c7dc3c341a498f86
     text: The provisioner detects occupied ports 80/443 or non-fresh state and refuses with an explanation instead of proceeding.
+  # D-039: checklist → test (see MON-DEADMAN-EXTERNAL above). text: untouched.
+  # Task 15 sits on the may-slip line (D-044); if it slips, this id needs a
+  # waiver or a phase bump at exit — the D-020 precedent.
   - id: PROV-J7-COMPOSE-AWARE-ADOPT
     phase: 3
-    verify: checklist
+    verify: test
     source: claude/project-inventory.md cross-cutting finding 3 (J7)
     text: The adopt-existing-site flow understands compose stacks with sidecar processes (worker, beat, scheduler, one-shot migrate) and site-owned edge containers, not just single containers.
 
@@ -704,3 +711,223 @@ requirements:
       - conformance/demos/phase-2.5/
     text_hash: sha256:01883c57602ae356ca45ddda15b4b07f5bdd9445583c53b4ab7fe612b233e268
     text: The phase-2.5 harness demo is recorded under conformance/demos/phase-2.5.md from a local Multipass run or a dated host-without-multipass waiver.
+
+  # ── Phase 3 (docs/phase-3-design-note.md §3, Task 0 / D-032). The SEC-B2 and
+  # UX-F5 clause splits (D-035, D-040, SCAN-M4 shape): the full-text ids above
+  # keep their text:/text_hash: untouched and carry NO marker while a clause is
+  # unbuilt; the buildable clauses are the new phase-3 ids here and the unbuilt
+  # clauses are the two phase-4 ids. New phase-3 ids sit `uncovered` until their
+  # tasks land proofs — that ratchet is intended; do not waive them mid-phase.
+  - id: SEC-B2-NO-TOKEN-ON-TARGET
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §B2
+    text_hash: sha256:b5450f27ac6f53b51fc4824ff24c5559434cec8e3bca61df34ad32269de3d0b5
+    text: >
+      No DNS, edge, or Origin-CA credential ever reaches a target-bound
+      surface - proven by a scan of put() payloads, run() argv, env files and
+      env snapshots, Celery task kwargs, DeploymentArtifact bodies, generated
+      Caddy/Dockerfile text, and the recorded Transport call log (the
+      exfiltration clause of SEC-B2, D-035).
+  - id: TLS-B2-HUB-DNS01-UNPROXIED
+    phase: 4
+    verify: test
+    source: plan-addendum-2026-07-30.md §B2
+    text_hash: sha256:b5450f27ac6f53b51fc4824ff24c5559434cec8e3bca61df34ad32269de3d0b5
+    text: >
+      Unproxied public sites get certificates via Hub-central DNS-01 with
+      renewal owned by a Hub Beat job; until it is built the pipeline refuses
+      with a Finding plus a visible Sites-screen state, never a bare exception
+      (the unbuilt clause of SEC-B2, D-035).
+  - id: UX-F5-T2-T3-FRICTION
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §F5
+    text_hash: sha256:14f46f651559404d042c7f0f22e4e0c9c7cd1629b0c7eca3aa40632702dceb5f
+    text: >
+      Action tiers are one declarative table shared server and client - T2
+      disruptive-reversible actions confirm with a diff summary; T3 recovery
+      actions (rollback, restart, re-run check) are a single click with an
+      undo toast and can never be gated behind step-up or a hardware touch
+      (the buildable UX-F5 clauses, D-040).
+  - id: SEC-F5-T1-HARDWARE-TOUCH
+    phase: 4
+    verify: test
+    source: plan-addendum-2026-07-30.md §F5
+    text_hash: sha256:14f46f651559404d042c7f0f22e4e0c9c7cd1629b0c7eca3aa40632702dceb5f
+    text: >
+      T1 irreversible/credential-touching actions (target delete, key export,
+      KEK ops) require hardware touch plus type-the-name - lands with the
+      WebAuthn step-up work (the unbuilt UX-F5 clause, D-040; see
+      SEC-A2-WEBAUTHN-PHASE4).
+  - id: DNS-CF-PRODUCT-ADAPTER
+    phase: 3
+    verify: test
+    source: phase-3-design-note.md §1
+    text_hash: sha256:f0b3fbc76b9b80c505762379e6d69ff384068f4b5c3ca6e30257b404c31f657e
+    text: >
+      providers/cloudflare.py implements the pinned DnsProvider against a
+      DnsZone under a DnsAccount carrying three credential refs;
+      providers/registry.py::dns_provider_for(zone) is the only construction
+      path and enforces scope synchronously before the client is usable -
+      Bearer only, an active token verify, and a zone probe returning exactly
+      the one expected provider_zone_id; more zones means the client refuses
+      to exist (D-034, D-046).
+  - id: DNS-CF-T3-LIVE
+    phase: 3
+    verify: test
+    tier: t3
+    source: phase-3-design-note.md §4
+    text_hash: sha256:9bea7481d92c03ac0610fe19798f0a00ac5d2e57d8ffb5c4942dc58e66bf7b0f
+    text: >
+      The credentialed T3 leg drives the product Cloudflare adapter under
+      HUB_TEST_MODE against the allowlisted purpose=test zone and upserts a
+      real proxied record; an absent test-zone token is skipped-only plus a
+      dated waiver, never a T1-sibling green (D-034, D-043).
+  - id: TLS-B2-ORIGIN-CERT-PUSH
+    phase: 3
+    verify: test
+    tier: t2
+    source: phase-3-design-note.md §1
+    text_hash: sha256:f0b3fbc76b9b80c505762379e6d69ff384068f4b5c3ca6e30257b404c31f657e
+    text: >
+      Proxied sites get a Cloudflare Origin CA certificate issued Hub-side
+      with the private key stored in the vault before anything is pushed;
+      cert+key are written atomically through a 0700 root-owned tls dir as
+      0400 root:root, key/cert match and checksum verified after write, Caddy
+      reloaded, and a failed reload rolls back to the previous pair (D-035).
+  - id: TLS-V9-CERT-THRESHOLDS
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §V9
+    text_hash: sha256:d802e283b0470a32bbee0cdfa20d32580eb509f12a9d466690638ceff453bf23
+    text: >
+      Cert-expiry alerts use the reconciled V9 thresholds - uploaded 45d=P3,
+      21d=P2, 7d=P1; auto-renewed 7d=P2 (renewal is broken), 1d=P1 - enforced
+      by the cert-expiry-daily check writing CheckRun rows.
+  - id: ALERT-M3-PAGER-AUTH
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-08-02-review3.md §M3
+    text_hash: sha256:aba556fe74a005591688b8cfd5974bb6d5cc74349210c629faf5ea971fe3a6d4
+    text: >
+      Pager access is authenticated with distinct publisher identities - Hub,
+      healthchecks, and a per-target publish token issued at provisioning;
+      subscriber read access is its own protected-topic credential no publish
+      token can use; decommissioning a target revokes its publish token; push
+      bodies are minimized and scrubbed, break-glass text only in the email
+      copy, advisory-only (D-036).
+  - id: ALERT-RECOVERY-NOTICE
+    phase: 3
+    verify: test
+    source: alert-protocol.md §4
+    text_hash: sha256:4dd501ae5fe91f30d52556d38b87ce1c4f0c87d2344df62df52bb624d60ea683
+    text: >
+      Every opened alert sends the mandatory recovery notice when it closes
+      (close after 2 successes); ack stops repeats without resolving, and ack
+      is never resolve.
+  - id: ALERT-DELIVERY-BEHAVIORS
+    phase: 3
+    verify: test
+    source: alert-protocol.md §1
+    text_hash: sha256:c15a64dce5b36f4bf22ec4f1fd572fe3ca736988073ef278625ba337b3adfa58
+    text: >
+      Every delivery behaviour of the severities table has a named module and
+      Beat entry - hourly re-push of unacked P1s and the 24h UNACKED email on
+      alert-repeat-unacked, P2 grouping in monitor/antinoise.py, the 08:00 P3
+      digest and the weekly trend rollup in monitor/digest.py; a failed email
+      writes a Finding and never blocks the push path (D-037).
+  - id: ALERT-PAGER-DRILL
+    phase: 3
+    verify: test
+    source: alert-protocol.md §7
+    text_hash: sha256:29e458de4bd31b4b9744a42ee46d159b883cb776357b7f966cd342d362a7a552
+    text: >
+      The monthly pager drill is a Beat job writing CheckRun rows with due_at
+      seeded so find_missed works in prod; a skipped or missed pager drill
+      alerts like a down site, never a silence.
+  - id: MON-UPTIME-EVENTS
+    phase: 3
+    verify: test
+    source: phase-3-design-note.md §1
+    text_hash: sha256:f0b3fbc76b9b80c505762379e6d69ff384068f4b5c3ca6e30257b404c31f657e
+    text: >
+      UptimeEvent rows carry the transitions the hysteresis engine reads; the
+      dead-man ping fires only after a probe cycle completes every target and
+      a failed dead-man POST files its own Finding; the canary rule precedes
+      any mass-outage declaration and degrades to one Hub-egress-degraded P2;
+      mesh_only sites are probed Hub-to-tailnet over HTTP through the existing
+      seams, never a second per-minute SSH session.
+  - id: MON-TRAFFIC-INGEST
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §C4
+    text_hash: sha256:54546eabfc1651075046dc639401c29cb09bdc2bfcb49eb212b6de49e1f3538d
+    text: >
+      Minute TrafficStat rows land from the collector; over the per-pull byte
+      cap the on-host one-liner returns counts by status and top IPs, ingested
+      as a summary flagged sampled true.
+  - id: MON-C7-RETENTION
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §C7
+    text_hash: sha256:9db6992fcd57ce58059c22c57b599eed452d8c6f944818c238ccf84ae374e2bb
+    text: >
+      The retention janitor enforces the pinned C7 numbers with plain nightly
+      batched DELETEs - HostMetric raw 14d / hourly rollup 1y, UptimeEvent 90d
+      / daily rollup forever, TrafficStat minute 48h / hour 90d / day forever,
+      deploy logs to gzip after 30d, AuditEvent forever.
+  - id: UX-F1-IA-NAV
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §F1
+    text_hash: sha256:25bddf2237e098d7d0140026012b60ddfb0eec1ede97c953b12e851621fed7a9
+    text: >
+      Object-centric nav - Home is the map plus fleet cards as one composite
+      screen, with Sites, Targets, Deploys, Findings, Settings; the advisors
+      are tabs on their objects, never top-level pages.
+  - id: UX-F4-FAILURE-IMPACT
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §F4
+    text_hash: sha256:aa5d6f310ecf99467d4aec1550950a9ac3f9a1a07d03d50b4c32723508cf3ffa
+    text: >
+      A failed deployment shows an impact line first - old version still
+      serving versus site may be unreachable, with recreate-strategy rows
+      included - and at most three buttons (retry from step N, roll back,
+      abort and clean up), each saying what it will do.
+  - id: MAP-96-GRAPH-V1
+    phase: 3
+    verify: test
+    source: deploy-system-plan.md §9.6
+    text_hash: sha256:5524527edf560a79ec16f2203b440e5fcb9e9c16a337d2d308d7118bfa09fb28
+    text: >
+      Map v1 renders zones, hosts, containers, the Hub and the Cloudflare edge
+      from one map.graph snapshot/topic with solid public versus dashed mesh
+      edges and a list-view toggle; zone nodes are NetworkZone, never DnsZone,
+      and status is never colour-only (D-041).
+  - id: PROV-E6-ADOPT-TEMP-SUBDOMAIN
+    phase: 3
+    verify: test
+    source: plan-addendum-2026-07-30.md §E6
+    text_hash: sha256:e3b4c27253b89708b191c62032aba493919e2dc40926e0c8c7dc3c341a498f86
+    text: >
+      Adopt-existing-site deploys via the Hub to a temp subdomain, verifies,
+      migrates or points the DB, then flips real DNS and decommissions the old
+      path - never taking down the live manually-managed site during
+      enrollment (may slip to 3b with PROV-J7 under D-044; a slip needs a
+      waiver or a phase bump at exit).
+  - id: P3-DNS-MONITOR-DEMO
+    phase: 3
+    verify: demo
+    source: phase-3-design-note.md §4
+    demo:
+      - conformance/demos/phase-3.md
+      - conformance/demos/phase-3/
+    text_hash: sha256:9bea7481d92c03ac0610fe19798f0a00ac5d2e57d8ffb5c4942dc58e66bf7b0f
+    text: >
+      The phase-3 exit demo is recorded under conformance/demos/phase-3.md -
+      Cloudflare connect from Settings, proxied A record in the allowlisted
+      test zone, Origin cert push, the P1 open/ack/repeat/recover cycle,
+      grouped P2s, host-down suppression, the digest, map v1, dead-man and
+      canary, with the receiver registration as a dated artifact.

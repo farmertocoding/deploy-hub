@@ -82,6 +82,55 @@ def test_codeowners_matches_paths_yaml_for_every_literal_entry():
         f"(paths.yaml and CODEOWNERS have drifted): {missing}")
 
 
+def test_codeowners_entries_all_appear_in_paths_yaml():
+    """Custody parity is two-way (phase-3 Task 0; a 2.5 finding left it one-way).
+
+    The forward test above proves every paths.yaml entry has a CODEOWNERS
+    line. This is the reverse: every CODEOWNERS owners line must have a
+    paths.yaml counterpart, so a path someone makes human-merge-only in
+    CODEOWNERS alone cannot drift outside the sensitive-path check CI runs —
+    the two lists must name the same custody set, from either end.
+    """
+    patterns = _sensitive_patterns()
+    orphans = []
+    for line in _codeowners_lines():
+        entry = line.split()[0].lstrip("/")
+        if entry.endswith("/"):
+            # A directory line owns dir/**; its counterpart is any sensitive
+            # entry under that directory (`.github/` is satisfied by
+            # `.github/workflows/**`).
+            covered = any(p.startswith(entry) for p in patterns)
+        else:
+            covered = entry in patterns or any(
+                p.endswith("/**") and entry.startswith(p[:-2])
+                for p in patterns)
+        if not covered:
+            orphans.append(line)
+    assert orphans == [], (
+        "CODEOWNERS owners lines with no paths.yaml counterpart "
+        f"(custody parity is two-way): {orphans}")
+
+
+def test_phase_3_sensitive_modules_are_listed():
+    """Phase-3 custody set (Task 0): the pager publish path, the transcribed
+    alert rules table, the cert-material push, and compose-aware adopt are all
+    deletion/credential/edge-adjacent — each needs its paths.yaml entry AND its
+    CODEOWNERS owners line before any task lands code there.
+    """
+    patterns = _sensitive_patterns()
+    owners_lines = _codeowners_lines()
+    for entry in (
+        "monitor/pager.py",
+        "monitor/alert_rules.py",
+        "deploys/certs.py",
+        "provision/adopt.py",
+    ):
+        assert entry in patterns, (
+            f"{entry} is not a sensitive-path entry in conformance/paths.yaml")
+        assert f"/{entry} @farmertocoding" in owners_lines, (
+            f"CODEOWNERS has no owners line `/{entry} @farmertocoding`")
+
+
 def test_codeowners_lists_core_ssh_py():
     """CODEOWNERS must list `/core/ssh.py @farmertocoding` as an owners line.
     Comments are skipped so a mention in a comment does not satisfy this."""
