@@ -6,6 +6,10 @@ class MonitorConfig(AppConfig):
     name = "monitor"
 
     def ready(self):
+        # One after_raise seam: antinoise installs over monitor.alerts.after_raise.
+        from monitor import antinoise
+        antinoise._install_hook()
+
         from django.db.models.signals import post_delete, post_save
 
         from core.models import NetworkZone, Site, SiteInstance, Target

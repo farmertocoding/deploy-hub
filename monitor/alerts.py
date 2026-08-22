@@ -1,29 +1,20 @@
 """raise_alert — classify, fingerprint, file through finding() (D-037/D-038).
 
-Hand-off to the anti-noise engine is a named pass-through. Task 6 implements
-hysteresis/flap/storm; until then after_raise is identity, and
-monitor.antinoise.after_raise is imported behind a try/guard when that
-module exists. antinoise.observe(fingerprint, ok) is Task 6's API and is
-not called from here with invented arguments.
+after_raise is the one hand-off seam. monitor.antinoise installs its hook
+over this name at import / AppConfig.ready(). observe(fingerprint, ok) is
+the probe-level hysteresis API and is not called from here.
 """
 from core.findings import finding
 from monitor.alert_rules import classify
 
 
 def after_raise(row):
-    """Identity hook. Task 6 replaces this or lands antinoise.after_raise."""
+    """Identity until monitor.antinoise replaces this with its hook."""
     return row
 
 
 def _handoff(row):
-    try:
-        from monitor import antinoise
-    except ImportError:
-        antinoise = None
-    hook = getattr(antinoise, "after_raise", None) if antinoise else None
-    if hook is None:
-        hook = after_raise
-    result = hook(row)
+    result = after_raise(row)
     return row if result is None else result
 
 

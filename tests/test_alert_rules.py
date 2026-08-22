@@ -100,7 +100,11 @@ def test_every_p1_row_of_the_protocol_has_a_rule():
 
     bullets = protocol_p1_bullets()
     assert bullets, "parser saw no P1 bullets — the §2 headings moved"
-    p1_rules = [rule for rule in RULES if rule.severity == "p1"]
+    # §4 kinds (ALERT STORM) are P1 but not §2 bullets — Task 6.
+    p1_rules = [
+        rule for rule in RULES
+        if rule.severity == "p1" and "§2" in rule.source_clause
+    ]
     assert len(p1_rules) == len(bullets), (
         f"P1 bullets ({len(bullets)}) and P1 rules ({len(p1_rules)}) drifted: "
         f"bullets={[_norm(b)[:60] for b in bullets]!r} "
