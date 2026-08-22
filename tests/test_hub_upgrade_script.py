@@ -153,6 +153,53 @@ def test_refuses_when_deployment_running(tmp_path):
 
 
 @pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
+def test_hold_through_build_waits_then_proceeds(tmp_path):
+    """HUB_DRAIN_TIMEOUT_S holds: a deploy that drains during the wait upgrades.
+
+    What would make this fail: refusing immediately despite HUB_DRAIN_TIMEOUT_S,
+    never re-checking the running count, or proceeding without pg_dump after
+    the drain completes.
+    """
+    env, mutate, dumps = _stub_upgrade_env(tmp_path, running_count="1")
+    marker = tmp_path / "first-check-done"
+    # First invocation prints 1 (running), every later one prints 0 (drained).
+    env["HUB_CHECK_RUNNING"] = (
+        f"if [ -e '{marker}' ]; then echo 0; else touch '{marker}'; echo 1; fi"
+    )
+    env["HUB_DRAIN_TIMEOUT_S"] = "5"
+    env["HUB_DRAIN_POLL_S"] = "1"
+    result = _run(["bash", str(UPGRADE)], env=env)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert marker.exists(), "running count was never checked"
+    text = (result.stdout + result.stderr).lower()
+    assert "waiting" in text
+    log = mutate.read_text(encoding="utf-8")
+    assert "pg_dump" in log
+    assert list(dumps.iterdir()), "expected a Hub DB dump after the drain"
+
+
+@pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
+def test_hold_through_build_still_refuses_after_timeout(tmp_path):
+    """A deploy that never drains still refuses after HUB_DRAIN_TIMEOUT_S.
+
+    What would make this fail: waiting forever, or falling through into
+    pg_dump/docker/systemctl when the count stays above zero at timeout.
+    """
+    env, mutate, dumps = _stub_upgrade_env(tmp_path, running_count="1")
+    env["HUB_DRAIN_TIMEOUT_S"] = "2"
+    env["HUB_DRAIN_POLL_S"] = "1"
+    result = _run(["bash", str(UPGRADE)], env=env)
+    assert result.returncode != 0
+    text = (result.stdout + result.stderr).lower()
+    assert "running" in text
+    assert "deployment" in text
+    log = mutate.read_text(encoding="utf-8")
+    assert "MUTATE" not in log
+    assert "pg_dump" not in log
+    assert list(dumps.iterdir()) == []
+
+
+@pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
 def test_rollback_flag_documented():
     """--rollback is in --help and restores the previous kept image in the doc.
 
