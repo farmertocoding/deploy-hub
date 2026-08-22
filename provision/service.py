@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 
 from catalog.apply import argv_steps
-from catalog.entries import CATALOG
+from catalog.entries import CATALOG, SERVER_WATCH_CRON_D
 from catalog.models import AppliedCatalogEntry
 from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
 from core.test_mode import assert_test_zone
@@ -82,6 +82,7 @@ def provision_host(target, transport, *, live_beat_jobs=(), profile="target"):
 def handoff_hub_probing(target, transport):
     """Hub-side probing is live: drop server-watch.sh and revoke its token."""
     _delete_script_crons(transport, (SERVER_WATCH_SCRIPT,), target=target)
+    _remove_server_watch_cron_d(transport)
     _revoke_target_publisher(target)
     from catalog.entries import ENTRIES
     from catalog.models import AppliedCatalogEntry
@@ -153,13 +154,19 @@ def _delete_script_crons(transport, live_beat_jobs, *, target=None):
     transport.run(["crontab", path])
 
 
+def _remove_server_watch_cron_d(transport):
+    """Same path the catalog entry checks/fixes — a cron.d host must not keep paging."""
+    transport.run(["rm", "-f", SERVER_WATCH_CRON_D])
+
+
 def _issue_target_publisher(target):
-    import os
+    import secrets
 
     from providers.ntfy import TokenRevoked, issue_publisher_token
 
     try:
-        issue_publisher_token(f"target:{target.pk}", os.urandom(24))
+        # Text token: vault get() returns bytes and ntfy decodes UTF-8.
+        issue_publisher_token(f"target:{target.pk}", secrets.token_urlsafe(24))
     except TokenRevoked:
         return
 

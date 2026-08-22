@@ -58,7 +58,10 @@ def _load_secret(ref):
         return None
     from vault import service as vault_service
 
-    return vault_service.get(secret, reason="ntfy").decode().strip()
+    raw = vault_service.get(secret, reason="ntfy")
+    if isinstance(raw, str):
+        return raw.strip()
+    return bytes(raw).decode("utf-8").strip()
 
 
 def is_revoked(identity):

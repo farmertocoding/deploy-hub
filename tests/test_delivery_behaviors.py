@@ -179,3 +179,62 @@ def test_grouped_p2_push_is_delivered_once():
     n = deliver_grouped(window=600)
     assert n == 1
     assert len(pager.published) == before + 1
+
+
+def test_beat_invokes_deliver_grouped():
+    """What would make this fail: no Beat owner for the P2 flush, so pending
+    P2s stay on __pushes__ until a test calls deliver_grouped by hand."""
+    from monitor import tasks as monitor_tasks
+    from monitor.alerts import raise_alert
+    from monitor.pager import get_pager
+
+    entry = settings.CELERY_BEAT_SCHEDULE["alert-group-p2"]
+    assert entry["task"] == monitor_tasks.deliver_grouped.name
+    assert float(entry["schedule"]) == 300.0
+    assert entry["task"] != settings.CELERY_BEAT_SCHEDULE["probe-uptime"]["task"]
+
+    raise_alert("feed-data-stale", "feed:a", fingerprint="stale:beat-a", **COPY)
+    raise_alert("feed-data-stale", "feed:b", fingerprint="stale:beat-b", **COPY)
+    pager = get_pager()
+    before = len(pager.published)
+    monitor_tasks.deliver_grouped()
+    assert len(pager.published) == before + 1
+
+
+def test_failed_publish_does_not_start_the_hourly_clock():
+    """What would make this fail: a failed first P1 stamping last_push_at so
+    repeat_unacked waits a full hour before retrying."""
+    from core.models import AlertDelivery, AlertState
+    from monitor.alerts import repeat_unacked
+    from monitor.pager import get_pager
+
+    pager = get_pager()
+    pager.fail = True
+    row = _p1(fingerprint="site-down:failed-clock")
+    ntfy = AlertDelivery.objects.get(finding=row, channel=AlertDelivery.Channel.NTFY)
+    assert ntfy.ok is False
+    state = AlertState.objects.get(fingerprint=row.fingerprint)
+    assert state.last_push_at is None
+
+    pager.fail = False
+    before = len(pager.published)
+    repeat_unacked(now=timezone.now() + timedelta(minutes=5))
+    assert len(pager.published) == before + 1
+
+
+def test_failed_grouped_flush_retries():
+    """What would make this fail: group_p2 marking delivered before publish,
+    so a later Beat sees an empty window after a failed flush."""
+    from monitor.alerts import raise_alert
+    from monitor.pager import deliver_grouped, get_pager
+
+    raise_alert("feed-data-stale", "feed:a", fingerprint="stale:retry-a", **COPY)
+    raise_alert("feed-data-stale", "feed:b", fingerprint="stale:retry-b", **COPY)
+    pager = get_pager()
+    pager.fail = True
+    deliver_grouped(window=600)
+    failed_n = len(pager.published)
+    pager.fail = False
+    n = deliver_grouped(window=600)
+    assert n == 1
+    assert len(pager.published) == failed_n + 1

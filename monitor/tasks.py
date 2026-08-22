@@ -116,6 +116,14 @@ def repeat_unacked(*, now=None):
 
 
 @shared_task(ignore_result=True)
+def deliver_grouped(*, window=600, now=None):
+    """Beat `alert-group-p2` (300 s). Flushes pending P2s; not probe-uptime."""
+    from monitor.pager import deliver_grouped as body
+
+    return {"ok": True, "n": body(window=window, now=now)}
+
+
+@shared_task(ignore_result=True)
 def build_digest():
     """Beat `digest-daily` — 08:00 local, TIME_ZONE."""
     from django.utils import timezone

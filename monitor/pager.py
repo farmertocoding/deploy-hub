@@ -92,28 +92,37 @@ def deliver(finding, *, now=None, pager=None):
         ok=push_ok,
         detail=push_detail,
     )
-    _touch_last_push(finding, now)
+    if push_ok:
+        _touch_last_push(finding, now)
+    else:
+        _release_failed_push_clock(finding)
     if finding.severity == Finding.Severity.P1:
         _email_p1(finding, backend, unacked=False)
     return {"ok": push_ok}
 
 
 def deliver_grouped(*, window=600, now=None, pager=None):
-    """Flush pending P2s: one publish per group_p2 batch."""
-    from monitor.antinoise import group_p2
+    """Flush pending P2s: one publish per group_p2 batch.
+
+    group_p2 is asked not to mark the window: a failed publish must stay
+    pending so the next Beat tick retries instead of seeing an empty log.
+    """
+    from monitor.antinoise import group_p2, mark_p2_delivered
 
     now = now or timezone.now()
     pager = pager or get_pager()
-    batches = group_p2(window=window, now=now)
+    batches = group_p2(window=window, now=now, mark=False)
     n = 0
     for batch in batches:
         findings = batch.get("findings") or []
         if not findings:
             continue
         if batch.get("grouped"):
-            _publish_group(findings, pager=pager, now=now)
+            ok = _publish_group(findings, pager=pager, now=now)
         else:
-            deliver(findings[0], now=now, pager=pager)
+            ok = deliver(findings[0], now=now, pager=pager).get("ok")
+        if ok:
+            mark_p2_delivered(findings)
         n += 1
     return n
 
@@ -142,6 +151,7 @@ def _publish_group(findings, *, pager, now):
         ok=ok,
         detail=detail,
     )
+    return ok
 
 
 def _minimized(finding, now):
@@ -177,6 +187,27 @@ def _public_url():
 def _touch_last_push(finding, now):
     state, _ = AlertState.objects.get_or_create(fingerprint=finding.fingerprint)
     state.last_push_at = now
+    state.save(update_fields=["last_push_at"])
+
+
+def _release_failed_push_clock(finding):
+    """A failed publish must not start the hourly repeat clock.
+
+    after_raise stamps last_push_at when will_push is set; that stamp is
+    not a successful delivery. Leave a prior successful stamp alone so a
+    failed hourly retry is still due on the next 300 s tick.
+    """
+    has_ok = AlertDelivery.objects.filter(
+        finding=finding,
+        channel=AlertDelivery.Channel.NTFY,
+        ok=True,
+    ).exists()
+    if has_ok:
+        return
+    state, _ = AlertState.objects.get_or_create(fingerprint=finding.fingerprint)
+    if state.last_push_at is None:
+        return
+    state.last_push_at = None
     state.save(update_fields=["last_push_at"])
 
 

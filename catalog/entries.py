@@ -121,11 +121,14 @@ CADDY = CatalogEntry(
 # Hub-side probing handoff (D-036): remove server-watch.sh cron + revoke the
 # per-target ntfy publish token. Applied by provision.handoff_hub_probing,
 # never silently mutated — change check/fix/rollback ⇒ bump version.
+# Runtime also edits the user crontab (named test); this path is the
+# /etc/cron.d/server-watch unit that would otherwise keep paging.
+SERVER_WATCH_CRON_D = "/etc/cron.d/server-watch"
 SERVER_WATCH_HANDOFF = CatalogEntry(
     id="server-watch-handoff",
     version=1,
-    check=["test", "!", "-e", "/etc/cron.d/server-watch"],
-    fix=["rm", "-f", "/etc/cron.d/server-watch"],
+    check=["test", "!", "-e", SERVER_WATCH_CRON_D],
+    fix=["rm", "-f", SERVER_WATCH_CRON_D],
     rollback=["true"],
 )
 

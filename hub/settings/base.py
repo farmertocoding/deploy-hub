@@ -247,6 +247,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.repeat_unacked",
         "schedule": 300.0,
     },
+    "alert-group-p2": {
+        "task": "monitor.tasks.deliver_grouped",
+        "schedule": 300.0,
+    },
     "digest-daily": {
         "task": "monitor.tasks.build_digest",
         "schedule": crontab(hour=8, minute=0),

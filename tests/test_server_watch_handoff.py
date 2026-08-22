@@ -119,3 +119,41 @@ def test_catalog_entry_version_bumped_not_mutated():
         ).count()
         == 2
     )
+
+
+def test_provisioned_target_token_is_loadable():
+    """What would make this fail: provision_host storing raw urandom bytes
+    that ntfy._load_secret cannot decode."""
+    from providers.ntfy import _load_secret, publisher_ref
+    from provision.service import provision_host
+
+    target = _target("watch-token-load.example")
+    result = provision_host(target, FakeTransport())
+    assert result.allowed is True
+    token = _load_secret(publisher_ref(f"target:{target.pk}"))
+    assert token
+    assert token.isascii()
+
+
+def test_catalog_and_runtime_cron_paths_agree():
+    """What would make this fail: catalog checking /etc/cron.d/server-watch
+    while handoff only edits the user crontab, leaving a cron.d host paging."""
+    from catalog.entries import ENTRIES, SERVER_WATCH_CRON_D
+    from provision.service import handoff_hub_probing
+
+    entry = ENTRIES["server-watch-handoff"]
+    assert SERVER_WATCH_CRON_D in entry.check
+    assert SERVER_WATCH_CRON_D in entry.fix
+    assert entry.fix == ["rm", "-f", SERVER_WATCH_CRON_D]
+
+    target = _target("watch-crond.example")
+    transport = _cron_transport()
+    handoff_hub_probing(target, transport)
+    runs = [payload for kind, payload in transport.calls if kind == "run"]
+    assert ["rm", "-f", SERVER_WATCH_CRON_D] in runs
+    written = ""
+    for path, body in transport.files.items():
+        if "crontab" in path:
+            written = body.decode() if isinstance(body, (bytes, bytearray)) else body
+    assert "server-watch.sh" not in written
+    assert "update-cloudflare-ufw.sh" in written
