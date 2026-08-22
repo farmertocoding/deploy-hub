@@ -46,35 +46,60 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
 def detect_missed_drills(*, now=None):
     from django.utils import timezone
 
-    from monitor.drills import find_missed
+    from monitor.drills import alert_missed_drill, find_missed
 
     clock = now or timezone.now()
     missed = find_missed(clock)
+
     for kind in missed:
         audit("drill-missed", source="celery", severity="warning", kind=kind)
+        alert_missed_drill(kind)
     return {"ok": True, "n": len(missed)}
 
 
 @shared_task(ignore_result=True)
 def run_hub_down_drill(*, duration_s=1800):
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_hub_down_drill as body
 
+    seed_due_at(CheckRun.Kind.HUB_DOWN, period_s=DRILL_PERIODS[CheckRun.Kind.HUB_DOWN])
     run = body(duration_s=duration_s)
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 
 @shared_task(ignore_result=True)
 def run_reaper_drill(*, planted_name="hub-t3-orphan-weekly"):
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_reaper_drill as body
 
+    seed_due_at(CheckRun.Kind.REAPER, period_s=DRILL_PERIODS[CheckRun.Kind.REAPER])
     run = body(planted_name=planted_name)
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 
 @shared_task(ignore_result=True)
 def run_restore_clean_drill():
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
     from monitor.drills import run_restore_clean_drill as body
 
+    seed_due_at(
+        CheckRun.Kind.RESTORE_CLEAN,
+        period_s=DRILL_PERIODS[CheckRun.Kind.RESTORE_CLEAN],
+    )
+    run = body()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def run_pager_drill():
+    from core.models import CheckRun
+    from monitor.drills import DRILL_PERIODS, seed_due_at
+    from monitor.drills import run_pager_drill as body
+
+    seed_due_at(CheckRun.Kind.PAGER, period_s=DRILL_PERIODS[CheckRun.Kind.PAGER])
     run = body()
     return {"ok": True, "status": run.status, "kind": run.kind}
 
