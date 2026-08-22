@@ -12,12 +12,17 @@ DEFAULT_IMAGE = "22.04"
 DEFAULT_USER = "deploy"
 VERSION_TIMEOUT_S = 5
 
+# `- default` keeps the image's default user (multipass injects its own SSH
+# key there; a `users:` list without it drops that user and multipass exec
+# can never connect again). The runcmd enables `ssh` only: Ubuntu has no
+# `sshd` unit and a failing runcmd leaves cloud-init degraded.
 CLOUD_INIT = """\
 #cloud-config
 package_update: true
 packages:
   - openssh-server
 users:
+  - default
   - name: deploy
     gecos: one-shot deploy user
     groups: [sudo]
@@ -26,7 +31,6 @@ users:
     lock_passwd: true
 runcmd:
   - systemctl enable --now ssh
-  - systemctl enable --now sshd
 """
 
 
@@ -170,13 +174,40 @@ def exec_result(vm, argv, *, run_fn=None, timeout=120):
     return runner(exec_argv(vm, argv))
 
 
+# EHOSTUNREACH from `multipass exec` while the daemon-side launch succeeded is
+# not a boot wait: on macOS 15+ it is the Local Network privacy permission
+# denying the client process tree (canonical/multipass#3766/#3864/#4588).
+# Waiting out the full deadline turns a host misconfiguration into an opaque
+# TimeoutError, so after a short grace of nothing but no-route results the
+# poll fails fast and says what to fix.
+NO_ROUTE_MARKER = "No route to host"
+NO_ROUTE_GRACE_S = 30
+NO_ROUTE_HINT = (
+    "every multipass client connection returns EHOSTUNREACH while the VM "
+    "launched fine (daemon-side SSH worked) — on macOS this is the Local "
+    "Network privacy permission denying the app running the tests, not a VM "
+    "boot failure. Grant it under System Settings > Privacy & Security > "
+    "Local Network, then re-run."
+)
+
+
 def wait_exec(vm, argv, *, ready, deadline, timeout=30, run_fn=None):
     """Poll exec_result until `ready(result)` or `deadline`."""
     last = None
+    no_route_since = None
     while time.time() < deadline:
         last = exec_result(vm, argv, run_fn=run_fn, timeout=timeout)
         if ready(last):
             return last
+        err = f"{getattr(last, 'stdout', '')} {getattr(last, 'stderr', '')}"
+        if getattr(last, "returncode", 0) != 0 and NO_ROUTE_MARKER in err:
+            no_route_since = no_route_since or time.time()
+            if time.time() - no_route_since >= NO_ROUTE_GRACE_S:
+                raise TimeoutError(
+                    f"waiting for {argv!r} on {vm.name}: {NO_ROUTE_HINT}"
+                )
+        else:
+            no_route_since = None
         time.sleep(2)
     stdout = getattr(last, "stdout", "") if last is not None else ""
     stderr = getattr(last, "stderr", "") if last is not None else ""
