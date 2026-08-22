@@ -313,6 +313,21 @@ RULES = (
         "and Sites-screen state",
         "D-035",
     ),
+    # ── §4 anti-noise kinds (not §2 bullets) ────────────────────────────
+    _r(
+        "FLAPPING",
+        "p2",
+        "≥3 open/close cycles in 30 min → one FLAPPING alert (P2); "
+        "individual transitions suppressed until stable for 30 min",
+        "alert-protocol.md §4 / D-038",
+    ),
+    _r(
+        "ALERT STORM (n)",
+        "p1",
+        ">10 pushes in 10 minutes → one ALERT STORM (n alerts) P1 and "
+        "10-min summaries until the rate drops",
+        "alert-protocol.md §4 / D-038",
+    ),
 )
 
 RULES_BY_KIND = {rule.kind: rule for rule in RULES}
