@@ -10,10 +10,13 @@ Usage:
 Writes `conformance/demos/phase-2.5/failures/<utc>.md` with a pytest
 summary excerpt and the sha of `conformance/run-report.json` when that
 file exists. The raw log is never copied into the bundle (and therefore
-never attached to a GitHub issue). Assignment-like SECRET/KEY/TOKEN/
-PASSWORD/URL values and VAULT-TEST-PLAINTEXT-MARKER are redacted. If
-`GITHUB_TOKEN` (or `GH_TOKEN`) and `gh` are both present, opens an issue
-with that excerpt; otherwise prints the path.
+never attached to a GitHub issue). Redacted before anything leaves this
+machine: assignment-like SECRET/KEY/TOKEN/PASSWORD/URL values,
+VAULT-TEST-PLAINTEXT-MARKER, `Bearer <token>` headers, and bare
+high-entropy token/base64-ish runs — a pytest assertion summary quotes
+raw values with no assignment shape, so shape-only scrubbing published
+them (panel S2). If `GITHUB_TOKEN` (or `GH_TOKEN`) and `gh` are both
+present, opens an issue with that excerpt; otherwise prints the path.
 """
 from __future__ import annotations
 
@@ -37,11 +40,32 @@ _SECRETISH = re.compile(
     r"\s*[:=]\s*\S+"
 )
 _VAULT_MARKER = re.compile(r"VAULT-TEST-PLAINTEXT-MARKER(?:=\S+)?")
+# Panel S2: pytest summary lines quote raw values with no assignment shape
+# (`assert 'cf-Abc123...' not in body`). Catch the shapes tokens actually
+# take, not the names they were assigned to:
+#   - an Authorization-style `Bearer <anything>`;
+#   - a bare high-entropy run: >=20 chars of token/base64 alphabet carrying
+#     at least one lowercase, one uppercase AND one digit. Mixed-class is the
+#     discriminator that keeps pytest nodeids (lowercase_with_underscores)
+#     and file paths readable while real API tokens are redacted.
+_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_TOKENISH = re.compile(r"[A-Za-z0-9+/_=.-]{20,}")
+
+
+def _mixed_class(run):
+    return (
+        any(c.islower() for c in run)
+        and any(c.isupper() for c in run)
+        and any(c.isdigit() for c in run)
+    )
 
 
 def scrub(text):
     text = _SECRETISH.sub(lambda m: f"{m.group(1)}=<redacted>", text)
-    return _VAULT_MARKER.sub("<redacted>", text)
+    text = _VAULT_MARKER.sub("<redacted>", text)
+    text = _BEARER.sub("Bearer <redacted>", text)
+    return _TOKENISH.sub(
+        lambda m: "<redacted>" if _mixed_class(m.group(0)) else m.group(0), text)
 
 
 def pytest_summary(log_text):

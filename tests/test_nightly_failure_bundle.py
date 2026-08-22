@@ -110,6 +110,43 @@ def test_bundle_contains_no_vault_plaintext(tmp_path, monkeypatch):
         assert f"{name}={value}" not in body, f"{name} assignment leaked"
 
 
+RAW_BEARER = "Bearer cf0XyZZtoken1234567890abcDEF"
+RAW_TOKEN = "S3cretT0kenAbCdEfGh1jK2lM3nO4pQ5rS6tU7vW8x"
+
+
+def test_raw_token_in_summary_never_reaches_the_issue_body(tmp_path, monkeypatch):
+    """Panel S2: pytest summary lines quote raw values with no assignment shape
+    (`assert '<token>' not in body` renders the token verbatim into the short
+    test summary). The scrubber must catch token SHAPES — Bearer headers and
+    bare high-entropy runs — not just NAME=value assignments, and the bundle
+    is exactly what --body-file would hand to a GitHub issue.
+
+    What would make this fail: scrub() only rewriting assignment-shaped
+    matches, so the quoted payload rides the excerpt into the issue.
+    """
+    log = tmp_path / "nightly.log"
+    log.write_text(
+        "============================= test session starts ==============================\n"
+        "=========================== short test summary info ============================\n"
+        f"FAILED tests/test_dns.py::test_header - AssertionError: assert '{RAW_BEARER}' "
+        "not in request.headers\n"
+        f"FAILED tests/test_vault.py::test_leak - assert '{RAW_TOKEN}' == '<redacted>'\n"
+        "======================== 2 failed, 1 passed in 0.34s =========================\n",
+        encoding="utf-8",
+    )
+    rc = _run(tmp_path, 1, log, monkeypatch)
+    assert rc != 0
+
+    failures = tmp_path / "conformance" / "demos" / "phase-2.5" / "failures"
+    body = next(failures.glob("*.md")).read_text(encoding="utf-8")
+    assert RAW_TOKEN not in body, "a bare high-entropy token reached the issue body"
+    assert RAW_BEARER not in body, "a Bearer credential reached the issue body"
+    assert RAW_BEARER.split(" ", 1)[1] not in body, "the Bearer value survived"
+    # The summary must still be a usable summary: nodeids and counts survive.
+    assert "tests/test_dns.py::test_header" in body
+    assert "2 failed, 1 passed" in body
+
+
 def test_gh_issue_is_optional_when_token_absent(tmp_path, monkeypatch, capsys):
     """What would make this fail: requiring `gh` / GITHUB_TOKEN, or claiming the
     script runs on the Hub host when the token is missing.
