@@ -52,3 +52,15 @@ test("cloudflare_tab_exists_and_posts_the_token", async () => {
   assert.ok(!JSON.stringify(data).includes(pasted),
     "the success body the panel renders must not echo the token");
 });
+
+test("connect_names_the_missing_origin_ca_key_ref_and_has_no_paste_for_it", () => {
+  // 12b is DNS-token only. After connect, Origin certs fail closed by name —
+  // this screen must say origin_ca_key_ref is missing, never offer a second paste.
+  const markup = render(CloudflarePanel);
+  const text = visibleText(markup);
+  assert.match(text, /origin_ca_key_ref/);
+  assert.ok(!/Origin CA key/i.test(text) || /does not accept|not accept|vault/i.test(text),
+    text);
+  const passwords = markup.match(/type="password"/g) || [];
+  assert.equal(passwords.length, 1, "only the DNS token field is a paste surface");
+});

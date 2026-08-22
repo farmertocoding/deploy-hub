@@ -162,7 +162,7 @@ def test_sigkill_child_resumes(acceptance_sigkill_db, monkeypatch):
     from deploys import pipeline
     from deploys.models import Deployment, DeploymentStep
     from deploys.tasks import sweep_stale_deployments
-    from providers.fakes import FakeDnsProvider
+    from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     parent_pid = os.getpid()
     _site, deployment = queued_deployment("a25-sigkill")
@@ -177,6 +177,10 @@ def test_sigkill_child_resumes(acceptance_sigkill_db, monkeypatch):
     )
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     result = sweep_stale_deployments()
     assert deployment.pk in result["resumed"]

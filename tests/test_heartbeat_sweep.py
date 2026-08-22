@@ -62,10 +62,14 @@ def test_stale_running_is_resumed_or_aborted(monkeypatch):
 
     from deploys import pipeline
     from deploys.heartbeat import sweep
-    from providers.fakes import FakeDnsProvider
+    from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     assert "deploys.tasks.sweep_stale_deployments" in _beat_sweep_task_names()
 

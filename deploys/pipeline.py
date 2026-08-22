@@ -16,6 +16,7 @@ from core import locks
 from core.models import OperationLock
 from core.test_mode import assert_test_zone
 from deploys.models import Deployment, DeploymentArtifact, DeploymentStep
+from deploys.seams import DeploySeamRefused, resolve_production_seams
 from deploys.steps import (
     _caddy_route,
     _desired_dns_records,
@@ -177,9 +178,18 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None, cert_issuer=
     """Run (or resume) a deployment. Task kwargs must stay ids-only."""
     deployment = Deployment.objects.select_related(
         "manifest__site__primary_target__zone",
+        "manifest__site__dns_zone__account",
     ).get(pk=deployment_id)
     if settings.HUB_TEST_MODE:
         assert_test_zone(deployment.manifest.site.primary_target.zone)
+    try:
+        dns, cert_issuer = _resolve_seams(
+            deployment.manifest.site, dns=dns, cert_issuer=cert_issuer,
+        )
+    except DeploySeamRefused:
+        deployment.status = Deployment.Status.FAILED
+        deployment.save(update_fields=["status"])
+        raise
     if deployment.status == Deployment.Status.QUEUED:
         if not begin_deploy(deployment):
             return {"started": False}
@@ -199,12 +209,21 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None, cert_issuer=
             release_deploy_locks(deployment)
 
 
+def _resolve_seams(site, *, dns, cert_issuer):
+    """Prod path (both unset) uses the factory. Partial injection stays T1/T2."""
+    if dns is None and cert_issuer is None:
+        return resolve_production_seams(site)
+    if dns is None:
+        dns = _default_dns()
+    if cert_issuer is None:
+        cert_issuer = _default_cert_issuer()
+    return dns, cert_issuer
+
+
 def _execute_running(deployment, *, transport, dns, sleep, cert_issuer=None):
     site = deployment.manifest.site
     if transport is None:
         transport = _default_transport(site)
-    if dns is None:
-        dns = _default_dns()
     desired = _assemble_desired(
         deployment, transport=transport, dns=dns, sleep=sleep,
         cert_issuer=cert_issuer,
@@ -385,7 +404,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
         "docker_run_extra": body.get("docker_run_extra"),
         "env_names": env_names,
         "firewall_argv": list(body.get("firewall_argv") or []),
-        "cert_issuer": cert_issuer if cert_issuer is not None else _default_cert_issuer(),
+        "cert_issuer": cert_issuer,
     }
     if sleep is not None:
         desired["sleep"] = sleep

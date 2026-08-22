@@ -300,7 +300,9 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     rec = RecordingTransport(SshTransport(target))
 
     try:
-        result = execute(first.pk, transport=rec)
+        result = execute(
+            first.pk, transport=rec, dns=FakeDnsProvider(),
+        )
     except Exception as exc:
         ssh = SshTransport(target)
         name = f"site-{slug}-{first.pk}"
@@ -331,7 +333,7 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
 
     rec.calls.clear()
     _requeue_pending(first)
-    result2 = execute(first.pk, transport=rec)
+    result2 = execute(first.pk, transport=rec, dns=FakeDnsProvider())
     first.refresh_from_db()
     assert first.status == Deployment.Status.SUCCEEDED, result2
     mutating_docker = [

@@ -49,10 +49,11 @@ def main(argv=None):
     kwargs = {}
     if args.fake:
         from deploys.testing import PipelineTransport
-        from providers.fakes import FakeDnsProvider
+        from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
         kwargs["transport"] = PipelineTransport()
         kwargs["dns"] = FakeDnsProvider()
+        kwargs["cert_issuer"] = FakeOriginCertIssuer()
     execute(args.pk, **kwargs)
 
 

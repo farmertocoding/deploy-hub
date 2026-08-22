@@ -21,7 +21,7 @@ from django.utils import timezone
 from pipeline_fakes import PipelineTransport, queued_deployment
 
 from deploys.models import Deployment, DeploymentStep
-from providers.fakes import FakeDnsProvider
+from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
 REPO = Path(__file__).resolve().parent.parent
 STEP_NAMES = list(DeploymentStep.Name.values)
@@ -183,6 +183,10 @@ def test_heartbeat_sweep_resumes_sigkilled_child(sigkill_db, monkeypatch):
     )
     monkeypatch.setattr(pipeline, "_default_transport", lambda site: PipelineTransport())
     monkeypatch.setattr(pipeline, "_default_dns", FakeDnsProvider)
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
 
     result = sweep_stale_deployments()
     assert deployment.pk in result["resumed"]
@@ -336,10 +340,17 @@ def test_t2_sigkill_worker_resumes_on_hub_test_target(
         pipeline, "_default_transport",
         lambda site: SshTransport(site.primary_target),
     )
+    monkeypatch.setattr(
+        pipeline, "resolve_production_seams",
+        lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
+    )
     result = sweep_stale_deployments()
     assert deployment.pk in result["resumed"]
     deployment.refresh_from_db()
     if deployment.status != Deployment.Status.SUCCEEDED:
-        pipeline.execute(deployment.pk)
+        pipeline.execute(
+            deployment.pk, dns=FakeDnsProvider(),
+            cert_issuer=FakeOriginCertIssuer(),
+        )
         deployment.refresh_from_db()
     assert deployment.status == Deployment.Status.SUCCEEDED
