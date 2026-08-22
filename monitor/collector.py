@@ -45,7 +45,12 @@ def collect(target, transport, *, now=None, sleep=None, tick_started=None, monot
     ensure_hub_dir(transport, user)
     remote = hub_join("collect-once", ssh_user=user)
     transport.put(_SCRIPT_PATH.read_bytes(), remote, mode=0o700)
-    result = transport.probe([remote, str(tid), str(_stored_offset(target))])
+    # argv[3] "-" keeps the target's default log path; argv[4] is the stored
+    # inode so the script resets to byte 0 when the file was rotated (§C4).
+    result = transport.probe([
+        remote, str(tid), str(_stored_offset(target)), "-",
+        str(_stored_inode(target)),
+    ])
     if not result.ok:
         raise RuntimeError(result.stderr or "collector script failed")
     payload = json.loads(result.stdout)
@@ -59,6 +64,13 @@ def collect(target, transport, *, now=None, sleep=None, tick_started=None, monot
 
 def _stored_offset(target):
     raw = getattr(target, "collect_log_offset", None)
+    if raw in (None, ""):
+        return 0
+    return int(raw)
+
+
+def _stored_inode(target):
+    raw = getattr(target, "collect_log_inode", None)
     if raw in (None, ""):
         return 0
     return int(raw)

@@ -11,6 +11,12 @@ from their own tables instead; history is for log-style topics.
 Backend selection keys on the configured channel layer (round-1 finding: keying
 on REDIS_PASSWORD misroutes a passwordless-Redis deployment into process-local
 counters while events fan out cross-process).
+
+Phase 3 (§C4) topics: ``site.{id}.traffic`` (minute TrafficStat aggregates —
+counts, never raw log lines) and ``host.{id}.metrics`` (collector
+load/mem/disk). Producers live in monitor/ and reach publish() through
+core.events (see core/events.py for why the import is inverted); both topics
+snapshot from their own tables, so neither keeps history here.
 """
 import json
 

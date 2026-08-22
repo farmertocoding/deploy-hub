@@ -12,6 +12,7 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
     from core.models import Target
     from core.ssh import SshTransport
     from monitor.collector import collect
+    from monitor.traffic import ingest as ingest_traffic
 
     factory = transport_for or SshTransport
     mono = monotonic or time.monotonic
@@ -22,10 +23,11 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
         if lock is None:
             continue
         try:
-            collect(
+            payload = collect(
                 target, factory(target), now=now, sleep=sleep,
                 tick_started=started, monotonic=mono,
             )
+            ingest_traffic(target, payload)
             n += 1
         except Exception as exc:
             audit(

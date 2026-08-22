@@ -8,8 +8,16 @@ import sys
 import time
 
 LOG = os.environ.get("HUB_COLLECT_LOG", "/var/log/caddy/access.log")
-CHUNK = 65536
+CHUNK = 65536  # per-pull byte cap (§C4): raw lines never exceed this
 SCHEMA_VERSION = 1
+
+# Degrade mode (§C4): over the cap we aggregate on-host instead of shipping
+# raw lines. Every bound below is a recorded fact in the summary, not silence.
+SUMMARY_SCAN_CAP = 8 * 1024 * 1024  # bytes one degrade pull will consume
+MAX_LINE = 1024 * 1024              # longer lines are swallowed + counted malformed
+TOP_IPS = 10
+MAX_TRACKED_IPS = 4096              # beyond this, new IPs land in dropped_ips
+MAX_TRACKED_HOSTS = 64              # beyond this, new hosts aggregate into "~other"
 
 
 def _metrics():
@@ -60,23 +68,118 @@ def _containers():
     return rows
 
 
-def _log_chunk(path, offset):
+def _log_chunk(path, offset, expected_inode=0):
     try:
         st = os.stat(path)
         inode = st.st_ino
+        start = offset
+        if expected_inode and inode != expected_inode:
+            start = 0  # rotated: a new inode is a new file, resume at byte 0
+        if start > st.st_size:
+            start = 0  # truncated in place
         with open(path, "rb") as fh:
-            start = 0 if offset > st.st_size else offset
             fh.seek(start)
-            data = fh.read(CHUNK)
-            new_off = fh.tell()
+            if st.st_size - start <= CHUNK:
+                data = fh.read(CHUNK)
+                return {
+                    "file": path,
+                    "inode": inode,
+                    "offset": fh.tell(),
+                    "bytes": data.decode("utf-8", "replace"),
+                }
+            summary, new_off = _summarize(fh, start)
         return {
             "file": path,
             "inode": inode,
             "offset": new_off,
-            "bytes": data.decode("utf-8", "replace"),
+            "bytes": "",
+            "sampled": True,
+            "summary": summary,
         }
     except OSError:
         return {"file": path, "inode": 0, "offset": 0, "bytes": ""}
+
+
+def _summarize(fh, start):
+    """Aggregate the pending region: counts by status, top IPs, per-host totals.
+
+    Bounded on purpose — dict caps and the scan cap keep memory and session
+    time finite on a chatty container; whatever is not shipped is counted
+    (malformed, dropped_ips, truncated), never silently dropped. The offset
+    advances exactly to the last consumed line so nothing is read twice.
+    """
+    requests = bytes_total = malformed = dropped_ips = 0
+    statuses = {}
+    ips = {}
+    hosts = {}
+    pos = start
+    while pos - start < SUMMARY_SCAN_CAP:
+        line = fh.readline(MAX_LINE)
+        if not line:
+            break
+        if not line.endswith(b"\n"):
+            if len(line) < MAX_LINE:
+                break  # partial tail still being written: next pull gets it
+            # One pathological line longer than MAX_LINE: swallow to its
+            # newline in bounded reads, count it malformed, keep going.
+            pos += len(line)
+            while True:
+                extra = fh.readline(MAX_LINE)
+                pos += len(extra)
+                if not extra or extra.endswith(b"\n"):
+                    break
+            malformed += 1
+            continue
+        pos += len(line)
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            malformed += 1
+            continue
+        if not isinstance(record, dict) or "status" not in record:
+            malformed += 1
+            continue
+        requests += 1
+        try:
+            bytes_total += int(record.get("size") or 0)
+        except (TypeError, ValueError):
+            pass
+        status = str(record.get("status"))
+        statuses[status] = statuses.get(status, 0) + 1
+        req = record.get("request") if isinstance(record.get("request"), dict) else {}
+        ip = str(req.get("remote_ip") or "")
+        if ip:
+            if ip in ips or len(ips) < MAX_TRACKED_IPS:
+                ips[ip] = ips.get(ip, 0) + 1
+            else:
+                dropped_ips += 1
+        host = str(req.get("host") or "").rsplit(":", 1)[0].lower()
+        if host:
+            if host not in hosts and len(hosts) >= MAX_TRACKED_HOSTS:
+                host = "~other"
+            bucket = hosts.setdefault(
+                host, {"requests": 0, "bytes": 0, "status_counts": {}})
+            bucket["requests"] += 1
+            try:
+                bucket["bytes"] += int(record.get("size") or 0)
+            except (TypeError, ValueError):
+                pass
+            bucket["status_counts"][status] = bucket["status_counts"].get(status, 0) + 1
+    top = sorted(ips.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_IPS]
+    summary = {
+        "requests": requests,
+        "bytes": bytes_total,
+        "malformed": malformed,
+        "status_counts": statuses,
+        "top_ips": [[ip, n] for ip, n in top],
+        "dropped_ips": dropped_ips,
+        "hosts": hosts,
+        "scanned_bytes": pos - start,
+        "truncated": (pos - start) >= SUMMARY_SCAN_CAP,
+    }
+    return summary, pos
 
 
 def _clock():
@@ -277,7 +380,12 @@ def _curl_body(curl, url):
 def main():
     target_id = sys.argv[1] if len(sys.argv) > 1 else ""
     offset = int(sys.argv[2]) if len(sys.argv) > 2 else 0
-    log_file = sys.argv[3] if len(sys.argv) > 3 else LOG
+    # argv[3] "-" or "" = the target's default log; argv[4] = last seen inode.
+    log_file = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] not in ("", "-") else LOG
+    try:
+        expected_inode = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+    except (TypeError, ValueError):
+        expected_inode = 0
     try:
         typed_id = int(target_id)
     except (TypeError, ValueError):
@@ -289,7 +397,7 @@ def main():
         "ts": _clock(),
         "metrics": _metrics(),
         "containers": containers,
-        "log_chunk": _log_chunk(log_file, offset),
+        "log_chunk": _log_chunk(log_file, offset, expected_inode),
         "clock": _clock(),
         "healthz": _healthz(containers),
     }
