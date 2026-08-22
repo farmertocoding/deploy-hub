@@ -1,6 +1,7 @@
 """Prefix-only test-plane reaper. argv lists; never touch names outside hub-t3-."""
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 — argv lists only (require_t3_name-guarded), never a shell
 from pathlib import Path
 
@@ -8,6 +9,13 @@ NAME_PREFIX = "hub-t3-"
 VERSION_TIMEOUT_S = 5
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_LEASE_ROOT = REPO / "tmp"
+# Pinned test-plane token env (D-043). The NAME, never a credential.
+TEST_ZONE_TOKEN_ENV = "HUB_TEST_CF_TOKEN"  # nosec B105
+
+
+def test_zone_token_present():
+    """True when the pinned test-plane token env is set (M4 / D-043)."""
+    return bool(os.environ.get(TEST_ZONE_TOKEN_ENV, "").strip())
 
 
 class T3NameError(ValueError):
