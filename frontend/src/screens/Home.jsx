@@ -8,7 +8,7 @@ import ReadinessScreen from "../Readiness.jsx";
 import { DESKTOP_MIN_PX } from "../Chrome.jsx";
 import FleetMap from "../Map.jsx";
 
-export function MapPanel({ width, graph }) {
+export function MapPanel({ width, graph, events }) {
   if (width < DESKTOP_MIN_PX) {
     // §F6: the map is explicitly OUT of the phone scope. Saying so beats rendering a
     // squashed unusable one — the phone screens are Sites, Deploys and the finding
@@ -18,13 +18,13 @@ export function MapPanel({ width, graph }) {
         Map is desktop-only — use Sites for status on a phone.</p>
     );
   }
-  return <FleetMap graph={graph} />;
+  return <FleetMap graph={graph} events={events} />;
 }
 
-export default function Home({ width }) {
+export default function Home({ width, events }) {
   return (
     <div>
-      <MapPanel width={width} />
+      <MapPanel width={width} events={events} />
       <ReadinessScreen />
     </div>
   );

@@ -184,19 +184,49 @@ function layout(nodes) {
   return pos;
 }
 
-export default function FleetMap({ graph: graphProp }) {
+// GET v1/map/ is the map.graph snapshot (§D7) — not topics/${topic}/snapshot/.
+export async function mapGraphSnapshot() {
+  const { status, data } = await api("v1/map/");
+  if (status !== 200 || !data?.data) throw { status };
+  return data;
+}
+
+// Snapshot-then-stream bind: the shell's one client already exists; this is
+// subscribe("map.graph", handler, snapshotFn). Event payload is {kind: changed},
+// not the graph — refetch (or apply __snapshot) the same way other table-backed
+// topics do. Exported so tests can drive the handler without mount effects.
+export function attachMapGraph(events, onGraph) {
+  const handler = (event) => {
+    if (event.__snapshot) {
+      onGraph(event.data);
+      return;
+    }
+    if (event.__snapshot_failed) return;
+    if (event.kind === "changed") {
+      mapGraphSnapshot().then((snap) => onGraph(snap.data)).catch(() => {});
+    }
+  };
+  events.subscribe("map.graph", handler, mapGraphSnapshot);
+  return () => events.unsubscribe("map.graph");
+}
+
+export default function FleetMap({ graph: graphProp, events }) {
   const [listView, setListView] = useState(false);
   const [graph, setGraph] = useState(graphProp || { nodes: [], edges: [] });
+  // Key the bind on subscribe identity — useEvents reallocates the wrapper
+  // object on every status/asOf tick; depending on `events` would unsubscribe
+  // and snapshot-loop.
+  const subscribe = events?.subscribe;
+  const unsubscribe = events?.unsubscribe;
 
   useEffect(() => {
     if (graphProp) {
       setGraph(graphProp);
-      return;
+      return undefined;
     }
-    api("v1/map/").then(({ status, data }) => {
-      if (status === 200 && data.data) setGraph(data.data);
-    });
-  }, [graphProp]);
+    if (!subscribe) return undefined;
+    return attachMapGraph({ subscribe, unsubscribe }, setGraph);
+  }, [subscribe, unsubscribe, graphProp]);
 
   return (
     <MapView graph={graph} listView={listView}

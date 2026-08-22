@@ -8,7 +8,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 
-import { MapView } from "../src/Map.jsx";
+import { readFileSync } from "node:fs";
+import { attachMapGraph, mapGraphSnapshot, MapView } from "../src/Map.jsx";
+import Home from "../src/screens/Home.jsx";
 
 const render = (component: any, props: any) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -65,4 +67,71 @@ test("empty_fleet_shows_the_onboarding_hint", () => {
   assert.ok(/provision|target|enroll/i.test(text), text);
   assert.ok(text.includes("—"), `hint must say what populates the map: ${text}`);
   assert.ok(!text.includes("prod-vlan"));
+});
+
+const flush = () => new Promise<void>((r) => setImmediate(r));
+
+function fakeEvents() {
+  const calls: Array<any> = [];
+  return {
+    calls,
+    subscribe(topic: string, handler: Function, snapshotFn: Function) {
+      calls.push({ topic, handler, snapshotFn });
+    },
+    unsubscribe(topic: string) {
+      calls.push({ unsubscribe: topic });
+    },
+  };
+}
+
+test("home_fleet_map_subscribes_to_map_graph", async () => {
+  // renderToStaticMarkup runs no effects — the bind is attachMapGraph, which
+  // FleetMap calls with the shell client Home threads through. Fake events;
+  // do not rely on a mount-only GET.
+  const events = fakeEvents();
+  let applied: any = null;
+  const detach = attachMapGraph(events, (data: any) => { applied = data; });
+  assert.equal(events.calls[0].topic, "map.graph");
+  assert.equal(events.calls[0].snapshotFn, mapGraphSnapshot);
+
+  events.calls[0].handler({ __snapshot: true, data: GRAPH });
+  assert.deepEqual(applied, GRAPH);
+
+  const updated = {
+    ...GRAPH,
+    nodes: [...GRAPH.nodes,
+      { id: "host:2", kind: "host", label: "web-2", status: "ready", parent: "zone:1" }],
+  };
+  const prevFetch = (globalThis as any).fetch;
+  const prevDoc = (globalThis as any).document;
+  const urls: string[] = [];
+  (globalThis as any).document = { cookie: "" };
+  (globalThis as any).fetch = async (url: string) => {
+    urls.push(String(url));
+    return { status: 200, json: async () => ({ seq: 8, data: updated }) };
+  };
+  try {
+    events.calls[0].handler({ kind: "changed" });
+    await flush();
+    assert.ok(urls.some((u) => /\/api\/v1\/map\/$/.test(u)), `refetch urls: ${urls}`);
+    assert.deepEqual(applied, updated);
+    const snap = await mapGraphSnapshot();
+    assert.equal(snap.seq, 8);
+    assert.deepEqual(snap.data, updated);
+  } finally {
+    (globalThis as any).fetch = prevFetch;
+    (globalThis as any).document = prevDoc;
+  }
+
+  detach();
+  assert.deepEqual(events.calls[1], { unsubscribe: "map.graph" });
+
+  // Home threads the shell client into FleetMap (effects do not run here).
+  render(Home, { width: 1280, events: fakeEvents() });
+  render(Home, { width: 390, events: fakeEvents() });
+  const homeSrc = readFileSync(new URL("../src/screens/Home.jsx", import.meta.url), "utf8");
+  assert.match(homeSrc, /<MapPanel width=\{width\} events=\{events\} \/>/);
+  assert.match(homeSrc, /<FleetMap graph=\{graph\} events=\{events\} \/>/);
+  const appSrc = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(appSrc, /<Home width=\{width\} events=\{events\} \/>/);
 });
