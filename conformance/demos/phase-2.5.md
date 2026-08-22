@@ -5,6 +5,12 @@ session on HEAD `30c93e4` plus the acceptance/registry/waiver files in this
 change. Run tails under `conformance/demos/phase-2.5/` are from this session's
 real runs; nothing here is synthesized.
 
+**Amended 2026-08-22 (panel fix wave):** Multipass 1.16.3 was installed on
+this host after the original record, the panel's fix wave landed (FIX-0..9),
+and the live T3 leg ran green — see "The T3 leg, now live" below and
+`phase-2.5/t3-run.txt`. The two host-without-multipass waivers are retired;
+only the LE-staging credential waiver stands.
+
 ## What the milestone asked (design note §4)
 
 Local Multipass: provision a throwaway VM → harden+verify (ufw/fail2ban real)
@@ -16,22 +22,44 @@ present while T3 was skipped. `make conformance-2.5` green.
 
 ## The honest state of this host
 
-Multipass cannot run here and there are no Cloudflare test-zone credentials.
-Evidence: `phase-2.5/multipass-absent.txt` (`multipass version` → command not
-found, exit 127) and `phase-2.5/le-staging-outstanding.txt`. So the three
-skipped-only ids are **waived, not greened** — the WAIVERS.md fingerprints in
-force for this record, verbatim by id and reason key:
+**As originally recorded (Task 16):** Multipass could not run here and there
+were no Cloudflare test-zone credentials. Evidence:
+`phase-2.5/multipass-absent.txt` (`multipass version` → command not found,
+exit 127, kept as the historical pre-install state) and
+`phase-2.5/le-staging-outstanding.txt`. The three skipped-only ids were
+**waived, not greened**.
 
-- `HARNESS-T3-NIGHTLY` — host-without-multipass (2026-08-22)
-- `HARNESS-T3-UFW-TRUTH` — host-without-multipass (2026-08-22)
+**As it stands after the fix wave:** Multipass 1.16.3 is installed
+(`multipass version` succeeds), which made the two host-without-multipass
+lines self-refusing red — exactly as designed
+(`tests/harness/multipass.py::waiver_illegal_if` +
+`tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3`) —
+so the wave ran the live T3 leg green and retired them. The one waiver still
+in force, verbatim by id and reason key:
+
 - `HARNESS-T3-LE-STAGING` — no-test-zone-credentials (2026-08-22)
 
-Each is self-refusing: `tests/harness/multipass.py::waiver_illegal_if` plus
-`tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3` go
-red the moment `multipass version` succeeds on this host while the
-host-without-multipass lines still stand (Task 9's anti-silent-green probe,
-`tests/test_t3_skip_policy.py`, proves check.py itself refuses the skip →
-verified path either way).
+## The T3 leg, now live (Multipass — first recorded run)
+
+`CONFORMANCE_RUN_REPORT=off python -m pytest -q -m t3 -p no:cacheprovider` →
+**16 passed, 3 skipped in 215.94s**; `multipass list` afterwards →
+`No instances found.` (reaper-empty teardown). Full tail and all 19 collected
+nodeids with their real outcomes: `phase-2.5/t3-run.txt`. Highlights, all on
+one throwaway `hub-t3-sess-*` VM:
+
+- provision (fresh-host probe, port 80 free) → guest docker + Caddy →
+  PROFILE=target harden → `ufw` active, fail2ban active, ignoreip is the
+  singular HUB_MESH_IP — `tests/test_t3_deploy.py::test_provision_fresh_multipass_then_harden`,
+  `tests/test_t3_ufw_truth.py` (5 passed)
+- `sample-site/` deployed through the real pipeline with its
+  `DJANGO_SECRET_KEY` delivered via the vault env bundle (panel C1/F3 fix) →
+  HTTP ready through on-VM Caddy — `::test_deploy_sample_site_http_ready`
+- `sample-node-site` fixture: ready-before-cutover, volume survives v2,
+  one ws frame through Caddy (the pipeline's own smoke now performs a real
+  ws handshake), rollback under 60s — 4 passed
+- honest no-mesh posture: harden printed "does not prove HARD-V2", no
+  tailscale0 interface or rule exists (the dummy standin is gone; panel C2)
+- the 3 skips are the LE-staging credential gates, still waived (D-031)
 
 ## What executed live (T2, docker — no Multipass required)
 
@@ -96,8 +124,9 @@ tier t3; both fixture trees exist; the two t3 clauses
 
 ## Follow-up, still open
 
-1. First local Multipass nightly (`make test-t3`) — retires the two
-   host-without-multipass waivers.
+1. ~~First local Multipass T3 run — retires the two host-without-multipass
+   waivers.~~ Done 2026-08-22 (fix wave): `phase-2.5/t3-run.txt`, waivers
+   retired.
 2. First credentialed LE-staging + wss-through-CF run — retires
    `HARNESS-T3-LE-STAGING`.
 3. REL-P2 24h live drill — retires

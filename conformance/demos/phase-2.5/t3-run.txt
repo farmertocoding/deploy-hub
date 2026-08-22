@@ -1,0 +1,43 @@
+# HARNESS-T3-NIGHTLY / HARNESS-T3-UFW-TRUTH — first live Multipass T3 run
+# Recorded 2026-08-22 (panel fix wave), same host as the Task 16 record:
+# Multipass was installed after that record (multipass-absent.txt, kept as
+# history). This is the real run output, not synthesized.
+
+$ multipass version
+multipass   1.16.3+mac
+multipassd  1.16.3+mac
+
+$ CONFORMANCE_RUN_REPORT=off python -m pytest -q -m t3 -p no:cacheprovider
+..........sss......                                                      [100%]
+16 passed, 3 skipped, 1320 deselected, 2 warnings in 215.94s (0:03:35)
+
+$ multipass list        # after the run — reaper-empty teardown
+No instances found.
+
+The 19 collected @pytest.mark.t3 nodeids (--collect-only -m t3 -q):
+
+tests/acceptance/test_phase_2_5.py::test_t3_both_fixtures_ready_v2_rollback_reaper   PASSED
+tests/acceptance/test_phase_2_5.py::test_t3_ufw_truth                                PASSED
+tests/test_t3_deploy.py::test_provision_fresh_multipass_then_harden                  PASSED
+tests/test_t3_deploy.py::test_deploy_sample_site_http_ready                          PASSED
+tests/test_t3_deploy.py::test_deploy_sample_node_site_ready_before_cutover           PASSED
+tests/test_t3_deploy.py::test_sample_node_site_volume_survives_v2                    PASSED
+tests/test_t3_deploy.py::test_sample_node_site_ws_frame_through_caddy                PASSED
+tests/test_t3_deploy.py::test_v2_deploy_then_rollback_under_60s                      PASSED
+tests/test_t3_deploy.py::test_teardown_finally_reaper_leaves_no_hub_t3_vm            PASSED
+tests/test_t3_deploy.py::test_hub_docker_sock_not_on_vm                              PASSED
+tests/test_t3_https.py::test_https_and_security_headers_le_staging                   SKIPPED (no test-zone credentials; D-031)
+tests/test_t3_https.py::test_wss_one_frame_through_cf_caddy                          SKIPPED (no test-zone credentials; D-031)
+tests/test_t3_https.py::test_dns_records_reaped_in_finally                           SKIPPED (no test-zone credentials; D-031)
+tests/test_t3_ufw_truth.py::test_ufw_active_on_multipass_vm                          PASSED
+tests/test_t3_ufw_truth.py::test_fail2ban_active_on_multipass_vm                     PASSED
+tests/test_t3_ufw_truth.py::test_ignoreip_is_not_tailnet_slash10                     PASSED
+tests/test_t3_ufw_truth.py::test_verify_hardening_target_profile_passes              PASSED
+tests/test_t3_ufw_truth.py::test_inner_docker_is_overlay2_not_vfs                    PASSED
+tests/test_t3_ufw_truth.py::test_not_running_inside_hub_test_target                  PASSED
+
+The 3 skips are the HARNESS-T3-LE-STAGING credential gates (their waiver
+stays; see le-staging-outstanding.txt). The HARD-V2 mesh clause is NOT
+claimed: harden ran the documented HUB_T3_UFW_ONLY no-mesh path, printed
+"does not prove HARD-V2", applied no tailscale0 rule, and no dummy interface
+exists (the standin was removed by the panel C2 fix in this same wave).

@@ -1,8 +1,7 @@
 # HARNESS-T3-LE-STAGING — not run: no test-zone credentials (D-031)
 # Recorded 2026-08-22, Task 16 session.
 
-HUB_TEST_DNS_ZONE and HUB_TEST_CF_TOKEN are not set on this host, and
-Multipass is also absent (see multipass-absent.txt), so
+HUB_TEST_DNS_ZONE and HUB_TEST_CF_TOKEN are not set on this host, so
 tests/test_t3_https.py::test_https_and_security_headers_le_staging,
 tests/test_t3_https.py::test_wss_one_frame_through_cf_caddy and
 tests/test_t3_https.py::test_dns_records_reaped_in_finally are skipped-only:
@@ -16,3 +15,7 @@ in this record because none happened. The id is waived in WAIVERS.md
 (HARNESS-T3-LE-STAGING, no-test-zone-credentials, 2026-08-22) rather than
 greened from a T1 sibling. Retire the waiver with the first credentialed run
 against the Cloudflare TEST zone.
+
+Postscript (2026-08-22, panel fix wave): Multipass is now installed and the
+live T3 leg is green (t3-run.txt) — the original "Multipass is also absent"
+clause above no longer holds; the missing piece is only the test-zone token.

@@ -17,3 +17,8 @@ tests/harness/multipass.py::waiver_illegal_if and
 tests/acceptance/test_phase_2_5.py::test_t3_skip_cannot_verify_tier_t3 make
 those waivers illegal the moment `multipass version` starts succeeding here.
 No Multipass run is claimed anywhere in this record.
+
+SUPERSEDED (2026-08-22, panel fix wave): Multipass 1.16.3 was installed on
+this host later the same day, exactly the self-refusing trigger above. The
+two host-without-multipass waivers are retired and the first live T3 run is
+recorded in t3-run.txt. This file stays as the historical pre-install state.
