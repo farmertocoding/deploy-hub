@@ -31,10 +31,10 @@ from django.utils import timezone
 
 from core.test_mode import assert_test_zone
 
+from . import cloudflare
 from .cloudflare import (
     CloudflareDnsProvider,
     CloudflareError,
-    api_request,
     refuse_global_api_key,
 )
 
@@ -125,24 +125,29 @@ def _load_token(ref):
 
 
 def _verify_scope(token, zone):
-    """Steps (b) + (c): active token, then the pinned exact-one-zone probe."""
-    verify = api_request(token, "GET", "/user/tokens/verify")
-    status = (verify.get("result") or {}).get("status")
+    """Steps (b) + (c), judged over the shared pinned observation.
+
+    cloudflare.observe_token is the ONE spelling of the verify + zone-probe
+    endpoints; Task 2's daily audit consumes the same helper, so the audit
+    can never drift from the enforcement it backs up (SEC-B5). Resolved
+    through the module attribute so the sharing is patchable and provable.
+    """
+    observed = cloudflare.observe_token(token)
+    status = observed["status"]
     if status != "active":
         raise ScopeError(
             f"token verify returned status {status!r}, not 'active' — refusing"
         )
 
-    probe = api_request(token, "GET", "/zones?per_page=50")
-    zones = probe.get("result") or []
+    zones = observed["zones"]
     if len(zones) != 1:
         raise ScopeError(
             f"zone probe returned {len(zones)} zones; the DNS token must be "
             f"scoped to exactly the one zone {zone.name!r} (D-046)"
         )
-    if zones[0].get("id") != zone.provider_zone_id:
+    if zones[0]["id"] != zone.provider_zone_id:
         raise ScopeError(
-            f"zone probe returned id {zones[0].get('id')!r}, expected "
+            f"zone probe returned id {zones[0]['id']!r}, expected "
             f"{zone.provider_zone_id!r} for {zone.name!r} — refusing"
         )
 

@@ -19,6 +19,14 @@ from .base import DnsProvider
 
 API = "https://api.cloudflare.com/client/v4"
 
+# The pinned SEC-B5 observation endpoints (D-046). These literals live HERE
+# and nowhere else: providers/registry.py (construction) and
+# monitor/token_audit.py (the daily audit) both consume observe_token, so the
+# enforcement and the audit that backs it up cannot drift into two spellings
+# — tests/test_cf_token_audit.py scans both consumers for a re-spelling.
+TOKEN_VERIFY_PATH = "/user/tokens/verify"
+ZONE_PROBE_PATH = "/zones?per_page=50"
+
 # Header names whose presence marks the legacy Global API Key credential
 # shape, refused outright before any request (D-046 / SEC-B5).
 _GLOBAL_KEY_MARKERS = {"x-auth-key", "x-auth-email", "api_key", "email"}
@@ -92,6 +100,49 @@ def api_request(token, method, path, payload=None, *, timeout=20):
             f"cloudflare API {method} {path} failed: {body.get('errors')}"
         )
     return body
+
+
+def observe_token(token, *, timeout=20):
+    """The one spelling of SEC-B5's pinned token observation (D-046).
+
+    verify proves liveness (it returns no policy set, so it can never prove
+    scope); the zone-set probe proves reach. Returns
+    ``{"status": <verify result.status>, "zones": [{"id", "name"}, ...]}``.
+    The probe is skipped when verify already failed the token — a dead
+    credential's reach is not worth a second request, and the construction
+    wall's tests pin that an inactive token sends exactly one request.
+
+    Read-only, GETs only, and safe by construction: the token is shape-refused
+    here (refuse_global_api_key), so no consumer can put a Global API Key on
+    the wire by handing this helper a raw vault value. Judgment stays with the
+    callers: the registry refuses construction on anything but exactly the one
+    expected zone; the daily audit files Findings on drift against the
+    declared zone rows.
+    """
+    token = refuse_global_api_key(token)
+    verify = api_request(token, "GET", TOKEN_VERIFY_PATH, timeout=timeout)
+    status = (verify.get("result") or {}).get("status")
+    if status != "active":
+        return {"status": status, "zones": []}
+    probe = api_request(token, "GET", ZONE_PROBE_PATH, timeout=timeout)
+    zones = [
+        {"id": row.get("id"), "name": row.get("name")}
+        for row in probe.get("result") or []
+    ]
+    return {"status": status, "zones": zones}
+
+
+def verify_token(token_ref, *, timeout=20):
+    """Resolve a DnsAccount vault ref and observe it (Task 2's audit entry).
+
+    The ref is loaded through the registry's vault seam (never a raw value in
+    a signature the caller might log), then observed through observe_token,
+    which shape-refuses pre-network itself. No mutation anywhere.
+    """
+    from .registry import _load_token
+
+    _, raw = _load_token(token_ref)
+    return observe_token(raw, timeout=timeout)
 
 
 class CloudflareDnsProvider(DnsProvider):

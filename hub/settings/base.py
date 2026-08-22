@@ -229,6 +229,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.run_restore_clean_drill",
         "schedule": 30 * 86400,
     },
+    "cf-token-scope-daily": {
+        "task": "monitor.tasks.audit_cf_token_scope",
+        "schedule": 86400.0,
+    },
 }
 
 LOGGING = {
