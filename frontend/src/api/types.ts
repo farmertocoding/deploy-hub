@@ -127,6 +127,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/findings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_findings_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_findings_retrieve_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/{id}/transition/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_findings_transition_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/": {
         parameters: {
             query?: never;
@@ -234,6 +282,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description * `ack` - ack
+         *     * `resolve` - resolve
+         *     * `accept_risk` - accept_risk
+         * @enum {string}
+         */
+        ActionEnum: "ack" | "resolve" | "accept_risk";
         Confirm: {
             otp_code: string;
         };
@@ -259,6 +314,30 @@ export interface components {
             env: {
                 [key: string]: string;
             };
+        };
+        Finding: {
+            readonly id: number;
+            source_engine: string;
+            severity: components["schemas"]["SeverityEnum"];
+            entity: string;
+            title: string;
+            body?: string;
+            fix_action?: string;
+            state?: components["schemas"]["StateEnum"];
+            /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            fingerprint: string;
+            accepted_reason?: string;
+        };
+        FindingDetailSnapshot: {
+            seq: number;
+            data: components["schemas"]["Finding"];
+        };
+        FindingListSnapshot: {
+            seq: number;
+            data: components["schemas"]["Finding"][];
         };
         Login: {
             username: string;
@@ -328,12 +407,32 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * @description * `p1` - P1
+         *     * `p2` - P2
+         *     * `p3` - P3
+         * @enum {string}
+         */
+        SeverityEnum: "p1" | "p2" | "p3";
         SiteSummary: {
             id: number;
             name: string;
             domain: string;
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
+        };
+        /**
+         * @description * `open` - Open
+         *     * `acked` - Acked
+         *     * `resolved` - Resolved
+         *     * `accepted` - Accepted
+         * @enum {string}
+         */
+        StateEnum: "open" | "acked" | "resolved" | "accepted";
+        Transition: {
+            action: components["schemas"]["ActionEnum"];
+            /** @default  */
+            reason: string;
         };
         WizardState: {
             questions: components["schemas"]["Question"][];
@@ -509,6 +608,88 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_findings_retrieve: {
+        parameters: {
+            query?: {
+                entity?: string;
+                /**
+                 * @description * `p1` - P1
+                 *     * `p2` - P2
+                 *     * `p3` - P3
+                 */
+                severity?: "p1" | "p2" | "p3";
+                /**
+                 * @description * `open` - Open
+                 *     * `acked` - Acked
+                 *     * `resolved` - Resolved
+                 *     * `accepted` - Accepted
+                 */
+                state?: "open" | "acked" | "resolved" | "accepted";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingListSnapshot"];
+                };
+            };
+        };
+    };
+    v1_findings_retrieve_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
+            };
+        };
+    };
+    v1_findings_transition_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Transition"];
+                "application/x-www-form-urlencoded": components["schemas"]["Transition"];
+                "multipart/form-data": components["schemas"]["Transition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
             };
         };
     };

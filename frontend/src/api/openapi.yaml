@@ -141,6 +141,107 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/findings/:
+    get:
+      operationId: v1_findings_retrieve
+      parameters:
+      - in: query
+        name: entity
+        schema:
+          type: string
+          maxLength: 128
+          minLength: 1
+      - in: query
+        name: severity
+        schema:
+          enum:
+          - p1
+          - p2
+          - p3
+          type: string
+          minLength: 1
+        description: |-
+          * `p1` - P1
+          * `p2` - P2
+          * `p3` - P3
+      - in: query
+        name: state
+        schema:
+          enum:
+          - open
+          - acked
+          - resolved
+          - accepted
+          type: string
+          minLength: 1
+        description: |-
+          * `open` - Open
+          * `acked` - Acked
+          * `resolved` - Resolved
+          * `accepted` - Accepted
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingListSnapshot'
+          description: ''
+  /api/v1/findings/{id}/:
+    get:
+      operationId: v1_findings_retrieve_2
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetailSnapshot'
+          description: ''
+  /api/v1/findings/{id}/transition/:
+    post:
+      operationId: v1_findings_transition_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Transition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Transition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Transition'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetailSnapshot'
+          description: ''
   /api/v1/projects/:
     get:
       operationId: v1_projects_list
@@ -406,6 +507,16 @@ paths:
           description: ''
 components:
   schemas:
+    ActionEnum:
+      enum:
+      - ack
+      - resolve
+      - accept_risk
+      type: string
+      description: |-
+        * `ack` - ack
+        * `resolve` - resolve
+        * `accept_risk` - accept_risk
     Confirm:
       type: object
       properties:
@@ -461,6 +572,71 @@ components:
           description: name -> value. Values are write-only and stored in the vault.
       required:
       - env
+    Finding:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        source_engine:
+          type: string
+          maxLength: 64
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        entity:
+          type: string
+          maxLength: 128
+        title:
+          type: string
+          maxLength: 256
+        body:
+          type: string
+        fix_action:
+          type: string
+          maxLength: 256
+        state:
+          $ref: '#/components/schemas/StateEnum'
+        first_seen:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+        fingerprint:
+          type: string
+          maxLength: 128
+        accepted_reason:
+          type: string
+          maxLength: 256
+      required:
+      - entity
+      - fingerprint
+      - id
+      - severity
+      - source_engine
+      - title
+    FindingDetailSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/Finding'
+      required:
+      - data
+      - seq
+    FindingListSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+      required:
+      - data
+      - seq
     Login:
       type: object
       properties:
@@ -609,6 +785,16 @@ components:
       - scanned_at
       - summary
       - warnings
+    SeverityEnum:
+      enum:
+      - p1
+      - p2
+      - p3
+      type: string
+      description: |-
+        * `p1` - P1
+        * `p2` - P2
+        * `p3` - P3
     SiteSummary:
       type: object
       properties:
@@ -630,6 +816,29 @@ components:
       - latest_manifest_version
       - manifest_current
       - name
+    StateEnum:
+      enum:
+      - open
+      - acked
+      - resolved
+      - accepted
+      type: string
+      description: |-
+        * `open` - Open
+        * `acked` - Acked
+        * `resolved` - Resolved
+        * `accepted` - Accepted
+    Transition:
+      type: object
+      properties:
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+        reason:
+          type: string
+          default: ''
+          maxLength: 256
+      required:
+      - action
     WizardState:
       type: object
       properties:

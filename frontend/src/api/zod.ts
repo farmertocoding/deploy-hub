@@ -17,6 +17,37 @@ const DemoJob = z
     confirm_warnings: z.boolean().optional().default(false),
   })
   .passthrough();
+const SeverityEnum = z.enum(["p1", "p2", "p3"]);
+const StateEnum = z.enum(["open", "acked", "resolved", "accepted"]);
+const Finding = z
+  .object({
+    id: z.number().int(),
+    source_engine: z.string().max(64),
+    severity: SeverityEnum,
+    entity: z.string().max(128),
+    title: z.string().max(256),
+    body: z.string().optional(),
+    fix_action: z.string().max(256).optional(),
+    state: StateEnum.optional(),
+    first_seen: z.string().datetime({ offset: true }).optional(),
+    last_seen: z.string().datetime({ offset: true }).optional(),
+    fingerprint: z.string().max(128),
+    accepted_reason: z.string().max(256).optional(),
+  })
+  .passthrough();
+const FindingListSnapshot = z
+  .object({ seq: z.number().int(), data: z.array(Finding) })
+  .passthrough();
+const FindingDetailSnapshot = z
+  .object({ seq: z.number().int(), data: Finding })
+  .passthrough();
+const ActionEnum = z.enum(["ack", "resolve", "accept_risk"]);
+const Transition = z
+  .object({
+    action: ActionEnum,
+    reason: z.string().max(256).optional().default(""),
+  })
+  .passthrough();
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -96,6 +127,13 @@ export const schemas = {
   Login,
   Confirm,
   DemoJob,
+  SeverityEnum,
+  StateEnum,
+  Finding,
+  FindingListSnapshot,
+  FindingDetailSnapshot,
+  ActionEnum,
+  Transition,
   SiteSummary,
   ProjectSummary,
   Readiness,
