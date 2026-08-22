@@ -83,10 +83,12 @@ def test_no_dns_token_reaches_any_target_bound_surface():
     ::test_no_dns_token_in_run_argv, ::test_no_dns_token_in_env_files_or_env_snapshots,
     ::test_no_dns_token_in_deployment_artifacts_or_manifest,
     ::test_no_dns_token_in_generated_caddy_or_dockerfile_text,
-    ::test_recorded_transport_call_log_is_token_free, and
+    ::test_recorded_transport_call_log_is_token_free,
+    ::test_no_dns_token_in_celery_task_kwargs, and
     ::test_no_acme_dns_challenge_block_is_ever_generated. Does not mark the
     full-text SEC-B2 id.
     """
+    from django.conf import settings
     from test_no_token_exfiltration import (
         ACME_MARKERS,
         _artifact_and_generated,
@@ -99,6 +101,8 @@ def test_no_dns_token_reaches_any_target_bound_surface():
         _simulate_deploy,
     )
 
+    from deploys.tasks import run_deploy
+
     _site, deployment, transport = _simulate_deploy("p3-exfil")
     assert deployment.status == "succeeded"
     _assert_clean(_put_payloads(transport), where="put payload")
@@ -110,6 +114,12 @@ def test_no_dns_token_reaches_any_target_bound_surface():
     )
     _assert_clean(_artifact_and_generated(deployment, transport), where="caddy/dockerfile")
     _assert_clean([_call_log_blob(transport)], where="transport call log")
+    sig = run_deploy.s(deployment.pk)
+    _assert_clean([sig.args, sig.kwargs, sig.options], where="celery signature")
+    _assert_clean(
+        [settings.CELERY_BEAT_SCHEDULE],
+        where="CELERY_BEAT_SCHEDULE",
+    )
     for blob in _artifact_and_generated(deployment, transport) + _put_payloads(transport):
         text = _blobify(blob).decode("utf-8", "replace").lower()
         for marker in ACME_MARKERS:
@@ -846,6 +856,50 @@ def test_uptime_events_are_transitions_not_samples():
         .values_list("state", flat=True)
     )
     assert states == ["up", "down"]
+
+
+@pytest.mark.django_db
+@pytest.mark.req("MON-UPTIME-EVENTS")
+def test_canary_fail_degrades_to_one_hub_egress_p2():
+    """A failed canary collapses N site-down candidates to one Hub-egress P2.
+
+    Transcribes tests/test_canary.py::test_canary_failure_collapses_n_site_alerts_to_one_p2.
+    The phase-3 demo must name this clause honestly: a real T1 artifact, or a
+    dated "not recorded" line — never an invented live canary-fail.
+    """
+    from test_canary import RecordingGet
+
+    from monitor.deadman import declare_mass_outage
+
+    candidates = ["site:blog", "site:scan", "site:shop"]
+    alerts = declare_mass_outage(
+        candidates, http_get=RecordingGet(status=OSError("egress down")),
+    )
+    assert len(alerts) == 1
+    alert = alerts[0]
+    assert alert["severity"] == "p2"
+    assert alert["kind"] == "hub-egress-degraded"
+    assert alert["suppressed"] == candidates
+
+    record = _demo()
+    assert "canary" in record.lower(), (
+        "design-note §4 and P3-DNS-MONITOR-DEMO name canary-fail → one P2"
+    )
+    assert "canary-fail" in record.lower() or "canary fail" in record.lower()
+    artifact = REPO / "conformance" / "demos" / "phase-3" / "canary-fail.txt"
+    assert artifact.is_file() and artifact.stat().st_size > 0, (
+        "record a real canary artifact or a dated not-recorded line"
+    )
+    text = artifact.read_text(encoding="utf-8")
+    assert "2026-08-23" in text
+    assert (
+        "hub-egress-degraded" in text.lower()
+        or "hub egress degraded" in text.lower()
+        or "not recorded" in text.lower()
+    )
+    assert "live canary-fail was not run" in text.lower() or "not a live" in text.lower() or (
+        "not recorded" in text.lower()
+    )
 
 
 def test_clause_scoped_full_text_ids_are_waived_not_marked():

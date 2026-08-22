@@ -79,3 +79,33 @@ def test_split_clause_ids_exist_and_name_their_phase():
     for full_text in (FULL_TEXT_SEC_B2, FULL_TEXT_UX_F5):
         assert reg[full_text]["phase"] == 3, (
             f"{full_text} stays due at phase 3 — the split never rephases it")
+
+
+def _acceptance_fn(name: str) -> str:
+    src = (REPO / "tests" / "acceptance" / "test_phase_3.py").read_text(
+        encoding="utf-8")
+    needle = f"def {name}("
+    start = src.index(needle)
+    after = src[start:]
+    nxt = after.find("\ndef ", 1)
+    return after[:nxt] if nxt != -1 else after
+
+
+def test_sec_b2_marked_acceptance_covers_celery_kwargs():
+    """The sole function-level SEC-B2-NO-TOKEN-ON-TARGET marker must scan
+    Celery task kwargs. The registry names that surface; the source file is
+    module-pytestmark only, so collect_markers never sees
+    tests/test_no_token_exfiltration.py::test_no_dns_token_in_celery_task_kwargs.
+    Do not put @pytest.mark.req on the full-text SEC-B2 id.
+    """
+    body = _acceptance_fn("test_no_dns_token_reaches_any_target_bound_surface")
+    assert "celery" in body.lower(), (
+        "the marked SEC-B2 acceptance body must cover Celery kwargs"
+    )
+    assert "run_deploy" in body or "CELERY_BEAT_SCHEDULE" in body, (
+        "transcribe tests/test_no_token_exfiltration.py::"
+        "test_no_dns_token_in_celery_task_kwargs, not a comment"
+    )
+    src = (REPO / "tests" / "acceptance" / "test_phase_3.py").read_text(
+        encoding="utf-8")
+    assert '@pytest.mark.req("SEC-B2-NO-DNS-TOKENS-ON-TARGETS")' not in src

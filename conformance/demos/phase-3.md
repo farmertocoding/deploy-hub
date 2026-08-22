@@ -9,7 +9,7 @@ Nothing here is a live Cloudflare or Let's Encrypt success.
 Mechanical: `make review-round` twice clean (T1 + phase-3 conformance minus
 live tiers). Live on the Multipass host of record: CF-connect → provision →
 deploy `sample-site/` → product adapter upsert → Origin cert → P1 / digest /
-map / dead-man. **No test-zone token → DNS-CF-T3-LIVE and
+map / dead-man → canary-fail → one P2. **No test-zone token → DNS-CF-T3-LIVE and
 HARNESS-T3-LE-STAGING are skipped-only + dated waiver, never a T1-sibling
 green.** Record: this file + `conformance/demos/phase-3/`.
 
@@ -57,6 +57,15 @@ that honest. Do not read this record as a 24 h run.
 dated 2026-08-23. The product still files a Finding on a failed POST
 (`tests/acceptance/test_phase_3.py::test_deadman_pings_only_after_a_completed_cycle_and_failure_files_a_finding`).
 A fake healthchecks signup was not invented.
+
+## Canary-fail → one P2
+
+`phase-3/canary-fail.txt` — **no live canary-fail was run on this host**,
+dated 2026-08-23. The T1 proof still holds:
+`tests/test_canary.py::test_canary_failure_collapses_n_site_alerts_to_one_p2`
+(transcribed at
+`tests/acceptance/test_phase_3.py::test_canary_fail_degrades_to_one_hub_egress_p2`).
+A live mass-outage declaration was not invented.
 
 ## Cloudflare-connect screen
 
@@ -108,6 +117,7 @@ growth from HostMetric is vacuously zero. No MON-C7 slip waiver.
 - `::test_host_down_suppression_collapses_site_alerts`
 - `::test_push_body_is_minimized_and_scrubbed`
 - `::test_deadman_pings_only_after_a_completed_cycle_and_failure_files_a_finding`
+- `::test_canary_fail_degrades_to_one_hub_egress_p2`
 - `::test_log_pull_is_capped_and_degrades_sampled`
 - `::test_findings_inbox_requires_a_reason_to_accept_risk`
 - `::test_rollback_is_one_click_and_never_step_up_gated`
