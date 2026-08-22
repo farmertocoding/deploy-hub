@@ -103,7 +103,13 @@ ensure_pkg() {
     if pkg_present "${name}"; then
         return 0
     fi
-    run apt-get install -y "${name}"
+    # Explicit failure branch: callers use `ensure_pkg X || true`, and inside
+    # an || list bash suspends set -e for the whole function body — a failed
+    # install used to fall through to mark_stamped, and the stale stamp then
+    # convinced the caddy branch to enable a unit that does not exist.
+    if ! run apt-get install -y "${name}"; then
+        return 1
+    fi
     mark_stamped "pkg-${name}"
 }
 

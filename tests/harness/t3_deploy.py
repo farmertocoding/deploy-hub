@@ -253,6 +253,14 @@ def guest_gateway_ipv4(vm):
 
 
 def install_authorized_keys(vm, pubkey_text):
+    """Append the session key; never replace an authorized_keys file.
+
+    `install` clobbered /home/ubuntu/.ssh/authorized_keys — the file carrying
+    the key multipass itself injected — so every later `multipass exec` failed
+    with "Access denied for 'publickey'" and the session was unreachable the
+    moment this ran (FIX-0: masked until the Local Network block was lifted).
+    The guest-side sh -c is data in an exec argv list, not a host shell string.
+    """
     local = REPO / "tmp" / f"{vm.name}.pub"
     local.parent.mkdir(exist_ok=True)
     local.write_text(pubkey_text, encoding="utf-8")
@@ -263,12 +271,12 @@ def install_authorized_keys(vm, pubkey_text):
         ("/root/.ssh/authorized_keys", "root"),
     ):
         home_ssh = str(Path(dest).parent)
-        _mp_exec(vm, ["sudo", "mkdir", "-p", home_ssh], timeout=30)
-        _mp_exec(
-            vm,
-            ["sudo", "install", "-m", "0600", "-o", owner, "-g", owner, "/tmp/t3.pub", dest],
-            timeout=30,
+        script = (
+            f"mkdir -p {home_ssh} && touch {dest} && "
+            f"cat /tmp/t3.pub >> {dest} && "
+            f"chown {owner}:{owner} {dest} && chmod 600 {dest}"
         )
+        _mp_exec(vm, ["sudo", "sh", "-c", script], timeout=30)
 
 
 def install_guest_docker(vm):
@@ -295,6 +303,56 @@ def install_guest_docker(vm):
         ready=lambda r: getattr(r, "returncode", 1) == 0,
         deadline=time.time() + 90,
         timeout=20,
+    )
+
+
+CADDY_VERSION = "2.8.4"
+CADDY_UNIT = REPO / "images" / "hub-test-target" / "caddy.service"
+T3_CADDYFILE = '{\n\tauto_https off\n}\n:80 {\n\trespond "hub-t3-vm" 200\n}\n'
+
+
+def install_guest_caddy(vm):
+    """Caddy binary + unit on the VM, mirroring images/hub-test-target.
+
+    caddy is not in the jammy archive (harden-ubuntu.sh tolerates that with
+    `ensure_pkg caddy || true`), and the pipeline's route step PUTs against
+    the admin API on 127.0.0.1:2019 — so the harness installs the same
+    GitHub-release binary the T2 image records. Runs after provision_host so
+    the fresh-host probe still sees port 80 free.
+    """
+    arch = (_mp_result(vm, ["dpkg", "--print-architecture"], timeout=30).stdout or "").strip()
+    url = (
+        "https://github.com/caddyserver/caddy/releases/download/"
+        f"v{CADDY_VERSION}/caddy_{CADDY_VERSION}_linux_{arch}.tar.gz"
+    )
+    _mp_exec(
+        vm,
+        ["sudo", "sh", "-c",
+         f"curl -fsSL {url} | tar -xz -C /usr/local/bin caddy "
+         f"&& chmod +x /usr/local/bin/caddy && mkdir -p /etc/caddy"],
+        timeout=300,
+    )
+    local_caddyfile = REPO / "tmp" / f"{vm.name}.Caddyfile"
+    local_caddyfile.parent.mkdir(exist_ok=True)
+    local_caddyfile.write_text(T3_CADDYFILE, encoding="utf-8")
+    transfer(str(local_caddyfile), f"{vm.name}:/tmp/Caddyfile")
+    transfer(str(CADDY_UNIT), f"{vm.name}:/tmp/caddy.service")
+    _mp_exec(vm, ["sudo", "install", "-m", "0644", "/tmp/Caddyfile", "/etc/caddy/Caddyfile"],
+             timeout=30)
+    _mp_exec(
+        vm,
+        ["sudo", "install", "-m", "0644", "/tmp/caddy.service",
+         "/etc/systemd/system/caddy.service"],
+        timeout=30,
+    )
+    _mp_exec(vm, ["sudo", "systemctl", "daemon-reload"], timeout=60)
+    _mp_exec(vm, ["sudo", "systemctl", "enable", "--now", "caddy"], timeout=120)
+    wait_exec(
+        vm.mp(),
+        ["curl", "-sf", "http://127.0.0.1:2019/config/"],
+        ready=lambda r: getattr(r, "returncode", 1) == 0,
+        deadline=time.time() + 60,
+        timeout=15,
     )
 
 
@@ -371,12 +429,17 @@ def ssh_transport(target):
 
 
 def ensure_provisioned_and_hardened(vm, settings):
-    """Fresh-host provision once, then harden. Safe to call from any test order."""
+    """Fresh-host provision once, then caddy, then harden. Any test order.
+
+    Caddy comes after provision_host on purpose: the fresh-host probe refuses
+    a target whose port 80 is already occupied.
+    """
     if vm.provision_result is None:
         from provision.service import provision_host
 
         target = enroll_target(vm, settings)
         vm.provision_result = provision_host(target, ssh_transport(target))
+        install_guest_caddy(vm)
     if not vm.hardened:
         harden_target_profile(vm)
         vm.hardened = True
