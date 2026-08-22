@@ -237,6 +237,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.probe_uptime",
         "schedule": 60.0,
     },
+    "cert-expiry-daily": {
+        "task": "monitor.tasks.scan_cert_expiry",
+        "schedule": 86400.0,
+    },
 }
 
 # --- Dead-man + canary (alert-protocol §5, D-039) ---

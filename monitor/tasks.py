@@ -103,3 +103,13 @@ def probe_uptime():
         "n": cycle["n"],
         "pinged": outcome["pinged"],
     }
+
+
+@shared_task(ignore_result=True)
+def scan_cert_expiry():
+    """Beat `cert-expiry-daily`. Takes no args so nothing credential-shaped
+    can appear in task args or the result."""
+    from monitor.cert_watch import scan_cert_expiry as body
+
+    run = body()
+    return {"ok": True, "status": run.status, "kind": run.kind}

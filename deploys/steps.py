@@ -251,7 +251,15 @@ def ensure_dns(desired):
 
 
 def ensure_route_tls(desired):
-    """PUT Caddy route by id site-{slug}; skip when the live route matches."""
+    """PUT Caddy route by id site-{slug}; skip when the live route matches.
+
+    Public sites first converge certificate material (vault-first Origin CA
+    push, or the named unproxied refusal). mesh_only is unchanged.
+    """
+    if desired.get("site") is not None and _exposure(desired) != "mesh_only":
+        from deploys.certs import ensure_site_certificate
+
+        ensure_site_certificate(desired)
     transport = desired["transport"]
     route_id = f"site-{desired['site_slug']}"
     route = _caddy_route(desired, route_id)

@@ -163,11 +163,17 @@ def _default_dns():
     return FakeDnsProvider()
 
 
+def _default_cert_issuer():
+    from providers.fakes import FakeOriginCertIssuer
+
+    return FakeOriginCertIssuer()
+
+
 def _noop_sleep(_seconds):
     return None
 
 
-def execute(deployment_id, *, transport=None, dns=None, sleep=None):
+def execute(deployment_id, *, transport=None, dns=None, sleep=None, cert_issuer=None):
     """Run (or resume) a deployment. Task kwargs must stay ids-only."""
     deployment = Deployment.objects.select_related(
         "manifest__site__primary_target__zone",
@@ -183,14 +189,17 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None):
 
     touch_heartbeat(deployment)
     try:
-        return _execute_running(deployment, transport=transport, dns=dns, sleep=sleep)
+        return _execute_running(
+            deployment, transport=transport, dns=dns, sleep=sleep,
+            cert_issuer=cert_issuer,
+        )
     finally:
         deployment.refresh_from_db()
         if deployment.status in TERMINAL_STATUSES:
             release_deploy_locks(deployment)
 
 
-def _execute_running(deployment, *, transport, dns, sleep):
+def _execute_running(deployment, *, transport, dns, sleep, cert_issuer=None):
     site = deployment.manifest.site
     if transport is None:
         transport = _default_transport(site)
@@ -198,6 +207,7 @@ def _execute_running(deployment, *, transport, dns, sleep):
         dns = _default_dns()
     desired = _assemble_desired(
         deployment, transport=transport, dns=dns, sleep=sleep,
+        cert_issuer=cert_issuer,
     )
     desired["env_mapping"] = _env_mapping_for_deploy(deployment)
 
@@ -223,7 +233,7 @@ def _execute_running(deployment, *, transport, dns, sleep):
     return {"started": True, "status": Deployment.Status.SUCCEEDED}
 
 
-def rollback(deployment_id, *, transport=None, dns=None, sleep=None):
+def rollback(deployment_id, *, transport=None, dns=None, sleep=None, cert_issuer=None):
     """Enqueue a new Deployment that re-applies the original artifact set."""
     original = Deployment.objects.select_related(
         "manifest__site__primary_target",
@@ -233,7 +243,10 @@ def rollback(deployment_id, *, transport=None, dns=None, sleep=None):
         status=Deployment.Status.QUEUED,
         rollback_of=original,
     )
-    return execute(created.pk, transport=transport, dns=dns, sleep=sleep)
+    return execute(
+        created.pk, transport=transport, dns=dns, sleep=sleep,
+        cert_issuer=cert_issuer,
+    )
 
 
 def _supersede_running(site, *, except_pk):
@@ -312,7 +325,7 @@ def _pin_from_succeeded_history(deployment, fallback_sha):
     return sha, _stored_image_tag(built) or image_tag(sha, body)
 
 
-def _assemble_desired(deployment, *, transport, dns, sleep):
+def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
     site = deployment.manifest.site
     body = deployment.manifest.body or {}
     slug = site.name
@@ -372,6 +385,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep):
         "docker_run_extra": body.get("docker_run_extra"),
         "env_names": env_names,
         "firewall_argv": list(body.get("firewall_argv") or []),
+        "cert_issuer": cert_issuer if cert_issuer is not None else _default_cert_issuer(),
     }
     if sleep is not None:
         desired["sleep"] = sleep
@@ -428,6 +442,7 @@ def _run_step(deployment, step, desired=None):
             transport=_default_transport(deployment.manifest.site),
             dns=_default_dns(),
             sleep=_noop_sleep,
+            cert_issuer=_default_cert_issuer(),
         )
     step.status = DeploymentStep.Status.RUNNING
     step.started = timezone.now()
