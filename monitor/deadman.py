@@ -71,7 +71,17 @@ def _file_finding(*, source_engine, severity, entity, title, body,
     row = Finding.objects.filter(fingerprint=fingerprint).first()
     if row is not None:
         row.last_seen = timezone.now()
-        row.save(update_fields=["last_seen"])
+        update_fields = ["last_seen"]
+        # §F2 recurrence semantics: a RESOLVED finding that recurs REOPENS —
+        # otherwise a recurring dead-man failure after one operator resolve
+        # is permanent silence, the exact D-039 hole. ACKED and ACCEPTED are
+        # left alone: the operator has already seen it (ack != resolve).
+        if row.state == Finding.State.RESOLVED:
+            row.state = Finding.State.OPEN
+            update_fields.append("state")
+            audit("finding-reopened", row, source="system",
+                  severity="warning", fingerprint=fingerprint)
+        row.save(update_fields=update_fields)
         return row
     row = Finding.objects.create(
         source_engine=source_engine,
@@ -138,10 +148,21 @@ def ping(*, http_post=None, now=None):
 def ping_after_cycle(cycle, *, http_post=None, now=None):
     """The §C7 gate: ping only when the cycle completed EVERY target. A DOWN
     site is a completed probe; an incomplete cycle stays silent so the
-    receiver's missed-ping alarm fires."""
+    receiver's missed-ping alarm fires. A ZERO-target cycle is also silent:
+    the ping asserts "probing works", not "the Hub process is alive" — a
+    receiver vouching for a Hub that monitors nothing would be a lie, so an
+    empty fleet surfaces at the receiver as missed pings, not as green. The
+    probed count rides every outcome so the fleet size is observable."""
     if not isinstance(cycle, dict) or cycle.get("completed") is not True:
         return {"pinged": False, "ok": False, "reason": "cycle-incomplete"}
-    return ping(http_post=http_post, now=now)
+    n = int(cycle.get("n") or 0)
+    if n == 0:
+        audit("deadman-ping-skipped", source="system", severity="warning",
+              reason="empty-fleet")
+        return {"pinged": False, "ok": False, "reason": "empty-fleet", "n": 0}
+    outcome = ping(http_post=http_post, now=now)
+    outcome["n"] = n
+    return outcome
 
 
 def canary_ok(*, http_get=None):

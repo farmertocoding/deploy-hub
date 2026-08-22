@@ -9,16 +9,28 @@ engine reads. ws-class sites additionally surface last-tick age + connection
 count from the /healthz payload the collector already fetched (§O3): a
 rendering rule over existing data, not new machinery.
 """
+from datetime import timedelta
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from django.utils import timezone
 
+from core import locks
 from core.audit import audit
-from core.models import Site, Target, UptimeEvent
+from core.models import OperationLock, Site, Target, UptimeEvent
 
 SCHEMA_VERSION = 1
 PROBE_TIMEOUT_S = 10
+
+# Cycle-overlap guard (§A5 Postgres locks, the collect_all pattern): one
+# fleet-wide row so a slow cycle makes the next Beat tick skip-and-record
+# instead of stacking a concurrent run. Vocabulary reuses the existing
+# OperationLock choices — the cycle is a collection-class pass over targets.
+CYCLE_LOCK = ("target", "probe-uptime-cycle", "collect")
+CYCLE_HOLDER = "probe-uptime"
+# A holder that died mid-cycle must not silence probing forever: a lock this
+# old (5 Beat periods) is broken and taken over, audited.
+CYCLE_LOCK_STALE_S = 300
 
 # Key spellings the scanner-addendum /healthz contract uses for ws-class
 # tick/connection data (§O3); checked in the entry and its nested checks.
@@ -119,14 +131,53 @@ def _probe_sites():
     )
 
 
+def _acquire_cycle_lock():
+    """Take the fleet-wide cycle guard; break-and-retake only a stale one."""
+    lock = locks.acquire(*CYCLE_LOCK, CYCLE_HOLDER)
+    if lock is not None:
+        return lock
+    scope, object_id, kind = CYCLE_LOCK
+    cutoff = timezone.now() - timedelta(seconds=CYCLE_LOCK_STALE_S)
+    stale, _ = OperationLock.objects.filter(
+        scope=scope, object_id=object_id, kind=kind, heartbeat_at__lt=cutoff,
+    ).delete()
+    if not stale:
+        return None
+    audit("uptime-cycle-lock-broken", source="system", severity="warning",
+          stale_after_s=CYCLE_LOCK_STALE_S)
+    return locks.acquire(*CYCLE_LOCK, CYCLE_HOLDER)
+
+
 def probe_cycle(*, http_get=None, now=None):
     """Probe every site once over HTTP; record transitions; feed observe().
 
     A DOWN site is a completed probe. Only an unexpected internal error marks
     the cycle incomplete — and an incomplete cycle must not dead-man ping
     (§C7), because the ping's whole claim is "the pipeline proved itself
-    end-to-end this minute".
+    end-to-end this minute". A cycle that finds the guard held is a recorded
+    SKIP (completed False, zero probes) — a hung fleet must not stack
+    overlapping cycles on top of itself.
     """
+    lock = _acquire_cycle_lock()
+    if lock is None:
+        audit("uptime-cycle-skipped", source="system", severity="warning",
+              reason="cycle-lock-held")
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "completed": False,
+            "skipped": True,
+            "reason": "cycle-lock-held",
+            "n": 0,
+            "errors": 0,
+            "results": [],
+        }
+    try:
+        return _run_cycle(http_get=http_get, now=now)
+    finally:
+        locks.release(*CYCLE_LOCK, holder=CYCLE_HOLDER)
+
+
+def _run_cycle(*, http_get=None, now=None):
     get = http_get or http_probe
     results, errors = [], 0
     for site in _probe_sites():

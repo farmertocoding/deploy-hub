@@ -112,6 +112,41 @@ def test_ws_site_card_metric_is_last_tick_age_and_connections():
     assert ws_card_metric({"live": True, "ready": True, "checks": {}}) is None
 
 
+def test_overlapping_cycle_is_a_recorded_skip():
+    from uptime_fixtures import make_site
+
+    from core import locks
+    from core.models import AuditEvent
+    from monitor.deadman import ping_after_cycle
+    from monitor.uptime import CYCLE_LOCK, probe_cycle
+
+    make_site("blog3")
+    # Another worker holds the cycle guard (a slow fleet still probing).
+    assert locks.acquire(*CYCLE_LOCK, "another-worker") is not None
+    get = RecordingGet(status=200)
+
+    cycle = probe_cycle(http_get=get)
+
+    # Skip-and-record, never a stacked concurrent run.
+    assert cycle["skipped"] is True
+    assert cycle["completed"] is False
+    assert get.calls == []
+    assert AuditEvent.objects.filter(action="uptime-cycle-skipped").exists()
+
+    # And a skipped cycle proved nothing, so it must not dead-man ping.
+    post_calls = []
+    outcome = ping_after_cycle(
+        cycle, http_post=lambda url, *, timeout=None: post_calls.append(url) or 200,
+    )
+    assert outcome["pinged"] is False
+    assert post_calls == []
+
+    # Once the holder releases, the next cycle runs normally.
+    locks.release(*CYCLE_LOCK, holder="another-worker")
+    cycle = probe_cycle(http_get=get)
+    assert cycle["completed"] is True and cycle["n"] == 1
+
+
 def test_probe_cycle_records_zero_mutating_transport_calls(monkeypatch):
     from uptime_fixtures import make_site
 

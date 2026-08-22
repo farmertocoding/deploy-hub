@@ -142,6 +142,66 @@ def test_failed_ping_files_its_own_finding():
     assert RECEIVER_URL not in finding.title
 
 
+def test_recurrence_reopens_a_resolved_finding():
+    from monitor.deadman import DEADMAN_FINDING_FINGERPRINT, ping
+
+    _plant_receiver_url()
+    ping(http_post=RecordingPost(status=500))
+    finding = Finding.objects.get(fingerprint=DEADMAN_FINDING_FINGERPRINT)
+
+    # Operator resolves it; the POST fails again next minute. A resolved
+    # finding staying resolved would be the D-039 permanent-silence hole.
+    finding.state = Finding.State.RESOLVED
+    finding.save(update_fields=["state"])
+    ping(http_post=RecordingPost(status=500))
+
+    finding.refresh_from_db()
+    assert finding.state == Finding.State.OPEN
+    assert Finding.objects.filter(
+        fingerprint=DEADMAN_FINDING_FINGERPRINT).count() == 1
+
+
+def test_recurrence_leaves_an_acked_finding_acked():
+    from monitor.deadman import DEADMAN_FINDING_FINGERPRINT, ping
+
+    _plant_receiver_url()
+    ping(http_post=RecordingPost(status=500))
+    finding = Finding.objects.get(fingerprint=DEADMAN_FINDING_FINGERPRINT)
+
+    # Ack != resolve (§F2): an acked finding stays acked on recurrence —
+    # the operator has already seen it; only last_seen moves.
+    finding.state = Finding.State.ACKED
+    finding.save(update_fields=["state"])
+    last_seen = finding.last_seen
+    ping(http_post=RecordingPost(status=500))
+
+    finding.refresh_from_db()
+    assert finding.state == Finding.State.ACKED
+    assert finding.last_seen >= last_seen
+
+
+def test_zero_target_cycle_does_not_ping():
+    from monitor.deadman import ping_after_cycle
+    from monitor.uptime import probe_cycle
+
+    # No sites at all: the cycle "completes" trivially, but the ping asserts
+    # "probing works", not "the Hub process is alive" — a receiver vouching
+    # for a Hub that monitors nothing is a lie, so the ping is skipped and
+    # the reason + fleet size are recorded.
+    _plant_receiver_url()
+    post = RecordingPost(status=200)
+
+    cycle = probe_cycle(http_get=RecordingGet(status=200))
+    assert cycle["completed"] is True and cycle["n"] == 0
+
+    outcome = ping_after_cycle(cycle, http_post=post)
+
+    assert outcome["pinged"] is False
+    assert outcome["reason"] == "empty-fleet"
+    assert outcome["n"] == 0, "fleet size must be observable in the record"
+    assert post.calls == []
+
+
 def test_deadman_url_is_a_vault_ref_not_a_settings_literal():
     import inspect
 
