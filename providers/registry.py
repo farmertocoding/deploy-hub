@@ -27,7 +27,6 @@ on the model.
 import time
 
 from django.conf import settings
-from django.utils import timezone
 
 from core.test_mode import assert_test_zone
 
@@ -153,28 +152,26 @@ def _verify_scope(token, zone):
 
 
 def _file_scope_finding(zone, error):
-    """A refused construction is operator-visible, not just a raise."""
-    from core.models import Finding
+    """A refused construction is operator-visible, not just a raise.
 
-    now = timezone.now()
-    fingerprint = f"cf-scope:{zone.account_id}:{zone.name}"
-    finding, created = Finding.objects.get_or_create(
-        fingerprint=fingerprint,
-        defaults={
-            "source_engine": "dns_scope",
-            "severity": Finding.Severity.P2,
-            "entity": f"dns_zone:{zone.name}",
-            "title": f"Cloudflare scope verification failed for {zone.name}",
-            "body": str(error),
-            "fix_action": (
-                "Issue a single-zone scoped DNS token and update the "
-                "DnsAccount dns_token_ref"
-            ),
-        },
+    Goes through raise_alert so classify() + finding() give the refusal the
+    same audit + findings-topic publish as every other class. Kind is
+    ``cf-token-scope`` (the table row for construction refusal and the
+    daily-audit drift). The fingerprint stays the Task-1 identity
+    ``cf-scope:{account_id}:{zone.name}`` — not ``cf-token-scope:{pk}:{role}``,
+    which is the daily-audit row.
+    """
+    from monitor.alerts import raise_alert
+
+    raise_alert(
+        "cf-token-scope",
+        f"dns_zone:{zone.name}",
+        fingerprint=f"cf-scope:{zone.account_id}:{zone.name}",
+        source_engine="dns_scope",
+        title=f"Cloudflare scope verification failed for {zone.name}",
+        body=str(error),
+        fix_action=(
+            "Issue a single-zone scoped DNS token and update the "
+            "DnsAccount dns_token_ref"
+        ),
     )
-    if not created:
-        finding.body = str(error)
-        finding.last_seen = now
-        if finding.state == Finding.State.RESOLVED:
-            finding.state = Finding.State.OPEN
-        finding.save(update_fields=["body", "last_seen", "state"])
