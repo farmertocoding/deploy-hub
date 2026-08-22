@@ -19,6 +19,7 @@
     "@vitejs/plugin-react": "^4.3.0",
     "openapi-typescript": "^7.13.0",
     "openapi-zod-client": "^1.18.3",
+    "react-test-renderer": "^18.3.1",
     "tsx": "^4.23.5",
     "vite": "^5.4.0"
   }
