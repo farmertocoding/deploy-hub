@@ -480,12 +480,22 @@ def main(host, port, path, server_name):
         idx = 2
         if ln == 126:
             while len(data) < 4:
-                data += sock.recv(4096)
+                more = sock.recv(4096)
+                if not more:
+                    break
+                data += more
+            if len(data) < 4:
+                return 3
             ln = int.from_bytes(data[2:4], "big")
             idx = 4
         elif ln == 127:
             while len(data) < 10:
-                data += sock.recv(4096)
+                more = sock.recv(4096)
+                if not more:
+                    break
+                data += more
+            if len(data) < 10:
+                return 3
             ln = int.from_bytes(data[2:10], "big")
             idx = 10
         while len(data) < idx + ln:

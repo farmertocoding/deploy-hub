@@ -85,16 +85,21 @@ def sigkill_db(sigkill_db_migrated, django_db_blocker):
 
 def _spawn_worker(pk, db_path, *, fake=True, crash_after, timeout=30):
     """Run worker_entry in a child. Do not SIGKILL from this parent."""
+    zone = _declare_test_zone(pk)
     connections.close_all()
     env = os.environ.copy()
     env["DJANGO_SETTINGS_MODULE"] = "hub.settings.dev"
+    # The child rebinds only under HUB_TEST_MODE (2.5 panel I2); this parent is
+    # the test plane, so it declares it and allowlists the fixture zone for the
+    # §B9 wall. tests/ stays off the child's path — worker_entry no longer
+    # imports from the test tree.
+    env["HUB_TEST_MODE"] = "1"
+    env["HUB_TEST_ZONE_SLUGS"] = zone.slug
     env["HUB_TEST_DATABASE"] = str(db_path)
     env["HUB_TEST_CRASH_AFTER_STEP"] = str(crash_after)
     env["HUB_TEST_CRASH_SIGNAL"] = "SIGKILL"
     env["CONFORMANCE_RUN_REPORT"] = "off"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(REPO), str(REPO / "tests"), env.get("PYTHONPATH", "")],
-    )
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO), env.get("PYTHONPATH", "")])
     cmd = [sys.executable, "-m", "deploys.worker_entry", str(pk)]
     if fake:
         cmd.append("--fake")
@@ -112,6 +117,15 @@ def _spawn_worker(pk, db_path, *, fake=True, crash_after, timeout=30):
         sys.stderr.write(stdout or "")
         sys.stderr.write(stderr or "")
     return proc.returncode
+
+
+def _declare_test_zone(pk):
+    """Flip the fixture zone to purpose=test so the test-mode child may deploy to it."""
+    zone = Deployment.objects.get(pk=pk).manifest.site.primary_target.zone
+    if zone.purpose != "test":
+        zone.purpose = "test"
+        zone.save(update_fields=["purpose"])
+    return zone
 
 
 def _assert_crashed_mid_pipeline(deployment, seq):

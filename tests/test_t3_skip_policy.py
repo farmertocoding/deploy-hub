@@ -87,7 +87,6 @@ def test_host_without_multipass_waiver_does_not_verify_when_multipass_present(
     planted, even if `multipass_available()` is True (silent green / D-024).
     Do not add this waiver to the real WAIVERS.md (Task 16).
     """
-    import tests.harness.multipass as mp
     from tests.harness.multipass import (
         multipass_available,
         version_argv,
@@ -107,7 +106,10 @@ def test_host_without_multipass_waiver_does_not_verify_when_multipass_present(
             return subprocess.CompletedProcess(argv, 0, "", "")
         return real_run(argv, **kwargs)
 
-    monkeypatch.setattr(mp.subprocess, "run", fake_run)
+    # multipass_available is defined in monitor/reaper.py (panel I4: one
+    # driver); the harness re-exports it and no longer imports subprocess
+    # itself. Patching the shared subprocess module covers the defining module.
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert multipass_available() is True
     assert recorded["argv"] == ["multipass", "version"]
     assert recorded["timeout"] == 5
