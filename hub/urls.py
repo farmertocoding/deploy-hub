@@ -13,4 +13,5 @@ urlpatterns = [
     path("api/v1/", include("wizard.urls")),
     path("api/v1/", include("deploys.urls")),
     path("api/v1/", include("monitor.urls")),
+    path("api/v1/", include("core.zone_urls")),
 ]

@@ -1,7 +1,7 @@
-// Settings (§F1): the non-object surfaces, as TABS — Developer (the Phase-0 demo
-// pane, which is a plumbing proof and not the product surface) and Vault (a Settings
-// tab until Phase 4 gives it a real screen). The Cloudflare-connect panel is Task
-// 12b's tab and is deliberately absent here.
+// Settings (§F1): the non-object surfaces, as TABS — Cloudflare (Task 12b:
+// paste a single-zone token), Developer (the Phase-0 demo pane, a plumbing
+// proof and not the product surface), and Vault (a Settings tab until Phase 4
+// gives it a real screen).
 //
 // The demo pane is otherwise the Phase-0 code moved verbatim, with two changes:
 // it takes the shell's ONE events client as a prop instead of opening a second
@@ -19,12 +19,77 @@ import { ConfirmDialog } from "../Tiers.jsx";
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
 export const SETTINGS_TABS = [
+  { id: "cloudflare", label: "Cloudflare" },
   { id: "developer", label: "Developer" },
   { id: "vault", label: "Vault" },
 ];
 
+export async function connectCloudflare(token) {
+  return api("v1/cloudflare/connect/", { token });
+}
+
+export function CloudflarePanel() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const {
+    register, handleSubmit, setError, reset, clearErrors,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(schemas.CloudflareConnect),
+    defaultValues: { token: "" },
+  });
+
+  async function submit(values) {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    clearErrors();
+    const { status, data } = await connectCloudflare(values.token);
+    setBusy(false);
+    if (status === 201) {
+      const parsed = schemas.CloudflareConnectResult.safeParse(data);
+      setResult(parsed.success ? parsed.data : data);
+      reset({ token: "" });
+      return;
+    }
+    const field = Object.values(data.errors ?? {}).flat()[0];
+    setError("token", {
+      type: field?.code ?? String(status),
+      message: field?.message ?? data.detail ?? `Unexpected ${status} response.`,
+    });
+  }
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2>Cloudflare</h2>
+      <p>Paste a single-zone API token. The Hub verifies it and stores it in the
+        vault — the token never comes back.</p>
+      <form onSubmit={handleSubmit(submit)}
+        style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+          <small>API token</small>
+          <input type="password" {...register("token")} style={box}
+            autoComplete="off" aria-invalid={!!errors.token} />
+        </label>
+        <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      </form>
+      {errors.token && (
+        <div style={{ color: "#ff7b72", marginTop: 8 }}>{errors.token.message}</div>
+      )}
+      {result && (
+        <div style={{ color: "#7ee787", marginTop: 8 }}>
+          Connected {result.account?.label} — zone {result.zone?.name}
+          {result.zone?.purpose ? ` (${result.zone.purpose})` : ""}.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings({ user, events }) {
-  const [tab, setTab] = useState("developer");
+  const [tab, setTab] = useState("cloudflare");
   return (
     <div style={{ padding: 16 }}>
       <nav style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -33,10 +98,12 @@ export default function Settings({ user, events }) {
             onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </nav>
-      {tab === "developer"
-        ? <DemoPanel user={user} events={events} />
-        : <p style={{ color: "#8b949e" }}>Vault management gets its screen in Phase 4;
-            until then secrets stay CLI-managed and this tab says so.</p>}
+      {tab === "cloudflare" && <CloudflarePanel />}
+      {tab === "developer" && <DemoPanel user={user} events={events} />}
+      {tab === "vault" && (
+        <p style={{ color: "#8b949e" }}>Vault management gets its screen in Phase 4;
+            until then secrets stay CLI-managed and this tab says so.</p>
+      )}
     </div>
   );
 }

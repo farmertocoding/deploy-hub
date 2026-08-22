@@ -17,6 +17,27 @@ const DemoJob = z
     confirm_warnings: z.boolean().optional().default(false),
   })
   .passthrough();
+const CloudflareConnect = z.object({ token: z.string().min(1) }).passthrough();
+const ProviderEnum = z.literal("cloudflare");
+const DnsAccountConnected = z
+  .object({
+    id: z.number().int(),
+    provider: ProviderEnum.optional(),
+    label: z.string().max(128),
+  })
+  .passthrough();
+const PurposeEnum = z.enum(["prod", "test"]);
+const DnsZoneConnected = z
+  .object({
+    id: z.number().int(),
+    name: z.string().max(253),
+    provider_zone_id: z.string().max(64).optional(),
+    purpose: PurposeEnum.optional(),
+  })
+  .passthrough();
+const CloudflareConnectResult = z
+  .object({ account: DnsAccountConnected, zone: DnsZoneConnected })
+  .passthrough();
 const SeverityEnum = z.enum(["p1", "p2", "p3"]);
 const StateEnum = z.enum(["open", "acked", "resolved", "accepted"]);
 const Finding = z
@@ -127,6 +148,12 @@ export const schemas = {
   Login,
   Confirm,
   DemoJob,
+  CloudflareConnect,
+  ProviderEnum,
+  DnsAccountConnected,
+  PurposeEnum,
+  DnsZoneConnected,
+  CloudflareConnectResult,
   SeverityEnum,
   StateEnum,
   Finding,

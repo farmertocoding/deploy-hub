@@ -127,6 +127,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cloudflare/connect/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_cloudflare_connect_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/findings/": {
         parameters: {
             query?: never;
@@ -289,6 +305,13 @@ export interface components {
          * @enum {string}
          */
         ActionEnum: "ack" | "resolve" | "accept_risk";
+        CloudflareConnect: {
+            token: string;
+        };
+        CloudflareConnectResult: {
+            account: components["schemas"]["DnsAccountConnected"];
+            zone: components["schemas"]["DnsZoneConnected"];
+        };
         Confirm: {
             otp_code: string;
         };
@@ -301,6 +324,17 @@ export interface components {
             delay: number;
             /** @default false */
             confirm_warnings: boolean;
+        };
+        DnsAccountConnected: {
+            readonly id: number;
+            provider?: components["schemas"]["ProviderEnum"];
+            label: string;
+        };
+        DnsZoneConnected: {
+            readonly id: number;
+            name: string;
+            provider_zone_id?: string;
+            purpose?: components["schemas"]["PurposeEnum"];
         };
         EnvApply: {
             deployment_id: number;
@@ -379,6 +413,17 @@ export interface components {
             };
             sites: components["schemas"]["SiteSummary"][];
         };
+        /**
+         * @description * `cloudflare` - Cloudflare
+         * @enum {string}
+         */
+        ProviderEnum: "cloudflare";
+        /**
+         * @description * `prod` - Prod
+         *     * `test` - Test
+         * @enum {string}
+         */
+        PurposeEnum: "prod" | "test";
         Question: {
             id: string;
             prompt: string;
@@ -608,6 +653,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_cloudflare_connect_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloudflareConnect"];
+                "application/x-www-form-urlencoded": components["schemas"]["CloudflareConnect"];
+                "multipart/form-data": components["schemas"]["CloudflareConnect"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloudflareConnectResult"];
+                };
             };
         };
     };
