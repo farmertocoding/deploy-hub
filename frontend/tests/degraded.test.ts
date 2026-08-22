@@ -99,7 +99,8 @@ test("socket_failure_switches_to_ten_second_polling", async () => {
   sockets[sockets.length - 1].fail();
   await flush();
   await timers.advance(10_000);
-  assert.equal(snapshots, 5, "a repeated failure stacked a second 10 s poll loop");
+  assert.equal(snapshots, 5,
+    "a repeated failure must not stack a second poll loop — one tick per 10 s");
 
   // A live socket that drops reads "reconnecting" first (a blip is not unavailability);
   // the NEXT failure is what re-enters degraded.
@@ -153,9 +154,10 @@ test("reconnect_resnapshots_before_streaming", async () => {
   s.open();
   // The subscribe frame must not be on the wire before the snapshot has landed:
   // snapshot-THEN-stream is the reconnect contract (§D7), and polling is over.
-  assert.equal(s.sent.length, 0, "subscribed before the snapshot resolved");
+  assert.equal(s.sent.length, 0,
+    "the subscribe frame must wait for the snapshot to resolve (snapshot-THEN-stream)");
   await flush();
-  assert.equal(snapshots, 3, "reconnect did not refetch the snapshot");
+  assert.equal(snapshots, 3, "reconnect must refetch the snapshot before streaming");
   assert.ok(s.sent.some((f) => JSON.parse(f).action === "subscribe"));
   assert.equal(events[0]?.__snapshot, true, "the repaint precedes any stream event");
 
@@ -167,5 +169,6 @@ test("reconnect_resnapshots_before_streaming", async () => {
 
   // …and the poll loop is genuinely gone: ten more seconds fetch nothing.
   await timers.advance(10_000);
-  assert.equal(snapshots, 3, "the poll loop survived the reconnect");
+  assert.equal(snapshots, 3,
+    "the poll loop should be stopped after reconnect, but a tick still fired");
 });

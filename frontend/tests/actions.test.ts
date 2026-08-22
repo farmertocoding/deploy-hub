@@ -37,13 +37,15 @@ test("rollback_restart_and_rerun_are_t3_and_never_behind_step_up", () => {
     const row = tierFor(id);
     assert.equal(row.tier, "T3", id);
     assert.deepEqual(presentation(row), { confirm: false, undo: true, stepUp: "none" },
-      `${id} grew friction beyond one click + undo`);
+      `${id} must stay one click + undo — no extra friction`);
     assert.ok(row.undo_window_s >= 5, `${id}'s undo window is too small to reach`);
   }
   // …and the rule holds for every T3 row the table will ever hold, not three names.
   for (const row of ACTION_TIERS.filter((r) => r.tier === "T3")) {
-    assert.equal(presentation(row).stepUp, "none", `${row.id} is T3 behind a step-up`);
-    assert.equal(presentation(row).confirm, false, `${row.id} is T3 behind a confirm`);
+    assert.equal(presentation(row).stepUp, "none",
+      `${row.id} is T3 and must never require step-up`);
+    assert.equal(presentation(row).confirm, false,
+      `${row.id} is T3 and must not require a confirm`);
   }
 });
 
@@ -67,7 +69,8 @@ test("t1_rows_are_named_and_refused_not_weakened", () => {
   const runner = makeTierRunner({ row: tierFor("target.delete"),
     onRun: () => ran.push("ran"), onUndo: () => {} });
   runner.click();
-  assert.deepEqual(ran, [], "a T1 action executed without any step-up at all");
+  assert.deepEqual(ran, [],
+    "a T1 click must run nothing until Phase 4's step-up flow exists");
   assert.equal(runner.state.phase, "refused");
   assert.match(runner.state.reason, /Phase 4/);
 });
@@ -79,11 +82,12 @@ test("t2_click_confirms_before_running_and_dismiss_runs_nothing", () => {
 
   runner.click({ version: 4 });
   assert.equal(runner.state.phase, "confirming");
-  assert.deepEqual(ran, [], "T2 ran on the first click — the confirm is the tier");
+  assert.deepEqual(ran, [],
+    "T2 must not run on the first click — the confirm is the tier");
 
   runner.dismiss();
   assert.equal(runner.state.phase, "idle");
-  assert.deepEqual(ran, [], "dismissing the confirm still ran the action");
+  assert.deepEqual(ran, [], "dismissing the confirm must run nothing");
 
   runner.click({ version: 4 });
   runner.confirm();
@@ -106,7 +110,7 @@ test("t3_runs_on_one_click_with_an_undo_window", () => {
   runner.undo();
   assert.deepEqual(calls, ["run", "undo"]);
   assert.equal(runner.state.phase, "idle");
-  assert.equal(t.size(), 0, "the expiry timer outlived the undo that cancelled it");
+  assert.equal(t.size(), 0, "undo must also cancel the pending expiry timer");
 
   // The window EXPIRING closes the offer without inventing an undo.
   runner.click();
@@ -114,7 +118,8 @@ test("t3_runs_on_one_click_with_an_undo_window", () => {
   assert.deepEqual(calls, ["run", "undo", "run"]);
   assert.equal(runner.state.phase, "idle");
   runner.undo();
-  assert.deepEqual(calls, ["run", "undo", "run"], "undo worked after its window closed");
+  assert.deepEqual(calls, ["run", "undo", "run"],
+    "undo must be inert once its window has closed");
 });
 
 test("the_tier_controls_render_what_the_runner_decides", () => {
@@ -137,7 +142,8 @@ test("the_tier_controls_render_what_the_runner_decides", () => {
   const t1 = render(ActionButton, { row: tierFor("key.export"), onRun: () => {} });
   assert.match(t1, /disabled=""/);
   assert.ok(visibleText(t1).includes("requires step-up — lands in Phase 4"));
-  assert.ok(!/hardware/i.test(t1), "the unbuilt hardware clause is being claimed");
+  assert.ok(!/hardware/i.test(t1),
+    "the control must not claim the unbuilt hardware clause (D-040, Phase 4)");
 
   // A T3 control at rest is one plain button: no dialog, no toast, no extra step.
   const t3 = render(ActionButton, { row: tierFor("site.rollback"), onRun: () => {} });
@@ -168,7 +174,7 @@ test("a_mounted_action_button_reads_current_props_not_first_render_ones", async 
 
   act(() => { tree.root.findAllByType("button")[0].props.onClick(); });
   assert.deepEqual(ran, ["current"],
-    "the runner ran the action over the props it was mounted with");
+    "a click must run the action with the CURRENT props, not first-render ones");
 
   // …and the undo half reads through the same ref: refresh again, then undo.
   // (Undoing also cancels the real 10 s expiry timer, so nothing outlives the test.)
