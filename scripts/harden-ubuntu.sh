@@ -1,17 +1,32 @@
 #!/usr/bin/env bash
-# harden-ubuntu.sh v2026-08-20
+# harden-ubuntu.sh v2026-08-22
 # Canonical: scripts/harden-ubuntu.sh (server-hardening.md)
 # Pre-Hub interim of catalog ids: ntp-chrony, log-rotation, docker-daemon-json,
 # sshd-dropin, ufw-posture-hub, ufw-posture-target, ufw-posture-intake,
 # fail2ban-ignoreip, caddy.
+#
+# Test-only env (T3 Multipass — never set on a real host):
+#   The no-mesh bypass is true only when ALL of:
+#     HUB_TEST_MODE=1 (or true/yes/on) AND PROFILE=target AND
+#     (HUB_T3_ALLOW_NO_MESH=1 OR HUB_T3_UFW_ONLY=1).
+#   Then ufw+fail2ban can still enable on a throwaway VM with no tailnet.
+#   HUB_MESH_IP is still required (singular IPv4, never 100.64.0.0/10).
+#   This path does NOT prove HARD-V2. Unset HUB_TEST_MODE, PROFILE=hub/intake,
+#   or a lone T3 skip var still fail-closes the V2 refuse.
+#   HUB_T3_SSH_FROM=<ipv4> is honored only on that same gated path
+#   (never on hub/intake, never when HUB_TEST_MODE is unset).
 set -euo pipefail
 
-SCRIPT_VERSION="2026-08-21"
+SCRIPT_VERSION="2026-08-22"
 STAMP_DIR="${HUB_STAMP_DIR:-/var/lib/hub-harden}"
 PROFILE="${PROFILE:-}"
 DRY_RUN="${DRY_RUN:-0}"
 HUB_MESH_IP="${HUB_MESH_IP:-}"
 HUB_CONFIRM_LOCAL="${HUB_CONFIRM_LOCAL:-0}"
+HUB_TEST_MODE="${HUB_TEST_MODE:-}"
+HUB_T3_ALLOW_NO_MESH="${HUB_T3_ALLOW_NO_MESH:-0}"
+HUB_T3_UFW_ONLY="${HUB_T3_UFW_ONLY:-0}"
+HUB_T3_SSH_FROM="${HUB_T3_SSH_FROM:-}"
 
 SSHD_DROPIN="${HUB_SSHD_DROPIN:-/etc/ssh/sshd_config.d/99-hub-hardening.conf}"
 JAIL_LOCAL="${HUB_JAIL_LOCAL:-/etc/fail2ban/jail.local}"
@@ -158,6 +173,34 @@ session_rides_mesh() {
     # Unset SSH_* is sudo env_reset *or* a real console. Do not treat silence
     # as a verified second path — public SSH + sudo would lock the operator out.
     [[ "${HUB_CONFIRM_LOCAL}" == "1" ]]
+}
+
+t3_test_mode() {
+    case "${HUB_TEST_MODE}" in
+        1 | true | TRUE | yes | YES | on | ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+t3_allow_no_mesh() {
+    # Second gate: test-plane + target profile + an explicit T3 skip var.
+    # A leaked HUB_T3_UFW_ONLY=1 on PROFILE=hub must not open the bypass.
+    t3_test_mode || return 1
+    [[ "${PROFILE}" == "target" ]] || return 1
+    [[ "${HUB_T3_ALLOW_NO_MESH}" == "1" || "${HUB_T3_UFW_ONLY}" == "1" ]]
+}
+
+ensure_t3_tailscale0_standin() {
+    # Dummy iface so `ufw allow in on tailscale0` can still be applied.
+    # Not a mesh; HARD-V2 is not proven on this path.
+    if ip link show tailscale0 >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v modprobe >/dev/null 2>&1; then
+        run modprobe dummy || true
+    fi
+    run ip link add tailscale0 type dummy || true
+    run ip link set tailscale0 up || true
 }
 
 require_profile() {
@@ -320,9 +363,17 @@ apply_ufw_hub_or_intake() {
 apply_ufw_target() {
     run ufw default deny incoming
     run ufw default allow outgoing
-    run ufw allow in on tailscale0 comment 'tailscale mesh'
+    if t3_allow_no_mesh && ! ip link show tailscale0 >/dev/null 2>&1; then
+        echo "harden-ubuntu.sh: no tailscale0; T3 UFW_ONLY continues (HARD-V2 not proven)"
+    else
+        run ufw allow in on tailscale0 comment 'tailscale mesh'
+    fi
     run ufw allow proto tcp from 173.245.48.0/20 to any port 80 comment 'cloudflare-edge'
     run ufw allow proto tcp from 173.245.48.0/20 to any port 443 comment 'cloudflare-edge'
+    if t3_allow_no_mesh && [[ -n "${HUB_T3_SSH_FROM}" ]]; then
+        is_ipv4 "${HUB_T3_SSH_FROM}" || die "HUB_T3_SSH_FROM must be a single IPv4"
+        run ufw allow proto tcp from "${HUB_T3_SSH_FROM}" to any port 22 comment 't3-multipass-ssh'
+    fi
     enable_ufw
 }
 
@@ -337,7 +388,15 @@ main() {
     fi
 
     if ! mesh_is_up || ! session_rides_mesh; then
-        die "refusing tailscale0-only firewall: mesh is not up or this session does not ride it (V2)"
+        if t3_allow_no_mesh; then
+            echo "harden-ubuntu.sh: HUB_TEST_MODE+PROFILE=target T3 skip-mesh; skipping mesh-before-firewall (does not prove HARD-V2)"
+            if [[ -n "${HUB_T3_SSH_FROM}" ]]; then
+                is_ipv4 "${HUB_T3_SSH_FROM}" || die "HUB_T3_SSH_FROM must be a single IPv4"
+            fi
+            ensure_t3_tailscale0_standin
+        else
+            die "refusing tailscale0-only firewall: mesh is not up or this session does not ride it (V2)"
+        fi
     fi
 
     ensure_pkg unattended-upgrades

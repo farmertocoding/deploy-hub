@@ -139,6 +139,14 @@ exit 1
     _write_stub(bindir, "chronyc", 'echo "Leap status     : Normal"; exit 0\n')
     _write_stub(bindir, "curl", 'echo "stub-curl"; exit 0\n')
     _write_stub(bindir, "lsb_release", 'echo "jammy"; exit 0\n')
+    _write_stub(
+        bindir,
+        "ip",
+        f"""
+printf 'ip %s\\n' "$*" >> "{log_q}"
+exit 0
+""",
+    )
 
     env = os.environ.copy()
     env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
@@ -147,6 +155,11 @@ exit 1
     env["PROFILE"] = "hub"
     env["SSH_CONNECTION"] = f"{HUB_MESH_IP} 54321 100.64.1.1 22"
     env.pop("SUDO_USER", None)
+    # A leaked operator/T3 env must not green the mesh-before-firewall bypass.
+    env.pop("HUB_T3_ALLOW_NO_MESH", None)
+    env.pop("HUB_T3_UFW_ONLY", None)
+    env.pop("HUB_T3_SSH_FROM", None)
+    env.pop("HUB_TEST_MODE", None)
     return env, mutate
 
 
@@ -341,6 +354,48 @@ def test_explicit_hub_confirm_local_allows_console(tmp_path):
     env["HUB_CONFIRM_LOCAL"] = "1"
     result = _run(["bash", str(HARDEN)], env=env)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.req("HARD-V2-MESH-BEFORE-FIREWALL")
+def test_t3_ufw_only_without_test_mode_still_refuses_off_mesh(tmp_path):
+    """A lone HUB_T3_UFW_ONLY=1 without HUB_TEST_MODE must not skip V2.
+
+    What would make this fail: treating the T3 skip var as enough on PROFILE=hub
+    (or any profile) so a leaked env opens tailscale0-only ufw off-mesh.
+    """
+    env, mutate = _stub_env(tmp_path, mesh_up=False)
+    env["DRY_RUN"] = "0"
+    env["PROFILE"] = "hub"
+    env["HUB_T3_UFW_ONLY"] = "1"
+    env.pop("HUB_TEST_MODE", None)
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode != 0
+    text = (result.stdout + result.stderr).lower()
+    assert "mesh" in text or "tailscale" in text
+    log = mutate.read_text(encoding="utf-8")
+    assert "MUTATE ufw" not in log
+
+
+@pytest.mark.req("HARD-Q8-SCRIPTS-TESTED")
+def test_t3_ufw_only_on_target_test_mode_allows_no_mesh_without_claiming_v2(tmp_path):
+    """PROFILE=target + HUB_TEST_MODE + HUB_T3_UFW_ONLY may enable ufw off-mesh.
+
+    What would make this fail: still refusing the documented T3 path, or printing
+    HARD-V2 as proven on the skip-mesh path.
+    """
+    env, mutate = _stub_env(tmp_path, mesh_up=False)
+    env["DRY_RUN"] = "1"
+    env["PROFILE"] = "target"
+    env["HUB_TEST_MODE"] = "1"
+    env["HUB_T3_UFW_ONLY"] = "1"
+    result = _run(["bash", str(HARDEN)], env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    combined = result.stdout + result.stderr
+    assert "DRY_RUN" in combined
+    assert "ufw" in combined and "enable" in combined
+    assert "does not prove HARD-V2" in combined
+    log = mutate.read_text(encoding="utf-8")
+    assert "MUTATE ufw" not in log
 
 
 @pytest.mark.req("HARD-R3-IGNOREIP")
