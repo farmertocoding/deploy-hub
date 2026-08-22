@@ -26,6 +26,7 @@ class PipelineTransport(FakeTransport):
         self.containers = {}
         self.routes = {}
         self.container_ips = {}
+        self.tls = None
 
     def probe(self, argv, *, timeout=60):
         if not isinstance(argv, (list, tuple)):
@@ -46,8 +47,9 @@ class PipelineTransport(FakeTransport):
             return self._inspect_container(argv)
         if argv and argv[0] == "curl":
             return self._curl_probe(argv)
-        if argv[:2] == ["test", "-f"] and len(argv) >= 3:
-            path = argv[2]
+        cmd = argv[1:] if argv and argv[0] == "sudo" else argv
+        if cmd[:2] == ["test", "-f"] and len(cmd) >= 3:
+            path = cmd[2]
             if path in self.files:
                 return CommandResult(argv, exit_code=0)
             return CommandResult(argv, exit_code=1, stderr="No such file")
@@ -78,10 +80,13 @@ class PipelineTransport(FakeTransport):
         if argv[:2] == ["docker", "rm"]:
             self.containers.pop(argv[-1], None)
         if argv and argv[0] == "curl" and "PUT" in argv:
-            route_id = _route_id_from_argv(argv)
             path = _data_binary_path(argv)
-            if route_id and path:
-                self.routes[route_id] = self.files.get(path, b"{}")
+            if _is_caddy_tls_admin(argv) and path:
+                self.tls = self.files.get(path, b"{}")
+            else:
+                route_id = _route_id_from_argv(argv)
+                if route_id and path:
+                    self.routes[route_id] = self.files.get(path, b"{}")
         return result
 
     def _inspect_container(self, argv):
@@ -100,6 +105,11 @@ class PipelineTransport(FakeTransport):
         return CommandResult(argv, exit_code=0, stdout=stdout)
 
     def _curl_probe(self, argv):
+        if _is_caddy_tls_admin(argv) and "PUT" not in argv:
+            if self.tls is None:
+                return CommandResult(argv, exit_code=1, stderr="404")
+            stdout = self.tls.decode() if isinstance(self.tls, (bytes, bytearray)) else self.tls
+            return CommandResult(argv, stdout=stdout)
         route_id = _route_id_from_argv(argv)
         if route_id and "PUT" not in argv:
             raw = self.routes.get(route_id)
@@ -126,6 +136,13 @@ def _inspect_target(argv):
             continue
         return part
     return argv[-1]
+
+
+CADDY_TLS_ADMIN = "http://127.0.0.1:2019/config/apps/tls"
+
+
+def _is_caddy_tls_admin(argv):
+    return any(str(part).rstrip("/") == CADDY_TLS_ADMIN for part in argv)
 
 
 def _route_id_from_argv(argv):

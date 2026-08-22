@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .base import DnsProvider
+from .base import DnsProvider, OriginCertIssuer
 
 API = "https://api.cloudflare.com/client/v4"
 
@@ -130,6 +130,36 @@ def observe_token(token, *, timeout=20):
         for row in probe.get("result") or []
     ]
     return {"status": status, "zones": zones}
+
+
+def origin_ca_request(origin_ca_key, method, path, payload=None, *, timeout=20):
+    """One Origin CA call. The service key goes into X-Auth-User-Service-Key
+    and nowhere else — never Bearer, never logs, never error text."""
+    if isinstance(origin_ca_key, (bytes, bytearray)):
+        origin_ca_key = origin_ca_key.decode()
+    request = Request(
+        API + path,
+        data=None if payload is None else json.dumps(payload).encode(),
+        headers={
+            "X-Auth-User-Service-Key": origin_ca_key,
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    # nosec justification: scheme is pinned to the https:// API constant.
+    try:
+        with urlopen(request, timeout=timeout) as response:  # nosec B310
+            body = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise CloudflareApiError(
+            f"cloudflare Origin CA {method} {path} failed: HTTP {error.code}",
+            status=error.code,
+        ) from None
+    if not body.get("success", False):
+        raise CloudflareApiError(
+            f"cloudflare Origin CA {method} {path} failed: {body.get('errors')}"
+        )
+    return body
 
 
 def verify_token(token_ref, *, timeout=20):
@@ -270,3 +300,63 @@ class CloudflareDnsProvider(DnsProvider):
             if error.status in (401, 403) and self._on_auth_error is not None:
                 self._on_auth_error()
             raise
+
+
+class CloudflareOriginCertIssuer(OriginCertIssuer):
+    """Origin CA client. The Hub sends a CSR; the private key never leaves."""
+
+    def __init__(self, zone, *, origin_ca_key, timeout=20):
+        self.zone = zone
+        self._origin_ca_key = origin_ca_key
+        self.timeout = timeout
+
+    def __repr__(self):
+        return f"<CloudflareOriginCertIssuer zone={self.zone.name!r}>"
+
+    __str__ = __repr__
+
+    def issue(self, zone, hostnames, *, validity_days, csr):
+        if zone is not None and zone is not self.zone:
+            same_row = (
+                getattr(zone, "pk", None) is not None
+                and getattr(zone, "pk", None) == self.zone.pk
+            )
+            if not same_row:
+                raise CloudflareError(
+                    f"this issuer is bound to zone {self.zone.name!r}; "
+                    f"refusing a call for a different zone"
+                )
+        csr_text = csr.decode() if isinstance(csr, (bytes, bytearray)) else csr
+        body = origin_ca_request(
+            self._origin_ca_key,
+            "POST",
+            "/certificates",
+            {
+                "hostnames": list(hostnames),
+                "requested_validity": int(validity_days),
+                "request_type": "origin-ecc",
+                "csr": csr_text,
+            },
+            timeout=self.timeout,
+        )
+        result = body.get("result") or {}
+        return {
+            "certificate": result["certificate"],
+            "expires_at": _parse_expires(result.get("expires_on")),
+        }
+
+
+def _parse_expires(raw):
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+
+    if raw is None:
+        return timezone.now()
+    if hasattr(raw, "year"):
+        return raw
+    parsed = parse_datetime(str(raw).replace(" +0000", "+00:00"))
+    if parsed is None:
+        return timezone.now()
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.utc)
+    return parsed

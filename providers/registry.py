@@ -151,6 +151,42 @@ def _verify_scope(token, zone):
         )
 
 
+def origin_cert_issuer_for(zone):
+    """Build the Origin CA issuer for a DnsZone, or refuse.
+
+    The Origin CA key is a different credential from the DNS token and has
+    no zone-set probe (Cloudflare cannot observe an Origin CA key). Presence
+    of a vaulted ref is the fail-closed fact.
+    """
+    from .cloudflare import CloudflareOriginCertIssuer
+
+    account = zone.account
+    ref = account.origin_ca_key_ref
+    if not ref:
+        raise ScopeError(
+            f"DnsAccount {account.label!r} has no origin_ca_key_ref; connect "
+            "the account before issuing an Origin certificate"
+        )
+    _secret_pk, raw = _load_origin_ca_key(ref)
+    return CloudflareOriginCertIssuer(zone, origin_ca_key=raw)
+
+
+def _load_origin_ca_key(ref):
+    from vault import service as vault_service
+    from vault.models import Secret
+
+    secret = (
+        Secret.objects.filter(
+            kind=Secret.Kind.API_TOKEN, owner_type="dns_account", owner_id=ref,
+        )
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if secret is None:
+        raise ScopeError(f"no origin CA secret in the vault for ref {ref!r}")
+    return secret.pk, vault_service.get(secret, reason="origin ca issue")
+
+
 def _file_scope_finding(zone, error):
     """A refused construction is operator-visible, not just a raise.
 

@@ -1,7 +1,7 @@
 """In-memory provider fakes (§A7/§D5) — what T1 tests plug into."""
 import itertools
 
-from .base import CloudProvider, DnsProvider, EdgeProtection
+from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer
 
 _ids = itertools.count(1)
 
@@ -96,3 +96,20 @@ class FakeCloudProvider(CloudProvider):
 
     def estimate_hourly_cost(self, spec):
         return 0.05
+
+
+class FakeOriginCertIssuer(OriginCertIssuer):
+    """Locally-minted leaf so T1/T2 never call Cloudflare. The leaf public
+    key is taken from the Hub CSR so key/cert match still holds."""
+
+    def __init__(self):
+        self.calls = []
+
+    def issue(self, zone, hostnames, *, validity_days, csr):
+        from vault.tls import mint_local_leaf
+
+        self.calls.append((zone, list(hostnames), validity_days))
+        certificate, expires_at = mint_local_leaf(
+            csr, hostnames, validity_days=validity_days,
+        )
+        return {"certificate": certificate, "expires_at": expires_at}
