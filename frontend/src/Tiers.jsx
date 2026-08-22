@@ -3,7 +3,7 @@
 // every state by props — the Readiness.jsx arrangement, for the same reason: the only
 // way to assert markup is to render it, and a state inside a component is a state no
 // renderToStaticMarkup test can reach.
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { makeTierRunner, presentation } from "./actions.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
@@ -44,8 +44,21 @@ export function UndoToast({ label, seconds, onUndo }) {
 // Readiness.jsx: an inline style overrides :disabled, so disabled must LOOK disabled).
 export function ActionButton({ row, summary, onRun, onUndo }) {
   const [state, setState] = useState({ phase: "idle" });
+  // The runner is one-shot (it owns the tier state machine for this control's
+  // lifetime) but its callbacks read THROUGH this ref, refreshed every render —
+  // a runner built over first-render closures would invoke the action with the
+  // props of the mount, and this shell's whole point is socket-refreshed data
+  // (review finding on the Task 13 contract: SiteStatus passes
+  // `onRun={() => onRun(id, site)}`, and `site` moves). The ROW stays frozen on
+  // purpose: a mounted control changing which action it is would be a different
+  // defect, and the tier table is static.
+  const callbacksRef = useRef({ onRun, onUndo });
+  callbacksRef.current = { onRun, onUndo };
   const [runner] = useState(() => makeTierRunner({
-    row, onRun, onUndo: onUndo ?? (() => {}), onState: setState,
+    row,
+    onRun: (args) => callbacksRef.current.onRun(args),
+    onUndo: () => callbacksRef.current.onUndo?.(),
+    onState: setState,
   }));
   const p = presentation(row);
   if (p.stepUp === "deferred") {

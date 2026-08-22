@@ -17,6 +17,10 @@
 // socket client is a state machine no test in this tree can reach.
 import { useEffect, useRef, useState } from "react";
 
+// RT-35's number, exported so the pill's "polling every N s" copy (Chrome.jsx) is
+// derived from the interval that actually polls and the two cannot drift.
+export const POLL_MS = 10_000;
+
 // Status ladder: connecting → live ⇄ reconnecting → degraded → live; auth-required
 // is terminal. ONE failed (re)connect is a blip and reads "reconnecting"; the next
 // failure means the socket is unavailable in RT-35's sense, and that is when the
@@ -29,7 +33,7 @@ export function createEventsClient({
   now = () => new Date(),
   onChange = () => {},
   retryMs = 1500,
-  pollMs = 10_000,
+  pollMs = POLL_MS,
 }) {
   let ws = null;
   let closed = false;

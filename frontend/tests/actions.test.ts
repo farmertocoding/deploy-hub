@@ -144,3 +144,38 @@ test("the_tier_controls_render_what_the_runner_decides", () => {
   assert.ok(!/role="dialog"/.test(t3));
   assert.equal(visibleText(t3).trim(), "Roll back");
 });
+
+test("a_mounted_action_button_reads_current_props_not_first_render_ones", async () => {
+  // The review finding on the Task 13 contract: the runner is one-shot, and built
+  // over first-render closures it would run the action with the props of the MOUNT.
+  // SiteStatus passes `onRun={() => onRun(id, site)}` and `site` is socket-refreshed
+  // data — a rollback pressed ten minutes after mount must roll back what the screen
+  // shows, not what it showed. This needs a real mounted tree, so it is the one test
+  // in this file on react-test-renderer rather than renderToStaticMarkup.
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+
+  const ran: string[] = [];
+  const undone: string[] = [];
+  const el = (version: string) => React.createElement(ActionButton, {
+    row: tierFor("site.rollback"),
+    onRun: () => ran.push(version), onUndo: () => undone.push(version),
+  });
+
+  let tree: any;
+  act(() => { tree = create(el("mount-time")); });
+  act(() => { tree.update(el("current")); });
+
+  act(() => { tree.root.findAllByType("button")[0].props.onClick(); });
+  assert.deepEqual(ran, ["current"],
+    "the runner ran the action over the props it was mounted with");
+
+  // …and the undo half reads through the same ref: refresh again, then undo.
+  // (Undoing also cancels the real 10 s expiry timer, so nothing outlives the test.)
+  act(() => { tree.update(el("newer-still")); });
+  const undo = tree.root.findAllByType("button")
+    .find((b: any) => /Undo/.test(b.children.join("")));
+  act(() => { undo.props.onClick(); });
+  assert.deepEqual(undone, ["newer-still"]);
+  act(() => { tree.unmount(); });
+});

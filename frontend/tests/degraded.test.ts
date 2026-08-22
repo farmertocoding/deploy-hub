@@ -167,5 +167,5 @@ test("reconnect_resnapshots_before_streaming", async () => {
 
   // …and the poll loop is genuinely gone: ten more seconds fetch nothing.
   await timers.advance(10_000);
-  assert.equal(snapshots, 3, "still polling while live");
+  assert.equal(snapshots, 3, "the poll loop survived the reconnect");
 });

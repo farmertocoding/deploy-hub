@@ -2,6 +2,7 @@
 // connection pill and the designed empty state. Exported constants over clever
 // components, so tests/nav.test.ts pins the IA as data rather than by screenscraping.
 import React, { useEffect, useState } from "react";
+import { POLL_MS } from "./useEvents.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -68,7 +69,7 @@ export function StatusPill({ status, asOf }) {
     : "";
   const text =
     status === "degraded"
-      ? `⚠ degraded — polling every 10 s${stamp}`
+      ? `⚠ degraded — polling every ${POLL_MS / 1000} s${stamp}`
       : status === "reconnecting" ? "↻ reconnecting…"
       : status === "auth-required" ? "⛔ session expired — reload and log in again"
       : "… connecting";
