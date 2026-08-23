@@ -279,6 +279,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.audit_cf_token_scope",
         "schedule": 86400.0,
     },
+    "aws-iam-scope-daily": {
+        "task": "monitor.tasks.audit_aws_iam_scope",
+        "schedule": 86400.0,
+    },
     "tailscale-device-audit-daily": {
         "task": "monitor.tasks.audit_tailscale_devices",
         "schedule": 86400.0,

@@ -1,4 +1,4 @@
-"""AWS vault-ref credentials + IAM allowlist at construction (D-066, D-067).
+"""AWS vault-ref credentials + IAM allowlist at construction and daily audit.
 
 The only module that may import boto3 for Hub-user STS/IAM. Constructors pass
 explicit keys into boto3.client and never omit them (no default chain, no
@@ -6,8 +6,10 @@ explicit keys into boto3.client and never omit them (no default chain, no
 / a policy document), never boto3.
 
 Vault JSON is exactly {access_key_id, secret_access_key}. Extra keys and
-session tokens refuse. Empty AWS_CREDENTIALS_REF refuses even if a leftover
-CLOUD_CREDENTIAL row exists — we never scan the vault for owner_id.
+session tokens refuse. Empty AWS_CREDENTIALS_REF refuses construction and
+skips the daily Beat even if a leftover CLOUD_CREDENTIAL row exists — we
+never scan the vault for owner_id. The daily audit reuses collect_iam_documents
+/ refuse_iam_scope (user AND groups); it does not re-spell IAM inspect.
 """
 import json
 import os
@@ -77,6 +79,7 @@ _ESCALATION = frozenset({
 _SERVICE_STARS = frozenset({"ec2:*", "ssm:*", "iam:*"})
 _SSM_PREFIX = "/deploy-hub/"
 _REGION_CONDITION_KEYS = frozenset({"aws:requestedregion", "ec2:region"})
+RESULTS_SCHEMA_VERSION = 1
 
 
 class AwsCredsError(RuntimeError):
@@ -664,3 +667,97 @@ def observe_credentials(
         "arn": ident.get("Arn", ""),
         "region": region_name,
     }
+
+
+def _declared_hosted_zone_ids():
+    from core.models import DnsAccount, DnsZone
+
+    return set(
+        DnsZone.objects.filter(
+            account__provider=DnsAccount.Provider.ROUTE53,
+        ).exclude(provider_zone_id="").values_list("provider_zone_id", flat=True)
+    )
+
+
+def audit_iam_scope(*, iam=None, sts=None, region_name="us-east-1"):
+    """Daily D-067 allowlist audit. Empty ref SKIPPED; drift files aws-scope.
+
+    Inspect is collect_iam_documents / refuse_iam_scope (user attached+inline
+    AND each group's attached+inline). CheckRun.results carry the vault ref
+    and account id, never key material. Observation failure is FAILED; a
+    judged superset is SUCCEEDED plus the Finding — the Beat observed.
+    """
+    from core.models import CheckRun
+    from monitor.drills import record_run
+
+    ref = str(getattr(settings, "AWS_CREDENTIALS_REF", "") or "").strip()
+    if not ref:
+        return record_run(
+            CheckRun.Kind.AWS_IAM_SCOPE,
+            CheckRun.Status.SKIPPED,
+            {"schema_version": RESULTS_SCHEMA_VERSION, "skipped": "absent_ref"},
+        )
+
+    try:
+        creds = load_credentials(reason="aws iam daily audit")
+    except AwsCredsError:
+        return record_run(
+            CheckRun.Kind.AWS_IAM_SCOPE,
+            CheckRun.Status.FAILED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "ref": ref,
+                "error": "no_secret",
+            },
+        )
+
+    sts = sts or boto3_client(
+        "sts",
+        access_key_id=creds["access_key_id"],
+        secret_access_key=creds["secret_access_key"],
+        region_name=region_name,
+    )
+    try:
+        ident = sts.get_caller_identity()
+        account_id = str(ident["Account"])
+    except Exception:
+        return record_run(
+            CheckRun.Kind.AWS_IAM_SCOPE,
+            CheckRun.Status.FAILED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "ref": ref,
+                "error": "sts_failed",
+            },
+        )
+
+    iam = iam or boto3_client(
+        "iam",
+        access_key_id=creds["access_key_id"],
+        secret_access_key=creds["secret_access_key"],
+        region_name=region_name,
+    )
+    drift = None
+    try:
+        refuse_iam_scope(
+            iam=iam,
+            account_id=account_id,
+            ref=ref,
+            hosted_zone_ids=_declared_hosted_zone_ids(),
+            pass_role_arns=(),
+            allowed_regions=tuple(
+                getattr(settings, "HUB_TEST_AWS_REGIONS", ()) or ()
+            ),
+        )
+    except AwsScopeError as exc:
+        drift = str(exc)
+    return record_run(
+        CheckRun.Kind.AWS_IAM_SCOPE,
+        CheckRun.Status.SUCCEEDED,
+        {
+            "schema_version": RESULTS_SCHEMA_VERSION,
+            "ref": ref,
+            "account_id": account_id,
+            "drift": drift,
+        },
+    )

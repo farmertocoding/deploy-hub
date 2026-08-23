@@ -118,6 +118,16 @@ def audit_cf_token_scope():
 
 
 @shared_task(ignore_result=True)
+def audit_aws_iam_scope():
+    """Daily D-067 IAM allowlist audit. Takes no args by design:
+    nothing credential-shaped can ever appear in task args or the result."""
+    from providers.aws_creds import audit_iam_scope
+
+    run = audit_iam_scope()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
 def audit_tailscale_devices():
     """Beat `tailscale-device-audit-daily`. Takes no args so nothing
     credential-shaped can appear in task args or the result."""
