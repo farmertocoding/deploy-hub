@@ -109,6 +109,7 @@ const MapSnapshot = z
 const CertRefusal = z
   .object({ detail: z.string(), finding_id: z.number().int() })
   .passthrough();
+const EdgeOwnerEnum = z.enum(["host_caddy", "site_caddy"]);
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -117,6 +118,7 @@ const SiteSummary = z
     latest_manifest_version: z.number().int().nullable(),
     manifest_current: z.boolean().nullable(),
     cert_refusal: CertRefusal.nullish(),
+    edge_owner: EdgeOwnerEnum.optional(),
   })
   .passthrough();
 const ProjectSummary = z
@@ -154,7 +156,6 @@ const Readiness = z
     pending_sandbox: z.array(z.object({}).partial().passthrough()),
   })
   .passthrough();
-const EdgeOwnerEnum = z.enum(["host_caddy", "site_caddy"]);
 const PatchedSiteEdgeOwner = z
   .object({ edge_owner: EdgeOwnerEnum })
   .partial()
@@ -242,12 +243,12 @@ export const schemas = {
   MapGraph,
   MapSnapshot,
   CertRefusal,
+  EdgeOwnerEnum,
   SiteSummary,
   ProjectSummary,
   ExposureEnum,
   ProjectCreate,
   Readiness,
-  EdgeOwnerEnum,
   PatchedSiteEdgeOwner,
   SiteEdgeOwner,
   EnvNames,

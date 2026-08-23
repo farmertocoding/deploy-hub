@@ -25,6 +25,38 @@ export async function rollbackSite(siteId) {
   return api(`v1/sites/${siteId}/rollback/`, {});
 }
 
+export function adoptActions() {
+  return ["site.adopt.start", "site.adopt.cancel"];
+}
+
+export function adoptDiff(site, actionId) {
+  const domain = site.domain || site.name;
+  const zone = site.dns_zone || "";
+  const temp = site.adopt?.temp_name
+    || (zone ? `${site.name}-adopt-….${zone}` : `${site.name}-adopt-…`);
+  const volumes = (site.adopt?.volumes || []).join(", ") || "registered volumes";
+  if (actionId === "site.adopt.start") {
+    return `Flip ${domain} after verify; decommission the old path; ${volumes} stay registered.`;
+  }
+  if (actionId === "site.adopt.cancel") {
+    return `Abandon ${temp}; delete temp DNS; leave ${domain} serving.`;
+  }
+  throw new Error(`not an adopt action: ${actionId}`);
+}
+
+// HTTP start slipped 2026-08-23: MUST start is adopt_flow. This POST is the
+// Sites wiring so ?sim=plan can confirm the T2 diff; live 404s until a later
+// view owns the route. live_compose_path is sent only when the operator typed it.
+export async function startAdopt(siteId, opts = {}) {
+  const body = {};
+  if (opts.live_compose_path) body.live_compose_path = opts.live_compose_path;
+  return api(`v1/sites/${siteId}/adopt/`, body);
+}
+
+export async function cancelAdopt(siteId) {
+  return api(`v1/sites/${siteId}/adopt/`, { cancel: true });
+}
+
 export function flattenSites(projects) {
   return (projects || []).flatMap((p) =>
     (p.sites || []).map((s) => ({ ...s, project: p.name })));
@@ -70,10 +102,76 @@ export function CertState({ site }) {
   );
 }
 
+// Adopt plan on the site detail: edge_owner is a Site column (D-052), shown
+// here and never prompted per run. Start/cancel are T2 because the start
+// confirm names the flip + decommission. No /srv/sites walk — the path field
+// is the explicit live_compose_path argument, blank meaning unset.
+export function AdoptPlan({
+  site, liveComposePath, onLiveComposePath, onRun = () => {}, onUndo = () => {},
+}) {
+  const [path, setPath] = useState(liveComposePath ?? "");
+  const value = liveComposePath !== undefined ? liveComposePath : path;
+  const setValue = onLiveComposePath || setPath;
+  const stage = site.adopt?.stage;
+  const classified = site.adopt?.classified || {};
+  const volumes = site.adopt?.volumes || [];
+  const showStart = !stage || stage === "plan" || stage === "abandoned";
+  const showCancel = stage === "verify" || stage === "temp_dns";
+  const roles = Object.entries(classified).filter(([, name]) => name);
+  return (
+    <div style={{ ...box, borderColor: "#3fb950" }}>
+      <h4 style={{ margin: "0 0 8px" }}>Adopt plan</h4>
+      <div>edge owner: {site.edge_owner || "host_caddy"}</div>
+      {stage && <div>stage: {stage}</div>}
+      {site.adopt?.temp_name ? <div>temp: {site.adopt.temp_name}</div> : null}
+      {roles.map(([role, name]) => (
+        <div key={role}>{role}: {name}</div>
+      ))}
+      {volumes.length > 0 && <div>volumes: {volumes.join(", ")}</div>}
+      {site.origin_ca_planted === false && (
+        <div>Origin-CA unplanted — plant before a proxied public deploy.</div>
+      )}
+      <label style={{ display: "grid", gap: 4, marginTop: 8 }}>
+        live_compose_path
+        <input name="live_compose_path" style={box} value={value}
+          placeholder="explicit path; blank skips the drift check"
+          onChange={(e) => setValue(e.target.value)} />
+      </label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+        {showStart && (
+          <ActionButton row={tierFor("site.adopt.start")}
+            summary={adoptDiff(site, "site.adopt.start")}
+            onRun={() => onRun("site.adopt.start", site)}
+            onUndo={() => onUndo("site.adopt.start", site)} />
+        )}
+        {showCancel && (
+          <ActionButton row={tierFor("site.adopt.cancel")}
+            summary={adoptDiff(site, "site.adopt.cancel")}
+            onRun={() => onRun("site.adopt.cancel", site)}
+            onUndo={() => onUndo("site.adopt.cancel", site)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // §F6 phone screen: site status + its T3 actions. Live Sites passes the T3
 // ids; only site.rollback has HTTP (pipeline.rollback). Restart / re-run
 // render so the table is visible; they do not invent engines.
 export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () => {} }) {
+  const [liveComposePath, setLiveComposePath] = useState("");
+  const run = (id, current) => {
+    if (id === "site.adopt.start") {
+      return onRun(id, {
+        ...current,
+        adopt: {
+          ...current.adopt,
+          live_compose_path: liveComposePath || current.adopt?.live_compose_path || undefined,
+        },
+      });
+    }
+    return onRun(id, current);
+  };
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%",
       display: "grid", gap: 8 }}>
@@ -82,6 +180,10 @@ export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () =
       <div><ManifestLine site={site} /></div>
       <div><SiteObserved site={site} /></div>
       <CertState site={site} />
+      {(site.edge_owner || site.adopt) && (
+        <AdoptPlan site={site} liveComposePath={liveComposePath}
+          onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />
+      )}
       {actions.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {actions.map((id) => (
@@ -116,7 +218,15 @@ export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }
       ))}
       {selected && (
         <SiteStatus site={selected} actions={t3SiteActions()}
-          onRun={(id, site) => id === "site.rollback" && rollbackSite(site.id)} />
+          onRun={(id, site) => {
+            if (id === "site.rollback") return rollbackSite(site.id);
+            if (id === "site.adopt.start") {
+              return startAdopt(site.id, {
+                live_compose_path: site.adopt?.live_compose_path,
+              });
+            }
+            if (id === "site.adopt.cancel") return cancelAdopt(site.id);
+          }} />
       )}
     </div>
   );

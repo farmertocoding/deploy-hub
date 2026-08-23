@@ -673,6 +673,7 @@ export interface components {
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
+            edge_owner?: components["schemas"]["EdgeOwnerEnum"];
         };
         /**
          * @description * `open` - Open
