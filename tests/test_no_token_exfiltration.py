@@ -408,3 +408,65 @@ def test_no_acme_dns_challenge_block_is_ever_generated():
         text = _blobify(blob).decode("utf-8", "replace").lower()
         for marker in ACME_MARKERS:
             assert marker not in text, f"ACME/DNS-01 marker {marker!r} was generated"
+
+
+@pytest.mark.req("SEC-L5-ATTACK-PLAYBOOK")
+def test_playbook_never_puts_edge_token_on_target():
+    """L5 talks to EdgeProtection on the Hub; the edge token never rides Transport.
+
+    What would make this fail: playbook put()/run() of the planted edge token,
+    or filing it on the Finding the pager will copy.
+    """
+    import ast
+    import pathlib
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.models import AuditEvent, Finding, TrafficStat
+    from monitor.attack_playbook import run
+    from providers.fakes import FakeEdgeProtection
+
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    src = (repo / "monitor" / "attack_playbook.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert "transport" not in alias.name.lower()
+                assert "cloudflare" not in alias.name
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert "cloudflare" not in module
+            assert module.split(".")[0] != "deploys"
+    assert "Transport" not in src
+    assert ".put(" not in src
+
+    site = _simulate_deploy("playbook-exfil")[0]
+    target = site.primary_target
+    target.collect_payload = {
+        "log_chunk": {"summary": {"top_ips": [["203.0.113.9", 8000]]}},
+    }
+    target.save(update_fields=["collect_payload"])
+
+    now = timezone.now().replace(second=0, microsecond=0)
+    for offset, requests in enumerate(reversed([10] * 20 + [8000])):
+        TrafficStat.objects.create(
+            site=site,
+            bucket_start=now - timedelta(minutes=offset),
+            granularity=TrafficStat.Granularity.MINUTE,
+            requests=requests,
+        )
+    row = run(site, FakeEdgeProtection())
+    assert row is not None
+    blob = f"{row.title}\n{row.body}\n{row.fix_action}\n{row.fingerprint}"
+    _assert_clean([blob], where="attack playbook finding")
+    details = list(
+        AuditEvent.objects.filter(object_id=str(row.pk)).values_list("detail", flat=True)
+    )
+    _assert_clean(details, where="attack playbook audit")
+    for finding in Finding.objects.filter(pk=row.pk):
+        _assert_clean(
+            [finding.title, finding.body, finding.fix_action, finding.entity],
+            where="attack playbook finding row",
+        )

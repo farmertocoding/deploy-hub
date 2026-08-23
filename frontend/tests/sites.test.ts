@@ -8,8 +8,10 @@ import { readFileSync } from "node:fs";
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
+import { AttackBanner } from "../src/screens/Home.jsx";
 import {
-  CertState, SiteStatus, SitesView, flattenSites, rollbackSite, t3SiteActions,
+  AttackState, CertState, SiteStatus, SitesView, flattenSites, rollbackSite,
+  t3SiteActions,
 } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -28,6 +30,51 @@ const SITE = {
     finding_id: 9,
   },
 };
+
+test("attack_state_is_visible_site_state", () => {
+  const site = {
+    ...SITE,
+    attack_state: {
+      detail: "Under-Attack mode flipped; banned 203.0.113.9.",
+      finding_id: 11,
+      mode: "under_attack",
+    },
+  };
+  const markup = render(AttackState, { site });
+  const text = visibleText(markup);
+  assert.match(text, /Under attack/i);
+  assert.ok(text.includes(site.attack_state.detail), text);
+  assert.match(markup, /href="#\/findings\/11"/);
+});
+
+test("home_attack_banner_links_hash_findings", () => {
+  const markup = render(AttackBanner, {
+    findings: [{
+      id: 11,
+      fingerprint: "attack-playbook-engaged:3",
+      state: "open",
+      title: "Attack playbook engaged",
+    }],
+  });
+  const text = visibleText(markup);
+  assert.match(text, /Under attack/i);
+  assert.match(markup, /href="#\/findings\/11"/);
+});
+
+test("attack_state_notify_only_is_degraded_not_silent", () => {
+  const site = {
+    ...SITE,
+    attack_state: {
+      detail: "notify-only: no edge token, Under-Attack was not set.",
+      finding_id: 12,
+      mode: "notify_only",
+    },
+  };
+  const markup = render(AttackState, { site });
+  const text = visibleText(markup);
+  assert.match(text, /notify-only|degraded/i);
+  assert.match(markup, /href="#\/findings\/12"/);
+});
 
 test("cert_refusal_is_visible_site_state", () => {
   const markup = render(CertState, { site: SITE });
