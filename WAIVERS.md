@@ -130,3 +130,7 @@ WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemen
 WAIVED: TLS-B2-HUB-DNS01-UNPROXIED — first slip: Hub-central DNS-01 is the named Phase 4 slip so conformance-4 can start (D-054, D-060); unproxied public sites keep the named refusal (Finding plus Sites-screen state), never a bare exception. Do not mark full-text SEC-B2-NO-DNS-TOKENS-ON-TARGETS. Retire when Hub-central DNS-01 lands and this id is verified. (2026-08-23)
 # SCAN-DECLARED-TEST-MATERIAL and SCAN-DECLARED-GUARDS: Task 3 retired the
 # clause-scoped full-text waivers. Markers live on tests/test_d012_reland.py.
+
+# Phase 4 Task 9 (D-058 / D-043). Live Tailscale poll is skip-unless-configured.
+# T1 FakeTailscale proves unknown-device. Do not invent a live token env.
+WAIVED: SEC-B8-TAILSCALE-DEVICE-POLL — skip-unless-configured: HUB_TAILSCALE_API_TOKEN_REF defaults empty; the live device-list poll writes CheckRun.Kind.TAILSCALE_DEVICES SKIPPED and never SUCCEEDED. T1 FakeTailscale covers unknown-device Finding. Do not invent a live token env (D-058 / D-043). Retire when a vault ref is present on the host of record. (2026-08-23)

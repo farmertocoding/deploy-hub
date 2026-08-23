@@ -307,6 +307,12 @@ RULES = (
         "D-034 / SEC-B5",
     ),
     _r(
+        "tailscale-unknown-device",
+        "p2",
+        "A Tailscale device the Hub did not create appeared on the tailnet",
+        "D-058",
+    ),
+    _r(
         "unproxied-cert-refusal",
         "p2",
         "Unproxied public site refused Hub-central DNS-01; named Finding "

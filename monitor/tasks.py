@@ -118,6 +118,16 @@ def audit_cf_token_scope():
 
 
 @shared_task(ignore_result=True)
+def audit_tailscale_devices():
+    """Beat `tailscale-device-audit-daily`. Takes no args so nothing
+    credential-shaped can appear in task args or the result."""
+    from providers.tailscale import audit_devices
+
+    run = audit_devices()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
 def probe_uptime():
     """Beat `probe-uptime` (60 s, queue probes): one HTTP probe cycle, then
     the dead-man ping — fired only when the cycle completed every target

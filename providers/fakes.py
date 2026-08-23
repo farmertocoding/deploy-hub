@@ -128,6 +128,18 @@ class FakePager(Pager):
         return record
 
 
+class FakeTailscale:
+    """In-memory Tailscale device list for T1 (D-058)."""
+
+    def __init__(self, devices=None):
+        self.devices = list(devices or [])
+        self.calls = []
+
+    def list_devices(self, *, timeout=20):
+        self.calls.append(("list_devices", timeout))
+        return [dict(row) for row in self.devices]
+
+
 class FakeOriginCertIssuer(OriginCertIssuer):
     """Locally-minted leaf so T1/T2 never call Cloudflare. The leaf public
     key is taken from the Hub CSR so key/cert match still holds."""
