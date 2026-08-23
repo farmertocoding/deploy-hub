@@ -172,28 +172,39 @@ def ensure_decommission(desired):
 
 
 def cleanup(desired):
-    """Delete the temp DnsRecord + provider record. Never the prod name."""
+    """Delete the temp DnsRecord + provider record. Never the prod name.
+
+    One owner for cancel, successful flip, and the adopt-temp-reaper Beat.
+    A failed delete files `adopt-temp-orphan:{site_pk}:{name}` (P2) and
+    re-raises — this is an abandon leftover, not a Hub-down and not REL-P2.
+    """
     site = desired["site"]
-    _bind_dns(desired)
-    run = _find_checkrun(site)
-    temp = (run.results.get("temp_name") if run else "") or ""
-    stage = (run.results.get("stage") if run else "") or ""
-    dns = desired.get("dns")
-    if temp and dns is not None and site.dns_zone_id:
-        zone = site.dns_zone
-        for rec in dns.list_records(zone):
-            if rec.get("name") == temp:
-                dns.delete_record(zone, rec["id"])
-        DnsRecord.objects.filter(site=site, name=temp).exclude(
-            name=site.domain,
-        ).delete()
-    if stage in ("", "temp_dns", "verify"):
-        name = _temp_container_name(desired)
-        transport = desired["transport"]
-        if _container_running(transport, name) is True:
-            transport.run(["docker", "stop", name])
-    if run is not None:
-        _write_checkrun(desired, stage="cleanup", status=CheckRun.Status.SUCCEEDED)
+    try:
+        _bind_dns(desired)
+        run = _find_checkrun(site)
+        temp = (run.results.get("temp_name") if run else "") or ""
+        stage = (run.results.get("stage") if run else "") or ""
+        dns = desired.get("dns")
+        if temp and dns is not None and site.dns_zone_id:
+            zone = site.dns_zone
+            for rec in dns.list_records(zone):
+                if rec.get("name") == temp:
+                    dns.delete_record(zone, rec["id"])
+            DnsRecord.objects.filter(site=site, name=temp).exclude(
+                name=site.domain,
+            ).delete()
+        if stage in ("", "temp_dns", "verify"):
+            name = _temp_container_name(desired)
+            transport = desired["transport"]
+            if _container_running(transport, name) is True:
+                transport.run(["docker", "stop", name])
+        if run is not None:
+            _write_checkrun(desired, stage="cleanup", status=CheckRun.Status.SUCCEEDED)
+    except Exception:
+        run = _find_checkrun(site)
+        temp = (run.results.get("temp_name") if run else "") or ""
+        _file_orphan(site, temp)
+        raise
 
 
 def _bind_dns(desired):
@@ -378,6 +389,24 @@ def _vault_database_url(site, url):
         owner_type="site",
         owner_id=str(site.pk),
         plaintext=url.encode() if not isinstance(url, bytes) else url,
+    )
+
+
+def _file_orphan(site, name):
+    finding(
+        "adopt",
+        f"adopt-temp-orphan:{site.pk}:{name}",
+        severity=Finding.Severity.P2,
+        entity=f"site:{site.pk}",
+        title="Abandoned adopt temp was not cleaned up",
+        body=(
+            f"Cleanup could not remove {name or 'the adopt temp'} after the "
+            "abandon TTL. The leftover is a temp name or container, not "
+            "the production hostname."
+        ),
+        fix_action=(
+            "Retry cleanup or delete the leftover temp name in the site DNS zone."
+        ),
     )
 
 
