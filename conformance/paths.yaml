@@ -77,9 +77,10 @@ sensitive:
   # claimed before the first line of code. vault/** and providers/** already
   # listed. Do not broaden to scanner/** or wizard/** wholesale — name the
   # files. core/webauthn.py is listed in case Task 2 splits it out of otp.py.
-  # Audit-shipper is omitted until named (Task 11 SLIP).
+  # Task 11 named the audit-shipper: core/audit_ship.py.
   - core/actions.py
   - core/audit.py
+  - core/audit_ship.py
   - core/permissions.py
   - core/webauthn.py
   - frontend/src/actions.js
