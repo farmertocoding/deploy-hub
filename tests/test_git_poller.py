@@ -27,6 +27,8 @@ TRIGGER_PATHS = (
     "/webhooks/github",
     "/gitea/webhook",
     "/deploy-hook",
+    "/hooks/git-push",
+    "/partner/v1/git-push",
     "/api/partner",
     "/api/partner/",
     "/api/partner/v1/sites",
@@ -170,3 +172,5 @@ def test_non_tailnet_cannot_hit_a_deploy_trigger_route(client):
     for path in TRIGGER_PATHS:
         response = client.get(path)
         assert response.status_code == 404, f"{path} returned {response.status_code}"
+        response = client.post(path)
+        assert response.status_code == 404, f"POST {path} returned {response.status_code}"

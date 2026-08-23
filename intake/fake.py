@@ -18,3 +18,9 @@ class FakeIntake:
     def new_id(self, prefix):
         self._n += 1
         return f"{prefix}_{self._n}"
+
+    def plant_git_push(self, git_url, ref, sha, *, job_id=None):
+        """Untrusted git-push hint for the Hub poller. No webhook secret."""
+        return self.outbox.plant_git_push(
+            git_url, ref, sha, job_id=job_id or self.new_id("git"),
+        )

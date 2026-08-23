@@ -182,6 +182,23 @@ def _promote_waiting(site, sha, *, in_window, now, delay):
     delay(dep.pk)
 
 
+def enqueue_git_push(git_url, ref, sha, *, now=None, in_window=None):
+    """Turn a git-push outbox hint into the existing poll() enqueue.
+
+    git_url is untrusted. validate_git_url runs before any Site match. The
+    hint's sha is the head; poll() still owns confirm / windowed / same-sha.
+    """
+    validate_git_url(git_url, resolve=False)
+    hint_url, hint_ref, hint_sha = git_url, ref, sha or ""
+
+    def ls_remote(url, remote_ref):
+        if url == hint_url and remote_ref == hint_ref:
+            return hint_sha
+        return ""
+
+    poll(ls_remote=ls_remote, now=now, in_window=in_window)
+
+
 def poll(*, ls_remote=None, now=None, in_window=None):
     """For each Site with a Project git_url, enqueue when the branch head moved."""
     if ls_remote is None:
