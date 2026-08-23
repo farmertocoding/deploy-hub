@@ -28,7 +28,30 @@ PINNED_KINDS = {
     # Phase 3b Task 1: adopt progress reuses CheckRun (Python choices; no
     # CheckRun migration). site_id lives in results, not an FK.
     "adopt",
+    # Phase 4 Task 1: Python-only kinds (D-056). 0011 does not AlterField
+    # CheckRun. BACKUP results are a closed key set; the others are not.
+    "ssh_rotate",
+    "backup",
+    "attack_playbook",
+    "tailscale_devices",
 }
+
+_BACKUP_RESULT_KEYS = frozenset(
+    {"schema_version", "unit_id", "site_id", "bytes", "digest", "stored_at"}
+)
+
+
+def _backup_results(**overrides):
+    payload = {
+        "schema_version": 1,
+        "unit_id": 1,
+        "site_id": 1,
+        "bytes": 128,
+        "digest": "a" * 64,
+        "stored_at": "2026-08-23T00:00:00+00:00",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_checkrun_statuses_match_pinned_enums():
@@ -136,3 +159,99 @@ def test_missed_drill_writes_audit_event():
     assert beat["task"] == detect_missed_drills.name
     assert float(beat["schedule"]) == 3600.0
     assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+
+
+def test_checkrun_kind_backup_closed_schema():
+    """kind=backup results keys are exactly the C7 set; bytes is an int size.
+
+    What would make this fail: accepting the default {schema_version} payload,
+    storing bytes as a string, or allowing extra keys that later become a
+    ciphertext / key home.
+    """
+    from core.models import CheckRun
+
+    with pytest.raises(ValidationError) as exc:
+        CheckRun.objects.create(
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+            results={"schema_version": 1},
+        )
+    assert "results" in exc.value.message_dict
+
+    missing_bytes = _backup_results()
+    del missing_bytes["bytes"]
+    with pytest.raises(ValidationError) as exc:
+        CheckRun.objects.create(
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+            results=missing_bytes,
+        )
+    assert "results" in exc.value.message_dict
+
+    with pytest.raises(ValidationError) as exc:
+        CheckRun.objects.create(
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+            results=_backup_results(token="must-not-persist"),
+        )
+    assert "results" in exc.value.message_dict
+
+    with pytest.raises(ValidationError) as exc:
+        CheckRun.objects.create(
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+            results=_backup_results(bytes="128"),
+        )
+    assert "results" in exc.value.message_dict
+
+    with pytest.raises(ValidationError) as exc:
+        CheckRun.objects.create(
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+            results=_backup_results(bytes=True),
+        )
+    assert "results" in exc.value.message_dict
+
+    run = CheckRun.objects.create(
+        kind=CheckRun.Kind.BACKUP,
+        status=CheckRun.Status.SUCCEEDED,
+        results=_backup_results(bytes=4096, unit_id=9, site_id=4),
+    )
+    run.refresh_from_db()
+    assert set(run.results) == _BACKUP_RESULT_KEYS
+    assert run.results["bytes"] == 4096
+    assert type(run.results["bytes"]) is int
+    assert run.results["unit_id"] == 9
+    assert run.results["site_id"] == 4
+
+
+def test_checkrun_kinds_ssh_rotate_attack_tailscale_exist():
+    """Phase 4 kinds persist on the existing CheckRun table (Python choices).
+
+    What would make this fail: omitting a named kind so a later task invents a
+    second schema wave, or adding a Site FK that every drill would have to fill.
+    """
+    from core.models import CheckRun, Site
+
+    assert CheckRun.Kind.SSH_ROTATE == "ssh_rotate"
+    assert CheckRun.Kind.BACKUP == "backup"
+    assert CheckRun.Kind.ATTACK_PLAYBOOK == "attack_playbook"
+    assert CheckRun.Kind.TAILSCALE_DEVICES == "tailscale_devices"
+    assert not any(field.name == "site" for field in CheckRun._meta.fields)
+    assert Site not in {
+        getattr(field, "related_model", None) for field in CheckRun._meta.fields
+    }
+
+    for kind in (
+        CheckRun.Kind.SSH_ROTATE,
+        CheckRun.Kind.ATTACK_PLAYBOOK,
+        CheckRun.Kind.TAILSCALE_DEVICES,
+    ):
+        run = CheckRun.objects.create(
+            kind=kind,
+            status=CheckRun.Status.SUCCEEDED,
+            results={"schema_version": 1},
+        )
+        run.refresh_from_db()
+        assert run.kind == kind
+
