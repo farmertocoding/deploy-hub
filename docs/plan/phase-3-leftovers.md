@@ -57,7 +57,28 @@ Copy from `.superpowers/sdd/phase-3-tasks/global-constraints.md` (verbatim Phase
 - `test_second_write_over_root_0400_uses_temp_then_sudo_mv` — plant a root-owned 0400 file in a transport that raises `PermissionError` / `EACCES` on `put` to a root-owned path; assert `write_runbook` still replaces contents; assert calls include `put` to `*.tmp` and `sudo mv`.
 - Existing SEC-P5 / VAL-45 tests stay green (no secrets, impact first, argv lists). Update path assertions if they assumed `put` lands on the final path.
 
-**Not this task:** changing runbook body, TLS writes, catalog caddy-log-roll.
+**Not this task:** changing runbook body, TLS writes, catalog caddy-log-roll. Parent-dir unlock when `/srv/sites/{slug}` is root-owned is Task 1b.
+
+---
+
+## Task 1b — write_runbook must put .tmp when the site dir is root-owned
+
+**Title:** After Origin certs `sudo mkdir -p .../tls`, `/srv/sites/{slug}` can be root-owned 0755; `{path}.tmp` in that directory still EACCES on first T2 execute.
+
+**Why:** Task 1 review ⚠️ + implementer concern. `ensure_site_certificate` mkdir can leave the site dir root-owned; `_snapshot_and_runbook` `mkdir -p` no-ops and does not chown. Task 1's tmp put still lands in that dir.
+
+**Files:** `deploys/breakglass.py` and/or `deploys/pipeline.py::_snapshot_and_runbook`, `tests/test_breakglass.py` (and pipeline tests only if you change the caller).
+
+**Do:**
+- Before `put` of `{path}.tmp`, make the parent deploy-writable long enough to write, then restore a sane site-dir mode. Follow the certs parent unlock (`chown root:deploy` + `0770` + `finally` relock) **or** put the tmp under a known deploy-writable path (`/tmp` or `/var/tmp`) and `sudo mv` onto the final path. Prefer the `/tmp` + `sudo mv` shape if it avoids widening the site-dir window.
+- Argv lists only. No heredoc.
+- First write into a root-owned parent must succeed. Task 1's planted-file second write must stay green.
+- Do not change TLS `_atomic_write` or runbook body.
+
+**Tests (TDD):**
+- `test_write_runbook_puts_tmp_when_site_dir_is_root_owned` — parent `/srv/sites/{slug}` is root-owned 0755 and `put` into that directory raises; `write_runbook` still installs the final 0400 file via sudo mv.
+
+**Not this task:** caddy-log-roll, certs.py.
 
 **Exact req ids:** SEC-P5-BREAK-GLASS (existing markers stay; do not add a new full-text id).
 
