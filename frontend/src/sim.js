@@ -103,14 +103,16 @@ const CLEAN_PROJECT = {
       "name": "prod",
       "domain": "takko.market",
       "latest_manifest_version": 3,
-      "manifest_current": true
+      "manifest_current": true,
+      "cert_refusal": null
     },
     {
       "id": 4,
       "name": "staging",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };
@@ -138,14 +140,16 @@ const CLEAN_PROJECT_AFTER = {
       "name": "prod",
       "domain": "takko.market",
       "latest_manifest_version": 4,
-      "manifest_current": true
+      "manifest_current": true,
+      "cert_refusal": null
     },
     {
       "id": 4,
       "name": "staging",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };
@@ -169,14 +173,16 @@ const CLEAN_PROJECT_ANSWERED = {
       "name": "prod",
       "domain": "takko.market",
       "latest_manifest_version": 4,
-      "manifest_current": true
+      "manifest_current": true,
+      "cert_refusal": null
     },
     {
       "id": 4,
       "name": "staging",
       "domain": "staging.takko.market",
       "latest_manifest_version": 1,
-      "manifest_current": true
+      "manifest_current": true,
+      "cert_refusal": null
     }
   ]
 };
@@ -511,7 +517,8 @@ const MESSY_PROJECT = {
       "name": "prod",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };
@@ -803,7 +810,8 @@ const EDGE_PROJECT = {
       "name": "prod",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };
@@ -829,7 +837,8 @@ const EDGE_PROJECT_AFTER = {
       "name": "prod",
       "domain": "edge.atlas.market",
       "latest_manifest_version": 1,
-      "manifest_current": true
+      "manifest_current": true,
+      "cert_refusal": null
     }
   ]
 };
@@ -1118,14 +1127,16 @@ const RESCANNED_PROJECT = {
       "name": "prod",
       "domain": "takko.market",
       "latest_manifest_version": 3,
-      "manifest_current": false
+      "manifest_current": false,
+      "cert_refusal": null
     },
     {
       "id": 4,
       "name": "staging",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };
@@ -1335,7 +1346,8 @@ const UNSCANNED_PROJECT = {
       "name": "prod",
       "domain": "",
       "latest_manifest_version": null,
-      "manifest_current": null
+      "manifest_current": null,
+      "cert_refusal": null
     }
   ]
 };

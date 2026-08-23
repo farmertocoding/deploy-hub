@@ -48,6 +48,26 @@ test("degraded + empty project lists parse too", async () => {
   }
 });
 
+test("project list site fixtures emit cert_refusal like project_row_body", async () => {
+  // project_row_body always emits cert_refusal (null when unused). Zod's
+  // .nullish() treats omit and null as the same, so schema-parse stays green
+  // on a fixture that quietly dropped the field Sites.jsx CertState reads.
+  // Arrival lists only — the AFTER/RESCANNED rows are pinned in parseEveryRead.
+  for (const state of ["empty", "live", "stale", "degraded"]) {
+    (SIM_FIXTURES[state] as any).reset?.();
+    const { status, data } = await (SIM_FIXTURES[state] as any)("v1/projects/");
+    assert.equal(status, 200, state);
+    for (const row of data) {
+      for (const site of row.sites || []) {
+        assert.ok(Object.prototype.hasOwnProperty.call(site, "cert_refusal"),
+          `${state}: ${row.name}/${site.name} omitted cert_refusal`);
+        assert.equal(site.cert_refusal, null,
+          `${state}: ${row.name}/${site.name} unused cert_refusal must be null`);
+      }
+    }
+  }
+});
+
 test("live readiness report parses against the generated Readiness schema", async () => {
   const { data } = await (SIM_FIXTURES.live as any)("v1/projects/2/readiness/");
   const parsed = schemas.Readiness.safeParse(data);
@@ -376,6 +396,12 @@ async function parseEveryRead(state: string, when: string) {
       assert.ok(parsed.success,
         `${state} ${when}: ${path} drifted from ${schema} — ` +
         JSON.stringify((parsed as any).error?.issues));
+      if (schema === "ProjectSummary") {
+        for (const site of row.sites || []) {
+          assert.ok(Object.prototype.hasOwnProperty.call(site, "cert_refusal"),
+            `${state} ${when}: ${row.name}/${site.name} omitted cert_refusal`);
+        }
+      }
     }
   }
 }
