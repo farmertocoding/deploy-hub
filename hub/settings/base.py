@@ -143,14 +143,15 @@ SPECTACULAR_SETTINGS = {
 HUB_TRUSTED_PROXY_HOPS = int(os.environ.get("HUB_TRUSTED_PROXY_HOPS", "0"))
 
 # --- Vault (§6.9 envelope encryption) ---
-# Rung ① of the KEK placement ladder: a 32-byte keyfile outside the DB and excluded
-# from backups. Rungs ② (YubiKey unlock) and ③ (cloud KMS) are Phase 4 and change only
-# VAULT_KEK_BACKEND — ciphertexts and schema are identical (D-006).
+# Rung ① (local keyfile) is test/dev and does not defeat a stolen Hub disk.
+# Rung ② (YubiKey) may slip. Rung ③ is KmsKEK (D-059): HUB_VAULT_KEK_BACKEND=kms
+# refuses unless HUB_VAULT_KMS_KEY_ID is set. Prod must not default to kms.
 VAULT_KEK_BACKEND = os.environ.get("HUB_VAULT_KEK_BACKEND", "local")
 VAULT_KEYFILE = os.environ.get("HUB_VAULT_KEYFILE", "/etc/deploy-hub/vault.key")
 VAULT_KEYFILE_REQUIRE_MODE = True
 # The in-memory test KEK is opt-in and off by default; prod.py hard-fails on it.
 VAULT_ALLOW_FAKE_KEK = False
+VAULT_KMS_KEY_ID = os.environ.get("HUB_VAULT_KMS_KEY_ID", "")
 
 # Fleet reconciler kill switch. Per-site Site.reconcile_enabled still applies when
 # this is True. Default on: an unset env must not park the fleet.

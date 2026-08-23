@@ -1,9 +1,10 @@
 """KEK backends (§6.9 key hierarchy).
 
-The KEK wraps per-secret DEKs; it never encrypts bulk data. Phase 1 ships rung ① of
-the plan's placement ladder (local keyfile). Rungs ② (YubiKey challenge-response) and
-③ (cloud KMS) are Phase 4 and change *only* the class below — the vault service, the
-ciphertexts, and the schema are identical in all three. See DECISIONS.md D-006.
+The KEK wraps per-secret DEKs; it never encrypts bulk data. Rung ① is the local
+keyfile (test/dev; does not defeat a stolen Hub disk). Rung ② (YubiKey) may slip.
+Rung ③ is KmsKEK: the AWS client lives in providers/kms.py and this class takes
+that port without importing boto3 (D-059). Ciphertexts and schema are identical
+across rungs (D-006).
 
 Every backend carries a `kek_id`, stored on each Secret row, because rotation needs to
 know which KEK wrapped which DEK. Rewrapping without that column would mean trying
@@ -108,6 +109,43 @@ class FakeKEK:
             raise KEKError("DEK unwrap failed") from exc
 
 
+class KmsKEK:
+    """Rung ③: wrap DEKs through a KMS port. Never imports boto3 (D-059)."""
+
+    def __init__(self, port, *, kek_id=None):
+        self._port = port
+        key_id = str(getattr(port, "key_id", "") or "").strip()
+        if kek_id is None:
+            if not key_id:
+                raise KEKError(
+                    "VAULT_KEK_BACKEND=kms refuses unless VAULT_KMS_KEY_ID is set"
+                )
+            kek_id = f"kms:{key_id}"
+        self.kek_id = kek_id
+
+    def check(self):
+        check = getattr(self._port, "check", None)
+        if check is not None:
+            check()
+        return True
+
+    def wrap(self, dek: bytes) -> bytes:
+        try:
+            return self._port.encrypt(dek)
+        except KEKError:
+            raise
+        except Exception as exc:
+            raise KEKError("DEK wrap failed") from exc
+
+    def unwrap(self, wrapped: bytes) -> bytes:
+        try:
+            return self._port.decrypt(wrapped)
+        except KEKError:
+            raise
+        except Exception as exc:
+            raise KEKError("DEK unwrap failed — wrong KEK or tampered row") from exc
+
+
 def get_backend():
     """Resolve the configured backend. Import-time-free so settings can change in tests."""
     from django.conf import settings
@@ -122,4 +160,38 @@ def get_backend():
         return LocalKeyfileKEK(
             path, require_mode=getattr(settings, "VAULT_KEYFILE_REQUIRE_MODE", True)
         )
+    if configured == "kms":
+        key_id = str(getattr(settings, "VAULT_KMS_KEY_ID", "") or "").strip()
+        if not key_id:
+            raise KEKError(
+                "VAULT_KEK_BACKEND=kms refuses unless VAULT_KMS_KEY_ID is set"
+            )
+        from providers.kms import KmsClient
+
+        return KmsKEK(KmsClient(key_id))
     raise KEKError(f"unknown VAULT_KEK_BACKEND: {configured!r}")
+
+
+def backend_for_stored_kek_id(kek_id):
+    """Backend that wrapped this kek_id. ①→③ rewrap keeps the keyfile on disk."""
+    from django.conf import settings
+
+    current = get_backend()
+    if kek_id == current.kek_id:
+        return current
+    if isinstance(kek_id, str) and kek_id.startswith("kms:"):
+        from providers.kms import KmsClient
+
+        return KmsKEK(KmsClient(kek_id[len("kms:") :]), kek_id=kek_id)
+    if isinstance(kek_id, str) and kek_id.startswith("local"):
+        path = getattr(settings, "VAULT_KEYFILE", None)
+        if not path:
+            raise KEKError("VAULT_KEYFILE is not set")
+        return LocalKeyfileKEK(
+            path,
+            kek_id=kek_id,
+            require_mode=getattr(settings, "VAULT_KEYFILE_REQUIRE_MODE", True),
+        )
+    if isinstance(kek_id, str) and kek_id.startswith("fake"):
+        return FakeKEK(kek_id=kek_id)
+    raise KEKError(f"no KEK backend for kek_id {kek_id!r}")
