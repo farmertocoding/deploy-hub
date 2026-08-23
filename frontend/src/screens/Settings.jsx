@@ -62,7 +62,7 @@ export function AwsStatusBanner({ connected, reason, accountLast4, region }) {
 export function AwsPanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [awsOk, setAwsOk] = useState(false);
   const [statusReason, setStatusReason] = useState("set HUB_AWS_CREDENTIALS_REF");
   const {
     register, handleSubmit, setError, reset, clearErrors,
@@ -74,7 +74,7 @@ export function AwsPanel() {
 
   useEffect(() => {
     awsStatus().then(({ data }) => {
-      setConnected(Boolean(data?.connected));
+      setAwsOk(Boolean(data?.connected));
       setStatusReason(data?.reason || "set HUB_AWS_CREDENTIALS_REF");
     });
   }, []);
@@ -91,14 +91,14 @@ export function AwsPanel() {
     if (status === 201) {
       const parsed = schemas.AwsConnectResult.safeParse(data);
       setResult(parsed.success ? parsed.data : data);
-      setConnected(true);
+      setAwsOk(true);
       reset({ access_key_id: "", secret_access_key: "" });
       return;
     }
     const field = Object.values(data.errors ?? {}).flat()[0];
     const message = field?.message ?? data.detail ?? data.reason
       ?? `Unexpected ${status} response.`;
-    setConnected(false);
+    setAwsOk(false);
     setStatusReason(message);
     setError("root", { type: field?.code ?? String(status), message });
   }
@@ -111,7 +111,7 @@ export function AwsPanel() {
         the secret never comes back. Unconfigured is degraded: set
         <code> HUB_AWS_CREDENTIALS_REF</code>.</p>
       <AwsStatusBanner
-        connected={connected}
+        connected={awsOk}
         reason={statusReason}
         accountLast4={result?.account_id_last4}
         region={result?.region}

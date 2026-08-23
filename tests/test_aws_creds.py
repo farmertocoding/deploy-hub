@@ -761,7 +761,9 @@ def test_settings_unconfigured_is_degraded_not_connected(client):
     src = (REPO / "frontend" / "src" / "screens" / "Settings.jsx").read_text(
         encoding="utf-8"
     )
-    aws_fn = src.split("export function AwsPanel")[1].split("export function")[0]
+    start = src.find("export function AwsStatusBanner")
+    end = src.find("export function CloudflarePanel")
+    aws_fn = src[start:end]
     assert re.search(r"not connected", aws_fn, re.I)
     assert "Connected" not in aws_fn
 
