@@ -211,7 +211,9 @@ def test_git_push_uses_same_poller_as_partner_job(monkeypatch):
 
     assert result["ok"] is True
     assert client.fetch_calls == 1
-    assert set(client.acked) == {"job-partner", "job-git"}
+    assert "job-git" in client.acked
+    assert "job-partner" not in client.acked
+    assert any(item.get("id") == "job-partner" for item in client.items)
     assert queued == [
         Deployment.objects.exclude(status=Deployment.Status.SUCCEEDED)
         .get(manifest__site=site)

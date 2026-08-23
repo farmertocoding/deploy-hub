@@ -137,13 +137,76 @@ def _as_datetime(now):
     return datetime.fromtimestamp(int(now), tz=dt_tz.utc)
 
 
-def _partner_for(job):
-    from core.models import Partner
+def _partner_for(job, now):
+    """Bind Partner by trying reverify against Hub pubkey slots.
 
-    pk = job.get("partner_pk") or job.get("partner_id")
-    if pk:
-        return Partner.objects.filter(pk=pk).first()
-    return None
+    Intake-shaped jobs carry method/path/body/headers (including
+    X-Partner-Key-Id) and never partner_pk. Partner has no key-id column.
+    """
+    from core.models import Partner
+    from core.partner_verify import SignatureRejected, _header, reverify
+
+    method = job.get("method") or "POST"
+    path = job.get("path") or ""
+    body = job.get("body") or b""
+    headers = job.get("headers") or {}
+    if not _header(headers, "X-Partner-Signature"):
+        return None, None
+    for partner in Partner.objects.order_by("pk").iterator():
+        if not (partner.pubkey_current or partner.pubkey_previous):
+            continue
+        try:
+            result = reverify(
+                partner, method, path, body, headers, now=now,
+                remember_nonce=False,
+                persist_idempotency=False,
+            )
+        except SignatureRejected:
+            continue
+        return partner, result
+    return None, None
+
+
+def _ack(client, job_id):
+    if job_id is None or client is None:
+        return False
+    ack = getattr(client, "ack", None)
+    if not callable(ack):
+        return False
+    try:
+        ack(job_id)
+    except IntakeClientError:
+        return False
+    return True
+
+
+def _persist_accepted_nonce(partner, result, now):
+    from core.partner_verify import ReplayRejected, _remember_nonce
+
+    nonce = getattr(result, "nonce", "") or ""
+    if partner is None or not nonce:
+        return
+    try:
+        _remember_nonce(partner, nonce, now)
+    except ReplayRejected:
+        pass
+
+
+def _persist_accepted_idempotency(partner, job, result):
+    from core.partner_verify import _header, _params_hash, _store_idempotency
+
+    if partner is None or job is None or result is None:
+        return
+    headers = job.get("headers") or {}
+    idem_key = _header(headers, "Idempotency-Key")
+    if not idem_key:
+        return
+    method = job.get("method") or "POST"
+    path = job.get("path") or ""
+    body = job.get("body") or b""
+    _store_idempotency(
+        partner, idem_key, _params_hash(method, path, body), result,
+    )
 
 
 def _handle_git_push(job, now):
@@ -166,26 +229,6 @@ def _handle_git_push(job, now):
     return 1
 
 
-def _handle_partner_job(job, now):
-    from core.partner_verify import ReplayRejected, SignatureRejected, reverify
-
-    partner = _partner_for(job)
-    if partner is None:
-        return 0
-    try:
-        reverify(
-            partner,
-            job.get("method") or "POST",
-            job.get("path") or "",
-            job.get("body") or b"",
-            job.get("headers") or {},
-            now=now,
-        )
-    except (ReplayRejected, SignatureRejected):
-        return 0
-    return 1
-
-
 def _refuse_unknown(job):
     from core.audit import audit
 
@@ -198,28 +241,43 @@ def _refuse_unknown(job):
     )
 
 
-def _handle_job(job, now):
-    job_type = job.get("type") or ""
-    if job_type == TYPE_GIT_PUSH:
-        return _handle_git_push(job, now)
-    if job_type and job_type != TYPE_PARTNER_JOB:
-        _refuse_unknown(job)
-        return 0
-    return _handle_partner_job(job, now)
-
-
 def _process(client, items, now):
+    from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
+    from core.partner_verify import ReplayRejected, SignatureRejected
+
     n = 0
+    enabled = bool(getattr(settings, "PARTNER_API_ENABLED", False))
     for job in items:
         job_id = job.get("id")
-        n += int(bool(_handle_job(job, now)))
-        if job_id is not None and client is not None:
-            ack = getattr(client, "ack", None)
-            if callable(ack):
-                try:
-                    ack(job_id)
-                except IntakeClientError:
-                    pass
+        job_type = job.get("type") or TYPE_PARTNER_JOB
+        if job_type == TYPE_GIT_PUSH:
+            n += int(bool(_handle_git_push(job, now)))
+            _ack(client, job_id)
+            continue
+        if job_type != TYPE_PARTNER_JOB:
+            _refuse_unknown(job)
+            _ack(client, job_id)
+            continue
+        if not enabled:
+            continue
+        try:
+            partner, result = _partner_for(job, now)
+            if partner is None or result is None or not result.ok:
+                continue
+            n += 1
+            created = materialize(partner, job)
+        except ReplayRejected:
+            _ack(client, job_id)
+            continue
+        except SignatureRejected:
+            continue
+        except (PartnerRefuse, PartnerNotFound):
+            continue
+        if created is None:
+            continue
+        if _ack(client, job_id):
+            _persist_accepted_nonce(partner, result, now)
+            _persist_accepted_idempotency(partner, job, result)
     return n
 
 
