@@ -337,7 +337,7 @@ def test_factory_path_leaves_target_bound_blobs_clean(monkeypatch):
 
 
 def test_no_acme_dns_challenge_block_is_ever_generated():
-    """Hub-central DNS-01 is Phase 3b; Caddy must not grow an ACME DNS block.
+    """Hub-central DNS-01 is phase 4; Caddy must not grow an ACME DNS block.
 
     What would make this fail: emitting challenges.dns / acme_dns / letsencrypt
     so a token would have a place to live on the target.

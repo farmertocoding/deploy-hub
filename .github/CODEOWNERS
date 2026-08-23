@@ -28,3 +28,4 @@
 /monitor/alert_rules.py @farmertocoding
 /deploys/certs.py @farmertocoding
 /provision/adopt.py @farmertocoding
+/deploys/adopt_flow.py @farmertocoding

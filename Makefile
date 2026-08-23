@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-3 review-round generate-client check-generated \
+	conformance conformance-3 conformance-3.5 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -162,6 +162,12 @@ conformance:
 # conformance-2.5 (phase 2.5 closed; one all-tiers gate, not two).
 conformance-3:
 	python conformance/check.py --phase 3
+
+# Phase 3b gate: phase 3.5 without live-only reqs. Not all-tiers. Leave
+# conformance / review-round as phase 3 minus live tiers, and conformance-3
+# as all-tiers Phase 3 (nightly).
+conformance-3.5:
+	python conformance/check.py --phase 3.5 --exclude-tier t2 --exclude-tier t3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #
