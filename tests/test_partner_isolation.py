@@ -545,6 +545,13 @@ def test_flag_off_does_not_create_deployment():
     assert Deployment.objects.count() == 0
     assert client.acked == []
     assert client.items == [job]
+    with override_settings(PARTNER_API_ENABLED=True):
+        poll(
+            client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None,
+        )
+    assert Deployment.objects.count() == 1
+    assert client.acked == [job["id"]]
+    assert client.items == []
 
 
 @pytest.mark.req("PART-ISOLATION")

@@ -123,50 +123,77 @@ def _as_datetime(now):
     return datetime.fromtimestamp(int(now), tz=dt_tz.utc)
 
 
-def _partner_for(job):
-    from core.models import Partner
+def _partner_for(job, now):
+    """Bind Partner by trying reverify against Hub pubkey slots.
 
-    pk = job.get("partner_pk") or job.get("partner_id")
-    if pk:
-        return Partner.objects.filter(pk=pk).first()
-    return None
+    Intake-shaped jobs carry method/path/body/headers (including
+    X-Partner-Key-Id) and never partner_pk. Partner has no key-id column.
+    """
+    from core.models import Partner
+    from core.partner_verify import SignatureRejected, _header, reverify
+
+    method = job.get("method") or "POST"
+    path = job.get("path") or ""
+    body = job.get("body") or b""
+    headers = job.get("headers") or {}
+    if not _header(headers, "X-Partner-Signature"):
+        return None, None
+    for partner in Partner.objects.order_by("pk").iterator():
+        if not (partner.pubkey_current or partner.pubkey_previous):
+            continue
+        try:
+            result = reverify(
+                partner, method, path, body, headers, now=now,
+            )
+        except SignatureRejected:
+            continue
+        return partner, result
+    return None, None
+
+
+def _ack(client, job_id):
+    if job_id is None or client is None:
+        return
+    ack = getattr(client, "ack", None)
+    if not callable(ack):
+        return
+    try:
+        ack(job_id)
+    except IntakeClientError:
+        pass
 
 
 def _process(client, items, now):
+    from django.conf import settings
+
     from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
-    from core.partner_verify import ReplayRejected, SignatureRejected, reverify
+    from core.partner_verify import ReplayRejected, SignatureRejected
 
     n = 0
+    enabled = bool(getattr(settings, "PARTNER_API_ENABLED", False))
     for job in items:
         job_id = job.get("id")
+        job_type = job.get("type") or "partner-job"
+        if job_type != "partner-job":
+            continue
+        if not enabled:
+            continue
         try:
-            partner = _partner_for(job)
-            if partner is not None:
-                result = reverify(
-                    partner,
-                    job.get("method") or "POST",
-                    job.get("path") or "",
-                    job.get("body") or b"",
-                    job.get("headers") or {},
-                    now=now,
-                )
-                if result.ok:
-                    n += 1
-                    job_type = job.get("type") or "partner-job"
-                    if job_type == "partner-job":
-                        try:
-                            materialize(partner, job)
-                        except (PartnerRefuse, PartnerNotFound):
-                            pass
-        except (ReplayRejected, SignatureRejected):
-            pass
-        if job_id is not None and client is not None:
-            ack = getattr(client, "ack", None)
-            if callable(ack):
-                try:
-                    ack(job_id)
-                except IntakeClientError:
-                    pass
+            partner, result = _partner_for(job, now)
+            if partner is None or result is None or not result.ok:
+                continue
+            n += 1
+            created = materialize(partner, job)
+        except ReplayRejected:
+            _ack(client, job_id)
+            continue
+        except SignatureRejected:
+            continue
+        except (PartnerRefuse, PartnerNotFound):
+            continue
+        if created is None:
+            continue
+        _ack(client, job_id)
     return n
 
 
