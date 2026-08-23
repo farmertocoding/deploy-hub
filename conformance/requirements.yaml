@@ -588,21 +588,22 @@ requirements:
     text_hash: sha256:7642fa533c38cfb1a25c13ebf7fe29fa46e7ac62b0edc4f1bb7fd452ca4bcc4e
     text: Every screen renders empty/loading/live/error/degraded states in simulation mode, including warming and data-stale badges.
 
-  # — Partner surface (Phase 5.5)
+  # — Partner surface (Phase 5.5). Task 0 bumps these off the Phase 5 due
+  # set (D-065). text: / text_hash: untouched; do not implement §K.
   - id: PART-K1-ZERO-INBOUND-HUB
-    phase: 5
+    phase: 5.5
     verify: test
     source: plan-addendum-2026-07-30.md §K1
     text_hash: sha256:3a396c002b618aedf5a09494a991c8404768cc384172dd01787d375eb3267d7d
     text: The Hub has zero inbound internet paths; the credential-free intake is polled by the Hub over the mesh.
   - id: PART-K2-REPLAY-AT-HUB
-    phase: 5
+    phase: 5.5
     verify: test
     source: plan-addendum-2026-08-02-review3.md §M5
     text_hash: sha256:3063db77a287c37b9bbcac75d6d9d59532c128648430e958efd7d2e1a1e61169
     text: The Hub owns the authoritative replay defense; a replayed signed request is rejected at the Hub even when the intake forwards it.
   - id: PART-K6-NO-INTERNAL-ACTIONS
-    phase: 5
+    phase: 5.5
     verify: test
     source: plan-addendum-2026-07-30.md §K6
     text_hash: sha256:37f2da3efce2250149de640ee12fdddbafad73c771f7482ad2fd91624867b3b5
@@ -1103,3 +1104,83 @@ requirements:
       Findings, dual-key SSH rotate, backup persist and command-block restore,
       leftover honesty, Tailscale skip-unless or FakeTailscale, KmsKEK under
       moto (D-054).
+
+  # ── Phase 5 (docs/phase-5-design-note.md §3, Task 0 / D-065…D-074).
+  # PART-K* bumped to 5.5 above (text:/text_hash: untouched). New ids are
+  # tier-less (no `tier:` key). New ids sit `uncovered` until later tasks
+  # land proofs. P5-AWS-DEMO names conformance/demos/phase-5.md; do not
+  # stub that file here (missing is uncovered; a non-empty stub would
+  # verify). Do not hang full-text §I Phase 5 / §D5 (Azure, SSH-CA
+  # enablement, Key Vault, T3 aws) on any test.
+  - id: AWS-EC2-ADAPTER
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      providers/ec2.py implements CloudProvider; `cloud_provider_for` is the only constructor; T1 `mock_aws_ec2`; RunInstances sets IMDSv2 hop-limit 1; default SG has no public 22.
+  - id: AWS-R53-ADAPTER
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      providers/route53.py implements DnsProvider only; `proxied=True` raises; class is not EdgeProtection; L5 against that zone is notify-only.
+  - id: AWS-ENROLL-PIN
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      pin `host_key_fingerprint` before any Transport; store `kind=aws_ec2` + `provider_ref`; empty pin refuses.
+  - id: AWS-TEST-PLANE
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      `HUB_TEST_MODE` + `purpose=test` + `HUB_TEST_AWS_ACCOUNT_IDS` + `HUB_TEST_AWS_REGIONS`; explicit vault keys into boto3; empty ref / empty allowlist / default chain refuse; no `HUB_TEST_AWS_TOKEN`.
+  - id: AWS-IAM-ALLOWLIST
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      construction and daily audit refuse `*` / `AdministratorAccess` / off-prefix SSM / off-zone Route 53; missing inspect refuses; Finding body is refs.
+  - id: AWS-SSM-PULL
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      T1 fake in `providers/ssm.py`; push stays default; instance profile Get-only on `/deploy-hub/{target.pk}/*`; never `AWS_ACCESS_KEY_ID` on the target.
+  - id: AWS-IMAGE-REGISTRY
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      `ImageRegistry` port + `image_registry_for`; docker load remains default; Fake requires TLS+auth and split push/pull creds; ECR boto3 only under `providers/image_registry.py`.
+  - id: AWS-INSTANCE-T1
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      `instance.create` and `instance.terminate` are T1; `target.delete` on `aws_ec2` terminates then deletes.
+  - id: UX-P5-AWS-OPERATOR
+    phase: 5
+    verify: test
+    source: phase-5-design-note.md §3
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      Settings AWS tab (degraded, not Connected, when ref empty); cost on the T1 overlay; F8 enroll-empty/error/degraded; NAV stays six; copy says Target.
+  - id: P5-AWS-DEMO
+    phase: 5
+    verify: demo
+    source: phase-5-design-note.md §3
+    demo:
+      - conformance/demos/phase-5.md
+    text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
+    text: >
+      demo record names the MUST path in design note §4; no live AWS, no SSH-CA enablement, no DNS-01.

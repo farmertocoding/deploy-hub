@@ -44,3 +44,11 @@
 /scaling/attack_gate.py @farmertocoding
 /provision/ssh_rotate.py @farmertocoding
 /providers/tailscale.py @farmertocoding
+/providers/ec2.py @farmertocoding
+/providers/route53.py @farmertocoding
+/providers/ssm.py @farmertocoding
+/providers/image_registry.py @farmertocoding
+/providers/aws_creds.py @farmertocoding
+/monitor/cloud_reaper.py @farmertocoding
+/provision/aws_enroll.py @farmertocoding
+/core/aws_views.py @farmertocoding
