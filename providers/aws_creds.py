@@ -745,9 +745,9 @@ def audit_iam_scope(*, iam=None, sts=None, region_name="us-east-1"):
             ref=ref,
             hosted_zone_ids=_declared_hosted_zone_ids(),
             pass_role_arns=(),
-            allowed_regions=tuple(
-                getattr(settings, "HUB_TEST_AWS_REGIONS", ()) or ()
-            ),
+            # Same default as observe_credentials: the client region, not
+            # HUB_TEST_AWS_REGIONS (prod default [] would perpetual-P2 a C4 user).
+            allowed_regions=(region_name,),
         )
     except AwsScopeError as exc:
         drift = str(exc)
