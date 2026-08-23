@@ -336,6 +336,66 @@ def test_factory_path_leaves_target_bound_blobs_clean(monkeypatch):
     _assert_clean([sig.args, sig.kwargs, sig.options], where="factory celery")
 
 
+def _simulate_adopt(slug="adopt-exfil"):
+    """Plant the same DNS/edge/Origin-CA secrets, then run adopt_flow."""
+    from pathlib import Path
+
+    from dns_fixtures import default_dns_zone
+    from test_adopt_flow import AdoptTransport, _desired, _target
+
+    from core.models import Project, Site
+    from deploys.adopt_flow import adopt_flow
+    from deploys.models import Deployment, Manifest
+    from providers.fakes import FakeDnsProvider
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "compose" / "web-only"
+    project = Project.objects.create(
+        name=slug,
+        slug=slug,
+        source_kind=Project.Source.LOCAL_PATH,
+        local_path=str(fixtures),
+    )
+    site = Site.objects.create(
+        project=project,
+        name=slug,
+        domain=f"{slug}.example.com",
+        primary_target=_target(slug),
+        dns_zone=default_dns_zone(),
+        proxied=True,
+    )
+    _plant_credentials(site)
+    manifest = Manifest.objects.create(
+        site=site,
+        version=1,
+        body={"git_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    )
+    deployment = Deployment.objects.create(manifest=manifest)
+    transport = AdoptTransport()
+    dns = FakeDnsProvider()
+    adopt_flow(_desired(site, deployment, transport, dns))
+    return site, deployment, transport
+
+
+def test_adopt_put_payloads_have_no_dns_tokens():
+    """Adopt put() surfaces must stay clean of DNS / Origin-CA tokens and env names.
+
+    What would make this fail: putting CF_API_TOKEN or the planted token onto
+    the target during temp deploy / env-file write.
+    """
+    _site, _deployment, transport = _simulate_adopt("adoptput")
+    _assert_clean(_put_payloads(transport), where="adopt put payload")
+
+
+def test_adopt_run_argv_has_no_dns_tokens():
+    """Adopt run() argv must stay clean of DNS / Origin-CA tokens and env names.
+
+    What would make this fail: interpolating a planted token or CF_* env name
+    into a remote docker/curl argv.
+    """
+    _site, _deployment, transport = _simulate_adopt("adoptrun")
+    _assert_clean(_run_argv_blobs(transport), where="adopt run argv")
+
+
 def test_no_acme_dns_challenge_block_is_ever_generated():
     """Hub-central DNS-01 is phase 4; Caddy must not grow an ACME DNS block.
 
