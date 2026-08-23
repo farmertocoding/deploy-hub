@@ -83,8 +83,15 @@ class FakeCloudProvider(CloudProvider):
 
     def create_instance(self, spec):
         iid = f"i-{next(_ids)}"
-        self.instances[iid] = {"id": iid, "spec": spec, "state": "running",
-                               "host_keys": ["ssh-ed25519 FAKEKEY"], "ingress": []}
+        self.instances[iid] = {
+            "id": iid,
+            "state": "running",
+            "public_ip": "203.0.113.10",
+            "host_key_fingerprint": "SHA256:fakehostkeyfingerprint",
+            "host_keys": ["ssh-ed25519 FAKEKEY"],
+            "spec": spec,
+            "ingress": [],
+        }
         return self.instances[iid]
 
     def get_instance(self, instance_id):

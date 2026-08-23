@@ -208,7 +208,9 @@ def test_default_sg_has_no_public_22():
 
     with opened_ec2() as (provider, _key):
         provider.create_instance(_spec())
-    assert _has_public_22(last_sg_ingress()) is False
+    rules = last_sg_ingress()
+    assert rules is not None
+    assert _has_public_22(rules) is False
 
 
 @pytest.mark.req("AWS-EC2-ADAPTER")
@@ -285,7 +287,8 @@ def test_host_key_timeout_refuses_not_tofu():
         with pytest.raises(Ec2Error, match="host key|TOFU|timeout"):
             provider.create_instance(_spec())
     row = Finding.objects.get(fingerprint="aws-host-key-timeout:hub-t1-ec2")
-    assert row.kind == "aws-host-key-timeout"
+    assert row.severity == "p1"
+    assert "TOFU" in row.body
     src = (REPO / "providers" / "ec2.py").read_text(encoding="utf-8")
     assert "AutoAdd" not in src
     assert "WarningPolicy" not in src
