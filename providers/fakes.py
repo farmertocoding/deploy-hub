@@ -1,5 +1,6 @@
 """In-memory provider fakes (§A7/§D5) — what T1 tests plug into."""
 import itertools
+import os
 
 from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer, Pager
 
@@ -155,3 +156,45 @@ class FakeOriginCertIssuer(OriginCertIssuer):
             csr, hostnames, validity_days=validity_days,
         )
         return {"certificate": certificate, "expires_at": expires_at}
+
+
+class FakeKms:
+    """In-memory KMS port for T1. Bulk crypto stays under vault/.
+
+    `.down = True` is the KMS blip: encrypt/decrypt raise, so a get() that
+    still succeeds is proving the process-memory DEK cache, not the fake.
+    """
+
+    def __init__(self, key_id="alias/hub-test"):
+        self.key_id = key_id
+        self.down = False
+        self.encrypt_calls = 0
+        self.decrypt_calls = 0
+        self._blobs = {}
+
+    def _raise_if_down(self):
+        if self.down:
+            raise RuntimeError("fake kms unavailable")
+
+    def check(self):
+        self._raise_if_down()
+        return True
+
+    def encrypt(self, plaintext: bytes) -> bytes:
+        self._raise_if_down()
+        self.encrypt_calls += 1
+        token = os.urandom(16)
+        self._blobs[token] = plaintext
+        return b"fakekms:" + token
+
+    def decrypt(self, ciphertext: bytes) -> bytes:
+        self._raise_if_down()
+        self.decrypt_calls += 1
+        prefix = b"fakekms:"
+        if not ciphertext.startswith(prefix):
+            raise RuntimeError("fake kms: unknown ciphertext")
+        token = ciphertext[len(prefix) :]
+        try:
+            return self._blobs[token]
+        except KeyError as exc:
+            raise RuntimeError("fake kms: unknown ciphertext") from exc
