@@ -42,6 +42,10 @@ NOT_PUBLIC = (
     ("GET", "/partner/v1/sites"),
     ("POST", "/partner/v1/git-push"),
     ("POST", "/partner/v2/sites"),
+    ("POST", "/webhooks/github"),
+    ("POST", "/hooks/gitea"),
+    ("POST", "/api/github/webhook"),
+    ("GET", "/hooks/github"),
 )
 HUB_CANDIDATE_PATHS = (
     "/api/partner",
@@ -166,6 +170,10 @@ def test_intake_is_not_a_django_app():
     assert "FastAPI" not in app_src
     assert "Starlette" not in app_src
     assert "django" not in app_src
+    fake_src = (root / "fake.py").read_text(encoding="utf-8")
+    for banned in ("HUB_WEBHOOK_SECRET", "GITHUB_WEBHOOK", "HUB_INTAKE_HMAC", "whsec_"):
+        assert banned not in fake_src
+        assert banned not in app_src
 
 
 @pytest.mark.req("PART-K3-ENDPOINTS")
