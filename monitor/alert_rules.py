@@ -249,6 +249,12 @@ RULES = (
         "alert-protocol.md §2 P2 / review3 §O1",
     ),
     _r(
+        "partner-replay",
+        "p2",
+        "A signed partner request reused a nonce the Hub already accepted",
+        "phase-5.5-design-note.md §7 C12",
+    ),
+    _r(
         "target-cron-stale",
         "p2",
         "Target cron job failed/stale = **P2** (interim: both delivered "

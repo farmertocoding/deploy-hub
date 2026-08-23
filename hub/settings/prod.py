@@ -36,6 +36,8 @@ HUB_TEST_MODE = False
 # operator sets HUB_AWS_CREDENTIALS_REF; empty stays empty. Allowlists stay
 # whatever base.py read (default "") — never a baked-in account/region.
 
+# Phase 5.5 C6: do not default INTAKE_URL or PARTNER_API_ENABLED on.
+
 # Email: HUB_SMTP_* is the prod contract (D-037). base.py wires Django's
 # SMTP backend when HUB_SMTP_HOST is set; a failed send files a Finding
 # and never blocks the push path.

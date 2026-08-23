@@ -36,12 +36,31 @@ def _read_body(environ):
 
 
 def _partner_headers(environ):
-    return {
+    headers = {
         "X-Partner-Timestamp": environ.get("HTTP_X_PARTNER_TIMESTAMP", ""),
         "X-Partner-Nonce": environ.get("HTTP_X_PARTNER_NONCE", ""),
         "X-Partner-Key-Id": environ.get("HTTP_X_PARTNER_KEY_ID", ""),
         "X-Partner-Signature": environ.get("HTTP_X_PARTNER_SIGNATURE", ""),
     }
+    idem = environ.get("HTTP_IDEMPOTENCY_KEY", "")
+    if idem:
+        headers["Idempotency-Key"] = idem
+    return headers
+
+
+def _outbox_job(state, action, payload, method, path, body, headers):
+    job = {
+        "id": state.new_id("job"),
+        "type": "partner-job",
+        "action": action,
+        "method": method,
+        "path": path,
+        "body": body.decode("utf-8") if isinstance(body, (bytes, bytearray)) else (body or ""),
+        "headers": dict(headers),
+        "payload": payload,
+    }
+    state.outbox.put(job)
+    return job
 
 
 def _json(start_response, status, payload):
@@ -74,7 +93,7 @@ def _parse_json(body):
     return json.loads(body.decode("utf-8"))
 
 
-def _dispatch(state, method, template, groups, body, start_response):
+def _dispatch(state, method, path, template, groups, body, headers, start_response):
     try:
         payload = _parse_json(body)
     except (ValueError, UnicodeDecodeError):
@@ -91,12 +110,10 @@ def _dispatch(state, method, template, groups, body, start_response):
         if "template_ref" in payload:
             site["template_ref"] = payload["template_ref"]
         state.sites[site_id] = site
-        state.outbox.put({
-            "type": "partner-job",
-            "action": "site.create",
-            "site_id": site_id,
-            "payload": dict(site),
-        })
+        job = _outbox_job(
+            state, "site.create", dict(site), method, path, body, headers,
+        )
+        job["site_id"] = site_id
         return _json(start_response, "201 Created", site)
 
     if template == "/partner/v1/sites/{id}/deployments" and method == "POST":
@@ -104,12 +121,10 @@ def _dispatch(state, method, template, groups, body, start_response):
         dep_id = state.new_id("dep")
         dep = {"id": dep_id, "site_id": site_id, "status": "queued"}
         state.deployments[dep_id] = dep
-        state.outbox.put({
-            "type": "partner-job",
-            "action": "deployment.create",
-            "deployment_id": dep_id,
-            "payload": dict(dep),
-        })
+        job = _outbox_job(
+            state, "deployment.create", dict(dep), method, path, body, headers,
+        )
+        job["deployment_id"] = dep_id
         return _json(start_response, "202 Accepted", {
             "id": dep_id, "status": "queued",
         })
@@ -129,11 +144,9 @@ def _dispatch(state, method, template, groups, body, start_response):
             "txt": f"ownership={hostname}",
         }
         state.domains[hostname] = record
-        state.outbox.put({
-            "type": "partner-job",
-            "action": "domain.create",
-            "payload": dict(record),
-        })
+        _outbox_job(
+            state, "domain.create", dict(record), method, path, body, headers,
+        )
         return _json(start_response, "201 Created", record)
 
     if template == "/partner/v1/domains/{hostname}" and method == "GET":
@@ -164,11 +177,14 @@ def make_application(state=None):
         if template is None:
             return _empty(start_response, "404 Not Found")
         body = _read_body(environ)
+        headers = _partner_headers(environ)
         try:
-            verify(method, path, body, _partner_headers(environ), state.public_keys)
+            verify(method, path, body, headers, state.public_keys)
         except SignatureRejected:
             return _empty(start_response, "401 Unauthorized")
-        return _dispatch(state, method, template, groups, body, start_response)
+        return _dispatch(
+            state, method, path, template, groups, body, headers, start_response,
+        )
 
     return application
 

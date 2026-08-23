@@ -196,6 +196,19 @@ HUB_TEST_AWS_REGIONS = [
 # Empty = show the estimate, do not file budget-cap-hit (Task 5).
 AWS_HOURLY_BUDGET_USD = os.environ.get("HUB_AWS_HOURLY_BUDGET_USD", "")
 
+# --- Partner intake (phase 5.5 C6). Empty URL = poll no-op / SKIPPED. ---
+# Pinned env names only. Do not invent extra token env.
+INTAKE_URL = os.environ.get("HUB_INTAKE_URL", "")
+PARTNER_API_ENABLED = os.environ.get(
+    "HUB_PARTNER_API_ENABLED", "",
+).strip().lower() in {"1", "true", "yes", "on"}
+try:
+    PARTNER_FLEET_MAX_SITES = int(
+        os.environ.get("HUB_PARTNER_FLEET_MAX_SITES", "12") or "12"
+    )
+except ValueError:
+    PARTNER_FLEET_MAX_SITES = 12
+
 # --- Tailscale device-list poll (D-058 / C6) ---
 # Vault owner-id, never a token value. Default empty → skip-only CheckRun.
 # Do not invent a live token env.
@@ -322,6 +335,10 @@ CELERY_BEAT_SCHEDULE = {
     "retention-janitor-nightly": {
         "task": "monitor.tasks.run_retention_janitor",
         "schedule": crontab(hour=0, minute=0),
+    },
+    "poll-intake-outbox": {
+        "task": "monitor.tasks.poll_intake_outbox",
+        "schedule": 10.0,
     },
 }
 # crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday,

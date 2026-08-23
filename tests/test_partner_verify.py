@@ -412,4 +412,4 @@ def test_verifiers_do_not_share_a_module():
         "reconcile", "scaling",
     }
     shared = (hub_imps & edge_imps) & first_party
-    assert shared == [], f"verifiers share first-party modules: {shared}"
+    assert not shared, f"verifiers share first-party modules: {shared}"
