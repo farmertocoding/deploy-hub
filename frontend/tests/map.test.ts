@@ -55,6 +55,29 @@ test("status_is_icon_plus_label_not_colour", () => {
   assert.match(markup, /data-status="unhealthy"/);
 });
 
+test("optional_finding_chips_link_hash_findings", () => {
+  // Topology advisor chips are optional on the existing SVG (D-041): they
+  // must deep-link the hash inbox, never a path router the SPA does not mount.
+  const graph = {
+    nodes: [
+      {
+        id: "hub", kind: "hub", label: "Hub", status: "ok",
+        findings: [{ id: 42, severity: "p1" }],
+      },
+      { id: "edge", kind: "edge", label: "Cloudflare", status: "ok" },
+      { id: "zone:1", kind: "zone", label: "prod-vlan", status: "ok" },
+      { id: "host:1", kind: "host", label: "web-1", status: "ready", parent: "zone:1" },
+    ],
+    edges: [],
+  };
+  const svg = render(MapView, { graph, listView: false });
+  assert.match(svg, /#\/findings\/42/);
+  assert.match(svg, /data-finding-id="42"/);
+  assert.match(svg, /P1/);
+  const list = render(MapView, { graph, listView: true });
+  assert.ok(!list.includes("#/findings/42"), "chips are SVG-only");
+});
+
 test("empty_fleet_shows_the_onboarding_hint", () => {
   const empty = {
     nodes: [
