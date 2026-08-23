@@ -100,7 +100,8 @@ def handoff_hub_probing(target, transport):
 def _refuse(target, reason):
     return (
         f"Refusing to provision {target.host}: {reason}. "
-        "Adopt-existing-site is Phase 3b; this host is not a fresh target."
+        "Adopt-existing-site is Phase 3b; use adoption_plan / the adopt flow. "
+        "This host is not a fresh target."
     )
 
 
