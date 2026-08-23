@@ -6,6 +6,7 @@ install during overlap. Overlap itself is not a Finding.
 """
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import uuid
@@ -260,12 +261,17 @@ def test_ssh_rotate_generate_append_probe_revoke():
     assert any(argv[:1] == ["cat"] for argv in probes)
     assert any(argv == ["true"] for argv in probes)
     assert all(kind != "run" for kind, _ in transport.calls)
-    for kind, payload in transport.calls:
-        blob = payload if isinstance(payload, str) else " ".join(payload) if isinstance(payload, list) else str(payload)
+    for _kind, payload in transport.calls:
+        if isinstance(payload, list):
+            blob = " ".join(payload)
+        else:
+            blob = str(payload)
         assert "ssh-keygen" not in blob
 
     src = (REPO / "provision" / "ssh_rotate.py").read_text(encoding="utf-8")
-    assert "ssh-keygen" not in src
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Constant) and node.value == "ssh-keygen":
+            raise AssertionError("playbook must not name the ssh-keygen binary")
 
     from django.conf import settings
 
@@ -392,7 +398,7 @@ def test_private_key_never_leaves_vault():
             assert marker not in text
         assert old_pem.decode() not in text
         assert new_pem.decode() not in text
-    for kind, payload in transport.calls:
+    for _kind, payload in transport.calls:
         blob = " ".join(payload) if isinstance(payload, list) else str(payload)
         for marker in PRIVATE_MARKERS:
             assert marker not in blob

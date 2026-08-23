@@ -445,10 +445,11 @@ def test_login_webauthn_and_recovery_do_not_write_hardware_touch_at(client, monk
 
 
 # Paths that exist TODAY. T1 ids not listed must 404 at the obvious slug so a later
-# unguarded export/rotate/ssh.rotate view cannot land silently. Do not invent
+# unguarded export/rotate view cannot land silently. Do not invent
 # key.export / kek.rotate HTTP here (review ruling). ssh.rotate is Task 6.
 T1_HTTP = {
     "target.delete": "/api/v1/targets/{pk}/delete/",
+    "ssh.rotate": "/api/v1/targets/{pk}/ssh-rotate/",
 }
 
 

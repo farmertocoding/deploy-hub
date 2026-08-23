@@ -169,3 +169,31 @@ class TargetDeleteView(APIView):
               severity="security")
         target.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SshRotateSerializer(serializers.Serializer):
+    confirm_name = serializers.CharField()
+
+
+class SshRotateView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-name, then rotate."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(request=SshRotateSerializer, responses={204: None})
+    def post(self, request, pk):
+        target = get_object_or_404(Target, pk=pk)
+        ser = SshRotateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        if ser.validated_data["confirm_name"] != target.host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit("ssh.rotate", source="api", actor=request.user, obj=target,
+              severity="security")
+        from core.ssh import SshTransport
+        from provision.ssh_rotate import rotate_ssh
+
+        rotate_ssh(target, SshTransport(target), force=True)
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -60,7 +60,7 @@ test("deploy_and_dns_change_are_t2_with_a_confirm", () => {
 test("t1_rows_are_named_and_refused_not_weakened", () => {
   // T1 is hardware touch + type-the-name (SEC-F5-T1-HARDWARE-TOUCH). The client
   // must not improvise a T2 confirm, and TOTP must not be a substitute for touch.
-  for (const id of ["target.delete", "key.export", "kek.rotate"]) {
+  for (const id of ["target.delete", "key.export", "kek.rotate", "ssh.rotate"]) {
     assert.equal(tierFor(id).tier, "T1", id);
     assert.equal(presentation(tierFor(id)).stepUp, "required", id);
   }
