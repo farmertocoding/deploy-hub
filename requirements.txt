@@ -19,3 +19,6 @@ fabric>=3,<4
 # 2026-08-11 — an install from requirements.txt could import the scanner and then
 # fail on the first tree that carried any of the three.
 PyYAML>=6
+# Explicit AWS keys into boto3.client (D-066). botocore is transitive.
+# moto stays requirements-dev; no LocalStack.
+boto3>=1.35,<2

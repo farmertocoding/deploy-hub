@@ -21,3 +21,39 @@ def assert_test_zone(zone):
         raise TestModeError(
             f"HUB_TEST_MODE refuses zone {ident!r} (purpose={zone.purpose!r})"
         )
+
+
+def _csv_setting(name):
+    raw = getattr(settings, name, "") or ""
+    if isinstance(raw, (list, tuple)):
+        return tuple(str(part).strip() for part in raw if str(part).strip())
+    return tuple(part.strip() for part in str(raw).split(",") if part.strip())
+
+
+def assert_test_aws(account_id, region, *, purpose=None, tags=None):
+    """Quadruple-keyed AWS test-plane wall (D-066).
+
+    Under HUB_TEST_MODE both HUB_TEST_AWS_ACCOUNT_IDS and HUB_TEST_AWS_REGIONS
+    must contain the values; an empty allowlist refuses live. Outside it, a
+    purpose=test tagged call refuses. Operator (non-test) calls are a no-op
+    when the flag is off.
+    """
+    tagged_test = purpose == "test" or (tags or {}).get("purpose") == "test"
+    if getattr(settings, "HUB_TEST_MODE", False):
+        accounts = _csv_setting("HUB_TEST_AWS_ACCOUNT_IDS")
+        regions = _csv_setting("HUB_TEST_AWS_REGIONS")
+        if not accounts or not regions:
+            raise TestModeError(
+                "HUB_TEST_MODE empty AWS allowlist refuses live "
+                f"(account={account_id!r} region={region!r})"
+            )
+        if str(account_id) not in accounts or str(region) not in regions:
+            raise TestModeError(
+                f"HUB_TEST_MODE refuses AWS account {account_id!r} "
+                f"region {region!r} (off allowlist)"
+            )
+        return
+    if tagged_test:
+        raise TestModeError(
+            "refusing purpose=test AWS call outside HUB_TEST_MODE"
+        )

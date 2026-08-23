@@ -180,6 +180,21 @@ HUB_TEST_ZONE_SLUGS = [
     for slug in os.environ.get("HUB_TEST_ZONE_SLUGS", "hub-test").split(",")
     if slug.strip()
 ]
+# D-066: vault-ref, never a live token env. Empty refuses; do not invent
+# a token env for AWS. Comma-list allowlists default empty → refuse live.
+AWS_CREDENTIALS_REF = os.environ.get("HUB_AWS_CREDENTIALS_REF", "")
+HUB_TEST_AWS_ACCOUNT_IDS = [
+    part.strip()
+    for part in os.environ.get("HUB_TEST_AWS_ACCOUNT_IDS", "").split(",")
+    if part.strip()
+]
+HUB_TEST_AWS_REGIONS = [
+    part.strip()
+    for part in os.environ.get("HUB_TEST_AWS_REGIONS", "").split(",")
+    if part.strip()
+]
+# Empty = show the estimate, do not file budget-cap-hit (Task 5).
+AWS_HOURLY_BUDGET_USD = os.environ.get("HUB_AWS_HOURLY_BUDGET_USD", "")
 
 # --- Tailscale device-list poll (D-058 / C6) ---
 # Vault owner-id, never a token value. Default empty → skip-only CheckRun.
