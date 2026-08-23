@@ -11,7 +11,11 @@ pytestmark = pytest.mark.django_db
 OLD_SHA = "aaa111old"
 NEW_SHA = "bbb222new"
 
-WEBHOOK_NEEDLES = ("github", "webhook", "gitea", "deploy-hook")
+WEBHOOK_NEEDLES = (
+    "github", "webhook", "gitea", "deploy-hook",
+    # §7 C3: Hub urlpatterns gain zero /api/partner, /partner/v1, or /mcp.
+    "api/partner", "/mcp", "partner/v1",
+)
 
 TRIGGER_PATHS = (
     "/hooks/github",
@@ -23,6 +27,12 @@ TRIGGER_PATHS = (
     "/webhooks/github",
     "/gitea/webhook",
     "/deploy-hook",
+    "/api/partner",
+    "/api/partner/",
+    "/api/partner/v1/sites",
+    "/partner/v1/sites",
+    "/mcp",
+    "/mcp/",
 )
 
 
