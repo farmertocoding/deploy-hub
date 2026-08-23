@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
 import { presentation, tierFor } from "../src/actions.js";
-import { AdoptPlan, adoptDiff, startAdopt } from "../src/screens/Sites.jsx";
+import { AdoptPlan, SiteStatus, adoptDiff, startAdopt } from "../src/screens/Sites.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
 
 const render = (component: any, props: any = {}) =>
@@ -162,4 +162,25 @@ test("sim_covers_plan_verify_flip_abandon", async () => {
   } finally {
     (globalThis as any).fetch = prevFetch;
   }
+});
+
+test("live_site_row_includes_edge_owner_so_adopt_plan_mounts", () => {
+  // What would make this fail: AdoptPlan still requiring a sim-only `adopt`
+  // blob, or treating host_caddy as falsy so a live list row never mounts.
+  const site = {
+    id: 4,
+    name: "bare",
+    domain: "bare.example.test",
+    project: "refuse-me",
+    latest_manifest_version: 1,
+    manifest_current: true,
+    cert_refusal: null,
+    edge_owner: "host_caddy",
+  };
+  assert.equal(site.adopt, undefined, "live list has no second adopt blob");
+  const markup = render(SiteStatus, { site });
+  const text = visibleText(markup);
+  assert.match(text, /Adopt plan/);
+  assert.match(text, /host_caddy/);
+  assert.match(text, /Start adopt/);
 });

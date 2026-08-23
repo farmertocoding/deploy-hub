@@ -198,6 +198,32 @@ def _public_site(slug):
     )
 
 
+def test_project_row_emits_edge_owner_so_adopt_plan_can_mount(auth_client):
+    """Live GET /api/v1/projects/ must carry Site.edge_owner.
+
+    Sites.jsx AdoptPlan is gated on `site.edge_owner || site.adopt`. A row
+    that omits the column leaves the gate false on a real Site, so live
+    start is unreachable except under ?sim=. Do not invent an adopt blob
+    here — the column is enough for the gate.
+
+    What would make this fail: project_row_body / SiteSummary dropping
+    edge_owner, or defaulting it to empty so the gate stays falsy.
+    """
+    from core.models import Site
+
+    site = _public_site("p3b-list-edge")
+    assert site.edge_owner == Site.EdgeOwner.HOST_CADDY
+
+    listed = next(
+        p for p in auth_client.get("/api/v1/projects/").json()
+        if p["slug"] == "p3b-list-edge"
+    )
+    row = listed["sites"][0]
+    assert "edge_owner" in row, "live site row omitted edge_owner"
+    assert row["edge_owner"] == "host_caddy"
+    assert "adopt" not in row, "do not invent a second adopt blob on the list"
+
+
 def test_patch_edge_owner_only_field(auth_client):
     """PATCH /api/v1/sites/{id}/ accepts {edge_owner} only (I-edge).
 

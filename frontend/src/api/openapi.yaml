@@ -1283,6 +1283,8 @@ components:
           allOf:
           - $ref: '#/components/schemas/CertRefusal'
           nullable: true
+        edge_owner:
+          $ref: '#/components/schemas/EdgeOwnerEnum'
       required:
       - domain
       - id

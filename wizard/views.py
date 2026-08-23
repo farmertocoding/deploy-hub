@@ -196,6 +196,11 @@ class SiteSummarySerializer(serializers.Serializer):
     latest_manifest_version = serializers.IntegerField(allow_null=True)
     manifest_current = serializers.BooleanField(allow_null=True)
     cert_refusal = CertRefusalSerializer(allow_null=True, required=False)
+    # Always emitted by project_row_body (default host_caddy). required=False
+    # so older sim list rows still parse; omit is not the live shape.
+    edge_owner = serializers.ChoiceField(
+        choices=Site.EdgeOwner.choices, required=False,
+    )
 
 
 class ProjectSummarySerializer(serializers.Serializer):
@@ -273,6 +278,7 @@ def project_row_body(project):
                 {"detail": refused.body or refused.title, "finding_id": refused.pk}
                 if refused else None
             ),
+            "edge_owner": site.edge_owner,
         })
     return ProjectSummarySerializer({
         "id": project.pk, "name": project.name, "slug": project.slug,
