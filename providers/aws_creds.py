@@ -79,6 +79,11 @@ _ESCALATION = frozenset({
 _SERVICE_STARS = frozenset({"ec2:*", "ssm:*", "iam:*"})
 _SSM_PREFIX = "/deploy-hub/"
 _REGION_CONDITION_KEYS = frozenset({"aws:requestedregion", "ec2:region"})
+_REGION_ALLOWLIST_OPERATORS = frozenset({
+    "StringEquals",
+    "ForAllValues:StringEquals",
+    "StringEqualsIfExists",
+})
 RESULTS_SCHEMA_VERSION = 1
 
 
@@ -373,16 +378,28 @@ def _hosted_zone_id(resource):
 
 
 def _condition_regions(condition):
-    """Region values from aws:RequestedRegion / ec2:Region. Missing → []."""
+    """Positive-operator region pins. Negative/unknown operators → [].
+
+    Only StringEquals / ForAllValues:StringEquals / StringEqualsIfExists may
+    pin aws:RequestedRegion or ec2:Region. StringNotEquals, StringNotLike,
+    ForAnyValue:*, and any other operator naming those keys is the same as a
+    missing condition (C4 allowlist, not a denylist).
+    """
     if not isinstance(condition, dict):
         return []
     found = []
-    for block in condition.values():
+    for operator, block in condition.items():
         if not isinstance(block, dict):
             continue
+        region_values = []
         for key, value in block.items():
             if str(key).lower() in _REGION_CONDITION_KEYS:
-                found.extend(str(part) for part in _as_list(value))
+                region_values.extend(str(part) for part in _as_list(value))
+        if not region_values:
+            continue
+        if str(operator) not in _REGION_ALLOWLIST_OPERATORS:
+            return []
+        found.extend(region_values)
     return found
 
 

@@ -655,6 +655,43 @@ def test_ec2_region_condition_must_match_allowlist():
 
 
 @pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_ec2_region_negative_operator_is_not_an_allowlist():
+    """StringNotEquals / StringNotLike of the construction region is not a pin.
+
+    What would make this fail: treating any operator that names
+    aws:RequestedRegion as an allowlist, so StringNotEquals of us-east-1
+    vaults a Hub user that RunInstances in every other region.
+    """
+    from core.models import Finding
+    from providers.aws_creds import AwsScopeError, refuse_iam_scope
+
+    for operator in ("StringNotEquals", "StringNotLike"):
+        Finding.objects.filter(fingerprint=f"aws-scope:{ACCOUNT}").delete()
+        denied = {
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": "ec2:RunInstances",
+                    "Resource": "*",
+                    "Condition": {
+                        operator: {"aws:RequestedRegion": "us-east-1"}
+                    },
+                }
+            ]
+        }
+        with pytest.raises(AwsScopeError, match="region"):
+            refuse_iam_scope(
+                documents=[denied],
+                account_id=ACCOUNT,
+                ref=REF,
+                allowed_regions={"us-east-1"},
+            )
+        row = Finding.objects.get(fingerprint=f"aws-scope:{ACCOUNT}")
+        assert row.fingerprint == f"aws-scope:{ACCOUNT}"
+        assert row.fingerprint != "aws-scope"
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
 def test_finding_body_has_refs_never_secret():
     """The aws-scope Finding names the vault ref and account, never the keys.
 
