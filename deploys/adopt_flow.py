@@ -176,7 +176,8 @@ def cleanup(desired):
 
     One owner for cancel, successful flip, and the adopt-temp-reaper Beat.
     A failed delete files `adopt-temp-orphan:{site_pk}:{name}` (P2) and
-    re-raises — this is an abandon leftover, not a Hub-down and not REL-P2.
+    re-raises; a later success resolves that fingerprint. This is an
+    abandon leftover, not a Hub-down and not REL-P2.
     """
     site = desired["site"]
     try:
@@ -200,6 +201,7 @@ def cleanup(desired):
                 transport.run(["docker", "stop", name])
         if run is not None:
             _write_checkrun(desired, stage="cleanup", status=CheckRun.Status.SUCCEEDED)
+        _resolve_fp(f"adopt-temp-orphan:{site.pk}:{temp}")
     except Exception:
         run = _find_checkrun(site)
         temp = (run.results.get("temp_name") if run else "") or ""

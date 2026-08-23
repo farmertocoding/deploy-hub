@@ -186,6 +186,37 @@ def test_cleanup_failure_files_orphan_finding(monkeypatch):
     assert any(rec["name"] == temp for rec in dns.list_records(site.dns_zone))
 
 
+def test_successful_cleanup_resolves_orphan_finding():
+    """A later successful cleanup resolves adopt-temp-orphan:{pk}:{name}.
+
+    What would make this fail: leaving the P2 OPEN after the temp is gone,
+    so the inbox keeps a leftover the zone no longer has.
+    """
+    from core.models import Finding
+    from deploys.adopt_flow import cleanup, ensure_temp_dns
+
+    site, deployment = _site("reap-resolve")
+    transport = AdoptTransport()
+    boom = BoomOnDelete()
+    desired = _desired(site, deployment, transport, boom)
+    ensure_temp_dns(desired)
+    temp = _checkrun(site).results["temp_name"]
+    with pytest.raises(RuntimeError):
+        cleanup(desired)
+    row = Finding.objects.get(fingerprint=f"adopt-temp-orphan:{site.pk}:{temp}")
+    assert row.state == Finding.State.OPEN
+
+    dns = FakeDnsProvider()
+    dns.upsert_record(
+        site.dns_zone, temp, "A", ["203.0.113.10"], proxied=site.proxied,
+    )
+    desired["dns"] = dns
+    cleanup(desired)
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert not any(rec["name"] == temp for rec in dns.list_records(site.dns_zone))
+
+
 def test_reaper_does_not_delete_prod_name_or_registered_volume(monkeypatch):
     """cleanup deletes the temp name only. Prod DNS and SiteVolume stay.
 
