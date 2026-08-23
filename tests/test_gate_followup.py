@@ -19,6 +19,7 @@ the reason `test_conformance_gate.py` states: the property under test is how the
 behaves *when actually invoked*.
 """
 import ast
+import functools
 import hashlib
 import json
 import os
@@ -621,6 +622,40 @@ def _make_with_env(env_overrides, target="py-roots", args=()):
                           cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
 
 
+@functools.lru_cache(maxsize=1)
+def _honest_py_roots_stdout():
+    """Fingerprint of a real `py-roots` run, used to probe whether a hostile input is a no-op."""
+    result = _make_with_env({}, args=())
+    assert result.returncode == 0, (
+        "honest `make py-roots` must run for the capability probe:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" not in result.stderr
+    assert result.stdout.strip(), (
+        "honest py-roots printed nothing — the probe has no fingerprint")
+    return result.stdout
+
+
+def _py_roots_recipe_ran(result):
+    """True iff this make actually executed `py-roots` (the hostile input was a no-op).
+
+    Match the honest package list exactly. A dry-run prints the recipe (`echo catalog
+    …`) and would still contain those names as a substring; equality is the difference
+    between "the recipe ran" and "the recipe was printed".
+    """
+    return result.returncode == 0 and result.stdout == _honest_py_roots_stdout()
+
+
+# GNUMAKEFLAGS landed in 3.82; `--eval` in 4.0. On GNU Make 3.81 (stock macOS
+# `/usr/bin/make`) both are unknown and the recipe still runs. That is not a hole in
+# the guard: the input does not suppress or fake recipes here. Probe by whether
+# `py-roots` still prints the package list — do not hardcode `sys.platform`.
+R8_MAYBE_UNIMPLEMENTED = [
+    ({"GNUMAKEFLAGS": "-n"}, ()),
+    ({"GNUMAKEFLAGS": "SHELL=/bin/true"}, ()),
+    ({"MAKEFLAGS": "--eval=x:=1"}, ()),
+]
+
+
 R8_NEUTERINGS = [
     ({"MAKEFLAGS": "-n"}, ()),            # dry run: prints the recipe, exits 0
     ({"MAKEFLAGS": "n"}, ()),             # the short-flag spelling make itself writes
@@ -661,6 +696,59 @@ def test_issue_r8_make_refuses_to_start_when_its_own_inputs_suppress_recipes(
     assert "refusing to run" in result.stderr, (
         f"make failed, but not with the guard's message, so this is some other error:\n"
         f"{result.stderr}")
+
+
+@pytest.mark.parametrize(
+    "env_overrides,args",
+    R8_MAYBE_UNIMPLEMENTED,
+    ids=["GNUMAKEFLAGS=-n", "GNUMAKEFLAGS=SHELL=/bin/true", "MAKEFLAGS=--eval"],
+)
+def test_issue_r8_a_hostile_input_this_make_does_not_honor_still_runs_the_recipe(
+        env_overrides, args):
+    """Demanding refuse for a flag this make does not implement is a false-red.
+
+    GNUMAKEFLAGS is 3.82+; `--eval` is 4.0+. GNU Make 3.81 — stock macOS
+    `/usr/bin/make` — treats both as unknown: `GNUMAKEFLAGS=-n make py-roots` still
+    prints the package list and exits 0; so does `MAKEFLAGS=--eval=x:=1`. The guard
+    looks at `$(MAKEFLAGS)` after make has absorbed its inputs, so there is nothing
+    to refuse — the input never became a recipe suppressor.
+
+    Probe that, do not hardcode `sys.platform == "darwin"` and do not weaken the
+    guard for flags 3.81 *does* honor (`MAKEFLAGS=-n`/`n`/`i`/`q`/`t`, `SHELL=`,
+    `MAKEFILES=`, argv). If this make still executes `py-roots`, the case must not
+    sit on the always-refuse list: asserting "refusing to run" here is a false-red,
+    not a hole. If a future make starts honoring the flag, the package list will
+    stop appearing, this branch will fail, and the case must join the refuse list.
+    """
+    result = _make_with_env(env_overrides, args=args)
+    if _py_roots_recipe_ran(result):
+        assert (env_overrides, args) not in R8_NEUTERINGS, (
+            f"this make still executes py-roots under {env_overrides or list(args)} "
+            "— the input is not a recipe suppressor here. Leaving it on the always-"
+            "refuse list is a false-red, not a hole. Split it out of R8_NEUTERINGS "
+            "and assert the recipe ran instead.")
+        assert "refusing to run" not in result.stderr
+        return
+    assert result.returncode != 0, (
+        f"make ran with {env_overrides or list(args)} without printing py-roots "
+        "— this make honors the input, so the guard must refuse:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" in result.stderr, (
+        f"make failed, but not with the guard's message, so this is some other error:\n"
+        f"{result.stderr}")
+
+
+def test_lint_turns_off_the_pip_audit_tty_spinner():
+    """pip-audit's default TTY spinner has killed `make lint` in this wrapper.
+
+    Empirically: the spinner path hangs ~400s and exits 2; `pip-audit --progress-spinner
+    off` is clean. The gate stays advisory (`|| true`); this only pins the flag that
+    keeps the recipe from dying before that `|| true` can run.
+    """
+    recipe = gates.recipe(REPO, "lint")
+    assert "pip-audit --progress-spinner off -r requirements.txt" in recipe, (
+        "make lint must disable pip-audit's TTY spinner; the default has killed "
+        "the recipe in this wrapper:\n" + recipe)
 
 
 @pytest.mark.parametrize("env_overrides,args", [
