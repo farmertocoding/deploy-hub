@@ -88,3 +88,39 @@ test("plant_posts_path_only_and_connect_stays_token_only", async () => {
   assert.equal(data.planted, true);
   assert.ok(!("origin_ca_key" in calls[0].body));
 });
+
+test("settings_add_passkey_runs_create_ceremony", async () => {
+  // Security "Add a passkey" must use navigator.credentials.create, same as Enroll.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const src = join(dirname(fileURLToPath(import.meta.url)), "../src");
+  const { registerPasskey } = await import("../src/webauthn.js");
+
+  const calls: any[] = [];
+  const result = await registerPasskey("phone", {
+    apiFn: async (path: string, body: any) => {
+      calls.push({ path, body });
+      if (path.includes("registration/begin"))
+        return { status: 200, data: { challenge: "c" } };
+      return { status: 200, data: { webauthn_count: 2 } };
+    },
+    createCredential: async (opts: any) => {
+      calls.push({ create: opts });
+      return { id: "new-cred" };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls[0].path, "auth/webauthn/registration/begin/");
+  assert.deepEqual(calls[1].create, { challenge: "c" });
+  assert.equal(calls[2].path, "auth/webauthn/registration/complete/");
+  assert.equal(calls[2].body.name, "phone");
+  assert.equal(calls[2].body.id, "new-cred");
+
+  const settings = readFileSync(join(src, "screens/Settings.jsx"), "utf8");
+  assert.match(settings, /registerPasskey/);
+  assert.doesNotMatch(settings, /id: "phone"/);
+
+  const enroll = readFileSync(join(src, "screens/Enroll.jsx"), "utf8");
+  assert.match(enroll, /registerPasskey/);
+});

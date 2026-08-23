@@ -1,12 +1,9 @@
-// The operator shell (Task 12a): login (password + TOTP) → forced TOTP enrollment
-// (§6.10 mandatory-2FA) → the §F1 object-centric nav. The Phase-0 demo pane lives on
-// as a Settings/Developer tab (screens/Settings.jsx) — it proves plumbing, not the
-// product surface. Still plain React + inline styles: shadcn/Tailwind (§A8) arrive
-// with a styling pass, and mockup-first is the working agreement.
+// The operator shell: login (WebAuthn primary, TOTP fallback) → forced passkey
+// enrollment → the §F1 object-centric nav. ?sim= mounts Shell (C9); login/enroll/t1
+// are named sim states so F8 can see them without a backend.
 import React, { useEffect, useState } from "react";
 import { useEvents } from "./useEvents.js";
 import { api, simState } from "./api.js";
-import ReadinessScreen from "./Readiness.jsx";
 import { NAV, StatusPill, useRoute, useWidth } from "./Chrome.jsx";
 import Home from "./screens/Home.jsx";
 import Sites from "./screens/Sites.jsx";
@@ -14,17 +11,32 @@ import Targets from "./screens/Targets.jsx";
 import Deploys from "./screens/Deploys.jsx";
 import Findings from "./screens/Findings.jsx";
 import Settings from "./screens/Settings.jsx";
+import Login from "./screens/Login.jsx";
+import Enroll from "./screens/Enroll.jsx";
+import { T1Overlay } from "./Tiers.jsx";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
+export { Login, Enroll };
+
 export default function App() {
-  // Hydrate the session on load: restores login state across reloads AND plants
-  // the CSRF cookie the (CSRF-protected) login POST needs.
+  const sim = simState();
+  if (sim === "login") return <Login onLogin={() => {}} />;
+  if (sim === "enroll") return <Enroll onDone={() => {}} />;
+  if (sim === "t1")
+    return (
+      <div style={{ maxWidth: "100%", width: 390, margin: "8px auto" }}>
+        <T1Overlay label="Delete target" onTouch={() => {}} onConfirm={() => {}}
+          onDismiss={() => {}} />
+      </div>
+    );
+  // Other ?sim= states skip auth and mount the operator chrome so Login/Enroll
+  // are not the only reviewable surfaces — Home still owns readiness.
+  if (sim)
+    return <Shell user={{ username: "sim", otp_enrolled: true, webauthn_count: 2 }} />;
+
   const [user, setUser] = useState(undefined); // undefined = loading
   const [unreachable, setUnreachable] = useState(false);
-  // §F8 simulation: ?sim=<state> reviews the readiness screen with no backend at
-  // all, so auth (which needs a server) is skipped and the fixtures take over.
-  if (simState()) return <ReadinessScreen />;
   const hydrate = () => {
     setUnreachable(false);
     setUser(undefined);
@@ -68,7 +80,7 @@ export function NavBar({ route, onNav, status, asOf, username }) {
   );
 }
 
-function Shell({ user }) {
+export function Shell({ user }) {
   // ONE multiplexed socket for the whole shell (§3.5): screens subscribe through
   // this client, and the pill beside the username is RT-35's visible state — every
   // screen shows it because it is above all of them.
@@ -89,98 +101,4 @@ function Shell({ user }) {
   );
 }
 
-function Login({ onLogin }) {
-  const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true);
-    const { status, data } = await api("auth/login/", form);
-    setBusy(false);
-    if (status === 200) onLogin({ ...data, authenticated: true });
-    else setError(data.detail || "Login failed");
-  }
-
-  return (
-    <form onSubmit={submit} style={{ maxWidth: 320, margin: "15vh auto", display: "grid", gap: 8 }}>
-      <h2>Deploy Hub</h2>
-      {["username", "password", "otp_code"].map((f) => (
-        <input key={f} type={f === "password" ? "password" : "text"} style={box}
-          aria-label={f === "otp_code" ? "TOTP or recovery code" : f}
-          placeholder={f === "otp_code" ? "TOTP or recovery code (if enrolled)" : f}
-          value={form[f]} onChange={(e) => setForm({ ...form, [f]: e.target.value })} />
-      ))}
-      <button style={{ padding: 8 }} disabled={busy}>{busy ? "Signing in…" : "Log in"}</button>
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
-    </form>
-  );
-}
-
-function Enroll({ onDone }) {
-  const [qr, setQr] = useState(null);
-  const [code, setCode] = useState("");
-  const [recovery, setRecovery] = useState(null);
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  // The codes are shown exactly once — losing the tab before saving them must
-  // not be silent (round-1 UX finding).
-  useEffect(() => {
-    if (!recovery) return;
-    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [recovery]);
-
-  async function start() {
-    const { status, data } = await api("auth/totp/enroll/", {});
-    if (status === 201) setQr(data);
-    else setError(data.detail || "Enrollment failed to start");
-  }
-
-  async function confirm(e) {
-    e.preventDefault();
-    const { status, data } = await api("auth/totp/confirm/", { otp_code: code });
-    if (status === 200) setRecovery(data.recovery_codes);
-    else setError(data.detail || "Code did not verify");
-  }
-
-  if (recovery)
-    return (
-      <div style={{ maxWidth: 420, margin: "10vh auto" }}>
-        <h2>Recovery codes — shown once</h2>
-        <p>Store these offline (password manager / paper). Each works exactly once.</p>
-        <pre style={{ ...box, lineHeight: 1.8 }}>{recovery.join("\n")}</pre>
-        <button style={{ padding: 8, marginRight: 8 }}
-          onClick={() => navigator.clipboard.writeText(recovery.join("\n"))
-            .then(() => setCopied("ok"), () => setCopied("failed"))}>
-          {copied === "ok" ? "Copied ✔"
-            : copied === "failed" ? "Copy failed — select the codes manually"
-            : "Copy to clipboard"}
-        </button>
-        <button style={{ padding: 8 }} onClick={onDone}>I saved them — continue</button>
-      </div>
-    );
-
-  return (
-    <div style={{ maxWidth: 420, margin: "10vh auto" }}>
-      <h2>Set up two-factor auth</h2>
-      <p>2FA is mandatory on this panel. Scan with your authenticator, then confirm one code.</p>
-      {!qr ? (
-        <button style={{ padding: 8 }} onClick={start}>Start enrollment</button>
-      ) : (
-        <form onSubmit={confirm} style={{ display: "grid", gap: 8 }}>
-          <div style={{ background: "#fff", padding: 12, width: "fit-content" }}
-            dangerouslySetInnerHTML={{ __html: qr.qr_svg }} />
-          <small style={{ wordBreak: "break-all", color: "#8b949e" }}>{qr.otpauth_url}</small>
-          <input style={box} aria-label="6-digit code" placeholder="6-digit code" value={code}
-            onChange={(e) => setCode(e.target.value)} />
-          <button style={{ padding: 8 }}>Confirm</button>
-        </form>
-      )}
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
-    </div>
-  );
-}

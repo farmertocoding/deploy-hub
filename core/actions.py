@@ -2,8 +2,8 @@
 
 frontend/src/api/action_tiers.js is generated from this module
 (`scripts_dev/generate_actions.py`, hooked from `make generate-client`).
-Do not put @pytest.mark.req on UX-F5-ACTION-TIERS: the T1 hardware clause
-is unbuilt (SCAN-M4).
+T1 hardware touch is proven under SEC-F5-T1-HARDWARE-TOUCH; the full-text
+UX-F5-ACTION-TIERS marker lives on those tests, not this module.
 """
 
 ACTION_TIERS = (

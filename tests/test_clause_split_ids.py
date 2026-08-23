@@ -53,15 +53,13 @@ def test_sec_b2_full_text_id_carries_no_marker():
         f"unbuilt — found: {markers.get(FULL_TEXT_SEC_B2)}")
 
 
-def test_ux_f5_full_text_id_carries_no_marker():
-    """Same shape for UX-F5-ACTION-TIERS: the T1 hardware-touch clause is
-    phase 4 (D-040), so the full text cannot be claimed by any test this phase.
-    The buildable T2/T3 clauses are proven under UX-F5-T2-T3-FRICTION.
+def test_ux_f5_full_text_id_is_marked_now_that_hardware_lands():
+    """D-040 retirement: SEC-F5-T1-HARDWARE-TOUCH is marked, so the full-text
+    UX-F5-ACTION-TIERS marker goes back on.
     """
     markers = _suite_markers()
-    assert FULL_TEXT_UX_F5 not in markers, (
-        f"{FULL_TEXT_UX_F5} must carry no marker while its hardware clause is "
-        f"unbuilt — found: {markers.get(FULL_TEXT_UX_F5)}")
+    assert FULL_TEXT_UX_F5 in markers, (
+        f"{FULL_TEXT_UX_F5} must be marked now that the hardware clause landed")
 
 
 def test_split_clause_ids_exist_and_name_their_phase():

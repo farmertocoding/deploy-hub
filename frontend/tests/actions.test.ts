@@ -58,21 +58,72 @@ test("deploy_and_dns_change_are_t2_with_a_confirm", () => {
 });
 
 test("t1_rows_are_named_and_refused_not_weakened", () => {
-  // target delete / key export / KEK ops are in the table NOW so no screen can
-  // quietly ship them at a lower tier — but their step-up flow is Phase 4's, so the
-  // client refuses rather than rendering a confirm that pretends to be one.
+  // T1 is hardware touch + type-the-name (SEC-F5-T1-HARDWARE-TOUCH). The client
+  // must not improvise a T2 confirm, and TOTP must not be a substitute for touch.
   for (const id of ["target.delete", "key.export", "kek.rotate"]) {
     assert.equal(tierFor(id).tier, "T1", id);
-    assert.equal(presentation(tierFor(id)).stepUp, "deferred", id);
+    assert.equal(presentation(tierFor(id)).stepUp, "required", id);
   }
   const ran: string[] = [];
   const runner = makeTierRunner({ row: tierFor("target.delete"),
     onRun: () => ran.push("ran"), onUndo: () => {} });
-  runner.click();
-  assert.deepEqual(ran, [],
-    "a T1 click must run nothing until Phase 4's step-up flow exists");
-  assert.equal(runner.state.phase, "refused");
-  assert.match(runner.state.reason, /Phase 4/);
+  runner.click({ expected: "box-1" });
+  assert.deepEqual(ran, []);
+  assert.equal(runner.state.phase, "steppingUp");
+  runner.totp("123456");
+  assert.deepEqual(ran, [], "TOTP must not satisfy T1");
+  runner.touch();
+  runner.confirmStepUp({ name: "box-1" });
+  assert.deepEqual(ran, ["ran"],
+    "WebAuthn touch + type-the-name is what runs a T1 action");
+
+  const totpOnly: string[] = [];
+  const blocked = makeTierRunner({ row: tierFor("target.delete"),
+    onRun: () => totpOnly.push("ran"), onUndo: () => {} });
+  blocked.click({ expected: "box-1" });
+  blocked.totp("123456");
+  blocked.confirmStepUp({ name: "box-1" });
+  assert.deepEqual(totpOnly, [], "type-the-name without a hardware touch runs nothing");
+  assert.equal(blocked.state.phase, "refused");
+});
+
+test("t1_overlay_performs_webauthn_touch_and_types_the_host", async () => {
+  // The overlay must call begin + credentials.get + POST touch/, and type-the-name
+  // must be the resource name (target.host), not the ACTION_TIERS label.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "../src");
+  const { performHardwareTouch } = await import("../src/webauthn.js");
+
+  const calls: any[] = [];
+  const result = await performHardwareTouch({
+    apiFn: async (path: string, body: any) => {
+      calls.push({ path, body });
+      if (path.includes("authentication/begin"))
+        return { status: 200, data: { challenge: "c" } };
+      return { status: 200, data: { touched: true } };
+    },
+    getAssertion: async (opts: any) => {
+      calls.push({ get: opts });
+      return { id: "cred" };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls[0].path, "auth/webauthn/authentication/begin/");
+  assert.deepEqual(calls[1].get, { challenge: "c" });
+  assert.equal(calls[2].path, "auth/webauthn/touch/");
+  assert.deepEqual(calls[2].body, { id: "cred" });
+
+  const tiers = readFileSync(join(root, "Tiers.jsx"), "utf8");
+  assert.match(tiers, /performHardwareTouch/);
+  assert.match(tiers, /confirmName/);
+  assert.doesNotMatch(tiers, /expected: row\.label/);
+
+  const targets = readFileSync(join(root, "screens/Targets.jsx"), "utf8");
+  assert.match(targets, /deleteTarget/);
+  assert.match(targets, /confirmName=\{t\.host\}/);
+  assert.match(targets, /confirm_name/);
 });
 
 test("t2_click_confirms_before_running_and_dismiss_runs_nothing", () => {
@@ -137,13 +188,12 @@ test("the_tier_controls_render_what_the_runner_decides", () => {
   assert.match(toast, /role="status"/);
   assert.ok(visibleText(toast).includes("Undo (10 s)"));
 
-  // A T1 control is visibly dead with its reason as text — and claims nothing about
-  // hardware, because the hardware clause is Phase 4's and unbuilt (D-040).
+  // A T1 control at rest is pressable — the overlay (type-the-name + hardware
+  // touch) is the friction, not a disabled Phase-4 placeholder.
   const t1 = render(ActionButton, { row: tierFor("key.export"), onRun: () => {} });
-  assert.match(t1, /disabled=""/);
-  assert.ok(visibleText(t1).includes("requires step-up — lands in Phase 4"));
-  assert.ok(!/hardware/i.test(t1),
-    "the control must not claim the unbuilt hardware clause (D-040, Phase 4)");
+  assert.ok(!/disabled=""/.test(t1));
+  assert.ok(visibleText(t1).includes("Export key"));
+  assert.ok(!/lands in Phase 4/i.test(t1));
 
   // A T3 control at rest is one plain button: no dialog, no toast, no extra step.
   const t3 = render(ActionButton, { row: tierFor("site.rollback"), onRun: () => {} });

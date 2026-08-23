@@ -9,6 +9,7 @@ channels-redis>=4.2,<5
 celery[redis]>=5.4,<6
 redis>=5,<7
 django-otp>=1.5,<2
+django-otp-webauthn>=0.10,<1
 qrcode>=7,<9
 psycopg[binary]>=3.2,<4
 fabric>=3,<4

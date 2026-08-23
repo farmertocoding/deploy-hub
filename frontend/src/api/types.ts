@@ -94,6 +94,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/webauthn/login/begin/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Unauthenticated begin so login can take a WebAuthn assertion as 2FA. */
+        post: operations["auth_webauthn_login_begin_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/demo-jobs/": {
         parameters: {
             query?: never;
@@ -392,6 +409,23 @@ export interface paths {
         patch: operations["v1_sites_wizard_partial_update"];
         trace?: never;
     };
+    "/api/v1/targets/{id}/delete/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name. */
+        post: operations["v1_targets_delete_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -526,6 +560,7 @@ export interface components {
             username: string;
             password: string;
             otp_code?: string;
+            webauthn?: unknown;
         };
         Manifest: {
             version: number;
@@ -558,6 +593,14 @@ export interface components {
         Materialize: {
             /** @default false */
             confirm_warnings: boolean;
+        };
+        Me: {
+            authenticated: boolean;
+            username?: string;
+            otp_enrolled?: boolean;
+            webauthn_count?: number;
+            totp_enrolled?: boolean;
+            t1_available?: boolean;
         };
         OriginCaPlant: {
             path: string;
@@ -689,10 +732,16 @@ export interface components {
          * @enum {string}
          */
         StateEnum: "open" | "acked" | "resolved" | "accepted";
+        TargetDelete: {
+            confirm_name: string;
+        };
         Transition: {
             action: components["schemas"]["ActionEnum"];
             /** @default  */
             reason: string;
+        };
+        WebAuthnLoginBegin: {
+            username: string;
         };
         WizardState: {
             questions: components["schemas"]["Question"][];
@@ -770,12 +819,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
             };
         };
     };
@@ -821,6 +871,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    auth_webauthn_login_begin_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebAuthnLoginBegin"];
+                "application/x-www-form-urlencoded": components["schemas"]["WebAuthnLoginBegin"];
+                "multipart/form-data": components["schemas"]["WebAuthnLoginBegin"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
         };
     };
@@ -1345,6 +1422,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WizardState"];
                 };
+            };
+        };
+    };
+    v1_targets_delete_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TargetDelete"];
+                "application/x-www-form-urlencoded": components["schemas"]["TargetDelete"];
+                "multipart/form-data": components["schemas"]["TargetDelete"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

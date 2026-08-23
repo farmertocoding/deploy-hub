@@ -5,11 +5,23 @@ const Login = z
     username: z.string(),
     password: z.string(),
     otp_code: z.string().optional(),
+    webauthn: z.unknown().optional(),
+  })
+  .passthrough();
+const Me = z
+  .object({
+    authenticated: z.boolean(),
+    username: z.string().optional(),
+    otp_enrolled: z.boolean().optional(),
+    webauthn_count: z.number().int().optional(),
+    totp_enrolled: z.boolean().optional(),
+    t1_available: z.boolean().optional(),
   })
   .passthrough();
 const Confirm = z
   .object({ otp_code: z.string().regex(/^\d{6}$/) })
   .passthrough();
+const WebAuthnLoginBegin = z.object({ username: z.string() }).passthrough();
 const DemoJob = z
   .object({
     name: z.string().regex(/^[a-z][a-z0-9-]{1,30}$/),
@@ -220,10 +232,13 @@ const WizardState = z
 const PatchedAnswers = z
   .object({ answers: z.object({}).partial().passthrough() })
   .passthrough();
+const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
 
 export const schemas = {
   Login,
+  Me,
   Confirm,
+  WebAuthnLoginBegin,
   DemoJob,
   CloudflareConnect,
   ProviderEnum,
@@ -270,4 +285,5 @@ export const schemas = {
   Question,
   WizardState,
   PatchedAnswers,
+  TargetDelete,
 };

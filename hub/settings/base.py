@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "channels",
     "django_otp",
     "django_otp.plugins.otp_totp",
+    "django_otp_webauthn",
     # otp_static removed 2026-08-03 (round 2): recovery codes live in
     # core.RecoveryCode (sha256-hashed); keeping the plugin would let match_token
     # accept legacy plaintext StaticToken rows as second factors.
@@ -50,6 +51,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django_otp.middleware.OTPMiddleware",
     "core.middleware.EnrollmentRequiredMiddleware",  # §6.10 server-side 2FA gate
+    "core.middleware.IdleTimeoutMiddleware",  # HUB_SESSION_IDLE_TIMEOUT
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -105,8 +107,17 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 60 * 60 * 12          # absolute ~12 h
 SESSION_SAVE_EVERY_REQUEST = True           # rolling idle timeout base
-HUB_SESSION_IDLE_TIMEOUT = 60 * 30          # enforced by middleware in a later slice
+HUB_SESSION_IDLE_TIMEOUT = 60 * 30          # IdleTimeoutMiddleware rolling idle
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# django-otp-webauthn (WebAuthn primary second factor; TOTP remains fallback)
+OTP_WEBAUTHN_RP_NAME = "Deploy Hub"
+OTP_WEBAUTHN_RP_ID = "localhost"
+OTP_WEBAUTHN_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://localhost:5173",
+]
+OTP_WEBAUTHN_ALLOW_PASSWORDLESS_LOGIN = False
 
 # --- DRF + schema (§4.5: serializers are the source of truth) ---
 REST_FRAMEWORK = {

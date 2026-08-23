@@ -5,10 +5,9 @@
 //   T3 recovery               → single click + undo toast, NEVER behind step-up —
 //                               deliberately the lowest-friction actions in the
 //                               product, because they're needed at 2 a.m. from a phone
-//   T1 irreversible           → type-the-name + require_recent_touch. NOT BUILT this
-//                               phase: the step-up flow lands with WebAuthn in Phase 4
-//                               (SEC-F5-T1-HARDWARE-TOUCH), so a T1 action renders as
-//                               an explicit refusal, not as a weaker confirm.
+//   T1 irreversible           → type-the-name + require_recent_touch. stepUp is
+//                               "required": a WebAuthn touch plus typing the name
+//                               runs the action; TOTP is not a substitute.
 //
 // ACTION_TIERS is generated from core/actions.py into src/api/action_tiers.js
 // (`make generate-client`). This file keeps presentation + the runner.
@@ -26,12 +25,11 @@ export function tierFor(actionId) {
 // What each tier RENDERS AS, derived from the table and nothing else. `stepUp` has
 // two values on purpose: "none" (T2/T3 — §F5's hard rule is that T3 can NEVER grow a
 // step-up, and this is the single place a refactor would have to break) and
-// "deferred" (T1 — the flow is Phase 4's, so the client refuses rather than improvises
-// a weaker one).
+// "required" (T1 — WebAuthn hardware touch + type-the-name).
 export function presentation(row) {
   if (row.tier === "T3") return { confirm: false, undo: true, stepUp: "none" };
   if (row.tier === "T2") return { confirm: true, undo: false, stepUp: "none" };
-  return { confirm: false, undo: false, stepUp: "deferred" };
+  return { confirm: false, undo: false, stepUp: "required" };
 }
 
 // The runner: one state machine for both built tiers, so a screen wires an action by
@@ -40,7 +38,7 @@ export function presentation(row) {
 //   idle → (T2 click) confirming → (confirm) run → idle
 //   idle → (T3 click) run immediately → undoable(window) → (undo) onUndo → idle
 //                                                        → (expiry) idle
-//   (T1 click) → refused, nothing runs
+//   idle → (T1 click) steppingUp → (touch + type-the-name) run → idle
 //
 // Injected timers for the same reason createEventsClient takes them: the undo window
 // is the safety property, and a window nothing can advance is a window no test pins.
@@ -67,20 +65,36 @@ export function makeTierRunner({ row, onRun, onUndo, onState = () => {},
   return {
     get state() { return state; },
     click(args) {
-      if (p.stepUp === "deferred") {
-        set({ phase: "refused",
-              reason: "Requires step-up — this flow lands in Phase 4." });
+      if (p.stepUp === "required") {
+        set({ phase: "steppingUp", args: args ?? {}, typed: "", touched: false });
         return;
       }
       if (p.confirm) { set({ phase: "confirming", args }); return; }
       run(args);
+    },
+    totp() {
+      // TOTP authenticates login, never T1 (D-062). Leave the overlay in place.
+    },
+    touch() {
+      if (state.phase !== "steppingUp") return;
+      set({ ...state, touched: true });
+    },
+    confirmStepUp({ name } = {}) {
+      if (state.phase !== "steppingUp") return;
+      const expected = state.args?.expected;
+      if (!state.touched || !name || (expected !== undefined && name !== expected)) {
+        set({ ...state, phase: "refused",
+              reason: "Requires hardware touch and type-the-name." });
+        return;
+      }
+      run(state.args);
     },
     confirm() {
       if (state.phase !== "confirming") return;
       run(state.args);
     },
     dismiss() {
-      if (state.phase === "confirming") set({ phase: "idle" });
+      if (state.phase === "confirming" || state.phase === "steppingUp") set({ phase: "idle" });
     },
     undo() {
       if (state.phase !== "undoable") return;
