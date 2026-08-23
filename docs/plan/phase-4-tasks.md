@@ -53,13 +53,13 @@ Hub-central DNS-01.
 | Shared file | Order |
 |---|---|
 | `conformance/requirements.yaml` / `Makefile` / `DECISIONS.md` / `WAIVERS.md` / `conformance/paths.yaml` | Task 0 |
-| `core/models.py` / `0011_phase4.py` / `core/audit.py` | Task 1 after 0 |
+| `core/models.py` / `0011_phase4.py` / `core/audit.py` | Task 1 after 0 (only writer) |
 | `core/otp.py` / `core/permissions.py` / `core/middleware.py` / `frontend/src/actions.js` / `frontend/src/App.jsx` | Task 2 after 0 |
 | `scanner/core.py` / `fallbacks.py` / wizard | Task 3 after 0 (after Task 0 SCAN-M4) |
 | `providers/cloudflare.py` / `monitor/attack_*.py` / `scaling/attack_gate.py` | Task 4 after 0 |
 | `monitor/topology.py` | Task 5 after 0 |
 | `provision/ssh_rotate.py` / `core/actions.py` (ssh.rotate row) | Task 6 after 0 |
-| `provision/backup.py` / Sites UI | Task 7 after 1 (CheckRun.Kind.BACKUP is Python-only; may start after 0) |
+| `provision/backup.py` / Sites UI | Task 7 after 1 (and after Task 4 if both touch Sites.jsx) |
 | `realtime/authorize.py` / compose parse / exhaust gate | Task 8 after 0 |
 | `providers/tailscale.py` | Task 9 after 0 |
 | `vault/kek.py` / `vault/service.py` | Task 10 after 0 |
@@ -87,6 +87,13 @@ slip; `conformance-4` excludes live tiers; sensitive paths claimed.
   `SCAN-DECLARED-TEST-MATERIAL` / `SCAN-DECLARED-GUARDS` markers **or** move
   them onto a new `SCAN-DECLARED-PARSER` id. Tests keep running. Full-text
   ids stay unmarked until Task 3.
+- `tests/test_d017_declared_reqs_not_phase_2.py` — keep SCAN-DECLARED ids at
+  `phase: 4` and not-retired. **Stop** requiring full-text markers on
+  `tests/test_scanner_declarations.py`. Point the rewrite at
+  `test_scan_declared_full_text_is_not_verified_by_parser_only_tests`.
+- `tests/test_d023_actions_not_required.py` — pin `conformance` to
+  `--phase 4 --exclude-tier t2 --exclude-tier t3`. Leave `conformance-3` as
+  all-tiers `--phase 3` with **no** `--exclude-tier`.
 - `WAIVERS.md` — `WAIVED: TLS-B2-HUB-DNS01-UNPROXIED` (first slip, unproxied
   refusal remains). Clause-scoped SCAN-DECLARED full-text waiver until Task 3.
   Do not retire REL-P2 / LE-staging / SEC-B2 full-text.
@@ -107,10 +114,14 @@ makes the phase-4 due set honest.
   `test_tls_b2_hub_dns01_stays_phase_4`;
   `test_new_phase_4_ids_have_no_tier`;
   `test_scan_declared_full_text_is_not_verified_by_parser_only_tests`.
-- `tests/test_makefile_nightly.py` (extend/rewrite) —
-  `test_conformance_4_target_exists`;
+- `tests/test_makefile_nightly.py` — **delete or rewrite**
+  `test_review_round_conformance_is_phase_3_minus_live_tiers` and
+  `test_review_round_conformance_is_still_phase_3_minus_live_tiers` so they
+  cannot remain as `--phase 3` pins on `conformance`. Replacement:
+  `test_review_round_conformance_is_phase_4_minus_live_tiers`. Keep
+  `test_nightly_gates_use_conformance_3` unchanged (all-tiers Phase 3).
+  Also: `test_conformance_4_target_exists`;
   `test_conformance_4_is_phase_4_minus_live_tiers`;
-  `test_review_round_conformance_is_phase_4_minus_live_tiers`;
   `test_conformance_3_still_all_tiers_phase_3`;
   `test_conformance_4_is_not_a_nightly_gates_prereq`.
   Do not add a test that claims `conformance-3` excludes live tiers.
@@ -122,23 +133,37 @@ makes the phase-4 due set honest.
 
 ## Task 1 — Schema wave `0011_phase4.py`
 
-**Title:** DnsZone `(provider, name)` unique + AuditEvent hash chain.
+**Title:** DnsZone `(provider, name)` unique + AuditEvent hash chain + every
+CheckRun kind this phase needs.
 
-**Files:** `core/models.py`, `core/migrations/0011_phase4.py`, `core/audit.py`,
+**Files:** `core/models.py` (**this task is the only writer this phase**),
+`core/migrations/0011_phase4.py`, `core/audit.py`,
 `tests/test_dns_zone_unique.py` (or extend existing), `tests/test_audit.py`.
 
 **Do:**
-- Denormalize `DnsZone.provider` from `account.provider`.
+- Denormalize `DnsZone.provider` from `account.provider`. `save()` /
+  `full_clean()` copy `account.provider`.
 - `UniqueConstraint(fields=["provider", "name"], name="uniq_dnszone_provider_name")`.
 - Keep `uniq_dnszone_account_name`. `clean()` stays.
-- `AuditEvent.prev_hash`. `audit()` chains; genesis empty prev. Never blocks
-  on S3. `detail` still must not grow vault plaintext.
+- `AuditEvent.prev_hash`. `audit()` writes
+  `sha256((prev_hash + canonical_row).encode("utf-8")).hexdigest()` (sorted-key
+  JSON, no whitespace). Genesis empty prev. Never blocks on S3.
+- Nullable `AuditEvent.shipped_at`.
+- Python-only Kind values: `ssh_rotate`, `backup`, `attack_playbook`,
+  `tailscale_devices`. BACKUP `clean()` keys exactly
+  `{schema_version, unit_id, site_id, bytes, digest, stored_at}` (`bytes` =
+  int size).
+- `detail` still must not grow vault plaintext.
+- Later tasks do **not** edit `core/models.py`.
 
 **Tests:**
 - `test_two_accounts_cannot_share_a_provider_zone_name`
+- `test_dnszone_save_copies_account_provider`
 - `test_audit_event_prev_hash_chains`
 - `test_audit_genesis_empty_prev`
 - `test_audit_does_not_call_s3`
+- `test_checkrun_kind_backup_closed_schema`
+- `test_checkrun_kinds_ssh_rotate_attack_tailscale_exist`
 
 **Dependencies:** Task 0.
 
@@ -184,9 +209,12 @@ change except Task 6's row if sequenced here), `frontend/src/App.jsx`,
 - `test_t3_rollback_never_uses_require_recent_touch`
 - `test_idle_timeout_expires_session`
 - frontend: `rollback_restart_and_rerun_are_t3_and_never_behind_step_up` stays
-  (update expected `stepUp` from `"deferred"` to `"none"` for T3 and
-  `"required"` for T1)
+  (T3 `stepUp: "none"`)
+- frontend: rewrite `t1_rows_are_named_and_refused_not_weakened` — T1
+  `stepUp: "required"`; after WebAuthn touch + type-the-name the action runs;
+  TOTP still does not
 - frontend: sim Shell mounts Login/Enroll/T1 overlay
+- `test_login_webauthn_and_recovery_do_not_write_hardware_touch_at`
 
 **Dependencies:** Task 0.
 
@@ -213,6 +241,8 @@ tests. Do not rewrite `scanner/declarations.py`.
 - `test_index_prepend_does_not_revive_orphaned_true`
 - `test_scan_loads_declarations_module`
 - existing parser tests stay green
+- Each of the five attacks must go through `wizard.materialize.preflight` /
+  `materialize` against a real DB, not `confirm_question_id()` alone (C1).
 
 **Exact req ids:** `SCAN-DECLARED-TEST-MATERIAL`, `SCAN-DECLARED-GUARDS`
 (full-text markers land here). Retire the Task 0 clause waiver.
@@ -243,8 +273,9 @@ tests. Do not rewrite `scanner/declarations.py`.
 - `test_playbook_never_puts_edge_token_on_target`
 - `test_pager_click_url_is_hash_findings`
 - `test_dns_client_never_loads_edge_token_ref`
+- `test_edge_client_never_loads_dns_token_ref`
 
-**Dependencies:** Task 0.
+**Dependencies:** Task 0. Do not edit `core/models.py` (Kind.ATTACK_PLAYBOOK is Task 1).
 
 ---
 
@@ -272,7 +303,7 @@ tests. Do not rewrite `scanner/declarations.py`.
 **Title:** Dual-key playbook + Beat + T1 + host-key-mismatch Finding.
 
 **Files:** `provision/ssh_rotate.py` (new), `core/actions.py` (`ssh.rotate`
-T1), `core/models.py` (`CheckRun.Kind.SSH_ROTATE` Python-only),
+T1),
 `monitor/alert_rules.py` (`ssh-rotation-incomplete`, `ssh-rotation-stale-key`),
 `core/ssh.py` (`raise_alert` on host-key mismatch), `hub/settings/base.py`
 Beat `ssh-rotate-quarterly` 90 d, `tests/test_ssh_rotate.py`.
@@ -290,8 +321,9 @@ vault. Never `ssh-keygen` on the target.
 - `test_ssh_rotate_is_t1`
 - `test_host_key_mismatch_files_finding`
 
-**Dependencies:** Task 0. If Task 2 is in flight on `core/actions.py`, append
-only the new tuple after Task 2 merges, or take Task 2's branch as parent.
+**Dependencies:** Task 0. Do not edit `core/models.py` (Kind.SSH_ROTATE is
+Task 1). If Task 2 is in flight on `core/actions.py`, append only the new
+tuple after Task 2 merges, or take Task 2's branch as parent.
 
 ---
 
@@ -301,16 +333,19 @@ only the new tuple after Task 2 merges, or take Task 2's branch as parent.
 + restore-drill body.
 
 **Files:** `provision/backup.py`, `provision/tasks.py` or `monitor/tasks.py`,
-`hub/settings/base.py` (`backup-nightly`), `core/models.py`
-(`CheckRun.Kind.BACKUP` Python-only), views for
+`hub/settings/base.py` (`backup-nightly`), views for
 `GET /api/v1/sites/{id}/backups/` and
 `POST /api/v1/sites/{id}/backups/{unit_id}/test/` (T2),
 `frontend/src/screens/Sites.jsx`, `monitor/drills.py` (restore body),
 `tests/test_backup_operator.py`.
 
-**Do:** Persist sealed bytes (Hub-local is enough for T1). `raise_alert` on
+**Do:** Persist sealed bytes at `/var/lib/deploy-hub/backups/{checkrun_pk}`
+(0600). Results metadata only (`bytes` = int size). `raise_alert` on
 failure **and** missing nightly. Restore is a `<pre>` command block, no POST.
-Restore-drill SKIPPED only when no BackupUnit. Never the KEK.
+Restore-drill SKIPPED only when no BackupUnit. Never the KEK. Do not edit
+`core/models.py` (Kind.BACKUP + closed keys are Task 1). Task 7 takes
+`Sites.jsx` **after** Task 4 (AttackState) or Task 4 exports AttackState as a
+component Task 7 does not touch.
 
 **Tests:**
 - `test_backup_list_hides_key_material`
@@ -321,8 +356,8 @@ Restore-drill SKIPPED only when no BackupUnit. Never the KEK.
 - `test_missing_nightly_files_same_kind`
 - `test_restore_drill_skipped_only_when_siteless`
 
-**Dependencies:** Task 0 (Kind is Python-only). Prefer after Task 1 if you
-touch AuditEvent from backup-failed.
+**Dependencies:** Task 0 + Task 1 (closed BACKUP schema). Prefer after Task 4
+if both touch `Sites.jsx`.
 
 ---
 
@@ -362,23 +397,29 @@ exhaust plugin / `scripts_dev/` as needed, `tests/test_secrets_in_exhaust.py`,
 - `test_absent_ref_skips_and_does_not_green_a_live_tier`
 - `test_no_token_in_finding_or_checkrun`
 
-**Dependencies:** Task 0.
+**Dependencies:** Task 0. Do not edit `core/models.py` (Kind.TAILSCALE_DEVICES is Task 1).
 
 ---
 
 ## Task 10 — KmsKEK T1 adapter + DEK cache
 
-**Title:** `KmsKEK` + moto + refuse-unless-configured + process-memory DEK cache.
+**Title:** `providers/kms.py` port + `KmsKEK` + moto + refuse-unless-configured
++ process-memory DEK cache.
 
-**Files:** `vault/kek.py`, `vault/service.py`, `requirements-dev.txt` (moto if
-missing), `tests/test_kms_kek.py`.
+**Files:** `providers/kms.py` (new; the only module that may import boto3 for
+KMS), `providers/fakes.py`, `vault/kek.py` (takes the port; **no boto3**),
+`vault/service.py` (DEK cache), `hub/settings/base.py`
+(`HUB_VAULT_KMS_KEY_ID` → `VAULT_KMS_KEY_ID=""`), `requirements-dev.txt`
+(moto if missing), `tests/test_kms_kek.py` (**must not import boto3**).
 
 **Tests:**
 - `test_kms_kek_wrap_unwrap_with_moto`
 - `test_kms_backend_refuses_unless_configured`
+- `test_kms_backend_refuses_when_key_id_empty`
 - `test_keyfile_backend_still_default_in_tests`
 - `test_rewrap_from_local_to_kms_under_moto`
 - `test_dek_cache_survives_kms_blip`
+- `test_vault_and_kms_tests_do_not_import_boto3`
 - **no live AWS test**
 
 **Dependencies:** Task 0 (kek_id column already exists).
