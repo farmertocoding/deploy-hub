@@ -19,12 +19,14 @@ the reason `test_conformance_gate.py` states: the property under test is how the
 behaves *when actually invoked*.
 """
 import ast
+import functools
 import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
+import tempfile
 
 import gates
 import pytest
@@ -621,18 +623,49 @@ def _make_with_env(env_overrides, target="py-roots", args=()):
                           cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
 
 
+@functools.lru_cache(maxsize=1)
+def _honest_py_roots_stdout():
+    """Fingerprint of a real `py-roots` run, used to probe whether a hostile input is a no-op."""
+    result = _make_with_env({}, args=())
+    assert result.returncode == 0, (
+        "honest `make py-roots` must run for the capability probe:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" not in result.stderr
+    assert result.stdout.strip(), (
+        "honest py-roots printed nothing — the probe has no fingerprint")
+    return result.stdout
+
+
+def _py_roots_recipe_ran(result):
+    """True iff this make actually executed `py-roots` (the hostile input was a no-op).
+
+    Match the honest package list exactly. A dry-run prints the recipe (`echo catalog
+    …`) and would still contain those names as a substring; equality is the difference
+    between "the recipe ran" and "the recipe was printed".
+    """
+    return result.returncode == 0 and result.stdout == _honest_py_roots_stdout()
+
+
+# GNUMAKEFLAGS landed in 3.82; `--eval` in 4.0. On GNU Make 3.81 (stock macOS
+# `/usr/bin/make`) both are unknown and the recipe still runs. That is not a hole in
+# the guard: the input does not suppress or fake recipes here. Probe by whether
+# `py-roots` still prints the package list — do not hardcode `sys.platform`.
+R8_MAYBE_UNIMPLEMENTED = [
+    ({"GNUMAKEFLAGS": "-n"}, ()),
+    ({"GNUMAKEFLAGS": "SHELL=/bin/true"}, ()),
+    ({"MAKEFLAGS": "--eval=x:=1"}, ()),
+]
+
+
 R8_NEUTERINGS = [
     ({"MAKEFLAGS": "-n"}, ()),            # dry run: prints the recipe, exits 0
     ({"MAKEFLAGS": "n"}, ()),             # the short-flag spelling make itself writes
     ({"MAKEFLAGS": "ni"}, ()),            # combined with another
-    ({"GNUMAKEFLAGS": "-n"}, ()),         # the second variable make reads
     ({"MAKEFLAGS": "i"}, ()),             # ignore-errors: runs, swallows the failure
     ({"MAKEFLAGS": "q"}, ()),             # question mode: runs nothing
     ({"MAKEFLAGS": "t"}, ()),             # touch instead of running
     ({"MAKEFLAGS": "SHELL=/bin/true"}, ()),        # every recipe through `true`
-    ({"GNUMAKEFLAGS": "SHELL=/bin/true"}, ()),
     ({"MAKEFLAGS": ".SHELLFLAGS=-c true"}, ()),
-    ({"MAKEFLAGS": "--eval=x:=1"}, ()),   # inject makefile text
     ({"MAKEFILES": "/tmp/injected.mk"}, ()),       # inject a whole makefile
     ({}, ("-n",)),                        # and the same flags straight from argv
     ({}, ("--dry-run",)),
@@ -653,6 +686,10 @@ def test_issue_r8_make_refuses_to_start_when_its_own_inputs_suppress_recipes(
     amount of workflow parsing can see it. Enumerating make's inputs is a losing game.
     This stops playing it: whatever route the flag took, make refuses to start, and a
     gate that refuses to start is red rather than falsely green.
+
+    Inputs this make does not implement (GNUMAKEFLAGS before 3.82, `--eval` before 4.0)
+    live in R8_MAYBE_UNIMPLEMENTED and are probed, not assumed: a no-op that still
+    executes py-roots is not a suppressor here.
     """
     result = _make_with_env(env_overrides, args=args)
     assert result.returncode != 0, (
@@ -661,6 +698,59 @@ def test_issue_r8_make_refuses_to_start_when_its_own_inputs_suppress_recipes(
     assert "refusing to run" in result.stderr, (
         f"make failed, but not with the guard's message, so this is some other error:\n"
         f"{result.stderr}")
+
+
+@pytest.mark.parametrize(
+    "env_overrides,args",
+    R8_MAYBE_UNIMPLEMENTED,
+    ids=["GNUMAKEFLAGS=-n", "GNUMAKEFLAGS=SHELL=/bin/true", "MAKEFLAGS=--eval"],
+)
+def test_issue_r8_a_hostile_input_this_make_does_not_honor_still_runs_the_recipe(
+        env_overrides, args):
+    """Demanding refuse for a flag this make does not implement is a false-red.
+
+    GNUMAKEFLAGS is 3.82+; `--eval` is 4.0+. GNU Make 3.81 — stock macOS
+    `/usr/bin/make` — treats both as unknown: `GNUMAKEFLAGS=-n make py-roots` still
+    prints the package list and exits 0; so does `MAKEFLAGS=--eval=x:=1`. The guard
+    looks at `$(MAKEFLAGS)` after make has absorbed its inputs, so there is nothing
+    to refuse — the input never became a recipe suppressor.
+
+    Probe that, do not hardcode `sys.platform == "darwin"` and do not weaken the
+    guard for flags 3.81 *does* honor (`MAKEFLAGS=-n`/`n`/`i`/`q`/`t`, `SHELL=`,
+    `MAKEFILES=`, argv). If this make still executes `py-roots`, the case must not
+    sit on the always-refuse list: asserting "refusing to run" here is a false-red,
+    not a hole. If a future make starts honoring the flag, the package list will
+    stop appearing, this branch will fail, and the case must join the refuse list.
+    """
+    result = _make_with_env(env_overrides, args=args)
+    if _py_roots_recipe_ran(result):
+        assert (env_overrides, args) not in R8_NEUTERINGS, (
+            f"this make still executes py-roots under {env_overrides or list(args)} "
+            "— the input is not a recipe suppressor here. Leaving it on the always-"
+            "refuse list is a false-red, not a hole. Split it out of R8_NEUTERINGS "
+            "and assert the recipe ran instead.")
+        assert "refusing to run" not in result.stderr
+        return
+    assert result.returncode != 0, (
+        f"make ran with {env_overrides or list(args)} without printing py-roots "
+        "— this make honors the input, so the guard must refuse:\n"
+        f"{result.stdout}{result.stderr}")
+    assert "refusing to run" in result.stderr, (
+        f"make failed, but not with the guard's message, so this is some other error:\n"
+        f"{result.stderr}")
+
+
+def test_lint_turns_off_the_pip_audit_tty_spinner():
+    """pip-audit's default TTY spinner has killed `make lint` in this wrapper.
+
+    Empirically: the spinner path hangs ~400s and exits 2; `pip-audit --progress-spinner
+    off` is clean. The gate stays advisory (`|| true`); this only pins the flag that
+    keeps the recipe from dying before that `|| true` can run.
+    """
+    recipe = gates.recipe(REPO, "lint")
+    assert "pip-audit --progress-spinner off -r requirements.txt" in recipe, (
+        "make lint must disable pip-audit's TTY spinner; the default has killed "
+        "the recipe in this wrapper:\n" + recipe)
 
 
 @pytest.mark.parametrize("env_overrides,args", [
@@ -679,6 +769,81 @@ def test_issue_r8_the_guard_leaves_honest_invocations_alone(env_overrides, args)
     assert "refusing to run" not in result.stderr
 
 
+@functools.lru_cache(maxsize=1)
+def _make_parses_undefine():
+    """True iff this make accepts the `undefine` directive (GNU Make 3.82+).
+
+    Probe by running a tiny makefile, not by `sys.platform` or `make --version`.
+    3.81 rejects `undefine` as `missing separator` and never reaches a recipe.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "undefine-probe.mk"
+        path.write_text(
+            "undefine FOO\n"
+            "all:\n"
+            "\t@echo parsed-undefine\n",
+            encoding="utf-8")
+        env = dict(os.environ)
+        env.pop("MAKEFLAGS", None)
+        env.pop("GNUMAKEFLAGS", None)
+        result = subprocess.run(
+            ["make", "-f", str(path)],
+            cwd=tmp, capture_output=True, text=True, env=env, timeout=30)
+        return result.returncode == 0 and "parsed-undefine" in result.stdout
+
+
+def _n4_undefined_origin_result(tmp_path, variable, restore, shim_name):
+    """Run py-roots as if `variable` has origin undefined.
+
+    On a make that parses `undefine` (3.82+), a shim undefines then includes the
+    real Makefile then restores so the recipe can run — that is how 4.x simulates
+    3.81. On a make that does not, the native Makefile is already the case: 3.81
+    has no `.SHELLFLAGS`, and feeding it `undefine` is `missing separator`, not
+    an override accusation.
+    """
+    env = dict(os.environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    if not _make_parses_undefine():
+        return subprocess.run(
+            ["make", "-f", str(REPO / "Makefile"), "py-roots"],
+            cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    shim = tmp_path / shim_name
+    shim.write_text(
+        f"undefine {variable}\n"
+        "include " + str(REPO / "Makefile") + "\n"
+        f"{restore}\n",
+        encoding="utf-8")
+    return subprocess.run(
+        ["make", "-f", str(shim), "py-roots"],
+        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+
+
+def test_issue_n4_a_make_that_cannot_parse_undefine_runs_the_native_makefile(tmp_path):
+    """The undefine shim is how modern make simulates 3.81; it is not 3.81 itself.
+
+    `undefine` landed in 3.82. GNU Make 3.81 — stock macOS `/usr/bin/make` —
+    rejects it as `missing separator` and never reads the guard. That is not an
+    override accusation, and it is not the property N4 protects: origin
+    `undefined` is already clean, and this make already has no `.SHELLFLAGS`.
+    Feeding it the shim is a false-red.
+
+    Probe whether this make parses `undefine`. If it does not, N4 must run the
+    real Makefile as the native undefined-origin case. If it does, the shim
+    stays so 4.x still simulates 3.81. Do not hardcode `sys.platform`.
+    """
+    if _make_parses_undefine():
+        return
+    result = _n4_undefined_origin_result(
+        tmp_path, ".SHELLFLAGS", ".SHELLFLAGS := -c", "make381.mk")
+    assert result.returncode == 0, (
+        "this make cannot parse `undefine`; N4 must run the real Makefile as "
+        "the native undefined-origin case, not a shim that dies with missing "
+        f"separator:\n{result.stdout}{result.stderr}")
+    assert "missing separator" not in result.stderr
+    assert "refusing to run" not in result.stderr
+
+
 def test_issue_n4_a_make_without_shellflags_is_not_accused_of_overriding_it(tmp_path):
     """GNU make 3.81 — stock macOS `/usr/bin/make` — has no `.SHELLFLAGS` at all.
 
@@ -690,24 +855,19 @@ def test_issue_n4_a_make_without_shellflags_is_not_accused_of_overriding_it(tmp_
     before including the real Makefile puts the origin in exactly the state 3.81
     reports natively, so this test fails on the unfixed guard without needing a 2006
     make on the box.
+
+    `undefine` is 3.82+. On a make that cannot parse it, the shim is `missing
+    separator` — a false-red, not an override accusation. Probe and run the real
+    Makefile as the native undefined-origin case instead (3.81 already has no
+    `.SHELLFLAGS`).
     """
     # The guard is evaluated while the Makefile is being read, so the undefine is what
     # it sees. The restoration afterward is simulation plumbing only: real 3.81 needs
     # none — its `-c` is hardcoded — but on modern make an actually-undefined
     # .SHELLFLAGS invokes `sh` without `-c` and the recipe itself breaks, which would
-    # test the wrong thing.
-    shim = tmp_path / "make381.mk"
-    shim.write_text(
-        "undefine .SHELLFLAGS\n"
-        "include " + str(REPO / "Makefile") + "\n"
-        ".SHELLFLAGS := -c\n",
-        encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("MAKEFLAGS", None)
-    env.pop("GNUMAKEFLAGS", None)
-    result = subprocess.run(
-        ["make", "-f", str(shim), "py-roots"],
-        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    # test the wrong thing. A make that cannot parse `undefine` skips the shim.
+    result = _n4_undefined_origin_result(
+        tmp_path, ".SHELLFLAGS", ".SHELLFLAGS := -c", "make381.mk")
     assert result.returncode == 0, (
         f"a make whose .SHELLFLAGS does not exist was refused — the guard is again "
         f"accusing GNU make 3.81 of an override it cannot express:\n"
@@ -724,21 +884,15 @@ def test_issue_n4_residual_a_real_shellflags_override_is_still_refused():
 
 
 def test_issue_n4_residual_an_undefined_shell_is_also_clean_not_an_offense(tmp_path):
-    """The same reasoning covers `SHELL`, symmetrically, should a make ever lack it."""
+    """The same reasoning covers `SHELL`, symmetrically, should a make ever lack it.
+
+    Same `undefine` probe as the .SHELLFLAGS test: a make that cannot parse the
+    directive runs the real Makefile instead of a shim it rejects as syntax.
+    """
     # Same simulation plumbing as the .SHELLFLAGS test: the guard reads the undefined
     # origin at include time; the restoration only lets the recipe execute afterward.
-    shim = tmp_path / "noshell.mk"
-    shim.write_text(
-        "undefine SHELL\n"
-        "include " + str(REPO / "Makefile") + "\n"
-        "SHELL := /bin/sh\n",
-        encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("MAKEFLAGS", None)
-    env.pop("GNUMAKEFLAGS", None)
-    result = subprocess.run(
-        ["make", "-f", str(shim), "py-roots"],
-        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    result = _n4_undefined_origin_result(
+        tmp_path, "SHELL", "SHELL := /bin/sh", "noshell.mk")
     assert result.returncode == 0, (
         f"an undefined SHELL was treated as an override:\n{result.stdout}{result.stderr}")
 
@@ -764,10 +918,22 @@ def test_issue_r8_both_halves_of_the_defence_cover_the_same_variables(var):
     Asserted by running make, not by grepping the Makefile for the variable's name —
     a name in a comment satisfies a substring check while enforcing nothing, and two
     checks of one rule drifting apart is the N1 defect this branch exists to close.
+
+    GNUMAKEFLAGS is the exception that is not a drift: a make that does not read
+    that variable cannot put `-n` into `$(MAKEFLAGS)`, so the guard has nothing to
+    refuse. Probe py-roots the same way as R8_MAYBE_UNIMPLEMENTED.
     """
     hostile = {"MAKEFILES": "/tmp/injected-by-a-test.mk"} if var == "MAKEFILES" \
         else {var: "-n"}
     result = _make_with_env(hostile)
+    # GNUMAKEFLAGS is 3.82+: on a make that does not read it, `-n` never reaches
+    # `$(MAKEFLAGS)` and the recipe still runs. That is the same no-op the split
+    # R8_MAYBE_UNIMPLEMENTED cases cover, not a drift between gates.py and the
+    # Makefile. A make that starts honoring GNUMAKEFLAGS will stop printing
+    # py-roots and must refuse here.
+    if var == "GNUMAKEFLAGS" and _py_roots_recipe_ran(result):
+        assert "refusing to run" not in result.stderr
+        return
     assert result.returncode != 0 and "refusing to run" in result.stderr, (
         f"conformance/gates.py bans `env: {var}` in a workflow, but the Makefile runs "
         f"happily with it set — the two halves of this defence have drifted, and only "
