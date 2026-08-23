@@ -250,7 +250,10 @@ def test_ssm_pull_target_surfaces_have_no_aws_keys_or_parameter_values():
     _assert_clean(_run_argv_blobs(transport), where="ssm_pull run argv")
     _assert_clean(list(transport.files.values()), where="ssm_pull files")
     for blob in list(transport.files.values()):
-        text = blob.decode("utf-8", "replace") if isinstance(blob, (bytes, bytearray)) else str(blob)
+        if isinstance(blob, (bytes, bytearray)):
+            text = blob.decode("utf-8", "replace")
+        else:
+            text = str(blob)
         assert planted not in text
 
 

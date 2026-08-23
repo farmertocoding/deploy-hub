@@ -837,10 +837,33 @@ def _docker_run_argv(desired, name):
     return argv
 
 
+_SECRETS_MODES = frozenset({"push", "ssm_pull"})
+_AWS_KEY_NAMES = frozenset({
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN",
+})
+
+
+def _secrets_mode(desired):
+    """push | ssm_pull from desired/manifest. Default push. Never Site.tier."""
+    mode = desired.get("secrets_mode")
+    if mode is None:
+        mode = (desired.get("manifest_body") or {}).get("secrets_mode")
+    mode = str(mode or "push").strip() or "push"
+    if mode not in _SECRETS_MODES:
+        raise ValueError(f"unknown secrets_mode {mode!r}")
+    return mode
+
+
 def _put_env_file(desired):
     """Write vaulted env to a 0600 file on the target; never on docker argv."""
     mapping = desired.get("env_mapping") or {}
     if not mapping:
+        return
+    if _secrets_mode(desired) == "ssm_pull":
+        _put_ssm_pull(desired, mapping)
         return
     transport = desired["transport"]
     user = ssh_user_from(desired)
@@ -853,6 +876,51 @@ def _put_env_file(desired):
     body = "".join(f"{key}={mapping[key]}\n" for key in sorted(mapping))
     transport.put(body.encode(), remote, mode=0o600)
     desired["env_file"] = remote
+
+
+def _put_ssm_pull(desired, mapping):
+    """Hub Put under /deploy-hub/{target.pk}/…; no values or AWS keys on the target."""
+    from providers.registry import ssm_for
+    from providers.ssm import ParameterNotFound, SsmError, file_ssm_fail, parameter_name
+
+    target = desired.get("target")
+    if target is None:
+        site = desired.get("site")
+        target = getattr(site, "primary_target", None) if site is not None else None
+    if target is None or getattr(target, "pk", None) is None:
+        raise SsmError("ssm_pull requires a Target")
+    ssm = desired.get("ssm")
+    if ssm is None:
+        try:
+            ssm = ssm_for(target)
+        except SsmError:
+            file_ssm_fail(target, names=sorted(mapping), reason="ssm_for refused")
+            raise
+    names = []
+    try:
+        for key, value in mapping.items():
+            if str(key) in _AWS_KEY_NAMES:
+                continue
+            name = parameter_name(target, key)
+            names.append(name)
+            try:
+                current = ssm.get_parameter(name)
+            except ParameterNotFound:
+                current = None
+            wanted = "" if value is None else str(value)
+            if current == wanted:
+                continue
+            ssm.put_parameter(
+                name,
+                wanted,
+                tags={"ManagedBy": "deploy-hub", "Target": str(target.pk)},
+            )
+    except SsmError as exc:
+        file_ssm_fail(target, names=names or sorted(mapping), reason=type(exc).__name__)
+        raise
+    except Exception as exc:
+        file_ssm_fail(target, names=names or sorted(mapping), reason=type(exc).__name__)
+        raise SsmError("SSM parameter sync failed") from exc
 
 
 def _set_maintenance_until(site, desired):
