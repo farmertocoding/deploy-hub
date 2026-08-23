@@ -3,6 +3,7 @@
 // the build here instead.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { schemas } from "../src/api/zod.ts";
 import { SIM_FIXTURES, TAKKO_SITES } from "../src/sim.js";
 
@@ -63,9 +64,22 @@ test("project list site fixtures emit cert_refusal like project_row_body", async
           `${state}: ${row.name}/${site.name} omitted cert_refusal`);
         assert.equal(site.cert_refusal, null,
           `${state}: ${row.name}/${site.name} unused cert_refusal must be null`);
+        assert.ok(Object.prototype.hasOwnProperty.call(site, "attack_state"),
+          `${state}: ${row.name}/${site.name} omitted attack_state`);
+        assert.equal(site.attack_state, null,
+          `${state}: ${row.name}/${site.name} unused attack_state must be null`);
       }
     }
   }
+});
+
+test("generated_site_summary_includes_attack_state", () => {
+  const openapi = readFileSync(new URL("../src/api/openapi.yaml", import.meta.url), "utf8");
+  assert.match(openapi, /attack_state:/);
+  const zod = readFileSync(new URL("../src/api/zod.ts", import.meta.url), "utf8");
+  assert.match(zod, /attack_state:/);
+  const types = readFileSync(new URL("../src/api/types.ts", import.meta.url), "utf8");
+  assert.match(types, /attack_state/);
 });
 
 test("live readiness report parses against the generated Readiness schema", async () => {
@@ -400,6 +414,8 @@ async function parseEveryRead(state: string, when: string) {
         for (const site of row.sites || []) {
           assert.ok(Object.prototype.hasOwnProperty.call(site, "cert_refusal"),
             `${state} ${when}: ${row.name}/${site.name} omitted cert_refusal`);
+          assert.ok(Object.prototype.hasOwnProperty.call(site, "attack_state"),
+            `${state} ${when}: ${row.name}/${site.name} omitted attack_state`);
         }
       }
     }

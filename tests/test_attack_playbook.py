@@ -400,3 +400,91 @@ def test_edge_client_never_loads_dns_token_ref(monkeypatch):
         assert headers.get("Authorization") == f"Bearer {EDGE_TOKEN}"
     assert EDGE_TOKEN not in repr(edge)
     assert DNS_TOKEN not in repr(edge)
+
+
+@pytest.mark.req("SEC-L5-ATTACK-PLAYBOOK")
+def test_relax_patches_fresh_cloudflare_edge(monkeypatch):
+    """Auto-relax PATCHes even when CloudflareEdge.security_level is empty.
+
+    collect_all builds a new client every tick. What would make this fail:
+    only PATCHing when an in-memory cache still says under_attack, so the
+    Finding resolves while Cloudflare stays Under-Attack.
+    """
+    import json
+
+    from core.models import Finding, TrafficStat
+    from monitor.attack_playbook import engaged_finding, run
+    from providers.fakes import FakeEdgeProtection
+    from providers.registry import edge_protection_for
+    from scaling.attack_gate import refuse_if_attack
+
+    site = _world("l5-relax-fresh", dns_token=DNS_TOKEN, edge_token=EDGE_TOKEN)
+    zone = site.dns_zone
+    _attack_shaped(site)
+    run(site, FakeEdgeProtection())
+    assert engaged_finding(zone) is not None
+
+    TrafficStat.objects.filter(site=site).delete()
+    _plant_traffic(site, [10] * 21)
+    zid = zone.provider_zone_id
+    http = _http(monkeypatch, {
+        **_scope_routes(zone),
+        ("GET", f"/zones/{zid}/settings/security_level"): {
+            "success": True,
+            "result": {"id": "security_level", "value": "under_attack"},
+        },
+        ("PATCH", f"/zones/{zid}/settings/security_level"): {
+            "success": True,
+            "result": {"id": "security_level", "value": "medium"},
+        },
+    })
+    fresh = edge_protection_for(zone)
+    assert fresh.security_level == {}
+    row = run(site, fresh)
+    patches = [
+        req for req in http.requests
+        if req[0] == "PATCH" and req[1] == f"/zones/{zid}/settings/security_level"
+    ]
+    assert patches, "fresh CloudflareEdge must PATCH security_level on relax"
+    assert json.loads(patches[0][3])["value"] == "medium"
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert refuse_if_attack(site) is None
+
+
+@pytest.mark.req("SEC-L5-ATTACK-PLAYBOOK")
+def test_quiet_sibling_does_not_relax_zone():
+    """A calm site on the same zone must not resolve the zone engagement.
+
+    What would make this fail: should_relax reading only that site's
+    TrafficStat while the fingerprint is zone-keyed, so the second site in
+    collect_all clears AttackState while the attacked site is still hot.
+    """
+    from core.models import Site
+    from monitor.attack_playbook import engaged_finding, run
+    from providers.fakes import FakeEdgeProtection
+    from scaling.attack_gate import AttackRefuse, refuse_if_attack
+
+    hot = _world("l5-sib-hot")
+    zone = hot.dns_zone
+    quiet = Site.objects.create(
+        project=hot.project, name="l5-sib-quiet",
+        domain="l5-sib-quiet.example", dns_zone=zone,
+        primary_target=hot.primary_target,
+    )
+    _attack_shaped(hot)
+    _plant_traffic(quiet, [10] * 21)
+    edge = FakeEdgeProtection()
+    run(hot, edge)
+    run(quiet, edge)
+    assert engaged_finding(zone) is not None
+    assert edge.security_level[zone] == "under_attack"
+    medium = [
+        call for call in edge.mutating_calls()
+        if call[0] == "set_security_level" and call[2] == "medium"
+    ]
+    assert medium == [], "quiet sibling must not relax the hot zone"
+    with pytest.raises(AttackRefuse):
+        refuse_if_attack(hot)
+    with pytest.raises(AttackRefuse):
+        refuse_if_attack(quiet)
