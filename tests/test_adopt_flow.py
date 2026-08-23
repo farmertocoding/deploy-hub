@@ -584,8 +584,12 @@ def test_missing_database_url_files_finding_and_skips_ensure_site_db(tmp_path):
 
     import provision.db as db_mod
 
+    original = db_mod.ensure_site_db
     db_mod.ensure_site_db = lambda desired: calls.append(desired)
-    adopt_flow(_desired(site, deployment, transport, dns))
+    try:
+        adopt_flow(_desired(site, deployment, transport, dns))
+    finally:
+        db_mod.ensure_site_db = original
     assert calls == []
     assert not Secret.objects.filter(
         kind=Secret.Kind.DATABASE_URL, owner_type="site", owner_id=str(site.pk),
