@@ -284,7 +284,14 @@ class Ec2CloudProvider(CloudProvider):
         if _NEXT_CONSOLE:
             _PLANTED[instance_id] = _NEXT_CONSOLE.pop(0)
         self._record_instance_ingress(instance_id)
-        fingerprint, host_keys = self._wait_for_host_keys(instance_id, tags, spec)
+        try:
+            fingerprint, host_keys = self._wait_for_host_keys(instance_id, tags, spec)
+        except Ec2Error:
+            try:
+                self.terminate_instance(instance_id)
+            except Ec2Error:
+                pass
+            raise
         described = self.get_instance(instance_id) or {}
         state = described.get("state") or instance.get("State", {}).get("Name")
         return {

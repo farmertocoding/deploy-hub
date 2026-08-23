@@ -286,6 +286,14 @@ def test_host_key_timeout_refuses_not_tofu():
     ):
         with pytest.raises(Ec2Error, match="host key|TOFU|timeout"):
             provider.create_instance(_spec())
+        leftover = [
+            row
+            for row in provider.list_tagged_instances(
+                {"purpose": "test", "Name": "hub-t1-ec2"}
+            )
+            if row.get("state") in {"running", "pending"}
+        ]
+        assert leftover == [], leftover
     row = Finding.objects.get(fingerprint="aws-host-key-timeout:hub-t1-ec2")
     assert row.severity == "p1"
     assert "TOFU" in row.body
