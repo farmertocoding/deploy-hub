@@ -150,7 +150,6 @@ export function PartnersPanel({
       ))}
       {!minted && (
         <ActionButton row={tierFor("partner.create")}
-          confirmName=""
           onRun={runCreate} />
       )}
       {/* Create partner — mint keys, not a paste form. */}
