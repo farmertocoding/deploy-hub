@@ -26,6 +26,8 @@ class Secret(models.Model):
         DATABASE_URL = "database_url"
         # nosec B105 — Kind label for the per-site backup key, distinct from the KEK.
         BACKUP_KEY = "backup_key"  # nosec B105
+        # nosec B105 — Kind label for Hub-side partner webhook secret (whsec_).
+        WEBHOOK_SECRET = "webhook_secret"  # nosec B105
 
     kind = models.CharField(max_length=32, choices=Kind.choices)
     owner_type = models.CharField(max_length=32)  # 'site' | 'target' | 'project' | ...

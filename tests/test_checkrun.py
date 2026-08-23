@@ -38,6 +38,10 @@ PINNED_KINDS = {
     # CheckRun. IAM daily audit and the cloud reaper write these kinds.
     "aws_iam_scope",
     "aws_reaper",
+    # Phase 5.5 Task 1: Python-only kinds (D-076). 0013 does not AlterField
+    # CheckRun. Partner reaper and intake poller write these kinds.
+    "partner_reaper",
+    "intake_poll",
 }
 
 _BACKUP_RESULT_KEYS = frozenset(

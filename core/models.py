@@ -1,6 +1,6 @@
 """core: shared kernel. AuditEvent (§D1) plus the product models the whole
 system is about — Project (code), Site (project + domain + config), Zone,
-Target, SiteInstance, CheckRun — per §D9's canonical vocabulary.
+Target, SiteInstance, CheckRun, Partner — per §D9's canonical vocabulary.
 
 core deliberately imports nothing from scanner/, deploys/ or wizard/: everything
 imports core, so a dependency here becomes a dependency everywhere (see
@@ -47,8 +47,11 @@ class AuditEvent(models.Model):
     # Local hash chain (D-056). Genesis prev_hash=""; shipped_at is the off-host stamp.
     prev_hash = models.CharField(max_length=64, blank=True, default="")
     shipped_at = models.DateTimeField(null=True, blank=True)
-    # Phase-5.5 early stub (§K9): becomes a real FK when the Partner model exists.
-    partner_id_stub = models.IntegerField(null=True, blank=True)
+    # Nullable SET_NULL: non-partner events stay, and deleting a Partner keeps the chain.
+    partner = models.ForeignKey(
+        "Partner", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="audit_events",
+    )
 
     class Meta:
         indexes = [models.Index(fields=["object_type", "object_id"])]
@@ -306,6 +309,118 @@ class Site(models.Model):
         return f"{self.name} ({self.domain or 'no domain yet'})"
 
 
+class Partner(models.Model):
+    """A partner tenant (§7 C2 / D-076). Public keys live here, not the vault."""
+
+    slug = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=128)
+    pubkey_current = models.TextField(blank=True, default="")
+    pubkey_previous = models.TextField(blank=True, default="")
+    max_sites = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(1)],
+    )
+    deploys_per_day = models.PositiveIntegerField(
+        default=50, validators=[MinValueValidator(1)],
+    )
+    domains = models.PositiveIntegerField(
+        default=5, validators=[MinValueValidator(1)],
+    )
+    destination_order = models.JSONField(default=list)
+    suspended = models.BooleanField(default=False)
+    webhook_url = models.CharField(max_length=2048, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(max_sites__gte=1)
+                & models.Q(deploys_per_day__gte=1)
+                & models.Q(domains__gte=1),
+                name="partner_quotas_finite",
+            ),
+        ]
+
+    def clean(self):
+        errors = {}
+        for field in ("max_sites", "deploys_per_day", "domains"):
+            value = getattr(self, field)
+            if value is None or value < 1:
+                errors[field] = "unbounded quotas are out"
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return self.slug
+
+
+class PartnerSite(models.Model):
+    """One Site bound to one Partner. Isolation is this row, not Site.tier."""
+
+    partner = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, related_name="partner_sites",
+    )
+    site = models.OneToOneField(
+        Site, on_delete=models.CASCADE, related_name="partner_site",
+    )
+    tenant_ref = models.CharField(max_length=128)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["partner", "tenant_ref"],
+                name="uniq_partnersite_partner_tenant_ref",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.partner_id}:{self.tenant_ref}"
+
+
+class PartnerReplayNonce(models.Model):
+    """Hub nonce cache. Unique (partner, nonce); TTL is application-level."""
+
+    partner = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, related_name="replay_nonces",
+    )
+    nonce = models.CharField(max_length=128)
+    seen_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["partner", "nonce"],
+                name="uniq_partner_replay_nonce",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.partner_id}:{self.nonce}"
+
+
+class PartnerIdempotencyKey(models.Model):
+    """Stripe-style Idempotency-Key store. Unique (partner, key); 24 h TTL is app-level."""
+
+    partner = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, related_name="idempotency_keys",
+    )
+    key = models.CharField(max_length=255)
+    params_hash = models.CharField(max_length=64)
+    status_code = models.PositiveSmallIntegerField()
+    response = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["partner", "key"],
+                name="uniq_partner_idempotency_key",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.partner_id}:{self.key}"
+
+
 class Target(models.Model):
     """A managed host (§D9) — never called an instance in UI copy."""
 
@@ -526,6 +641,8 @@ class CheckRun(models.Model):
         TAILSCALE_DEVICES = "tailscale_devices"
         AWS_IAM_SCOPE = "aws_iam_scope"
         AWS_REAPER = "aws_reaper"
+        PARTNER_REAPER = "partner_reaper"
+        INTAKE_POLL = "intake_poll"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"
