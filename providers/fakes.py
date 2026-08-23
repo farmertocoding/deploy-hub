@@ -287,3 +287,58 @@ def _registry_target_ident(target):
     if pk is not None:
         return str(pk)
     return str(target)
+
+
+class FakeSsm:
+    """In-memory SSM port for T1. Paths are /deploy-hub/{target.pk}/… only.
+
+    `.fail = True` raises on Put/Delete so the playbook can file ssm-fail
+    without a value in the exception.
+    """
+
+    _MUTATING = frozenset({"put_parameter", "delete_parameter", "add_tags"})
+
+    def __init__(self, *, target=None, fail=False):
+        self.target = target
+        self.fail = fail
+        self.parameters = {}
+        self.tags = {}
+        self.calls = []
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
+
+    def put_parameter(self, name, value, *, tags=None, overwrite=True):
+        from .ssm import SsmError, assert_parameter_path
+
+        assert_parameter_path(name, target=self.target)
+        if self.fail:
+            raise SsmError("fake ssm unavailable")
+        if overwrite is False and name in self.parameters:
+            raise SsmError("parameter already exists")
+        if self.parameters.get(name) == ("" if value is None else str(value)):
+            self.calls.append(("get_parameter", name))
+            return
+        self.calls.append(("put_parameter", name))
+        self.parameters[name] = "" if value is None else str(value)
+        if tags:
+            self.calls.append(("add_tags", name))
+            self.tags[name] = {str(k): str(v) for k, v in tags.items()}
+
+    def get_parameter(self, name):
+        from .ssm import ParameterNotFound, assert_parameter_path
+
+        assert_parameter_path(name, target=self.target)
+        self.calls.append(("get_parameter", name))
+        if name not in self.parameters:
+            raise ParameterNotFound("parameter not found")
+        return self.parameters[name]
+
+    def delete_parameter(self, name):
+        from .ssm import SsmError, assert_parameter_path
+
+        assert_parameter_path(name, target=self.target)
+        if self.fail:
+            raise SsmError("fake ssm unavailable")
+        self.calls.append(("delete_parameter", name))
+        self.parameters.pop(name, None)

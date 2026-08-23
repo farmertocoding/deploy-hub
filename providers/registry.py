@@ -356,3 +356,21 @@ def image_registry_for(desired=None):
         return build_image_registry(desired)
     except ImageRegistryError as error:
         raise ScopeError(str(error)) from None
+
+
+def ssm_for(target):
+    """Product SSM client for a Target. Fail-closed via Task 2's loader."""
+    from .aws_creds import AwsCredsError
+    from .ssm import SsmClient, SsmError
+
+    if target is None or getattr(target, "pk", None) is None:
+        raise SsmError("ssm_for requires a Target")
+    try:
+        creds = load_aws_credentials(reason="ssm client construction")
+    except AwsCredsError as exc:
+        raise SsmError(str(exc)) from None
+    return SsmClient(
+        target=target,
+        access_key_id=creds["access_key_id"],
+        secret_access_key=creds["secret_access_key"],
+    )

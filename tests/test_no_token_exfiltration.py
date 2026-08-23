@@ -24,6 +24,9 @@ ENV_NAMES = (
     "CLOUDFLARE_DNS_API_TOKEN",
     "CLOUDFLARE_ORIGIN_CA_KEY",
     "CF_ORIGIN_CA_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
 )
 SECRETS = (DNS_TOKEN, EDGE_TOKEN, OCA_KEY, DNS_REF, EDGE_REF, OCA_REF, *ENV_NAMES)
 ACME_MARKERS = (
@@ -213,6 +216,45 @@ def test_recorded_transport_call_log_is_token_free():
     """What would make this fail: the call log itself carrying a token string."""
     _site, deployment, transport = _simulate_deploy("logscan")
     _assert_clean([_call_log_blob(transport)], where="transport call log")
+
+
+def test_ssm_pull_target_surfaces_have_no_aws_keys_or_parameter_values():
+    """SSM pull must not put Hub AWS keys or parameter values onto the target.
+
+    What would make this fail: writing AWS_ACCESS_KEY_ID or the env mapping
+    value into a put() payload when secrets_mode is ssm_pull (SEC-B2 for AWS).
+    """
+    from core.models import NetworkZone, Target
+    from core.transport import FakeTransport
+    from deploys.steps import _put_env_file
+    from providers.fakes import FakeSsm
+
+    planted = "SSM-EXFIL-PLANTED-VALUE-do-not-log"
+    zone = NetworkZone.objects.create(name="exfil-ssm", slug="exfil-ssm")
+    target = Target.objects.create(
+        zone=zone, kind=Target.Kind.AWS_EC2, host="10.0.0.8",
+        ssh_user="deploy", status=Target.Status.READY,
+    )
+    ssm = FakeSsm(target=target)
+    transport = FakeTransport()
+    _put_env_file({
+        "transport": transport,
+        "target": target,
+        "ssm": ssm,
+        "site_slug": "exfil-ssm",
+        "deployment_id": 1,
+        "secrets_mode": "ssm_pull",
+        "env_mapping": {"APP_SECRET": planted},
+    })
+    _assert_clean(_put_payloads(transport), where="ssm_pull put payload")
+    _assert_clean(_run_argv_blobs(transport), where="ssm_pull run argv")
+    _assert_clean(list(transport.files.values()), where="ssm_pull files")
+    for blob in list(transport.files.values()):
+        if isinstance(blob, (bytes, bytearray)):
+            text = blob.decode("utf-8", "replace")
+        else:
+            text = str(blob)
+        assert planted not in text
 
 
 class _FactoryHttp:
