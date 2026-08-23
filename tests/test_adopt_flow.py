@@ -40,6 +40,8 @@ class AdoptTransport(PipelineTransport):
         super().__init__()
         self.inspect_env = {}
         self.inspect_mounts = {}
+        self.container_images = {}
+        self.curl_stdout = None
 
     def run(self, argv, *, timeout=60):
         result = super().run(argv, timeout=timeout)
@@ -49,6 +51,12 @@ class AdoptTransport(PipelineTransport):
             if name:
                 n = 10 + len(self.container_ips)
                 self.container_ips[name] = f"10.0.0.{n}"
+                self.container_images[name] = argv[-1]
+        if argv[:2] == ["docker", "rm"] or (
+            len(argv) >= 3 and argv[0] == "docker" and "rm" in argv[1:3]
+        ):
+            gone = argv[-1]
+            self.container_images.pop(gone, None)
         return result
 
     def _inspect_container(self, argv):
@@ -56,6 +64,14 @@ class AdoptTransport(PipelineTransport):
         fmt = ""
         if "--format" in argv:
             fmt = argv[argv.index("--format") + 1]
+        if "Image" in fmt:
+            present = name in self.containers
+            return CommandResult(
+                argv,
+                exit_code=0 if present else 1,
+                stdout=self.container_images.get(name, "") if present else "",
+                stderr="" if present else "Error: No such container",
+            )
         if "Env" in fmt:
             lines = self.inspect_env.get(name, [])
             present = name in self.containers or bool(lines)
@@ -90,7 +106,8 @@ class AdoptTransport(PipelineTransport):
         )
         if wants_temp:
             if adopt and self.containers.get(adopt) == "running":
-                return CommandResult(argv, stdout=READY_JSON)
+                body = self.curl_stdout if self.curl_stdout is not None else READY_JSON
+                return CommandResult(argv, stdout=body)
             return CommandResult(argv, exit_code=1, stderr="temp not ready")
         if any(state == "running" for state in self.containers.values()):
             return CommandResult(argv, stdout=READY_JSON)
@@ -765,3 +782,64 @@ def test_no_cloudflare_import_in_deploys_adopt_flow():
             for alias in node.names:
                 assert "cloudflare" not in alias.name
     assert "providers.cloudflare" not in source
+
+
+def test_non_json_200_healthz_does_not_verify():
+    """A 200 default page is not healthz. Product treats non-JSON as not ready.
+
+    What would make this fail: _ready_payload treating HTML (or a bare '200')
+    as success so flip proceeds against a default page.
+    """
+    from deploys.adopt_flow import AdoptRefused, ensure_flip, ensure_temp_dns, ensure_verify
+
+    site, deployment = _site("html-200")
+    transport = AdoptTransport()
+    transport.curl_stdout = "<!doctype html><title>ok</title>"
+    dns = FakeDnsProvider()
+    desired = _desired(site, deployment, transport, dns)
+    ensure_temp_dns(desired)
+    with pytest.raises(AdoptRefused):
+        ensure_verify(desired)
+    assert desired.get("_adopt_verified_tag") != desired["image_tag"]
+    with pytest.raises(AdoptRefused):
+        ensure_flip(desired)
+    assert _prod_values(dns, site.dns_zone, site.domain) == ["198.51.100.1"]
+    assert transport.containers[desired["old_container"]] == "running"
+
+
+def test_adopt_container_for_a_different_image_tag_is_not_reused():
+    """A leftover site-{slug}-adopt for another tag is not this verify.
+
+    What would make this fail: docker start/reuse of the old container, or
+    stamping _adopt_verified_tag for the new tag without recreating.
+    """
+    from deploys.adopt_flow import ensure_temp_dns, ensure_verify
+
+    site, deployment = _site("retag")
+    transport = AdoptTransport()
+    name = f"site-{site.name}-adopt"
+    transport.containers[name] = "running"
+    transport.container_images[name] = "stale-adopt-tag"
+    transport.container_ips[name] = "10.0.0.12"
+    dns = FakeDnsProvider()
+    desired = _desired(
+        site, deployment, transport, dns, image_tag="fresh-adopt-tag",
+    )
+    ensure_temp_dns(desired)
+    ensure_verify(desired)
+    rms = [
+        payload for kind, payload in transport.calls
+        if kind == "run" and isinstance(payload, list)
+        and "rm" in payload and name in payload
+        and "volume" not in payload
+    ]
+    runs = [
+        payload for kind, payload in transport.calls
+        if kind == "run" and isinstance(payload, list)
+        and payload[:2] == ["docker", "run"]
+        and payload[-1] == "fresh-adopt-tag"
+    ]
+    assert rms, "mismatched adopt container must be removed, not reused"
+    assert runs, "verify must start the current image_tag"
+    assert transport.container_images.get(name) == "fresh-adopt-tag"
+    assert desired["_adopt_verified_tag"] == "fresh-adopt-tag"

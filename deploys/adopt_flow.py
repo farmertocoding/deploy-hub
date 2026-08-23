@@ -102,15 +102,15 @@ def ensure_verify(desired):
     run = _find_checkrun(site)
     stage = (run.results.get("stage") if run else "") or ""
     if stage == "cleanup":
-        desired["_adopt_verified_tag"] = desired.get("image_tag")
+        if _container_image_matches(desired):
+            desired["_adopt_verified_tag"] = desired.get("image_tag")
         return
     if _is_mesh(site) and (run is None or not run.results.get("temp_name")):
         _write_checkrun(desired, temp_name="", stage=stage)
-    if stage not in _PAST_VERIFY:
-        _point_db_cache_volumes(desired)
-        _start_temp_container(desired)
-        if not _temp_healthz_ready(desired):
-            raise AdoptRefused("verify failed for this image tag")
+    _point_db_cache_volumes(desired)
+    _start_temp_container(desired)
+    if not _temp_healthz_ready(desired):
+        raise AdoptRefused("verify failed for this image tag")
     desired["_adopt_verified_tag"] = desired.get("image_tag")
     if stage not in _PAST_VERIFY:
         _write_checkrun(desired, stage="verify")
@@ -473,17 +473,41 @@ def _refuse_drift(desired, live_compose_path):
         raise AdoptRefused("live compose drifted from the Project tree")
 
 
+def _container_image(transport, name):
+    result = transport.probe([
+        "docker", "inspect", "--format", "{{.Config.Image}}", name,
+    ])
+    if not result.ok:
+        return ""
+    return (result.stdout or "").strip()
+
+
+def _container_image_matches(desired):
+    name = _temp_container_name(desired)
+    image = _container_image(desired["transport"], name)
+    tag = desired.get("image_tag")
+    return bool(image) and bool(tag) and image == tag
+
+
 def _start_temp_container(desired):
     transport = desired["transport"]
     name = _temp_container_name(desired)
+    tag = desired.get("image_tag")
     running = _container_running(transport, name)
-    if running is True:
-        return
-    if running is False:
-        result = transport.run(["docker", "start", name])
-        if not result.ok:
-            raise AdoptRefused(f"docker start failed: {result.stderr}")
-        return
+    if running is not None:
+        if _container_image(transport, name) != tag:
+            result = transport.run(["docker", "rm", "-f", name])
+            if not result.ok:
+                raise AdoptRefused(
+                    "adopt container image does not match this image_tag"
+                )
+        elif running is True:
+            return
+        else:
+            result = transport.run(["docker", "start", name])
+            if not result.ok:
+                raise AdoptRefused(f"docker start failed: {result.stderr}")
+            return
     deployment = desired.get("deployment")
     mapping = {}
     site = desired.get("site")
@@ -542,13 +566,13 @@ def _temp_healthz_ready(desired):
 
 
 def _ready_payload(result):
+    """Same gate as product `_healthz_payload`: JSON with ready, else not ready."""
     if not result.ok or not (result.stdout or "").strip():
         return False
-    text = result.stdout.strip()
-    if text == "200":
-        return True
     try:
-        payload = json.loads(text)
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return True
-    return bool(payload.get("ready") or payload.get("live"))
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return bool(payload.get("ready"))
