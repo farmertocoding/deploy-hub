@@ -16,8 +16,22 @@ _NODE_KINDS = ("zone", "host", "container", "hub", "edge")
 
 
 def notify_graph_changed():
-    """Bump map.graph so snapshot-then-stream clients refetch the tables."""
+    """Bump map.graph so snapshot-then-stream clients refetch the tables.
+
+    r1–r5 re-evaluate on every graph change (§9.6.2) so the advisor cannot
+    drift behind the SVG. Failures in the advisor must not swallow the bump.
+    """
     events.publish(TOPIC, {"kind": "changed"}, history=False)
+    try:
+        from monitor.topology import evaluate
+
+        evaluate()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "topology advisor failed after map.graph bump"
+        )
 
 
 def graph_snapshot():
@@ -28,6 +42,9 @@ def graph_snapshot():
     """
     seq = events.current_seq(TOPIC)
     nodes, edges = _derive()
+    from monitor.topology import attach_findings
+
+    attach_findings(nodes)
     return {"seq": seq, "nodes": nodes, "edges": edges}
 
 
