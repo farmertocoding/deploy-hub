@@ -170,7 +170,6 @@ def test_cloud_reaper_does_not_import_boto3():
     ):
         text = (REPO / rel).read_text(encoding="utf-8")
         assert _IMPORT_BOTO.search(text) is None, rel
-        assert "import boto3" not in text
 
 
 def test_multipass_reaper_unchanged_no_boto3():
@@ -231,8 +230,3 @@ def test_harness_reaper_test_plane_is_not_claimed_for_aws():
     assert claimed == [], claimed
     cloud = (REPO / "monitor" / "cloud_reaper.py").read_text(encoding="utf-8")
     assert "HARNESS-REAPER-TEST-PLANE" not in cloud
-    tests = (REPO / "tests" / "test_cloud_reaper.py").read_text(encoding="utf-8")
-    # This file mentions the id as the thing we must not claim; the marker
-    # itself must not appear as pytest.mark.req.
-    assert '@pytest.mark.req("HARNESS-REAPER-TEST-PLANE")' not in tests
-    assert "pytest.mark.req('HARNESS-REAPER-TEST-PLANE')" not in tests

@@ -291,6 +291,7 @@ const PatchedAnswers = z
   .passthrough();
 const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
 const SshRotate = z.object({ confirm_name: z.string() }).passthrough();
+const InstanceTerminate = z.object({ confirm_name: z.string() }).passthrough();
 
 export const schemas = {
   Login,
@@ -355,4 +356,5 @@ export const schemas = {
   PatchedAnswers,
   TargetDelete,
   SshRotate,
+  InstanceTerminate,
 };

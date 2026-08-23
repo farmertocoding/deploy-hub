@@ -75,5 +75,10 @@ export const ACTION_TIERS = [
     "id": "instance.create",
     "tier": "T1",
     "label": "Create target"
+  },
+  {
+    "id": "instance.terminate",
+    "tier": "T1",
+    "label": "Terminate target"
   }
 ];

@@ -20,6 +20,10 @@ class EnrollError(RuntimeError):
     """Enroll refused. Never carries private-key or credential material."""
 
 
+class TerminateError(RuntimeError):
+    """Terminate refused or provider failed. Never carries credential material."""
+
+
 def enroll_aws_target(
     *,
     host,
@@ -112,6 +116,31 @@ def enroll_aws_target(
     return target
 
 
+def terminate_aws_target(target, *, provider=None, region_name="us-east-1"):
+    """AWS terminate. Idempotent: already-decommissioned is a no-op.
+
+    Absent instance == success. Failure files C12 and does not delete the
+    row; status will not stay READY.
+    """
+    from core.models import Target
+
+    if target.kind != Target.Kind.AWS_EC2:
+        raise TerminateError("instance.terminate is the AWS call")
+    if target.status == Target.Status.DECOMMISSIONED:
+        return target
+    provider = provider or _cloud_provider(region_name=region_name)
+    try:
+        provider.terminate_instance(target.provider_ref)
+    except Exception as exc:
+        _file_terminate_failed(target)
+        target.status = Target.Status.ERROR
+        target.save(update_fields=["status"])
+        raise TerminateError("terminate_instance failed") from exc
+    target.status = Target.Status.DECOMMISSIONED
+    target.save(update_fields=["status"])
+    return target
+
+
 def _cloud_provider(*, region_name="us-east-1"):
     from providers.registry import cloud_provider_for
 
@@ -198,6 +227,23 @@ def _file_create_failed(name):
         title=f"EC2 create failed for {name}",
         body=f"create_instance refused for {name}; the Target was not enrolled.",
         fix_action="Inspect the provider and retry Create target.",
+    )
+
+
+def _file_terminate_failed(target):
+    from monitor.alerts import raise_alert
+
+    raise_alert(
+        "aws-terminate-failed",
+        f"aws:{target.pk}",
+        fingerprint=f"aws-terminate:{target.pk}",
+        source_engine=SOURCE,
+        title=f"EC2 terminate failed for {target.host}",
+        body=(
+            f"terminate_instance refused for target {target.pk}; "
+            "the Target row is kept so the operator can retry."
+        ),
+        fix_action="Inspect the provider and retry Terminate target.",
     )
 
 

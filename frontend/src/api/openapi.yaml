@@ -905,6 +905,36 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/targets/{id}/terminate/:
+    post:
+      operationId: v1_targets_terminate_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-name, then
+        AWS terminate.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceTerminate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstanceTerminate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstanceTerminate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
     ActionEnum:
@@ -1322,6 +1352,13 @@ components:
       - host
       - id
       - kind
+    InstanceTerminate:
+      type: object
+      properties:
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
     KindEnum:
       enum:
       - zone

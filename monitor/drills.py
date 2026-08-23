@@ -286,6 +286,40 @@ def run_reaper_drill(*, list_fn=None, delete_fn=None, planted_name="hub-t3-orpha
     )
 
 
+def run_aws_reaper_drill(
+    *,
+    provider=None,
+    account_id="123456789012",
+    region_name="us-east-1",
+):
+    """Plant a Fake purpose=test instance, reap, assert gone, persist AWS_REAPER."""
+    from monitor.cloud_reaper import reap_cloud_test_plane
+    from providers.fakes import FakeCloudProvider
+
+    fake = provider or FakeCloudProvider()
+    planted = fake.create_instance(
+        {
+            "name": "hub-aws-orphan-weekly",
+            "tags": {"purpose": "test", "Name": "hub-aws-orphan-weekly"},
+        }
+    )
+    planted_id = planted["id"]
+    run = reap_cloud_test_plane(
+        fake, account_id=account_id, region_name=region_name,
+    )
+    gone = fake.get_instance(planted_id) is None
+    results = dict(run.results or {})
+    results["schema_version"] = RESULTS_SCHEMA_VERSION
+    results["planted_id"] = planted_id
+    results["gone"] = gone
+    run.results = results
+    run.status = (
+        CheckRun.Status.SUCCEEDED if gone else CheckRun.Status.FAILED
+    )
+    run.save(update_fields=["status", "results"])
+    return run
+
+
 def run_restore_clean_drill(*, restore_to_clean=None):
     """Unseal the latest dump into a clean file. SKIPPED only when siteless."""
     unit = BackupUnit.objects.select_related("site").order_by("pk").first()

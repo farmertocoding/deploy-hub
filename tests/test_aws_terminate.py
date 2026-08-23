@@ -492,7 +492,7 @@ def test_terminate_finding_fingerprint_is_aws_terminate_target_pk():
 
     What would make this fail: using the kind as the fingerprint (C12).
     """
-    from core.models import Finding
+    from core.models import Finding, Target
     from provision.aws_enroll import TerminateError, terminate_aws_target
 
     provider = RecordingCloud(fail_terminate=True)
