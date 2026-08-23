@@ -37,6 +37,29 @@ def should_relax(site, *, now=None):
     return score.z < Z_RELAX
 
 
+def should_relax_zone(zone, *, now=None):
+    """Relax only when no site on the zone is still attack-shaped.
+
+    Engagement is zone-keyed. A calm sibling with enough baseline samples
+    must not clear Under-Attack while another site on the same zone is hot.
+    """
+    from core.models import Site
+
+    if zone is None:
+        return False
+    scored = False
+    for site in Site.objects.filter(dns_zone=zone):
+        if detect(site, now=now) is not None:
+            return False
+        score = score_site(site, now=now)
+        if score is None:
+            continue
+        scored = True
+        if score.z >= Z_RELAX:
+            return False
+    return scored
+
+
 def score_site(site, *, now=None):
     from core.models import TrafficStat
 

@@ -7,7 +7,7 @@ edge_protection_for(zone); this module never loads a token ref.
 from core.findings import resolve
 from core.models import Finding
 from monitor.alerts import raise_alert
-from monitor.attack_detector import detect, should_relax
+from monitor.attack_detector import detect, should_relax_zone
 
 KIND = "attack-playbook-engaged"
 SOURCE = "attack_playbook"
@@ -39,7 +39,7 @@ def run(site, edge, *, now=None, ips=None):
         chosen = list(ips) if ips is not None else list(signal.ips)
         return engage(site, edge, ips=chosen)
     current = engaged_finding(zone)
-    if current is not None and should_relax(site, now=now):
+    if current is not None and should_relax_zone(zone, now=now):
         return relax(site, edge)
     return current
 
@@ -83,9 +83,15 @@ def engage(site, edge, *, ips=()):
 
 
 def relax(site, edge):
+    """Drop Under-Attack at the edge, then resolve the zone Finding.
+
+    Always call set_security_level: a fresh CloudflareEdge has an empty
+    in-memory cache, and GET-then-skip lives on the client (collect_all
+    constructs a new one every tick).
+    """
     zone = site.dns_zone
     row = engaged_finding(zone)
-    if edge is not None and getattr(edge, "security_level", {}).get(zone) == UNDER_ATTACK:
+    if edge is not None:
         edge.set_security_level(zone, RELAX_LEVEL)
     if row is not None:
         resolve(row, source="system")
