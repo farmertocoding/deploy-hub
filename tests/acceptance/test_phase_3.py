@@ -503,14 +503,14 @@ def test_findings_inbox_requires_a_reason_to_accept_risk():
     """Accept-risk without a one-line reason is refused; findings is canonical.
 
     Transcribes tests/test_findings.py::test_accept_risk_requires_a_reason and
-    tests/test_findings_api.py::test_alerts_alias_delivers_the_same_payload_as_findings
-    (D-045: `findings` is the one attention stream).
+    tests/test_findings_api.py::test_findings_topic_unchanged
+    (D-045/D-061: `findings` is the one attention stream; `alerts` retired).
     """
     from test_findings import _file
 
     from core.findings import accept_risk
     from core.models import Finding
-    from realtime.authorize import DEPRECATED_ALIASES
+    from realtime.authorize import ALLOWED_PREFIXES, authorize_topic
 
     row = _file(fingerprint="p3-accept")
     with pytest.raises(ValueError):
@@ -525,7 +525,13 @@ def test_findings_inbox_requires_a_reason_to_accept_risk():
     assert row.state == Finding.State.ACCEPTED
     assert row.accepted_reason == "internal-only site; downtime is acceptable"
 
-    assert DEPRECATED_ALIASES["alerts"] == "findings"
+    class _Authed:
+        is_authenticated = True
+
+    assert "findings" in ALLOWED_PREFIXES
+    assert "alerts" not in ALLOWED_PREFIXES
+    assert authorize_topic(_Authed(), "findings") is True
+    assert authorize_topic(_Authed(), "alerts") is False
     auth = (REPO / "realtime" / "authorize.py").read_text(encoding="utf-8")
     assert '"findings"' in auth
     assert "canonical" in auth.lower()

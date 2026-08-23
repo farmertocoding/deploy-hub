@@ -1,9 +1,9 @@
 """Findings inbox API + the canonical `findings` topic (§F2, D-045, §D7).
 
 The list/detail endpoints are the table-backed snapshot half of
-snapshot-then-stream; the topic (and its deprecated `alerts` alias) is the
-stream half. Both must ride the same seq counter or a reconnecting inbox
-repaints from a snapshot the stream can contradict.
+snapshot-then-stream; the topic is the stream half. Both must ride the same
+seq counter or a reconnecting inbox repaints from a snapshot the stream can
+contradict. The Phase-0 `alerts` alias was retired in Phase 4 (D-061).
 """
 import pytest
 
@@ -100,9 +100,9 @@ def test_transition_endpoint_refuses_impossible_transitions(client):
 
 
 def test_findings_topic_requires_authorize_topic(client):
-    """`findings` (and the alias) pass the same §D7 choke point as every topic:
-    anonymous fails, an enrolled session passes, and the snapshot endpoint
-    enforces it identically to the socket."""
+    """`findings` passes the same §D7 choke point as every topic: anonymous
+    fails, an enrolled session passes, and the snapshot endpoint enforces it
+    identically to the socket."""
     from django.contrib.auth.models import AnonymousUser
 
     from realtime.authorize import authorize_topic
@@ -112,22 +112,7 @@ def test_findings_topic_requires_authorize_topic(client):
 
     user = _enrolled_client(client)
     assert authorize_topic(user, "findings") is True
-    assert authorize_topic(user, "alerts") is True
     assert client.get("/api/topics/findings/snapshot/").status_code == 200
-
-
-def test_alerts_alias_delivers_the_same_payload_as_findings(recorded_layer):
-    """D-045: one attention stream. A filed Finding lands on BOTH group names
-    with the same seq and the same event — a Phase-0 `alerts` subscriber and a
-    `findings` subscriber can never disagree."""
-    _file()
-
-    by_group = {group: msg for group, msg in recorded_layer.sent}
-    assert set(by_group) == {"findings", "alerts"}
-    assert by_group["findings"]["event"] == by_group["alerts"]["event"]
-    assert by_group["findings"]["seq"] == by_group["alerts"]["seq"]
-    # The alias shares the canonical seq counter — its snapshot can't drift.
-    assert pub.current_seq("alerts") == pub.current_seq("findings")
 
 
 def test_alerts_topic_is_unauthorized(client):

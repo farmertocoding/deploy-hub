@@ -5,6 +5,7 @@ source scan for `SECRET_KEY\\s*=` in first-party Python.
 """
 import importlib.util
 import pathlib
+import sys
 
 import pytest
 
@@ -14,9 +15,13 @@ pytestmark = pytest.mark.req("SEC-69-NO-SECRETS-IN-EXHAUST")
 
 
 def _exhaust():
+    existing = sys.modules.get("hub_exhaust")
+    if existing is not None:
+        return existing
     path = REPO / "scripts_dev" / "exhaust.py"
     spec = importlib.util.spec_from_file_location("hub_exhaust", path)
     mod = importlib.util.module_from_spec(spec)
+    sys.modules["hub_exhaust"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -49,3 +54,8 @@ def test_exhaust_gate_flags_plaintext_in_celery_kwargs():
         args=(), kwargs={"nested": {"x": marker.encode("utf-8")}}
     )
     assert not exhaust.celery_kwargs_leaks(args=("site:1",), kwargs={"owner_id": 7})
+
+    from realtime.tasks import demo_stream_logs
+
+    with pytest.raises(exhaust.ExhaustLeak, match="Celery"):
+        demo_stream_logs.delay("exhaust-job", marker)

@@ -20,8 +20,8 @@
   ],
   "scripted_events": [
     {"t": 0, "topic": "demo.sim.log", "event": {"line": "simulation replayer online"}},
-    {"t": 1, "topic": "alerts", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "engaged"}},
-    {"t": 3, "topic": "alerts", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "relaxed"}},
+    {"t": 1, "topic": "findings", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "engaged"}},
+    {"t": 3, "topic": "findings", "event": {"kind": "attack_banner", "site": "shop.example.com", "state": "relaxed"}},
     {"t": 5, "topic": "site.shop.status", "event": {"site": "shop.example.com", "observed": "warming"}},
     {"t": 7, "topic": "site.api.status", "event": {"site": "api.example.com", "observed": "running", "badge": "data-stale"}},
     {"t": 9, "topic": "site.lab.status", "event": {"site": "lab.example.com", "deploy_strategy": "recreate", "observed": "down"}},

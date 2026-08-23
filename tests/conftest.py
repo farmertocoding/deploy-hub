@@ -12,10 +12,12 @@ if sys.version_info < (3, 11):
     )
 
 import datetime
+import importlib.util
 import json
 import pathlib
 
 import django
+import pytest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
 django.setup()
@@ -56,6 +58,32 @@ if str(REPO / "tests") not in sys.path:
 import gates  # noqa: E402 — the path insert above is its prerequisite
 
 _OUTCOMES: dict[str, str] = {}
+
+# SEC-69 exhaust gate (D-061 / C9): captured pytest stdout/stderr/log and
+# Celery kwargs, not `make log-scrub`. Loaded from scripts_dev so the
+# scanner is not a first-party package under PY_ROOTS.
+_EXHAUST_SPEC = importlib.util.spec_from_file_location(
+    "hub_exhaust", REPO / "scripts_dev" / "exhaust.py"
+)
+_EXHAUST = importlib.util.module_from_spec(_EXHAUST_SPEC)
+sys.modules["hub_exhaust"] = _EXHAUST
+_EXHAUST_SPEC.loader.exec_module(_EXHAUST)
+_EXHAUST.install_celery_wrap()
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_makereport(item, call):
+    """Fail a test whose captured exhaust carries the vault plaintext marker."""
+    report = yield
+    if call.when == "call":
+        hits = _EXHAUST.scan_report_captures(report)
+        if hits:
+            report.outcome = "failed"
+            report.longrepr = (
+                "SEC-69 exhaust: vault plaintext marker in captured "
+                + ", ".join(hits)
+            )
+    return report
 
 
 def _run_report_path():

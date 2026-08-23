@@ -273,7 +273,7 @@ export function DemoPanel({ user, events }) {
   // §F8 v0: watch the simulation replayer (manage.py replay_simulation) through the
   // same multiplexed socket — two topics, one panel, real publish() path.
   function watchSimulation() {
-    takePane(["demo.sim.log", "alerts"]);
+    takePane(["demo.sim.log", "findings"]);
     setLines(["— watching simulation topics (run: manage.py replay_simulation) —"]);
     const synced = new Set(); // first snapshot per topic = initial load, not a resync
     const simHandler = (topic, render) => (event) => {
@@ -293,8 +293,8 @@ export function DemoPanel({ user, events }) {
     };
     subscribe("demo.sim.log",
       simHandler("demo.sim.log", (e) => e.line ?? JSON.stringify(e)), snapshotFn);
-    subscribe("alerts",
-      simHandler("alerts", (e) => `⚠ ${e.kind} ${e.site ?? ""} ${e.state ?? ""}`), snapshotFn);
+    subscribe("findings",
+      simHandler("findings", (e) => `⚠ ${e.kind} ${e.title ?? e.site ?? ""} ${e.state ?? ""}`), snapshotFn);
   }
 
   return (
