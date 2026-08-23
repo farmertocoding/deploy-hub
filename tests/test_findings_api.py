@@ -130,6 +130,43 @@ def test_alerts_alias_delivers_the_same_payload_as_findings(recorded_layer):
     assert pub.current_seq("alerts") == pub.current_seq("findings")
 
 
+def test_alerts_topic_is_unauthorized(client):
+    """D-045 alias retired (D-061): `alerts` is no longer a subscribe-able topic.
+
+    What would make this fail: leaving `alerts` in ALLOWED_PREFIXES or mapping
+    it through DEPRECATED_ALIASES so a Phase-0 subscriber still attaches.
+    """
+    from realtime.authorize import ALLOWED_PREFIXES, authorize_topic
+
+    user = _enrolled_client(client)
+    assert "alerts" not in ALLOWED_PREFIXES
+    assert authorize_topic(user, "alerts") is False
+    assert client.get("/api/topics/alerts/snapshot/").status_code == 403
+
+
+def test_findings_topic_unchanged(client, recorded_layer):
+    """`findings` stays the one attention stream; publish does not fan out.
+
+    What would make this fail: dropping `findings` from the allow list, or
+    keeping an `alerts` alias group so a filed Finding still lands twice.
+    """
+    from django.contrib.auth.models import AnonymousUser
+
+    from realtime.authorize import ALLOWED_PREFIXES, authorize_topic
+
+    assert "findings" in ALLOWED_PREFIXES
+    assert authorize_topic(AnonymousUser(), "findings") is False
+    user = _enrolled_client(client)
+    assert authorize_topic(user, "findings") is True
+    assert client.get("/api/topics/findings/snapshot/").status_code == 200
+
+    _file()
+    groups = {group for group, _msg in recorded_layer.sent}
+    assert "findings" in groups
+    assert "alerts" not in groups
+    assert pub.current_seq("findings") >= 1
+
+
 def test_transitions_publish_on_the_findings_topic(recorded_layer):
     """Every create AND every transition is an event on the canonical topic."""
     from core.findings import ack, resolve
