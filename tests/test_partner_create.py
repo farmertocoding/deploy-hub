@@ -615,6 +615,8 @@ def test_f8_seed_is_partnersite_never_site_tier_partner():
         "partner-intake-error",
         "partner-intake-degraded",
         "partner-site",
+        "partner-kill-switch-overlay",
+        "partner-destination-order-confirm",
     ):
         assert required in ids, required
     partner_states = [row for row in seed["states"] if row["id"].startswith("partner")]
@@ -626,6 +628,8 @@ def test_f8_seed_is_partnersite_never_site_tier_partner():
     assert "partner-intake-error" in sim_tests
     assert "partner-intake-degraded" in sim_tests
     assert "partner-site" in sim_tests
+    assert "partner-kill-switch-overlay" in sim_tests
+    assert "partner-destination-order-confirm" in sim_tests
     assert "REQUIRED_STATE_IDS" in sim_tests
     lowered = dumped.lower()
     assert "acme corp" not in lowered
