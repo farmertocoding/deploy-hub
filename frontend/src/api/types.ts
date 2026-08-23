@@ -207,6 +207,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/first-run/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_first_run_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/map/": {
         parameters: {
             query?: never;
@@ -471,6 +487,27 @@ export interface components {
             seq: number;
             data: components["schemas"]["Finding"][];
         };
+        FirstRunItem: {
+            id: components["schemas"]["IdEnum"];
+            applicable: boolean;
+            done: boolean;
+        };
+        FirstRunProgress: {
+            owns_home: boolean;
+            items: components["schemas"]["FirstRunItem"][];
+        };
+        FirstRunSnapshot: {
+            seq: number;
+            data: components["schemas"]["FirstRunProgress"];
+        };
+        /**
+         * @description * `enroll_target` - enroll_target
+         *     * `connect_cloudflare` - connect_cloudflare
+         *     * `plant_origin_ca` - plant_origin_ca
+         *     * `add_project` - add_project
+         * @enum {string}
+         */
+        IdEnum: "enroll_target" | "connect_cloudflare" | "plant_origin_ca" | "add_project";
         /**
          * @description * `zone` - zone
          *     * `host` - host
@@ -957,6 +994,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FindingDetailSnapshot"];
+                };
+            };
+        };
+    };
+    v1_first_run_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstRunSnapshot"];
                 };
             };
         };

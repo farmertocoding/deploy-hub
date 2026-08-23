@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
 
-const PROVISION_CMD = "python -m hub provision <host>";
+export const PROVISION_CMD = "python -m hub provision <host>";
 
 export function TargetsView({ phase, targets = [], onError, onCopy }) {
   if (phase === "loading") return <LoadingLine what="targets" />;
