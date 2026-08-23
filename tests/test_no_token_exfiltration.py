@@ -247,6 +247,7 @@ class _FactoryHttp:
 
     def __call__(self, request, timeout=None):
         from test_cloudflare_adapter import _Resp
+
         from providers.cloudflare import API
         from vault.tls import mint_local_leaf
 

@@ -95,11 +95,10 @@ def test_rollback_seam_refuse_is_409(client, monkeypatch):
     What would make this fail: the view leaking the refuse as a 500, swallowing
     the factory Finding, or echoing vault values / token bytes in detail.
     """
-    from vault import service as vault_service
-
     from core.models import Finding
     from deploys import views as deploy_views
     from deploys.seams import resolve_production_seams
+    from vault import service as vault_service
 
     site, original = queued_deployment("rb-seam")
     original.status = Deployment.Status.SUCCEEDED
