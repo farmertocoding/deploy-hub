@@ -87,6 +87,45 @@ test("t1_rows_are_named_and_refused_not_weakened", () => {
   assert.equal(blocked.state.phase, "refused");
 });
 
+test("t1_overlay_performs_webauthn_touch_and_types_the_host", async () => {
+  // The overlay must call begin + credentials.get + POST touch/, and type-the-name
+  // must be the resource name (target.host), not the ACTION_TIERS label.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "../src");
+  const { performHardwareTouch } = await import("../src/webauthn.js");
+
+  const calls: any[] = [];
+  const result = await performHardwareTouch({
+    apiFn: async (path: string, body: any) => {
+      calls.push({ path, body });
+      if (path.includes("authentication/begin"))
+        return { status: 200, data: { challenge: "c" } };
+      return { status: 200, data: { touched: true } };
+    },
+    getAssertion: async (opts: any) => {
+      calls.push({ get: opts });
+      return { id: "cred" };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(calls[0].path, "auth/webauthn/authentication/begin/");
+  assert.deepEqual(calls[1].get, { challenge: "c" });
+  assert.equal(calls[2].path, "auth/webauthn/touch/");
+  assert.deepEqual(calls[2].body, { id: "cred" });
+
+  const tiers = readFileSync(join(root, "Tiers.jsx"), "utf8");
+  assert.match(tiers, /performHardwareTouch/);
+  assert.match(tiers, /confirmName/);
+  assert.doesNotMatch(tiers, /expected: row\.label/);
+
+  const targets = readFileSync(join(root, "screens/Targets.jsx"), "utf8");
+  assert.match(targets, /deleteTarget/);
+  assert.match(targets, /confirmName=\{t\.host\}/);
+  assert.match(targets, /confirm_name/);
+});
+
 test("t2_click_confirms_before_running_and_dismiss_runs_nothing", () => {
   const ran: any[] = [];
   const runner = makeTierRunner({ row: tierFor("site.deploy"),

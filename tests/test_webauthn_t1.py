@@ -442,3 +442,82 @@ def test_login_webauthn_and_recovery_do_not_write_hardware_touch_at(client, monk
     assert "session['hardware_touch_at'] =" not in login_and_totp
     touch_mod = __import__("core.webauthn", fromlist=["TouchView"])
     assert 'session["hardware_touch_at"]' in inspect.getsource(touch_mod.TouchView)
+
+
+# Paths that exist TODAY. T1 ids not listed must 404 at the obvious slug so a later
+# unguarded export/rotate/ssh.rotate view cannot land silently. Do not invent
+# key.export / kek.rotate HTTP here (review ruling). ssh.rotate is Task 6.
+T1_HTTP = {
+    "target.delete": "/api/v1/targets/{pk}/delete/",
+}
+
+
+@pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
+def test_t1_action_ids_are_require_recent_touch_or_404(client):
+    """Every T1 ACTION_TIERS id is RequireRecentTouch on its view, or 404."""
+    from django.urls import resolve
+
+    from core.actions import ACTION_TIERS
+    from core.permissions import RequireRecentTouch
+
+    t1_ids = [row["id"] for row in ACTION_TIERS if row["tier"] == "T1"]
+    assert "target.delete" in t1_ids
+    assert "key.export" in t1_ids
+    assert "kek.rotate" in t1_ids
+    extra = set(T1_HTTP) - set(t1_ids)
+    assert not extra, f"T1_HTTP names unknown ids: {extra}"
+
+    for action_id in t1_ids:
+        template = T1_HTTP.get(action_id)
+        if template is None:
+            slug = action_id.replace(".", "/")
+            for path in (f"/api/v1/{slug}/", f"/api/{slug}/"):
+                response = client.post(path, content_type="application/json")
+                assert response.status_code == 404, (
+                    f"{action_id} must 404 at {path} until a view with "
+                    f"RequireRecentTouch is listed in T1_HTTP"
+                )
+            continue
+        match = resolve(template.format(pk=1))
+        view_cls = getattr(match.func, "cls", None)
+        assert view_cls is not None, f"{action_id} did not resolve to a CBV"
+        assert RequireRecentTouch in view_cls.permission_classes, action_id
+
+
+@pytest.mark.req("P0-VALIDATION")
+def test_target_delete_confirm_name_goes_through_a_serializer():
+    """Type-the-name is the T1 confirm; it belongs on a DRF serializer (§4.5)."""
+    from core.views import TargetDeleteView
+
+    source = inspect.getsource(TargetDeleteView)
+    assert "TargetDeleteSerializer" in source
+    assert "request.data.get" not in source
+
+
+@pytest.mark.req("P0-VALIDATION")
+def test_login_begin_username_goes_through_a_serializer():
+    """Login-begin username is an API field; it belongs on a DRF serializer (§4.5)."""
+    from core.webauthn import LoginBeginView
+
+    source = inspect.getsource(LoginBeginView)
+    assert "WebAuthnLoginBeginSerializer" in source
+    assert "request.data.get" not in source
+
+
+def test_generated_client_mirrors_webauthn_me_and_target_delete():
+    """review-round check-generated: Login.webauthn, Me counts, target delete."""
+    import pathlib
+
+    api = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "src" / "api"
+    spec = (api / "openapi.yaml").read_text(encoding="utf-8")
+    assert "webauthn:" in spec
+    assert "webauthn_count" in spec
+    assert "t1_available" in spec
+    assert "totp_enrolled" in spec
+    assert "confirm_name" in spec
+    assert "/api/v1/targets/" in spec
+    assert "delete" in spec
+    zod = (api / "zod.ts").read_text(encoding="utf-8")
+    assert "webauthn" in zod
+    assert "webauthn_count" in zod
+    assert "confirm_name" in zod
