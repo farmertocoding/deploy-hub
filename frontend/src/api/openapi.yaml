@@ -482,6 +482,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/SiteEdgeOwner'
           description: ''
+  /api/v1/sites/{site_id}/backups/:
+    get:
+      operationId: v1_sites_backups_retrieve
+      description: 'GET: metadata-only dumps plus the restore command block.'
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupList'
+          description: ''
+  /api/v1/sites/{site_id}/backups/{unit_id}/test/:
+    post:
+      operationId: v1_sites_backups_test_create
+      description: 'POST: seal a dump with BACKUP_KEY, persist Hub-local, return metadata.'
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: unit_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRun'
+          description: ''
   /api/v1/sites/{site_id}/env/:
     get:
       operationId: v1_sites_env_retrieve
@@ -771,6 +818,77 @@ components:
       - detail
       - finding_id
       - mode
+    BackupDump:
+      type: object
+      properties:
+        id:
+          type: integer
+        bytes:
+          type: integer
+        digest:
+          type: string
+        stored_at:
+          type: string
+        status:
+          type: string
+      required:
+      - bytes
+      - digest
+      - id
+      - status
+      - stored_at
+    BackupList:
+      type: object
+      properties:
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/BackupUnit'
+        restore_command:
+          type: string
+      required:
+      - restore_command
+      - units
+    BackupRun:
+      type: object
+      properties:
+        schema_version:
+          type: integer
+        unit_id:
+          type: integer
+        site_id:
+          type: integer
+        bytes:
+          type: integer
+        digest:
+          type: string
+        stored_at:
+          type: string
+      required:
+      - bytes
+      - digest
+      - schema_version
+      - site_id
+      - stored_at
+      - unit_id
+    BackupUnit:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+        schedule:
+          type: string
+        dumps:
+          type: array
+          items:
+            $ref: '#/components/schemas/BackupDump'
+      required:
+      - dumps
+      - id
+      - kind
+      - schedule
     CertRefusal:
       type: object
       properties:

@@ -181,6 +181,36 @@ const PatchedSiteEdgeOwner = z
   .partial()
   .passthrough();
 const SiteEdgeOwner = z.object({ edge_owner: EdgeOwnerEnum }).passthrough();
+const BackupDump = z
+  .object({
+    id: z.number().int(),
+    bytes: z.number().int(),
+    digest: z.string(),
+    stored_at: z.string(),
+    status: z.string(),
+  })
+  .passthrough();
+const BackupUnit = z
+  .object({
+    id: z.number().int(),
+    kind: z.string(),
+    schedule: z.string(),
+    dumps: z.array(BackupDump),
+  })
+  .passthrough();
+const BackupList = z
+  .object({ units: z.array(BackupUnit), restore_command: z.string() })
+  .passthrough();
+const BackupRun = z
+  .object({
+    schema_version: z.number().int(),
+    unit_id: z.number().int(),
+    site_id: z.number().int(),
+    bytes: z.number().int(),
+    digest: z.string(),
+    stored_at: z.string(),
+  })
+  .passthrough();
 const EnvNames = z
   .object({ names: z.array(z.string()), config_stale: z.boolean() })
   .passthrough();
@@ -275,6 +305,10 @@ export const schemas = {
   Readiness,
   PatchedSiteEdgeOwner,
   SiteEdgeOwner,
+  BackupDump,
+  BackupUnit,
+  BackupList,
+  BackupRun,
   EnvNames,
   EnvApply,
   EnvWrite,

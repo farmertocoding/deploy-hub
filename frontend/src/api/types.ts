@@ -336,6 +336,40 @@ export interface paths {
         patch: operations["v1_sites_partial_update"];
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/backups/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET: metadata-only dumps plus the restore command block. */
+        get: operations["v1_sites_backups_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/backups/{unit_id}/test/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description POST: seal a dump with BACKUP_KEY, persist Hub-local, return metadata. */
+        post: operations["v1_sites_backups_test_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/env/": {
         parameters: {
             query?: never;
@@ -441,6 +475,31 @@ export interface components {
             detail: string;
             finding_id: number;
             mode: string;
+        };
+        BackupDump: {
+            id: number;
+            bytes: number;
+            digest: string;
+            stored_at: string;
+            status: string;
+        };
+        BackupList: {
+            units: components["schemas"]["BackupUnit"][];
+            restore_command: string;
+        };
+        BackupRun: {
+            schema_version: number;
+            unit_id: number;
+            site_id: number;
+            bytes: number;
+            digest: string;
+            stored_at: string;
+        };
+        BackupUnit: {
+            id: number;
+            kind: string;
+            schedule: string;
+            dumps: components["schemas"]["BackupDump"][];
         };
         CertRefusal: {
             detail: string;
@@ -1208,6 +1267,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteEdgeOwner"];
+                };
+            };
+        };
+    };
+    v1_sites_backups_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupList"];
+                };
+            };
+        };
+    };
+    v1_sites_backups_test_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRun"];
                 };
             };
         };

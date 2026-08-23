@@ -73,6 +73,16 @@ test("project list site fixtures emit cert_refusal like project_row_body", async
   }
 });
 
+test("live_backup_list_parses_against_generated_BackupList", async () => {
+  const { status, data } = await (SIM_FIXTURES.live as any)("v1/sites/1/backups/");
+  assert.equal(status, 200);
+  const parsed = schemas.BackupList.safeParse(data);
+  assert.ok(parsed.success, JSON.stringify((parsed as any).error?.issues));
+  assert.ok(data.restore_command.includes("/var/lib/deploy-hub/backups/"));
+  const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
+  assert.match(src, /export function AttackState/);
+});
+
 test("generated_site_summary_includes_attack_state", () => {
   const openapi = readFileSync(new URL("../src/api/openapi.yaml", import.meta.url), "utf8");
   assert.match(openapi, /attack_state:/);

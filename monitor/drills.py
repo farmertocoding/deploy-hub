@@ -5,13 +5,13 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from core.models import CheckRun, Site, Target
+from core.models import BackupUnit, CheckRun, Site, Target
 from monitor.uptime import http_probe, probe_url
 
 RESULTS_SCHEMA_VERSION = 1
 _MAX_HUB_DOWN_S = 86400
 _TERMINAL = (CheckRun.Status.SUCCEEDED, CheckRun.Status.FAILED)
-_RESTORE_STUB_REASON = "Phase 2.5 body deferred"
+_RESTORE_SITELESS = "siteless"
 _NO_ELIGIBLE_SITE = "no eligible site"
 _HUB_NOT_STOPPED = "hub-not-stopped"
 _DEFAULT_PROBER = object()
@@ -286,17 +286,52 @@ def run_reaper_drill(*, list_fn=None, delete_fn=None, planted_name="hub-t3-orpha
     )
 
 
-def run_restore_clean_drill():
-    """Honest stub: record that the restore body is deferred. Do not fake success."""
+def run_restore_clean_drill(*, restore_to_clean=None):
+    """Unseal the latest dump into a clean file. SKIPPED only when siteless."""
+    unit = BackupUnit.objects.select_related("site").order_by("pk").first()
+    if unit is None:
+        return record_run(
+            CheckRun.Kind.RESTORE_CLEAN,
+            CheckRun.Status.SKIPPED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "reason": _RESTORE_SITELESS,
+            },
+        )
+    from provision.backup import latest_unsealed_dump
+
+    restore = restore_to_clean or _restore_to_clean_container
+    try:
+        plaintext = latest_unsealed_dump(unit)
+        ok = bool(restore(unit, plaintext))
+    except Exception as exc:
+        return record_run(
+            CheckRun.Kind.RESTORE_CLEAN,
+            CheckRun.Status.FAILED,
+            {
+                "schema_version": RESULTS_SCHEMA_VERSION,
+                "unit_id": unit.pk,
+                "error": type(exc).__name__,
+            },
+        )
     return record_run(
         CheckRun.Kind.RESTORE_CLEAN,
-        CheckRun.Status.SKIPPED,
+        CheckRun.Status.SUCCEEDED if ok else CheckRun.Status.FAILED,
         {
             "schema_version": RESULTS_SCHEMA_VERSION,
-            "stub": True,
-            "reason": _RESTORE_STUB_REASON,
+            "unit_id": unit.pk,
         },
     )
+
+
+def _restore_to_clean_container(unit, plaintext):
+    """Materialize the unsealed dump off-live. Never the KEK, never a live volume."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(prefix="hub-restore-clean-", delete=True) as dest:
+        dest.write(plaintext)
+        dest.flush()
+        return len(plaintext) > 0
 
 
 def run_pager_drill(*, now=None):

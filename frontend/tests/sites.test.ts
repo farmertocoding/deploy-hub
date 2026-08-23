@@ -10,8 +10,8 @@ import { readFileSync } from "node:fs";
 
 import { AttackBanner } from "../src/screens/Home.jsx";
 import {
-  AttackState, CertState, SiteStatus, SitesView, flattenSites, rollbackSite,
-  t3SiteActions,
+  AttackState, BackupPanel, CertState, SiteStatus, SitesView, flattenSites,
+  rollbackSite, t3SiteActions, testBackupNow,
 } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -123,4 +123,48 @@ test("app_and_sites_source_wire_the_live_path", () => {
   assert.match(sites, /<SiteStatus/);
   const flatten = flattenSites([{ name: "p", sites: [{ id: 1, name: "s" }] }]);
   assert.equal(flatten[0].project, "p");
+});
+
+const BACKUPS = {
+  units: [{
+    id: 1,
+    kind: "postgres",
+    schedule: "0 2 * * *",
+    dumps: [{
+      id: 9,
+      bytes: 4096,
+      digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      stored_at: "2026-08-23T02:00:00+00:00",
+      status: "succeeded",
+    }],
+  }],
+  restore_command: "age -d -i backup.key /var/lib/deploy-hub/backups/9 | pg_restore --clean",
+};
+
+test("restore_is_command_block_not_a_post", () => {
+  const markup = render(BackupPanel, { site: SITE, backups: BACKUPS });
+  const text = visibleText(markup);
+  assert.match(markup, /<pre/);
+  assert.match(text, /pg_restore/);
+  assert.match(text, /Test backup now/);
+  assert.doesNotMatch(markup, /backups\/.+\/restore/);
+  const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
+  assert.match(src, /export function AttackState/);
+});
+
+test("test_backup_now_posts_the_test_route", async () => {
+  const calls: Array<{ url: string }> = [];
+  (globalThis as any).fetch = async (url: string) => {
+    calls.push({ url });
+    return {
+      status: 201,
+      json: async () => ({
+        schema_version: 1, unit_id: 1, site_id: 4, bytes: 128,
+        digest: "b".repeat(64), stored_at: "2026-08-23T03:00:00+00:00",
+      }),
+    };
+  };
+  const { status } = await testBackupNow(4, 1);
+  assert.equal(status, 201);
+  assert.equal(calls[0].url, "/api/v1/sites/4/backups/1/test/");
 });

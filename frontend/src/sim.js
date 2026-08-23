@@ -1577,10 +1577,54 @@ function adoptProjectsPayload(site) {
   }];
 }
 
+const SIM_BACKUP_LIST = {
+  units: [{
+    id: 1,
+    kind: "postgres",
+    schedule: "0 2 * * *",
+    dumps: [{
+      id: 9,
+      bytes: 4096,
+      digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      stored_at: "2026-08-23T02:00:00+00:00",
+      status: "succeeded",
+    }],
+  }],
+  restore_command: (
+    "# Restore into a clean container.\n"
+    + "# What: decrypt with Secret.Kind.BACKUP_KEY, never the KEK.\n"
+    + "age -d -i /var/lib/deploy-hub/backup-keys/site-11.key \\\n"
+    + "  /var/lib/deploy-hub/backups/9 \\\n"
+    + "  | docker run --rm -i postgres:16 pg_restore -d postgres --clean --if-exists\n"
+  ),
+};
+
+function backupsFixture(path, method) {
+  if (/^v1\/sites\/\d+\/backups\/$/.test(path) && method !== "POST") {
+    return { status: 200, data: SIM_BACKUP_LIST };
+  }
+  if (/^v1\/sites\/\d+\/backups\/\d+\/test\/$/.test(path) && method && method !== "GET") {
+    return {
+      status: 201,
+      data: {
+        schema_version: 1,
+        unit_id: 1,
+        site_id: 11,
+        bytes: 128,
+        digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        stored_at: "2026-08-23T03:00:00+00:00",
+      },
+    };
+  }
+  return null;
+}
+
 function adoptStateFixture(site) {
   return (path, body, method) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
     if (firstRun) return firstRun;
+    const backups = backupsFixture(path, method);
+    if (backups) return backups;
     if (path === "v1/projects/") return { status: 200, data: adoptProjectsPayload(site) };
     if (/^v1\/sites\/\d+\/adopt\/$/.test(path) && method !== "GET") {
       return { status: 202, data: { stage: site.adopt?.stage, slipped: true } };
@@ -1652,6 +1696,8 @@ export const SIM_FIXTURES = {
   live: (path, body, method) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
     if (firstRun) return firstRun;
+    const backups = backupsFixture(path, method);
+    if (backups) return backups;
     const findings = findingsFixture(path);
     if (findings) return findings;
     if (path === "v1/projects/")
