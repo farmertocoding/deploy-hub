@@ -39,14 +39,17 @@ class TokenRoutedFake:
         self.routes = {}  # (token, method, path) -> payload dict | Exception
         self.requests = []  # (token, method, path)
 
-    def route(self, token, *, status="active", zones=()):
+    def route(self, token, *, status="active", zones=(), result_info=None):
         self.routes[(token, "GET", VERIFY_PATH)] = {
             "success": True, "result": {"id": "tok", "status": status},
         }
-        self.routes[(token, "GET", PROBE_PATH)] = {
+        body = {
             "success": True,
             "result": [{"id": zid, "name": name} for zid, name in zones],
         }
+        if result_info is not None:
+            body["result_info"] = result_info
+        self.routes[(token, "GET", PROBE_PATH)] = body
 
     def __call__(self, request, timeout=None):
         from providers.cloudflare import API
@@ -126,6 +129,32 @@ def test_exact_minimum_scope_is_clean(monkeypatch):
     assert run.kind == CheckRun.Kind.CF_TOKEN_SCOPE
     assert run.status == CheckRun.Status.SUCCEEDED
     assert _findings().count() == 0
+
+
+@pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")
+def test_one_row_page_with_total_count_2_files_audit_finding(monkeypatch):
+    """The daily audit uses the same set-size fact as the wall (D-046).
+
+    What would make this fail: judging only the visible page rows so a
+    one-row page of a two-zone token looks like the declared minimum.
+    """
+    from core.models import Finding
+    from monitor.token_audit import audit_cloudflare_credentials
+
+    account = _account(zones=(("zid-a", "audit.example"),))
+    http = _http(monkeypatch)
+    http.route(
+        DNS_TOKEN,
+        zones=(("zid-a", "audit.example"),),
+        result_info={"page": 1, "per_page": 50, "total_count": 2},
+    )
+
+    audit_cloudflare_credentials()
+    finding = _findings().get()
+    assert finding.severity == Finding.Severity.P2
+    assert finding.state == Finding.State.OPEN
+    assert finding.fingerprint == f"cf-token-scope:{account.pk}:dns"
+    assert DNS_TOKEN not in finding.body
 
 
 @pytest.mark.req("SEC-B5-CF-TOKEN-SCOPING")

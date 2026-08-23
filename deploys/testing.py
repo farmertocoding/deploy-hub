@@ -58,6 +58,13 @@ class PipelineTransport(FakeTransport):
     def run(self, argv, *, timeout=60):
         result = super().run(argv, timeout=timeout)
         argv = list(argv)
+        cmd = argv[1:] if argv and argv[0] == "sudo" else argv
+        if cmd[:1] == ["mv"] and len(cmd) >= 3:
+            src, dst = cmd[1], cmd[2]
+            if src in self.files:
+                self.files[dst] = self.files.pop(src)
+            if src in self.put_modes:
+                self.put_modes[dst] = self.put_modes.pop(src)
         if argv and argv[0] == "docker" and "build" in argv and "-t" in argv:
             self.images.add(argv[argv.index("-t") + 1])
         if argv[:2] == ["docker", "load"]:

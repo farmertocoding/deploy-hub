@@ -126,7 +126,26 @@ def _audit_credential(account, role, ref, declared, *, timeout):
         )
         return {"status": observed["status"] or "unknown", "drift": "inactive"}
 
-    excess = [z for z in observed["zones"] if z["id"] not in declared]
+    # Same set-size fact the wall uses (observe_token.zone_count). A
+    # truncated page (total_count present and != page length) is hidden
+    # reach, not a clean one-zone token.
+    count = observed["zone_count"]
+    visible = observed["zones"]
+    if count != len(visible):
+        _file_drift_finding(
+            account, role,
+            f"the {role} token zone-set size is {count} but the probe page "
+            f"named {len(visible)} zone(s) — extra reach is hidden from "
+            f"page length (D-046); the declared minimum is "
+            f"{sorted(declared.values())}",
+        )
+        return {
+            "status": "active",
+            "drift": "excess_zones",
+            "zone_count": count,
+        }
+
+    excess = [z for z in visible if z["id"] not in declared]
     if excess:
         names = ", ".join(f"{z['name'] or '?'} ({z['id']})" for z in excess)
         _file_drift_finding(

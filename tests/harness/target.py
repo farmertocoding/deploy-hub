@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,9 @@ REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 IMAGE_DIR = REPO / "images" / "hub-test-target"
 IMAGE = "hub-test-target:local"
 SOCK = "/var/run/docker.sock"
+SAMPLE_NODE_SITE = REPO / "sample-node-site"
+SAMPLE_NODE_SITE_DOCKERFILE = REPO / "images" / "sample-node-site" / "Dockerfile"
+SAMPLE_NODE_SITE_IMAGE = "sample-node-site:t2"
 
 
 def _docker_available():
@@ -58,6 +62,67 @@ def _exec(container, argv, *, stdin=None, timeout=60, check=False):
         timeout=timeout,
         check=check,
     )
+
+
+def _image_in_target(container, tag):
+    return _exec(
+        container, ["docker", "image", "inspect", tag], timeout=30,
+    ).returncode == 0
+
+
+def host_build_image(tag, context, *, dockerfile=None, timeout=600):
+    """docker build on the Hub host (overlay). Never on hub-test-target."""
+    argv = ["build", "-t", tag]
+    if dockerfile is not None:
+        argv.extend(["-f", str(dockerfile)])
+    argv.append(str(context))
+    return _docker(argv, timeout=timeout, check=True)
+
+
+def host_build_sample_node_site():
+    """Build images/sample-node-site/Dockerfile against sample-node-site/."""
+    host_build_image(
+        SAMPLE_NODE_SITE_IMAGE,
+        SAMPLE_NODE_SITE,
+        dockerfile=SAMPLE_NODE_SITE_DOCKERFILE,
+    )
+    return SAMPLE_NODE_SITE_IMAGE
+
+
+def load_image_into_target(container, image, tag=None, *, timeout=300):
+    """Host docker save → cp → inner docker load → tag. No Hub sock bind.
+
+    Target dockerd on vfs times out pulling registry-1.docker.io. The
+    D-025 path is this load, not in-target npm ci.
+    """
+    tag = tag or image
+    if _image_in_target(container, tag):
+        return tag
+    if image != tag and _image_in_target(container, image):
+        _exec(container, ["docker", "tag", image, tag], timeout=30, check=True)
+        return tag
+
+    fd, tar_path = tempfile.mkstemp(prefix="hub-img-", suffix=".tar")
+    os.close(fd)
+    remote = f"/tmp/hub-load-{uuid.uuid4().hex[:8]}.tar"
+    try:
+        _docker(["save", "-o", tar_path, image], timeout=timeout, check=True)
+        _docker(["cp", tar_path, f"{container}:{remote}"], timeout=timeout, check=True)
+        _exec(container, ["docker", "load", "-i", remote], timeout=timeout, check=True)
+        if tag != image:
+            _exec(container, ["docker", "tag", image, tag], timeout=30, check=True)
+        _exec(container, ["rm", "-f", remote], timeout=30)
+    finally:
+        try:
+            os.unlink(tar_path)
+        except OSError:
+            pass
+    return tag
+
+
+def ensure_image_on_target(container, image, tag=None):
+    """Host-build is the caller's job; this only loads/tags if the target misses."""
+    return load_image_into_target(container, image, tag)
 
 
 def _wait_tcp(host, port, *, deadline):

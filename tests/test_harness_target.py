@@ -20,6 +20,7 @@ def test_hub_target_run_argv_never_binds_docker_sock():
         SOCK,
         hub_target_run_argv,
         hub_target_session,
+        load_image_into_target,
     )
 
     argv = hub_target_run_argv("hub-test-target-probe")
@@ -34,6 +35,12 @@ def test_hub_target_run_argv_never_binds_docker_sock():
     assert IMAGE in argv
     assert IMAGE == "hub-test-target:local"
     assert "hub_target_run_argv" in inspect.getsource(hub_target_session)
+
+    load_src = inspect.getsource(load_image_into_target)
+    assert "shell=True" not in load_src
+    assert '"docker", "save"' in load_src or '["save"' in load_src
+    assert '"docker", "load"' in load_src or '"load", "-i"' in load_src
+    assert "docker.sock" not in load_src
 
 
 def test_hub_target_removes_site_state_between_tests():
@@ -106,3 +113,20 @@ def test_t2_modules_share_one_hub_target_definition():
                 ):
                     from_harness = True
     assert from_harness, "pipeline T2 must import the shared hub_target"
+
+
+def test_sample_node_site_host_dockerfile_is_load_path():
+    """D-025 image is host-built node + no-lockfile, not in-target npm ci.
+
+    What would make this fail: deleting images/sample-node-site/Dockerfile,
+    frozen-lockfile (scanner hashes), or an alpine python stub.
+    """
+    from tests.harness.target import SAMPLE_NODE_SITE_DOCKERFILE
+
+    assert SAMPLE_NODE_SITE_DOCKERFILE.is_file()
+    text = SAMPLE_NODE_SITE_DOCKERFILE.read_text(encoding="utf-8")
+    assert "FROM node:" in text
+    assert "pnpm install --no-lockfile" in text
+    assert "frozen-lockfile" not in text
+    assert "T2_SERVE_PY" not in text
+    assert "python3" not in text

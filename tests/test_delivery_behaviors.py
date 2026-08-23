@@ -167,6 +167,48 @@ def test_weekly_rollup_has_an_owner_and_a_beat_entry():
     assert result["findings"] is not None
 
 
+def test_weekly_rollup_sends_mail_via_locmem():
+    """What would make this fail: weekly rollup returning the inbox set
+    without calling mail.send_mail."""
+    from monitor.alerts import raise_alert
+    from monitor.digest import build_weekly_rollup
+
+    raise_alert("advice-tier", "site:p3", fingerprint="rollup-send-p3", **COPY)
+    mail.outbox.clear()
+    week = timezone.localdate()
+    result = build_weekly_rollup(week)
+    assert mail.outbox, "weekly rollup must send email"
+    sent = mail.outbox[-1]
+    assert str(week) in sent.subject
+    assert any(finding.fingerprint == "rollup-send-p3" for finding in result["findings"])
+    assert COPY["title"] in sent.body
+
+
+def test_digest_smtp_failure_files_a_finding_and_does_not_raise(monkeypatch):
+    """What would make this fail: a swallowed SMTP error with no Finding,
+    or _send raising and blocking the caller."""
+    from django.core import mail as django_mail
+
+    from monitor.digest import _send, build_weekly_rollup
+
+    leak = "vlt_secret_must_not_appear"
+
+    def _boom(*args, **kwargs):
+        raise OSError(f"smtp down token={leak}")
+
+    monkeypatch.setattr(django_mail, "send_mail", _boom)
+    week = timezone.localdate()
+    result = build_weekly_rollup(week)
+    assert result["findings"] is not None
+    ok = _send(f"[HUB] weekly rollup {week}", f"mailbox body {leak}")
+    assert ok is False
+    filed = Finding.objects.get(fingerprint="digest:smtp-failed")
+    assert filed.severity == Finding.Severity.P2
+    hay = f"{filed.title}\n{filed.body}\n{filed.fix_action}"
+    assert leak not in hay
+    assert "token=" not in hay
+
+
 def test_grouped_p2_push_is_delivered_once():
     """What would make this fail: two P2s in the window producing two pushes."""
     from monitor.alerts import raise_alert

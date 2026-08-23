@@ -135,8 +135,12 @@ that name `TLS-B2-HUB-DNS01-UNPROXIED` and `SEC-F5-T1-HARDWARE-TOUCH`.
 
 ## D-025 alpine / PIPE-S4
 
-The existing `tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-ready-stub`
-line stays. Nothing in Phase 3 changes vfs overlay-on-overlay.
+RETIRED 2026-08-23 (leftover Task 7): host-built `sample-node-site` image
+`docker load` into `hub-test-target`. The T2 proof is
+`tests/test_pipeline_sample_node_site.py::test_t2_real_node_image_builds_on_vfs`
+(Fastify `/healthz` with `backfill_pct`, not the alpine instant stub).
+In-target `npm ci` / frozen pnpm on vfs is still impossible — the lockfile
+is scanner-shaped and the target cannot pull `registry-1.docker.io`.
 
 ## PROC checklist lines (D-022)
 
