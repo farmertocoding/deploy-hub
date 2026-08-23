@@ -19,7 +19,7 @@ import {
   intakeLine,
 } from "../src/screens/Settings.jsx";
 import { ActionButton, T1Overlay } from "../src/Tiers.jsx";
-import { tierFor } from "../src/actions.js";
+import { makeTierRunner, tierFor } from "../src/actions.js";
 import {
   PartnerBadge, SiteStatus, SitesView, isPartnerSite,
 } from "../src/screens/Sites.jsx";
@@ -175,6 +175,38 @@ test("partner_create_t1_overlay_omits_cost", () => {
   }));
   assert.match(rest, /Create partner/);
   assert.doesNotMatch(rest, /\$0\.05/);
+});
+
+test("partner_create_confirm_step_up_with_non_empty_name_runs", async () => {
+  // ActionButton always click({ expected: confirmName }). Empty-string
+  // expected is defined, so typed slug !== "" refuses and empty fails
+  // !name — omit confirmName (same as instance.create) so the typed
+  // name is the slug and confirmStepUp onRuns.
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(PartnersPanel, {
+      partners: [],
+      intake: { status: "degraded", mode: "fake", configured: false },
+    }));
+  });
+  const wired = tree.root.findByType(ActionButton);
+  assert.equal(wired.props.row.id, "partner.create");
+  const confirmName = wired.props.confirmName;
+  act(() => { tree.unmount(); });
+
+  const ran: any[] = [];
+  const runner = makeTierRunner({
+    row: tierFor("partner.create"),
+    onRun: (args: any) => ran.push(args),
+  });
+  runner.click({ expected: confirmName });
+  runner.touch();
+  runner.confirmStepUp({ name: "fixture-partner" });
+  assert.equal(ran.length, 1, "typed slug must onRun when confirmName is omitted");
+  assert.equal(ran[0].name, "fixture-partner");
 });
 
 test("sites_all_mine_partner_filter_and_partner_badge", () => {
