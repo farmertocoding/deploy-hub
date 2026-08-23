@@ -505,3 +505,44 @@ def test_terminate_finding_fingerprint_is_aws_terminate_target_pk():
     assert row.fingerprint != f"aws-terminate-failed:{target.pk}"
     assert "aws-terminate-failed" not in row.fingerprint
     assert Target.objects.filter(pk=target.pk).exists()
+
+
+@pytest.mark.req("AWS-INSTANCE-T1")
+def test_terminate_empty_credentials_ref_files_and_keeps_row(client, monkeypatch):
+    """Constructor refuse (empty AWS_CREDENTIALS_REF) is C12, ERROR, 400.
+
+    What would make this fail: _cloud_provider sitting outside the try so
+    AwsCredsError / ScopeError / TestModeError 500, status stays READY, and
+    no aws-terminate:{pk} Finding is filed.
+    """
+    from django.test import override_settings
+
+    from core.models import Finding, Target
+    from provision.aws_enroll import TerminateError, terminate_aws_target
+
+    target = _aws_target()
+    with override_settings(AWS_CREDENTIALS_REF=""):
+        with pytest.raises(TerminateError):
+            terminate_aws_target(target)
+    target.refresh_from_db()
+    assert Target.objects.filter(pk=target.pk).exists()
+    assert target.status == Target.Status.ERROR
+    assert target.status != Target.Status.READY
+    row = Finding.objects.get(fingerprint=f"aws-terminate:{target.pk}")
+    assert row.severity == "p1"
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    other = _aws_target(host="100.64.0.11")
+    with override_settings(AWS_CREDENTIALS_REF=""):
+        response = client.post(
+            _terminate_url(other),
+            data=json.dumps({"confirm_name": other.host}),
+            content_type="application/json",
+        )
+    assert response.status_code == 400, response.content
+    assert response.status_code != 500
+    other.refresh_from_db()
+    assert Target.objects.filter(pk=other.pk).exists()
+    assert other.status != Target.Status.READY
+    assert other.status == Target.Status.ERROR

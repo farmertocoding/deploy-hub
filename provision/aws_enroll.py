@@ -128,8 +128,8 @@ def terminate_aws_target(target, *, provider=None, region_name="us-east-1"):
         raise TerminateError("instance.terminate is the AWS call")
     if target.status == Target.Status.DECOMMISSIONED:
         return target
-    provider = provider or _cloud_provider(region_name=region_name)
     try:
+        provider = provider or _cloud_provider(region_name=region_name)
         provider.terminate_instance(target.provider_ref)
     except Exception as exc:
         _file_terminate_failed(target)
