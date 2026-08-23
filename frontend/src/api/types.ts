@@ -291,6 +291,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/partner-api/kill-switch/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1 partner.api_kill_switch: type partner-api. Enable when OFF, never a toggle. */
+        post: operations["v1_partner_api_kill_switch_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/partners/": {
         parameters: {
             query?: never;
@@ -320,6 +337,40 @@ export interface paths {
         get: operations["v1_partners_retrieve_2"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/partners/{id}/destination-rank/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T2 partner.destination_rank. Own-server without tunnel is a Finding. */
+        post: operations["v1_partners_destination_rank_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/partners/{id}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1 partner.suspend: type the slug, then stop + detach + revoke. */
+        post: operations["v1_partners_suspend_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -382,6 +433,23 @@ export interface paths {
         get: operations["v1_projects_readiness_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{id}/takedown/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T2 partner.site_takedown: {domain} route → 410. */
+        post: operations["v1_sites_takedown_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -632,6 +700,9 @@ export interface components {
         Confirm: {
             otp_code: string;
         };
+        ConfirmName: {
+            confirm_name: string;
+        };
         DemoJob: {
             name: string;
             /**
@@ -641,6 +712,9 @@ export interface components {
             delay: number;
             /** @default false */
             confirm_warnings: boolean;
+        };
+        DestinationRank: {
+            destination_order: number[];
         };
         DnsAccountConnected: {
             readonly id: number;
@@ -829,15 +903,22 @@ export interface components {
             hubk: string;
             whsec: string;
         };
+        PartnerDestination: {
+            id: number;
+            host: string;
+            kind: string;
+        };
         PartnerList: {
             partners: components["schemas"]["PartnerPublic"][];
             intake: components["schemas"]["IntakeStatus"];
+            api_enabled: boolean;
         };
         PartnerPublic: {
             id: number;
             slug: string;
             name: string;
             destination_order: number[];
+            destinations: components["schemas"]["PartnerDestination"][];
             suspended: boolean;
             site_ids: number[];
         };
@@ -1451,6 +1532,30 @@ export interface operations {
             };
         };
     };
+    v1_partner_api_kill_switch_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmName"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConfirmName"];
+                "multipart/form-data": components["schemas"]["ConfirmName"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     v1_partners_retrieve: {
         parameters: {
             query?: never;
@@ -1505,6 +1610,60 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPublic"];
+                };
+            };
+        };
+    };
+    v1_partners_destination_rank_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DestinationRank"];
+                "application/x-www-form-urlencoded": components["schemas"]["DestinationRank"];
+                "multipart/form-data": components["schemas"]["DestinationRank"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPublic"];
+                };
+            };
+        };
+    };
+    v1_partners_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmName"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConfirmName"];
+                "multipart/form-data": components["schemas"]["ConfirmName"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -1578,6 +1737,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Readiness"];
                 };
+            };
+        };
+    };
+    v1_sites_takedown_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmName"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConfirmName"];
+                "multipart/form-data": components["schemas"]["ConfirmName"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

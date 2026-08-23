@@ -311,6 +311,31 @@
         "latest_manifest_version": 1,
         "manifest_current": true
       }
+    },
+    {
+      "id": "partner-kill-switch-overlay",
+      "must_render": ["Suspend partner", "Stop containers", "detach routes", "revoke"],
+      "summary": "Stop containers, detach routes, revoke the Hub-side key.",
+      "partners": [
+        {
+          "id": 1, "slug": "fixture-partner", "name": "fixture-partner",
+          "destination_order": []
+        }
+      ]
+    },
+    {
+      "id": "partner-destination-order-confirm",
+      "must_render": ["abuse takedowns", "IP-reputation"],
+      "summary": "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of",
+      "partners": [
+        {
+          "id": 1, "slug": "fixture-partner", "name": "fixture-partner",
+          "destination_order": [1],
+          "destinations": [
+            {"id": 1, "host": "home.fixture.test", "kind": "ssh"}
+          ]
+        }
+      ]
     }
   ],
   "scripted_events": [
@@ -340,6 +365,8 @@
     {"t": 45, "state_id": "partner-intake-empty", "topic": "findings", "event": {"kind": "partner-intake", "state": "empty", "title": "No partners yet"}},
     {"t": 47, "state_id": "partner-intake-error", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 40, "severity": "p1", "state": "open", "entity": "partner:fixture-partner", "title": "Intake unreachable", "fingerprint": "partner-intake-unreachable"}},
     {"t": 49, "state_id": "partner-intake-degraded", "topic": "findings", "event": {"kind": "partner-intake", "state": "degraded", "title": "Fake intake degraded"}},
-    {"t": 51, "state_id": "partner-site", "topic": "findings", "event": {"kind": "partner-site", "title": "partner site", "entity": "partner:fixture-partner"}}
+    {"t": 51, "state_id": "partner-site", "topic": "findings", "event": {"kind": "partner-site", "title": "partner site", "entity": "partner:fixture-partner"}},
+    {"t": 53, "state_id": "partner-kill-switch-overlay", "topic": "findings", "event": {"kind": "partner-kill-switch", "title": "Suspend partner", "entity": "partner:fixture-partner"}},
+    {"t": 55, "state_id": "partner-destination-order-confirm", "topic": "findings", "event": {"kind": "partner-destination-rank", "title": "Rank partner destination", "entity": "partner:fixture-partner"}}
   ]
 }

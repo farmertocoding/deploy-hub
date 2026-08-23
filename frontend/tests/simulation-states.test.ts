@@ -20,7 +20,7 @@ import { CertState, SiteObserved, SiteStatus } from "../src/screens/Sites.jsx";
 import { MapPanel } from "../src/screens/Home.jsx";
 import { TargetsView } from "../src/screens/Targets.jsx";
 import { AwsPanel, PartnersPanel } from "../src/screens/Settings.jsx";
-import { T1Overlay } from "../src/Tiers.jsx";
+import { ConfirmDialog, T1Overlay } from "../src/Tiers.jsx";
 import { SitesView } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -58,6 +58,8 @@ const REQUIRED_STATE_IDS = [
   "partner-intake-error",
   "partner-intake-degraded",
   "partner-site",
+  "partner-kill-switch-overlay",
+  "partner-destination-order-confirm",
 ];
 
 function loadSeed() {
@@ -155,6 +157,32 @@ const RENDER: Record<string, (state: any) => string> = {
   "partner-site": (s) => render(SitesView, {
     phase: "live", sites: [s.site], onSelect: () => {}, onNav: () => {},
   }),
+  "partner-kill-switch-overlay": (s) =>
+    render(T1Overlay, {
+      label: "Suspend partner",
+      summary: s.summary
+        || "Stop containers, detach routes, revoke the Hub-side key.",
+      onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+    }) + render(PartnersPanel, {
+      partners: s.partners || [{
+        id: 1, slug: "fixture-partner", destination_order: [],
+      }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+      apiEnabled: false,
+    }),
+  "partner-destination-order-confirm": (s) =>
+    render(ConfirmDialog, {
+      label: "Rank partner destination",
+      summary: s.summary
+        || "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of",
+      onConfirm: () => {}, onDismiss: () => {},
+    }) + render(PartnersPanel, {
+      partners: s.partners || [{
+        id: 1, slug: "fixture-partner", destination_order: [1],
+        destinations: [{ id: 1, host: "home.fixture.test", kind: "ssh" }],
+      }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+    }),
 };
 
 test("every_new_state_renders_in_simulation_mode", () => {
@@ -235,6 +263,22 @@ test("every_new_state_renders_in_simulation_mode", () => {
     states.find((s) => s.id === "partner-site") || {}));
   assert.match(partnerSite, /◆ partner/);
   assert.match(partnerSite, /All/);
+
+  const killOverlay = visibleText(RENDER["partner-kill-switch-overlay"](
+    states.find((s) => s.id === "partner-kill-switch-overlay") || {}));
+  assert.match(killOverlay, /Stop containers/i);
+  assert.match(killOverlay, /detach routes/i);
+  assert.match(killOverlay, /revoke/i);
+  assert.doesNotMatch(killOverlay, /\bConnected\b/);
+  assert.doesNotMatch(killOverlay, /\$0\.05/);
+  assert.doesNotMatch(killOverlay, /\binstance\b/i);
+
+  const rankConfirm = visibleText(RENDER["partner-destination-order-confirm"](
+    states.find((s) => s.id === "partner-destination-order-confirm") || {}));
+  assert.match(rankConfirm, /abuse takedowns/);
+  assert.match(rankConfirm, /IP-reputation/);
+  assert.doesNotMatch(rankConfirm, /\bConnected\b/);
+  assert.doesNotMatch(rankConfirm, /\binstance\b/i);
 });
 
 test("live_create_failure_and_cost_only_from_get_200", async () => {

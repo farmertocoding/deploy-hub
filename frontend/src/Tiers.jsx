@@ -50,7 +50,7 @@ function costLine(cost) {
   return symbol;
 }
 
-export function T1Overlay({ label, cost, onTouch, onConfirm, onDismiss }) {
+export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss }) {
   const [name, setName] = useState("");
   const costText = costLine(cost);
   return (
@@ -59,6 +59,7 @@ export function T1Overlay({ label, cost, onTouch, onConfirm, onDismiss }) {
       <p style={{ marginTop: 0 }}>
         Type the name and touch a security key. TOTP cannot satisfy this.
       </p>
+      {summary ? <p>{summary}</p> : null}
       {costText ? (
         <p>Estimated hourly cost {costText}.</p>
       ) : null}
@@ -99,6 +100,7 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
     onState: setState,
   }));
   const p = presentation(row);
+  // partner.create and other partner T1 ids omit cost; optional T2-shaped summary.
   if (p.stepUp === "required") {
     return (
       <span style={{ marginRight: 8 }}>
@@ -106,7 +108,8 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
           {row.label}</button>
         {state.phase === "steppingUp" && (
           <T1Overlay label={row.label}
-            cost={row.id === "partner.create" ? undefined : cost}
+            cost={row.id.startsWith("partner.") ? undefined : cost}
+            summary={row.id.startsWith("partner.") ? summary : undefined}
             onTouch={async () => {
               const { status } = await performHardwareTouch();
               if (status === 200) runner.touch();

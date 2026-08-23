@@ -444,6 +444,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/MapSnapshot'
           description: ''
+  /api/v1/partner-api/kill-switch/:
+    post:
+      operationId: v1_partner_api_kill_switch_create
+      description: 'T1 partner.api_kill_switch: type partner-api. Enable when OFF,
+        never a toggle.'
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/partners/:
     get:
       operationId: v1_partners_retrieve
@@ -497,6 +521,72 @@ paths:
         required: true
       tags:
       - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerPublic'
+          description: ''
+  /api/v1/partners/{id}/destination-rank/:
+    post:
+      operationId: v1_partners_destination_rank_create
+      description: T2 partner.destination_rank. Own-server without tunnel is a Finding.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRank'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRank'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRank'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerPublic'
+          description: ''
+  /api/v1/partners/{id}/suspend/:
+    post:
+      operationId: v1_partners_suspend_create
+      description: 'T1 partner.suspend: type the slug, then stop + detach + revoke.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+        required: true
       security:
       - cookieAuth: []
       responses:
@@ -594,6 +684,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/Readiness'
           description: ''
+  /api/v1/sites/{id}/takedown/:
+    post:
+      operationId: v1_sites_takedown_create
+      description: 'T2 partner.site_takedown: {domain} route → 410.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConfirmName'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '410':
+          description: No response body
   /api/v1/sites/{site_id}/:
     patch:
       operationId: v1_sites_partial_update
@@ -1167,6 +1286,13 @@ components:
           pattern: ^\d{6}$
       required:
       - otp_code
+    ConfirmName:
+      type: object
+      properties:
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
     DemoJob:
       type: object
       properties:
@@ -1184,6 +1310,15 @@ components:
           default: false
       required:
       - name
+    DestinationRank:
+      type: object
+      properties:
+        destination_order:
+          type: array
+          items:
+            type: integer
+      required:
+      - destination_order
     DnsAccountConnected:
       type: object
       properties:
@@ -1620,6 +1755,19 @@ components:
       - name
       - slug
       - whsec
+    PartnerDestination:
+      type: object
+      properties:
+        id:
+          type: integer
+        host:
+          type: string
+        kind:
+          type: string
+      required:
+      - host
+      - id
+      - kind
     PartnerList:
       type: object
       properties:
@@ -1629,7 +1777,10 @@ components:
             $ref: '#/components/schemas/PartnerPublic'
         intake:
           $ref: '#/components/schemas/IntakeStatus'
+        api_enabled:
+          type: boolean
       required:
+      - api_enabled
       - intake
       - partners
     PartnerPublic:
@@ -1645,6 +1796,10 @@ components:
           type: array
           items:
             type: integer
+        destinations:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartnerDestination'
         suspended:
           type: boolean
         site_ids:
@@ -1653,6 +1808,7 @@ components:
             type: integer
       required:
       - destination_order
+      - destinations
       - id
       - name
       - site_ids

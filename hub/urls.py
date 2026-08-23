@@ -2,6 +2,12 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView
 
+from core.partner_views import (
+    PartnerApiKillSwitchView,
+    PartnerDestinationRankView,
+    PartnerSiteTakedownView,
+    PartnerSuspendView,
+)
 from core.views import (
     InstanceCreateView,
     InstanceTerminateView,
@@ -25,6 +31,15 @@ urlpatterns = [
          name="instance-terminate"),
     path("api/v1/targets/<int:pk>/ssh-rotate/", SshRotateView.as_view(),
          name="ssh-rotate"),
+    path("api/v1/partners/<int:pk>/suspend/", PartnerSuspendView.as_view(),
+         name="partner-suspend"),
+    path("api/v1/partner-api/kill-switch/", PartnerApiKillSwitchView.as_view(),
+         name="partner-api-kill-switch"),
+    path("api/v1/sites/<int:pk>/takedown/", PartnerSiteTakedownView.as_view(),
+         name="site-takedown"),
+    path("api/v1/partners/<int:pk>/destination-rank/",
+         PartnerDestinationRankView.as_view(),
+         name="partner-destination-rank"),
     path("api/v1/", include("wizard.urls")),
     path("api/v1/", include("deploys.urls")),
     path("api/v1/", include("provision.urls")),

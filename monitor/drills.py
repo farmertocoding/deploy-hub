@@ -286,6 +286,33 @@ def run_reaper_drill(*, list_fn=None, delete_fn=None, planted_name="hub-t3-orpha
     )
 
 
+def run_partner_reaper_drill(*, transport=None):
+    """Plant a Fake orphaned partner site, reap, assert gone, persist PARTNER_REAPER.
+
+    Do not fold this into drill-reaper-weekly / DRILL_PERIODS[REAPER].
+    """
+    from core.transport import FakeTransport
+    from monitor.partner_reaper import plant_orphan, reap_orphans
+
+    fake = transport or FakeTransport()
+    planted = plant_orphan(transport=fake, reason="partner-gone")
+    reap_orphans(transport=fake)
+    name = planted["container"]
+    gone = any(
+        call[0] == "run" and call[1][:3] == ["docker", "stop", name]
+        for call in fake.calls
+    )
+    return record_run(
+        CheckRun.Kind.PARTNER_REAPER,
+        CheckRun.Status.SUCCEEDED if gone else CheckRun.Status.FAILED,
+        {
+            "schema_version": RESULTS_SCHEMA_VERSION,
+            "planted_container": name,
+            "gone": gone,
+        },
+    )
+
+
 def run_aws_reaper_drill(
     *,
     provider=None,

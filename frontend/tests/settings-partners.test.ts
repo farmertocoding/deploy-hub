@@ -18,7 +18,7 @@ import {
   partnersList,
   intakeLine,
 } from "../src/screens/Settings.jsx";
-import { ActionButton, T1Overlay } from "../src/Tiers.jsx";
+import { ActionButton, ConfirmDialog, T1Overlay } from "../src/Tiers.jsx";
 import { makeTierRunner, tierFor } from "../src/actions.js";
 import {
   PartnerBadge, SiteStatus, SitesView, isPartnerSite,
@@ -63,8 +63,9 @@ test("settings_tabs_partners_after_aws_is_create_partner_not_connect", () => {
   assert.doesNotMatch(text, /\binstance\b/i);
   assert.doesNotMatch(text, /99\.9%|uptime SLA/i);
   assert.match(text, /response-time/);
-  assert.equal((markup.match(/<button/g) || []).length, 1,
-    "empty Partners tab is one sentence + the T1 Create partner button");
+  assert.match(text, /Enable partner API/);
+  assert.doesNotMatch(markup, /type="checkbox"/);
+  assert.doesNotMatch(markup, /role="switch"/);
 });
 
 test("unconfigured_and_post_create_fake_intake_never_connected", () => {
@@ -192,7 +193,9 @@ test("partner_create_confirm_step_up_with_non_empty_name_runs", async () => {
       intake: { status: "degraded", mode: "fake", configured: false },
     }));
   });
-  const wired = tree.root.findByType(ActionButton);
+  const wired = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.create");
+  assert.ok(wired, "Create partner ActionButton must still be wired");
   assert.equal(wired.props.row.id, "partner.create");
   const confirmName = wired.props.confirmName;
   act(() => { tree.unmount(); });
@@ -276,6 +279,86 @@ test("findings_entity_filter_includes_partner_slug", () => {
   assert.match(text, /partner:fixture-partner/);
   assert.match(text, /Intake unreachable/);
   assert.match(markup, /aria-label="Filter by entity"/);
+});
+
+test("enable_is_t1_not_a_toggle_and_suspend_names_stop_detach_revoke", () => {
+  assert.equal(tierFor("partner.api_kill_switch").tier, "T1");
+  assert.equal(tierFor("partner.suspend").tier, "T1");
+  const enable = visibleText(render(ActionButton, {
+    row: { ...tierFor("partner.api_kill_switch"), label: "Enable partner API" },
+    confirmName: "partner-api",
+    onRun: () => {},
+  }));
+  assert.match(enable, /Enable partner API/);
+  assert.doesNotMatch(enable, /type="checkbox"|role="switch"/);
+
+  const overlay = visibleText(render(T1Overlay, {
+    label: "Suspend partner",
+    summary: "Stop containers, detach routes, revoke the Hub-side key.",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.match(overlay, /Stop containers/);
+  assert.match(overlay, /detach routes/);
+  assert.match(overlay, /revoke/);
+  assert.doesNotMatch(overlay, /\$0\.05/);
+  assert.doesNotMatch(overlay, /\binstance\b/i);
+
+  const otherT1 = visibleText(render(T1Overlay, {
+    label: "Delete target",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.doesNotMatch(otherT1, /Stop containers/);
+  assert.doesNotMatch(otherT1, /\$0\.05/);
+});
+
+test("ranker_own_server_honesty_sentence_and_never_connected", () => {
+  assert.equal(tierFor("partner.destination_rank").tier, "T2");
+  const honesty = "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of";
+  const dialog = visibleText(render(ConfirmDialog, {
+    label: "Rank partner destination",
+    summary: honesty,
+    onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.match(dialog, /abuse takedowns/);
+  assert.match(dialog, /IP-reputation/);
+
+  const ranked = visibleText(render(PartnersPanel, {
+    partners: [{
+      id: 1, slug: "fixture-partner",
+      destination_order: [1],
+      destinations: [{ id: 1, host: "home.fixture.test", kind: "ssh" }],
+    }],
+    intake: { status: "degraded", mode: "fake", configured: false },
+  }));
+  assert.match(ranked, /Rank partner destination|fixture-partner/);
+  assert.match(ranked, /dedicated cloud first/);
+  assert.doesNotMatch(ranked, /\bConnected\b/);
+  assert.doesNotMatch(ranked, /\binstance\b/i);
+  assert.match(ranked, /Create partner|Suspend partner|Enable partner API/);
+});
+
+test("takedown_control_on_partner_site_detail", () => {
+  assert.equal(tierFor("partner.site_takedown").tier, "T2");
+  const partner = visibleText(render(SiteStatus, {
+    site: PARTNER_SITE, actions: [],
+    backups: { units: [] },
+  }));
+  assert.match(partner, /Take down site/);
+  assert.match(partner, /410/);
+  assert.doesNotMatch(partner, /Adopt plan/);
+  assert.doesNotMatch(partner, /\binstance\b/i);
+
+  const mine = visibleText(render(SiteStatus, {
+    site: {
+      id: 1, name: "shop", domain: "shop.example.com", project: "shop",
+      edge_owner: "host_caddy",
+      adopt: { stage: "plan", volumes: ["data"] },
+      job_create: true,
+    },
+    actions: [],
+    backups: { units: [] },
+  }));
+  assert.doesNotMatch(mine, /Take down site/);
 });
 
 test("intake_line_names_fake_and_never_connected", () => {

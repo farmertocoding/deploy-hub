@@ -61,12 +61,19 @@ test("t1_rows_are_named_and_refused_not_weakened", () => {
   // T1 is hardware touch + type-the-name (SEC-F5-T1-HARDWARE-TOUCH). The client
   // must not improvise a T2 confirm, and TOTP must not be a substitute for touch.
   for (const id of ["target.delete", "key.export", "kek.rotate", "ssh.rotate",
-                    "instance.create", "instance.terminate", "partner.create"]) {
+                    "instance.create", "instance.terminate", "partner.create",
+                    "partner.suspend", "partner.api_kill_switch"]) {
     assert.equal(tierFor(id).tier, "T1", id);
     assert.equal(presentation(tierFor(id)).stepUp, "required", id);
   }
   assert.equal(tierFor("partner.create").label, "Create partner");
   assert.doesNotMatch(tierFor("partner.create").label, /instance|connect/i);
+  assert.equal(tierFor("partner.suspend").label, "Suspend partner");
+  assert.equal(tierFor("partner.api_kill_switch").label, "Disable partner API");
+  assert.equal(tierFor("partner.site_takedown").tier, "T2");
+  assert.equal(tierFor("partner.site_takedown").label, "Take down site");
+  assert.equal(tierFor("partner.destination_rank").tier, "T2");
+  assert.equal(tierFor("partner.destination_rank").label, "Rank partner destination");
   assert.equal(tierFor("instance.create").label, "Create target");
   assert.doesNotMatch(tierFor("instance.create").label, /instance/i);
   assert.equal(tierFor("instance.terminate").label, "Terminate target");

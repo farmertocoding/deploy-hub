@@ -9,8 +9,7 @@ import json
 import time
 from pathlib import Path
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from vault.ssh import verify_ed25519
 
 WINDOW_S = 300
 NONCE_TTL_S = 600
@@ -89,10 +88,7 @@ def _load_pubkey(blob):
         return None
     if len(data) != 32:
         return None
-    try:
-        return Ed25519PublicKey.from_public_bytes(data)
-    except ValueError:
-        return None
+    return data
 
 
 def _params_hash(method, path, body):
@@ -150,11 +146,8 @@ def _verify_signature(partner, method, path, body, headers, now):
     if not keys:
         raise SignatureRejected("no partner public key")
     for key in keys:
-        try:
-            key.verify(signature, message)
+        if verify_ed25519(key, signature, message):
             return nonce
-        except InvalidSignature:
-            continue
     raise SignatureRejected("invalid signature")
 
 

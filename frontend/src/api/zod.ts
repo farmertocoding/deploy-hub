@@ -145,12 +145,17 @@ const MapGraph = z
 const MapSnapshot = z
   .object({ seq: z.number().int(), data: MapGraph })
   .passthrough();
+const ConfirmName = z.object({ confirm_name: z.string() }).passthrough();
+const PartnerDestination = z
+  .object({ id: z.number().int(), host: z.string(), kind: z.string() })
+  .passthrough();
 const PartnerPublic = z
   .object({
     id: z.number().int(),
     slug: z.string(),
     name: z.string(),
     destination_order: z.array(z.number().int()),
+    destinations: z.array(PartnerDestination),
     suspended: z.boolean(),
     site_ids: z.array(z.number().int()),
   })
@@ -166,7 +171,11 @@ const IntakeStatus = z
   })
   .passthrough();
 const PartnerList = z
-  .object({ partners: z.array(PartnerPublic), intake: IntakeStatus })
+  .object({
+    partners: z.array(PartnerPublic),
+    intake: IntakeStatus,
+    api_enabled: z.boolean(),
+  })
   .passthrough();
 const PartnerCreate = z
   .object({
@@ -186,6 +195,9 @@ const PartnerCreateResult = z
     hubk: z.string(),
     whsec: z.string(),
   })
+  .passthrough();
+const DestinationRank = z
+  .object({ destination_order: z.array(z.number().int()) })
   .passthrough();
 const CertRefusal = z
   .object({ detail: z.string(), finding_id: z.number().int() })
@@ -372,6 +384,8 @@ export const schemas = {
   MapEdge,
   MapGraph,
   MapSnapshot,
+  ConfirmName,
+  PartnerDestination,
   PartnerPublic,
   StatusEnum,
   ModeEnum,
@@ -379,6 +393,7 @@ export const schemas = {
   PartnerList,
   PartnerCreate,
   PartnerCreateResult,
+  DestinationRank,
   CertRefusal,
   AttackState,
   EdgeOwnerEnum,

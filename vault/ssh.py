@@ -42,6 +42,28 @@ def generate_ed25519_raw():
     return private_raw, public_raw
 
 
+def verify_ed25519(public_raw, signature, message):
+    """Return True if ``signature`` is valid Ed25519 over ``message``.
+
+    Hub re-verify (core.partner_verify) calls this so core/ never imports
+    cryptography.hazmat. ``public_raw`` is the 32-byte seed, not OpenSSH.
+    """
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    if not isinstance(public_raw, (bytes, bytearray)):
+        return False
+    if len(public_raw) != 32:
+        return False
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes(public_raw)).verify(
+            bytes(signature), bytes(message),
+        )
+    except (InvalidSignature, ValueError, TypeError):
+        return False
+    return True
+
+
 def public_openssh_from_pem(pem):
     """Return the OpenSSH public line for an OpenSSH PEM private key."""
     from cryptography.hazmat.primitives.serialization import (
