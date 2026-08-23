@@ -53,6 +53,17 @@ def reset_scope_cache():
     _verified.clear()
 
 
+def load_aws_credentials(*, reason="aws client construction"):
+    """Vault-ref explicit keys for the Hub AWS user. Never the default chain.
+
+    Loader only — cloud_provider_for lands in Task 3. boto3 stays in
+    providers/aws_creds.py.
+    """
+    from .aws_creds import load_credentials
+
+    return load_credentials(reason=reason)
+
+
 def dns_provider_for(zone, *, now=time.monotonic, ttl_s=VERIFY_TTL_S):
     """Build the product DNS client for a DnsZone, or refuse.
 

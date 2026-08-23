@@ -29,6 +29,19 @@ const DemoJob = z
     confirm_warnings: z.boolean().optional().default(false),
   })
   .passthrough();
+const AwsStatus = z
+  .object({ connected: z.boolean(), reason: z.string() })
+  .passthrough();
+const AwsConnect = z
+  .object({
+    access_key_id: z.string().min(1),
+    secret_access_key: z.string().min(1),
+    region: z.string().optional().default("us-east-1"),
+  })
+  .passthrough();
+const AwsConnectResult = z
+  .object({ account_id_last4: z.string(), region: z.string() })
+  .passthrough();
 const CloudflareConnect = z.object({ token: z.string().min(1) }).passthrough();
 const ProviderEnum = z.literal("cloudflare");
 const DnsAccountConnected = z
@@ -271,6 +284,9 @@ export const schemas = {
   Confirm,
   WebAuthnLoginBegin,
   DemoJob,
+  AwsStatus,
+  AwsConnect,
+  AwsConnectResult,
   CloudflareConnect,
   ProviderEnum,
   DnsAccountConnected,

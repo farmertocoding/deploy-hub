@@ -371,6 +371,45 @@ RULES = (
         "verifies the whole path phone-deep",
         "alert-protocol.md §7 / ALERT-PAGER-DRILL",
     ),
+    # ── Phase 5 C12 (register before first raise_alert; raise later) ────
+    _r(
+        "aws-scope",
+        "p2",
+        "AWS IAM construction or daily-audit scope refusal "
+        "(* / AdministratorAccess / groups / NotAction / service-star)",
+        "D-067 / phase-5-design-note.md §7 C12",
+    ),
+    _r(
+        "aws-create-failed",
+        "p2",
+        "EC2 create_instance failed; the Target was not enrolled",
+        "D-068 / phase-5-design-note.md §7 C12",
+    ),
+    _r(
+        "aws-terminate-failed",
+        "p1",
+        "EC2 terminate failed; the Target row is kept so the operator can retry",
+        "D-074 / phase-5-design-note.md §7 C12",
+    ),
+    _r(
+        "aws-host-key-timeout",
+        "p1",
+        "Provider-fetched host keys did not arrive in time; Transport refused "
+        "(never TOFU)",
+        "D-068 / phase-5-design-note.md §7 C12",
+    ),
+    _r(
+        "r53-fail",
+        "p2",
+        "Route 53 upsert or change failed",
+        "phase-5-design-note.md §7 C12",
+    ),
+    _r(
+        "ssm-fail",
+        "p2",
+        "SSM parameter Put/Get/Delete failed",
+        "phase-5-design-note.md §7 C12",
+    ),
 )
 
 RULES_BY_KIND = {rule.kind: rule for rule in RULES}

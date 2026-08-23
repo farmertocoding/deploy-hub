@@ -32,6 +32,10 @@ VAULT_ALLOW_FAKE_KEK = False
 # box must not be able to repoint a worker's database or open the test plane.
 HUB_TEST_MODE = False
 
+# D-066: do not default the AWS vault-ref or test-plane allowlists on. The
+# operator sets HUB_AWS_CREDENTIALS_REF; empty stays empty. Allowlists stay
+# whatever base.py read (default "") — never a baked-in account/region.
+
 # Email: HUB_SMTP_* is the prod contract (D-037). base.py wires Django's
 # SMTP backend when HUB_SMTP_HOST is set; a failed send files a Finding
 # and never blocks the push path.

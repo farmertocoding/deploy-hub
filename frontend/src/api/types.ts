@@ -144,6 +144,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/aws/connect/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_aws_connect_retrieve"];
+        put?: never;
+        post: operations["v1_aws_connect_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cloudflare/connect/": {
         parameters: {
             query?: never;
@@ -492,6 +508,20 @@ export interface components {
             detail: string;
             finding_id: number;
             mode: string;
+        };
+        AwsConnect: {
+            access_key_id: string;
+            secret_access_key: string;
+            /** @default us-east-1 */
+            region: string;
+        };
+        AwsConnectResult: {
+            account_id_last4: string;
+            region: string;
+        };
+        AwsStatus: {
+            connected: boolean;
+            reason: string;
         };
         BackupDump: {
             id: number;
@@ -1024,6 +1054,50 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_aws_connect_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AwsStatus"];
+                };
+            };
+        };
+    };
+    v1_aws_connect_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AwsConnect"];
+                "application/x-www-form-urlencoded": components["schemas"]["AwsConnect"];
+                "multipart/form-data": components["schemas"]["AwsConnect"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AwsConnectResult"];
+                };
             };
         };
     };

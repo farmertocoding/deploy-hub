@@ -22,6 +22,7 @@ const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px 
 export const SETTINGS_TABS = [
   { id: "security", label: "Security" },
   { id: "cloudflare", label: "Cloudflare" },
+  { id: "aws", label: "AWS" },
   { id: "developer", label: "Developer" },
   { id: "vault", label: "Vault" },
 ];
@@ -32,6 +33,86 @@ export async function connectCloudflare(token) {
 
 export async function plantOriginCa(accountId, path) {
   return api(`v1/dns-accounts/${accountId}/origin-ca-plant/`, { path });
+}
+
+export async function connectAws(access_key_id, secret_access_key) {
+  return api("v1/aws/connect/", { access_key_id, secret_access_key });
+}
+
+export async function awsStatus() {
+  return api("v1/aws/connect/");
+}
+
+export function AwsPanel() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [statusReason, setStatusReason] = useState("set HUB_AWS_CREDENTIALS_REF");
+  const {
+    register, handleSubmit, setError, reset, clearErrors,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(schemas.AwsConnect),
+    defaultValues: { access_key_id: "", secret_access_key: "" },
+  });
+
+  async function submit(values) {
+    if (busy) return;
+    setBusy(true);
+    setResult(null);
+    clearErrors();
+    const { status, data } = await connectAws(
+      values.access_key_id, values.secret_access_key,
+    );
+    setBusy(false);
+    if (status === 201) {
+      const parsed = schemas.AwsConnectResult.safeParse(data);
+      setResult(parsed.success ? parsed.data : data);
+      reset({ access_key_id: "", secret_access_key: "" });
+      return;
+    }
+    const field = Object.values(data.errors ?? {}).flat()[0];
+    const message = field?.message ?? data.detail ?? data.reason
+      ?? `Unexpected ${status} response.`;
+    setStatusReason(message);
+    setError("root", { type: field?.code ?? String(status), message });
+  }
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2>AWS</h2>
+      <p>Paste an IAM user access key. The Hub observes GetCallerIdentity and
+        the C4 allowlist (user <em>and</em> groups) before any vault write —
+        the secret never comes back. Unconfigured is degraded: set
+        <code> HUB_AWS_CREDENTIALS_REF</code>.</p>
+      <div style={{ color: "#f0b72f", marginBottom: 8 }}>
+        AWS is not connected. {statusReason}
+      </div>
+      <form onSubmit={handleSubmit(submit)}
+        style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+          <small>access key id</small>
+          <input type="password" {...register("access_key_id")} style={box}
+            autoComplete="off" aria-invalid={!!errors.access_key_id} />
+        </label>
+        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+          <small>secret access key</small>
+          <input type="password" {...register("secret_access_key")} style={box}
+            autoComplete="off" aria-invalid={!!errors.secret_access_key} />
+        </label>
+        <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      </form>
+      {errors.root && (
+        <div style={{ color: "#ff7b72", marginTop: 8 }}>{errors.root.message}</div>
+      )}
+      {result && (
+        <div style={{ color: "#7ee787", marginTop: 8 }}>
+          Account ···{result.account_id_last4} in {result.region}.
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function CloudflarePanel() {
@@ -212,6 +293,7 @@ export default function Settings({ user, events }) {
       </nav>
       {tab === "security" && <SecurityPanel user={user} />}
       {tab === "cloudflare" && <CloudflarePanel />}
+      {tab === "aws" && <AwsPanel />}
       {tab === "developer" && <DemoPanel user={user} events={events} />}
       {tab === "vault" && (
         <p style={{ color: "#8b949e" }}>Vault management gets its screen in Phase 4;

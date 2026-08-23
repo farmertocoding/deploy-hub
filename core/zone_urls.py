@@ -1,8 +1,9 @@
 from django.urls import path
 
-from . import checklist_views, zone_views
+from . import aws_views, checklist_views, zone_views
 
 urlpatterns = [
+    path("aws/connect/", aws_views.AwsConnectView.as_view(), name="aws-connect"),
     path("cloudflare/connect/", zone_views.CloudflareConnectView.as_view(),
          name="cloudflare-connect"),
     path("dns-accounts/<int:account_id>/origin-ca-plant/",
