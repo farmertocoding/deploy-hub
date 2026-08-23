@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
-import { SETTINGS_TABS, AwsPanel, connectAws } from "../src/screens/Settings.jsx";
+import { SETTINGS_TABS, AwsPanel, AwsStatusBanner, connectAws } from "../src/screens/Settings.jsx";
 
 const render = (component: any, props: any = {}) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -66,4 +66,27 @@ test("aws_tab_exists_paste_is_write_only_degraded_empty_and_error", async () => 
   assert.equal(err.data.connected, false);
   assert.match(err.data.reason, /HUB_AWS_CREDENTIALS_REF/);
   assert.ok(!/\bConnected\b/.test(JSON.stringify(err.data)));
+});
+
+test("aws_status_banner_hides_empty_ref_lie_after_connect", () => {
+  const empty = visibleText(render(AwsStatusBanner, {
+    connected: false, reason: "set HUB_AWS_CREDENTIALS_REF",
+  }));
+  assert.match(empty, /not connected/i, empty);
+  assert.match(empty, /HUB_AWS_CREDENTIALS_REF/, empty);
+  assert.ok(!/\bConnected\b/.test(empty), empty);
+
+  const configured = visibleText(render(AwsStatusBanner, {
+    connected: true, accountLast4: "9012", region: "us-east-1",
+  }));
+  assert.doesNotMatch(configured, /AWS is not connected/i);
+  assert.match(configured, /Account ···9012 in us-east-1/);
+  assert.ok(!/\bConnected\b/.test(configured), configured);
+
+  const after201 = visibleText(render(AwsStatusBanner, {
+    connected: false, accountLast4: "9012", region: "us-east-1",
+  }));
+  assert.doesNotMatch(after201, /AWS is not connected/i);
+  assert.match(after201, /Account ···9012 in us-east-1/);
+  assert.ok(!/\bConnected\b/.test(after201), after201);
 });
