@@ -556,6 +556,54 @@ def test_flag_off_does_not_create_deployment():
 
 @pytest.mark.req("PART-ISOLATION")
 @override_settings(PARTNER_API_ENABLED=True)
+def test_empty_dest_first_poll_does_not_consume_nonce():
+    """Empty dest / flag-off first poll must not spend the nonce.
+
+    What would make this fail: reverify calling _remember_nonce before
+    materialize+ack, so tick 2 is ReplayRejected, files partner-replay:{pk},
+    acks, and ranking a destination (or enabling the flag) can never apply.
+    """
+    from core.models import Finding, PartnerReplayNonce
+    from deploys.models import Deployment
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    vectors = _vectors()
+    nonce = vectors["cases"]["valid"]["headers"]["X-Partner-Nonce"]
+    zone = _zone("nonce-dest-zone")
+    box = _target(zone, "nonce-dest.lan")
+    partner = _partner(
+        "nonce-dest-p", [], pubkey_current=vectors["public_key_raw_b64"],
+    )
+    job = _intake_shaped_job(vectors, job_id="job-nonce-dest")
+    assert partner.destination_order == []
+    client = FakeIntakeClient(items=[job])
+    poll(client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None)
+    assert Deployment.objects.count() == 0
+    assert client.acked == []
+    assert client.items == [job]
+    assert not PartnerReplayNonce.objects.filter(
+        partner=partner, nonce=nonce,
+    ).exists()
+    assert not Finding.objects.filter(
+        fingerprint=f"partner-replay:{partner.pk}",
+    ).exists()
+
+    partner.destination_order = [box.pk]
+    partner.save(update_fields=["destination_order"])
+    poll(client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None)
+    assert Deployment.objects.count() == 1
+    assert client.acked == [job["id"]]
+    assert client.items == []
+    assert not Finding.objects.filter(
+        fingerprint=f"partner-replay:{partner.pk}",
+    ).exists()
+    assert PartnerReplayNonce.objects.filter(
+        partner=partner, nonce=nonce,
+    ).exists()
+
+
+@pytest.mark.req("PART-ISOLATION")
+@override_settings(PARTNER_API_ENABLED=True)
 def test_intake_shaped_job_without_partner_pk_materializes():
     """A job with method/path/body/headers and no partner_pk still materializes.
 
