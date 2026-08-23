@@ -488,3 +488,66 @@ def test_quiet_sibling_does_not_relax_zone():
         refuse_if_attack(hot)
     with pytest.raises(AttackRefuse):
         refuse_if_attack(quiet)
+
+
+def _r53_world(slug, *, edge_token=None):
+    from core.models import DnsAccount, DnsZone, NetworkZone, Project, Site, Target
+    from vault import service as vault_service
+
+    project = Project.objects.create(name=slug, slug=slug)
+    net = NetworkZone.objects.create(name=f"nz-{slug}", slug=f"nz-{slug}")
+    target = Target.objects.create(
+        zone=net, host=f"{slug}.lan", ssh_key_ref=f"ssh-{slug}",
+        status=Target.Status.READY,
+    )
+    account = DnsAccount.objects.create(
+        provider=DnsAccount.Provider.ROUTE53, label=f"acct-{slug}",
+    )
+    if edge_token is not None:
+        ref = f"edge-{slug}"
+        vault_service.put(
+            kind="api_token", owner_type="dns_account", owner_id=ref,
+            plaintext=edge_token.encode(),
+        )
+        account.edge_token_ref = ref
+        account.save(update_fields=["edge_token_ref"])
+    zone = DnsZone.objects.create(
+        account=account, name=f"{slug}.example", provider_zone_id=f"Z{slug}",
+    )
+    return Site.objects.create(
+        project=project, name=slug, domain=f"{slug}.example",
+        dns_zone=zone, primary_target=target,
+    )
+
+
+@pytest.mark.req("AWS-R53-ADAPTER")
+def test_l5_against_route53_zone_is_notify_only():
+    """L5 against a Route 53 DnsZone files notify-only; never silent no-op (C7).
+
+    What would make this fail: treating Route 53 as EdgeProtection and
+    flipping Under-Attack, or returning without a Finding so the detector
+    trip is invisible.
+    """
+    from core.models import DnsAccount
+    from monitor.attack_playbook import fingerprint_for, run
+    from providers.base import EdgeProtection
+    from providers.registry import edge_protection_for
+    from providers.route53 import Route53DnsProvider
+    from wizard.views import project_row_body
+
+    assert not issubclass(Route53DnsProvider, EdgeProtection)
+    site = _r53_world("r53-l5")
+    _attack_shaped(site)
+    zone = site.dns_zone
+    assert zone.account.provider == DnsAccount.Provider.ROUTE53
+    assert zone.account.edge_token_ref == ""
+    assert edge_protection_for(zone) is None
+    row = run(site, None)
+    assert row is not None
+    assert row.fingerprint == fingerprint_for(zone)
+    blob = f"{row.title}\n{row.body}\n{row.fix_action}".lower()
+    assert "notify-only" in blob or "notify only" in blob
+    payload = project_row_body(site.project)["sites"][0]["attack_state"]
+    assert payload is not None
+    assert payload["finding_id"] == row.pk
+    assert payload["mode"] == "notify_only"
