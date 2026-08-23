@@ -154,7 +154,6 @@ def test_partner_a_404s_on_partner_b_ids():
         get_partner_site,
         partner_sites_qs,
     )
-
     from deploys.models import Deployment, Manifest
 
     zone = _zone("idor-zone")
@@ -222,7 +221,6 @@ def test_hub_host_refuses():
     target so a partner site lands on the control plane.
     """
     from core.partner_jobs import PartnerRefuse, materialize
-
     from deploys.models import Deployment
 
     zone = _zone("hub-host-zone")
@@ -244,7 +242,6 @@ def test_non_partner_cohost_refuses():
     accepting a partner-base domain that already belongs to a non-partner Site.
     """
     from core.partner_jobs import PartnerRefuse, materialize
-
     from deploys.models import Deployment
 
     zone = _zone("cohost-zone")
@@ -283,7 +280,6 @@ def test_empty_destination_order_refuses_create():
     Hub host, when the operator has not ranked destinations.
     """
     from core.partner_jobs import PartnerRefuse, materialize
-
     from deploys.models import Deployment
 
     zone = _zone("empty-dest-zone")
@@ -336,9 +332,8 @@ def test_own_server_without_tunnel_refuses():
     What would make this fail: ranking an own-server target without Tunnel so
     a partner origin is reachable on the operator's residential IP.
     """
-    from core.partner_jobs import PartnerRefuse, materialize
-
     from core.models import Finding
+    from core.partner_jobs import PartnerRefuse, materialize
     from deploys.models import Deployment
 
     zone = _zone("ssh-zone")
@@ -369,7 +364,6 @@ def test_dockerfile_or_git_source_refuses():
     so unconstrained code lands on a partner-tier target.
     """
     from core.partner_jobs import PartnerRefuse, materialize
-
     from deploys.models import Deployment
 
     zone = _zone("src-zone")
@@ -404,7 +398,6 @@ def test_unconstrained_image_refuses():
     pinned digest so a partner picks any Hub-pullable image.
     """
     from core.partner_jobs import PartnerRefuse, materialize
-
     from deploys.models import Deployment
 
     zone = _zone("img-zone")
@@ -437,11 +430,10 @@ def test_digest_pinned_fixture_template_deploys():
     What would make this fail: requiring a partner Dockerfile, skipping the
     digest file, or creating a Site without a PartnerSite binding.
     """
+    from core.models import PartnerSite
     from core.partner_jobs import materialize
     from core.partner_templates import FIXTURE_DIGEST
     from core.partner_templates import TEMPLATE_REF as REF
-
-    from core.models import PartnerSite
     from core.transport import FakeTransport
     from deploys.models import Deployment
     from providers.fakes import FakeImageRegistry
@@ -487,11 +479,11 @@ def test_template_is_not_applied_catalog_entry():
     What would make this fail: applying a catalog entry to ship the template,
     or growing a PartnerTemplate table.
     """
-    from core.partner_jobs import materialize
-    from core.partner_templates import SOURCE_DIR as SRC
     from django.apps import apps
 
     from catalog.models import AppliedCatalogEntry
+    from core.partner_jobs import materialize
+    from core.partner_templates import SOURCE_DIR as SRC
 
     zone = _zone("cat-zone")
     box = _target(zone, "cat.lan")
@@ -530,9 +522,9 @@ def test_flag_off_does_not_create_deployment():
     so a T1 poll of Fake intake becomes a live partner site; or acking the
     outbox job so Task 7 enable finds nothing to apply.
     """
-    from core.partner_jobs import materialize
     from django.conf import settings
 
+    from core.partner_jobs import materialize
     from deploys.models import Deployment
     from monitor.intake_poll import FakeIntakeClient, poll
 
@@ -713,7 +705,6 @@ def test_materialize_run_twice_zero_mutating_calls():
     second Deployment row for the same partner-job id.
     """
     from core.partner_jobs import materialize
-
     from core.transport import FakeTransport
     from deploys.models import Deployment
     from providers.fakes import FakeImageRegistry

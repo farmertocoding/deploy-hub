@@ -52,9 +52,8 @@ def test_partner_router_maps_to_no_action_tiers_t1_t2():
     dns.change / partner.suspend (or any other T1/T2 operator id) so a
     machine caller reaches step-up actions.
     """
-    from core.partner_jobs import PARTNER_ROUTER
-
     from core.actions import ACTION_TIERS
+    from core.partner_jobs import PARTNER_ROUTER
 
     t1_t2 = {row["id"] for row in ACTION_TIERS if row["tier"] in {"T1", "T2"}}
     banned = t1_t2 | BANNED_INTERNAL
@@ -77,9 +76,8 @@ def test_scheduled_job_create_on_partnersite_refuses():
     What would make this fail: allowing docker-exec job commands on a partner
     site, which is the machine-caller path around the partner router allowlist.
     """
-    from core.partner_jobs import PartnerRefuse, refuse_scheduled_job
-
     from core.models import NetworkZone, Partner, PartnerSite, Project, Site, Target
+    from core.partner_jobs import PartnerRefuse, refuse_scheduled_job
 
     zone = NetworkZone.objects.create(name="k6-zone", slug="k6-zone")
     target = Target.objects.create(
