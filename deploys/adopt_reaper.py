@@ -49,7 +49,9 @@ def reap(*, now=None):
         try:
             _reap_one(site)
         except Exception:
-            continue
+            # cleanup files adopt-temp-orphan then re-raises. One bad row
+            # must not abort the hourly sweep.
+            continue  # nosec B112
         reaped.append(run.pk)
     return {"reaped": reaped}
 
