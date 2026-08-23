@@ -71,6 +71,6 @@ def _send(subject, body):
         try:
             _file_smtp_failure(exc, recipient)
         except Exception:
-            pass
+            return False
         return False
     return True

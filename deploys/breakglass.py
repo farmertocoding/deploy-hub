@@ -22,7 +22,9 @@ def write_runbook(desired):
     # site dir itself can be root:root 0755 after Origin certs mkdir.
     # Put a deploy-writable temp under /tmp, then sudo mv onto the final
     # path so we never need to widen the site-dir window.
-    tmp = f"/tmp/hub-runbook-{slug}.tmp"
+    # nosec B108 — remote Transport destination on the target, not a
+    # Hub-local tempfile. slug is the same path component as /srv/sites/{slug}.
+    tmp = f"/tmp/hub-runbook-{slug}.tmp"  # nosec B108
     transport.put(_render_runbook(desired).encode(), tmp, mode=0o400)
     transport.run(["sudo", "mv", tmp, path])
     transport.run(["sudo", "chown", "root:root", path])
