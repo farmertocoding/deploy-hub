@@ -168,6 +168,57 @@ def test_proof_axis_unaffected_under_declaration(tmp_path):
 
 
 @pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_declared_env_still_blocks_after_wizard_accept(tmp_path):
+    """C1 / SCAN-DECLARED-GUARDS: a .env inside the declared tree is not a
+    heuristic. The handler appends it to findings and continue's before the
+    covering label, so declared_only is false. Every confirm True still leaves
+    preflight/materialize refused."""
+    files = dict(_drill_files())
+    files["frontend/scripts/drill/.env"] = "API_KEY=x\n"
+    site = _site(tmp_path, files, name="declenv")
+    secret = _secret(site)
+    assert secret["tier"] == "blocker"
+    assert "frontend/scripts/drill/.env: .env file present in the scan tree" in (
+        secret["detail"]), secret["detail"]
+    assert secret["acceptance"]["blocking_only_declared"] is False
+
+    _answer_domain(site)
+    service.set_answers(site, {DRILL_CONFIRM: True})
+    assert "blockers_present" in _codes(preflight(site))
+    item = _problem(preflight(site), "blockers_present")["items"][0]
+    assert "awaiting_acceptance" not in item
+    with pytest.raises(MaterializeRefused) as refused:
+        materialize(site, confirm_warnings=True)
+    assert refused.value.code == "blockers_present"
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
+def test_undeclared_heuristic_still_blocks_after_wizard_accept(tmp_path):
+    """C1 / SCAN-DECLARED-GUARDS: an undeclared heuristic sitting next to a
+    declared tree is a real blocker. Accepting the drill confirm labels the
+    drill lines and no more — declared_only is not findings, and materialize
+    stays refused."""
+    files = dict(_drill_files())
+    files["src/app.py"] = f'admin_password = "{FAKE_HIGH_ENTROPY}"\n'
+    site = _site(tmp_path, files, name="undecl")
+    secret = _secret(site)
+    assert secret["tier"] == "blocker"
+    assert "src/app.py:1: [heuristic] hardcoded admin_password value" in (
+        secret["detail"]), secret["detail"]
+    assert "declared:" in secret["detail"]
+    assert secret["acceptance"]["blocking_only_declared"] is False
+
+    _answer_domain(site)
+    service.set_answers(site, {DRILL_CONFIRM: True})
+    assert "blockers_present" in _codes(preflight(site))
+    item = _problem(preflight(site), "blockers_present")["items"][0]
+    assert "awaiting_acceptance" not in item
+    with pytest.raises(MaterializeRefused) as refused:
+        materialize(site, confirm_warnings=True)
+    assert refused.value.code == "blockers_present"
+
+
+@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_root_declaration_warns_and_downgrades_nothing(tmp_path):
     """Scan-root swallow (attack 4). Declaring `.` is refused; nothing is
     accepted; no confirm is raised; heuristic findings stay unlabelled and
