@@ -102,9 +102,9 @@ def _vectors():
     return json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
 
 
-def _intake_shaped_job(vectors, *, job_id):
+def _intake_shaped_job(vectors, *, job_id, case_name="valid"):
     """Mesh outbox shape from intake/app.py _outbox_job: no partner_pk."""
-    case = vectors["cases"]["valid"]
+    case = vectors["cases"][case_name]
     payload = json.loads(case["body"])
     payload.setdefault("template_ref", TEMPLATE_REF)
     return {
@@ -117,6 +117,16 @@ def _intake_shaped_job(vectors, *, job_id):
         "headers": dict(case["headers"]),
         "payload": payload,
     }
+
+
+def _bind_sites(partner, n):
+    from core.models import PartnerSite
+
+    for i in range(n):
+        site = _plain_site(f"{partner.slug}-s{i}")
+        PartnerSite.objects.create(
+            partner=partner, site=site, tenant_ref=f"tenant-{i}",
+        )
 
 
 def _assert_no_intake_import(path):
@@ -599,6 +609,58 @@ def test_empty_dest_first_poll_does_not_consume_nonce():
     ).exists()
     assert PartnerReplayNonce.objects.filter(
         partner=partner, nonce=nonce,
+    ).exists()
+
+
+@pytest.mark.req("PART-ISOLATION")
+@override_settings(PARTNER_API_ENABLED=True)
+def test_quota_exceeded_idempotency_key_second_poll_still_refuses():
+    """Quota job with Idempotency-Key must refuse on tick 2, not cached-403-as-ok.
+
+    What would make this fail: peek persisting PartnerIdempotencyKey with the
+    quota 403, so tick 2 returns ok=True (idempotency-match) before
+    _quota_refuse and materialize creates PartnerSite max_sites+1.
+    """
+    from core.models import PartnerIdempotencyKey, PartnerSite
+    from deploys.models import Deployment
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    vectors = _vectors()
+    case = vectors["cases"]["quota-exceeded"]
+    idem_key = case["headers"]["Idempotency-Key"]
+    zone = _zone("quota-idem-zone")
+    box = _target(zone, "quota-idem.lan")
+    partner = _partner(
+        "quota-idem-p", [box], pubkey_current=vectors["public_key_raw_b64"],
+    )
+    _bind_sites(partner, partner.max_sites)
+    job = _intake_shaped_job(
+        vectors, job_id="job-quota-idem", case_name="quota-exceeded",
+    )
+    assert job["headers"].get("Idempotency-Key") == idem_key
+    client = FakeIntakeClient(items=[job])
+    poll(client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None)
+    assert PartnerSite.objects.filter(partner=partner).count() == partner.max_sites
+    assert not PartnerSite.objects.filter(
+        partner=partner, tenant_ref="t-quota",
+    ).exists()
+    assert Deployment.objects.count() == 0
+    assert client.acked == []
+    assert client.items == [job]
+    assert not PartnerIdempotencyKey.objects.filter(
+        partner=partner, key=idem_key,
+    ).exists()
+
+    poll(client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None)
+    assert PartnerSite.objects.filter(partner=partner).count() == partner.max_sites
+    assert not PartnerSite.objects.filter(
+        partner=partner, tenant_ref="t-quota",
+    ).exists()
+    assert Deployment.objects.count() == 0
+    assert client.acked == []
+    assert client.items == [job]
+    assert not PartnerIdempotencyKey.objects.filter(
+        partner=partner, key=idem_key,
     ).exists()
 
 
