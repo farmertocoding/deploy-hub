@@ -126,5 +126,5 @@ WAIVED: UX-F5-ACTION-TIERS — T1 hardware-touch clause unimplemented: the full-
 # DNS-CF-T3-LIVE, or full-text SEC-B2. UX-F5-ACTION-TIERS stays until Task 2
 # marks SEC-F5-T1-HARDWARE-TOUCH.
 WAIVED: TLS-B2-HUB-DNS01-UNPROXIED — first slip: Hub-central DNS-01 is the named Phase 4 slip so conformance-4 can start (D-054, D-060); unproxied public sites keep the named refusal (Finding plus Sites-screen state), never a bare exception. Do not mark full-text SEC-B2-NO-DNS-TOKENS-ON-TARGETS. Retire when Hub-central DNS-01 lands and this id is verified. (2026-08-23)
-WAIVED: SCAN-DECLARED-TEST-MATERIAL — full-text unmarked until Task 3 live-path E2E: parked parser tests in tests/test_scanner_declarations.py do not prove operator acceptance, the always-printed header on a live scan, or the five attacks against preflight/materialize (SCAN-M4 / D-055). Parser tests keep running unmarked. Retire when Task 3 marks this id on live-path E2E. (2026-08-23)
-WAIVED: SCAN-DECLARED-GUARDS — full-text unmarked until Task 3 live-path E2E: parked parser tests do not prove root-declaration refusal-with-no-downgrade on a live scan, stale-path warning on a live scan, or [proof]/.env remaining at full tier under an accepted declaration (SCAN-M4 / D-055). Parser tests keep running unmarked. Retire when Task 3 marks this id on live-path E2E. (2026-08-23)
+# SCAN-DECLARED-TEST-MATERIAL and SCAN-DECLARED-GUARDS: Task 3 retired the
+# clause-scoped full-text waivers. Markers live on tests/test_d012_reland.py.
