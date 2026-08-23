@@ -37,14 +37,9 @@ def _comment(owner_id):
 
 
 def _public_line_from_pem(pem, comment=""):
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding,
-        PublicFormat,
-        load_ssh_private_key,
-    )
+    from vault.ssh import public_openssh_from_pem
 
-    key = load_ssh_private_key(pem, password=None)
-    pub = key.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode().strip()
+    pub = public_openssh_from_pem(pem)
     if comment:
         return f"{pub} {comment}"
     return pub
@@ -52,18 +47,9 @@ def _public_line_from_pem(pem, comment=""):
 
 def _generate_ed25519():
     """In-Hub keygen. The private key is vaulted; only the pubkey is shipped."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding,
-        NoEncryption,
-        PrivateFormat,
-        PublicFormat,
-    )
+    from vault.ssh import generate_ed25519_keypair
 
-    key = Ed25519PrivateKey.generate()
-    pem = key.private_bytes(Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption())
-    pub = key.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode().strip()
-    return pem, pub
+    return generate_ed25519_keypair()
 
 
 def _current_secret(target):
