@@ -145,6 +145,7 @@ def _partner_for(job, now):
             result = reverify(
                 partner, method, path, body, headers, now=now,
                 remember_nonce=False,
+                persist_idempotency=False,
             )
         except SignatureRejected:
             continue
@@ -175,6 +176,23 @@ def _persist_accepted_nonce(partner, result, now):
         _remember_nonce(partner, nonce, now)
     except ReplayRejected:
         pass
+
+
+def _persist_accepted_idempotency(partner, job, result):
+    from core.partner_verify import _header, _params_hash, _store_idempotency
+
+    if partner is None or job is None or result is None:
+        return
+    headers = job.get("headers") or {}
+    idem_key = _header(headers, "Idempotency-Key")
+    if not idem_key:
+        return
+    method = job.get("method") or "POST"
+    path = job.get("path") or ""
+    body = job.get("body") or b""
+    _store_idempotency(
+        partner, idem_key, _params_hash(method, path, body), result,
+    )
 
 
 def _process(client, items, now):
@@ -209,6 +227,7 @@ def _process(client, items, now):
             continue
         if _ack(client, job_id):
             _persist_accepted_nonce(partner, result, now)
+            _persist_accepted_idempotency(partner, job, result)
     return n
 
 

@@ -196,47 +196,83 @@ def _quota_refuse(partner, method, path):
     return PartnerSite.objects.count() >= fleet_cap
 
 
-def reverify(partner, method, path, body, headers, *, now=None, remember_nonce=True):
-    """Re-verify a signed partner request against Partner pubkey slots.
+def _idempotency_cached(partner, idem_key, params, now, nonce=""):
+    """Return a live stored response, a 422 mismatch, or None if absent/expired.
 
-    `remember_nonce=False` still rejects an already-consumed nonce
-    (replay) but does not insert. The poller persists after materialize+ack
-    so operator-fixable refuses do not spend the nonce.
+    A match is ok only for 2xx so a cached quota 403 is not treated as accepted.
     """
     from datetime import timedelta
 
     from core.models import PartnerIdempotencyKey
 
+    existing = PartnerIdempotencyKey.objects.filter(
+        partner=partner, key=idem_key,
+    ).first()
+    if existing is None:
+        return None
+    cutoff = _clock(now) - timedelta(seconds=IDEMPOTENCY_TTL_S)
+    created = existing.created_at
+    if created is not None and created < cutoff:
+        existing.delete()
+        return None
+    if existing.params_hash != params:
+        return VerifyResult(
+            False, status=422, reason="idempotency", nonce=nonce,
+        )
+    return VerifyResult(
+        existing.status_code < 400,
+        status=existing.status_code,
+        response=existing.response,
+        reason="idempotency-match",
+        nonce=nonce,
+    )
+
+
+def _store_idempotency(partner, idem_key, params, result):
+    from django.db import IntegrityError, transaction
+
+    from core.models import PartnerIdempotencyKey
+
+    if not idem_key:
+        return
+    try:
+        with transaction.atomic():
+            PartnerIdempotencyKey.objects.create(
+                partner=partner,
+                key=idem_key,
+                params_hash=params,
+                status_code=result.status,
+                response=result.response,
+            )
+    except IntegrityError:
+        return
+
+
+def reverify(
+    partner, method, path, body, headers, *, now=None,
+    remember_nonce=True, persist_idempotency=True,
+):
+    """Re-verify a signed partner request against Partner pubkey slots.
+
+    `remember_nonce=False` still rejects an already-consumed nonce
+    (replay) but does not insert. `persist_idempotency=False` still
+    returns a live matching/mismatching row but does not insert. The
+    poller persists both after materialize+ack so operator-fixable
+    refuses do not spend the nonce or cache a quota 403 as ok=True.
+    """
     nonce = _verify_signature(partner, method, path, body, headers, now)
     # Replay is Hub-authoritative even when the request also carries a
     # matching Idempotency-Key (byte-for-byte replay ≠ Stripe retry).
     _remember_nonce(partner, nonce, now, persist=remember_nonce)
     idem_key = _header(headers, "Idempotency-Key")
     params = _params_hash(method, path, body)
-    clock = _clock(now)
 
     if idem_key:
-        existing = PartnerIdempotencyKey.objects.filter(
-            partner=partner, key=idem_key,
-        ).first()
-        if existing is not None:
-            cutoff = clock - timedelta(seconds=IDEMPOTENCY_TTL_S)
-            created = existing.created_at
-            if created is not None and created < cutoff:
-                existing.delete()
-                existing = None
-            elif existing.params_hash != params:
-                return VerifyResult(
-                    False, status=422, reason="idempotency", nonce=nonce,
-                )
-            else:
-                return VerifyResult(
-                    True,
-                    status=existing.status_code,
-                    response=existing.response,
-                    reason="idempotency-match",
-                    nonce=nonce,
-                )
+        cached = _idempotency_cached(
+            partner, idem_key, params, now, nonce=nonce,
+        )
+        if cached is not None:
+            return cached
 
     if _quota_refuse(partner, method, path):
         result = VerifyResult(
@@ -247,12 +283,6 @@ def reverify(partner, method, path, body, headers, *, now=None, remember_nonce=T
             True, status=202, response={"accepted": True}, nonce=nonce,
         )
 
-    if idem_key:
-        PartnerIdempotencyKey.objects.create(
-            partner=partner,
-            key=idem_key,
-            params_hash=params,
-            status_code=result.status,
-            response=result.response,
-        )
+    if idem_key and persist_idempotency:
+        _store_idempotency(partner, idem_key, params, result)
     return result
