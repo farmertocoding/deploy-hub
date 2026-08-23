@@ -251,6 +251,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.run_restore_clean_drill",
         "schedule": 30 * 86400,
     },
+    "backup-nightly": {
+        "task": "provision.tasks.run_backup_nightly",
+        "schedule": crontab(hour=2, minute=0),
+    },
     "cf-token-scope-daily": {
         "task": "monitor.tasks.audit_cf_token_scope",
         "schedule": 86400.0,
@@ -293,7 +297,7 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 # crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday,
-# retention janitor midnight).
+# retention janitor midnight, backup-nightly 02:00).
 CELERY_TIMEZONE = TIME_ZONE
 
 # --- Pager (D-036) ---

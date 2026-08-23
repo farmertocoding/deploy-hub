@@ -2,6 +2,14 @@
 from celery import shared_task
 
 
+@shared_task(ignore_result=True)
+def run_backup_nightly():
+    """Beat `backup-nightly`. Persist each unit; missing dumps file P1."""
+    from provision.backup import run_nightly
+
+    return run_nightly()
+
+
 @shared_task
 def provision_host(target_id, *, live_beat_jobs=None, profile="target"):
     from core.models import Target

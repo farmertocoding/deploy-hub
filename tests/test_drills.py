@@ -138,10 +138,10 @@ def test_reaper_drill_removes_planted_orphan_prefix():
 
 @pytest.mark.req("REL-P2-DRILL-STUB")
 def test_restore_drill_is_honest_stub_not_green_fiction():
-    """Restore CheckRun is a recorded stub, not a fake restore success.
+    """Siteless restore drill is SKIPPED, never a fake restore success.
 
-    What would make this fail: omitting stub=true, inventing a restore payload,
-    or claiming the Phase 2.5 body already ran.
+    What would make this fail: writing succeeded with no BackupUnit, or
+    claiming 24h / a live restore the body did not run.
     """
     run = run_restore_clean_drill()
 
@@ -149,8 +149,8 @@ def test_restore_drill_is_honest_stub_not_green_fiction():
     assert stored.kind == CheckRun.Kind.RESTORE_CLEAN
     assert stored.status == CheckRun.Status.SKIPPED
     assert stored.results["schema_version"] == 1
-    assert stored.results["stub"] is True
-    assert stored.results["reason"] == "Phase 2.5 body deferred"
+    assert stored.results["reason"] == "siteless"
+    assert stored.results.get("stub") is not True
     assert "restored" not in stored.results
     assert stored.results.get("restore_ok") is not True
     assert stored.results.get("green") is not True
@@ -391,16 +391,16 @@ def test_missing_prober_with_a_live_site_is_a_configuration_error():
 
 @pytest.mark.req("REL-P2-DRILL-STUB")
 def test_restore_stub_status_is_skipped_not_succeeded():
-    """The restore body is deferred: SKIPPED, never a fake SUCCEEDED (M1).
+    """Siteless restore is SKIPPED, never a fake SUCCEEDED.
 
-    What would make this fail: writing succeeded so a stub looks like a
-    restore that ran.
+    What would make this fail: writing succeeded so no-BackupUnit looks like
+    a restore that ran.
     """
     run = run_restore_clean_drill()
     stored = CheckRun.objects.get(pk=run.pk)
     assert stored.status == CheckRun.Status.SKIPPED
     assert stored.status != CheckRun.Status.SUCCEEDED
-    assert stored.results["reason"] == "Phase 2.5 body deferred"
+    assert stored.results["reason"] == "siteless"
 
 
 @pytest.mark.req("HARNESS-DRILLS-BEAT")
