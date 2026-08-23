@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
-import { HomeView, attachFirstRun, firstRunSnapshot } from "../src/screens/Home.jsx";
+import { HomeView, attachFirstRun, addProject, firstRunSnapshot } from "../src/screens/Home.jsx";
 import { remainingItems } from "../src/checklist.js";
 import { SIM_FIXTURES } from "../src/sim.js";
 
@@ -157,4 +157,49 @@ test("done_checklist_reveals_map_and_fleet", async () => {
   } finally {
     (globalThis as any).fetch = prevFetch;
   }
+});
+
+test("successful_add_project_refetches_first_run_without_a_findings_event", async () => {
+  // What would make this fail: AddProjectForm clearing fields after 201 and
+  // waiting for a findings event that project create never publishes, so the
+  // card stays on Home until remount.
+  const done = await firstRun("done");
+  assert.equal(done.owns_home, false);
+
+  const urls: string[] = [];
+  const prevFetch = (globalThis as any).fetch;
+  (globalThis as any).fetch = async (url: string) => {
+    urls.push(String(url));
+    if (String(url).includes("/api/v1/findings/")) {
+      return { status: 200, json: async () => ({ seq: 1, data: [] }) };
+    }
+    if (String(url).includes("/api/v1/projects/")) {
+      return { status: 201, json: async () => ({ id: 9, name: "f3-mesh", sites: [] }) };
+    }
+    if (String(url).includes("/api/v1/first-run/")) {
+      return { status: 200, json: async () => ({ seq: 1, data: done }) };
+    }
+    return { status: 404, json: async () => ({}) };
+  };
+  try {
+    const result = await addProject({
+      name: "f3-mesh", local_path: "/tmp/f3-mesh", exposure: "mesh_only", proxied: true,
+    });
+    assert.equal(result.status, 201);
+    assert.equal(result.progress?.owns_home, false,
+      "201 must return the refetched first-run progress so owns_home can clear");
+    assert.ok(urls.some((u) => /\/api\/v1\/projects\/$/.test(u)), `urls: ${urls}`);
+    assert.ok(urls.some((u) => /\/api\/v1\/first-run\/$/.test(u)),
+      `201 must refetch first-run; urls: ${urls}`);
+    assert.ok(!urls.some((u) => /\/api\/v1\/findings\//.test(u)),
+      "project create does not publish findings; do not wait on that topic");
+  } finally {
+    (globalThis as any).fetch = prevFetch;
+  }
+
+  const markup = render(HomeView, { width: 1280, progress: done, onNav: () => {} });
+  const text = visibleText(markup);
+  assert.match(text, /Fleet map/);
+  assert.match(text, /Loading projects/);
+  assert.doesNotMatch(text, /Add a project/);
 });

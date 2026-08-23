@@ -50,6 +50,18 @@ export async function firstRunSnapshot() {
   return data;
 }
 
+export async function addProject(body) {
+  const created = await api("v1/projects/", body);
+  if (created.status !== 201) return { ...created, progress: null };
+  // Project create does not publish findings. Re-derive owns_home now.
+  try {
+    const snap = await firstRunSnapshot();
+    return { ...created, progress: snap.data };
+  } catch {
+    return { ...created, progress: null };
+  }
+}
+
 export function attachFirstRun(events, onProgress) {
   const load = () => firstRunSnapshot().then((snap) => onProgress(snap.data)).catch(() => {});
   const handler = (event) => {
@@ -60,7 +72,7 @@ export function attachFirstRun(events, onProgress) {
   return () => events.unsubscribe("findings");
 }
 
-function AddProjectForm() {
+function AddProjectForm({ onProgress }) {
   const [name, setName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [domain, setDomain] = useState("");
@@ -73,12 +85,13 @@ function AddProjectForm() {
     if (busy) return;
     setBusy(true);
     setError("");
-    const { status, data } = await api("v1/projects/", {
+    const { status, data, progress } = await addProject({
       name, local_path: localPath, domain, exposure, proxied: true,
     });
     setBusy(false);
     if (status === 201) {
       setName(""); setLocalPath(""); setDomain("");
+      if (progress) onProgress?.(progress);
       return;
     }
     const field = Object.values(data.errors ?? {}).flat()[0];
@@ -118,7 +131,7 @@ function AddProjectForm() {
   );
 }
 
-export function ChecklistCard({ progress, onNav }) {
+export function ChecklistCard({ progress, onNav, onProgress }) {
   const items = remainingItems(progress);
   return (
     <div style={{ padding: 16, maxWidth: 640 }}>
@@ -137,7 +150,7 @@ export function ChecklistCard({ progress, onNav }) {
           <div key={item.id} style={{ ...box, marginBottom: 12 }}>
             <p>{copy.sentence}</p>
             {item.id === "add_project" ? (
-              <AddProjectForm />
+              <AddProjectForm onProgress={onProgress} />
             ) : (
               <button style={{ padding: 8 }} onClick={go}>{copy.button}</button>
             )}
@@ -148,9 +161,9 @@ export function ChecklistCard({ progress, onNav }) {
   );
 }
 
-export function HomeView({ width, progress, onNav, events }) {
+export function HomeView({ width, progress, onNav, onProgress, events }) {
   if (progress?.owns_home) {
-    return <ChecklistCard progress={progress} onNav={onNav} />;
+    return <ChecklistCard progress={progress} onNav={onNav} onProgress={onProgress} />;
   }
   return (
     <div>
@@ -172,5 +185,6 @@ export default function Home({ width, events, onNav }) {
     return attachFirstRun({ subscribe, unsubscribe }, setProgress);
   }, [subscribe, unsubscribe]);
   if (!progress) return <LoadingLine what="home" />;
-  return <HomeView width={width} progress={progress} onNav={onNav} events={events} />;
+  return <HomeView width={width} progress={progress} onNav={onNav}
+    onProgress={setProgress} events={events} />;
 }
