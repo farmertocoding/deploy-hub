@@ -34,6 +34,10 @@ PINNED_KINDS = {
     "backup",
     "attack_playbook",
     "tailscale_devices",
+    # Phase 5 Task 1: Python-only kinds (D-072). 0012 does not AlterField
+    # CheckRun. IAM daily audit and the cloud reaper write these kinds.
+    "aws_iam_scope",
+    "aws_reaper",
 }
 
 _BACKUP_RESULT_KEYS = frozenset(

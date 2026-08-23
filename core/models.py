@@ -131,6 +131,7 @@ class DnsAccount(models.Model):
 
     class Provider(models.TextChoices):
         CLOUDFLARE = "cloudflare"
+        ROUTE53 = "route53"
 
     provider = models.CharField(
         max_length=32, choices=Provider.choices, default=Provider.CLOUDFLARE,
@@ -310,6 +311,7 @@ class Target(models.Model):
 
     class Kind(models.TextChoices):
         SSH = "ssh"
+        AWS_EC2 = "aws_ec2"
 
     class Lifecycle(models.TextChoices):
         PERMANENT = "permanent"
@@ -325,6 +327,8 @@ class Target(models.Model):
                              related_name="targets")
     kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.SSH)
     host = models.CharField(max_length=253)
+    # CloudProvider instance id (e.g. i-…). SSH rows stay null; do not overload host.
+    provider_ref = models.CharField(max_length=64, null=True, blank=True)
     ssh_user = models.CharField(max_length=64, default="root")
     # Vault owner id (string), not an FK — vault must not import core.
     ssh_key_ref = models.CharField(max_length=64, blank=True, default="")
@@ -520,6 +524,8 @@ class CheckRun(models.Model):
         BACKUP = "backup"
         ATTACK_PLAYBOOK = "attack_playbook"
         TAILSCALE_DEVICES = "tailscale_devices"
+        AWS_IAM_SCOPE = "aws_iam_scope"
+        AWS_REAPER = "aws_reaper"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"
