@@ -286,9 +286,10 @@ def test_collect_persists_networks_and_clears_r3_without_map_graph_bump():
     """
     import json
 
+    from test_collector import CollectorTransport, _noop
+
     from core import events
     from monitor.collector import collect
-    from test_collector import CollectorTransport, _noop
 
     project = _project()
     zone = _zone("prod", "topo-c3net-prod")

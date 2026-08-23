@@ -21,6 +21,7 @@ CONTRACT_KEYS = {
     "log_chunk",
     "clock",
     "healthz",
+    "networks",
 }
 LOG_CHUNK_KEYS = {"file", "inode", "offset", "bytes"}
 HEALTHZ_KEYS = {"live", "ready", "checks"}

@@ -15,13 +15,8 @@ TOPIC = "map.graph"
 _NODE_KINDS = ("zone", "host", "container", "hub", "edge")
 
 
-def notify_graph_changed():
-    """Bump map.graph so snapshot-then-stream clients refetch the tables.
-
-    r1–r5 re-evaluate on every graph change (§9.6.2) so the advisor cannot
-    drift behind the SVG. Failures in the advisor must not swallow the bump.
-    """
-    events.publish(TOPIC, {"kind": "changed"}, history=False)
+def advise_topology():
+    """Re-run r1–r5 without bumping map.graph (collector payload writes)."""
     try:
         from monitor.topology import evaluate
 
@@ -29,9 +24,17 @@ def notify_graph_changed():
     except Exception:
         import logging
 
-        logging.getLogger(__name__).exception(
-            "topology advisor failed after map.graph bump"
-        )
+        logging.getLogger(__name__).exception("topology advisor failed")
+
+
+def notify_graph_changed():
+    """Bump map.graph so snapshot-then-stream clients refetch the tables.
+
+    r1–r5 re-evaluate on every graph change (§9.6.2) so the advisor cannot
+    drift behind the SVG. Failures in the advisor must not swallow the bump.
+    """
+    events.publish(TOPIC, {"kind": "changed"}, history=False)
+    advise_topology()
 
 
 def graph_snapshot():
