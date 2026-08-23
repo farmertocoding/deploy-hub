@@ -1341,9 +1341,10 @@ def test_t3_tier_req_verified_by_module_pytestmark(tmp_path):
 
 # ── Phase 3 Task 0: due set, D-039 conversions, t3 host-gate integrity (I1) ──
 
-# The 18 phase-3 ids design note §3 adds in Task 0 (the other two of the 20 are
-# the phase-4 clause-split ids below). Spelled here so a registry edit that
-# drops or rephases one goes red with its name.
+# The 17 phase-3 ids design note §3 added in Phase-3 Task 0 (the other two of
+# the original 20 are the phase-4 clause-split ids below). Adopt ids left
+# this set when they bumped to phase 3.5 (D-020 / D-047). Spelled here so a
+# registry edit that drops or rephases one goes red with its name.
 PHASE_3_NEW_IDS = {
     "SEC-B2-NO-TOKEN-ON-TARGET",
     "UX-F5-T2-T3-FRICTION",
@@ -1361,9 +1362,22 @@ PHASE_3_NEW_IDS = {
     "UX-F1-IA-NAV",
     "UX-F4-FAILURE-IMPACT",
     "MAP-96-GRAPH-V1",
-    "PROV-E6-ADOPT-TEMP-SUBDOMAIN",
     "P3-DNS-MONITOR-DEMO",
 }
+
+# Phase 3b Task 0 (D-047…D-053): new 3.5 ids plus the two adopt ids bumped
+# off Phase 3. No `tier:` on the four new ones (QE I4).
+PHASE_3_5_NEW_IDS = {
+    "DNS-SITE-ZONE-BIND",
+    "TLS-B2-ORIGIN-CA-PLANT",
+    "UX-F3-FIRST-RUN-CHECKLIST",
+    "P3B-ADOPT-DEMO",
+}
+PHASE_3_5_ADOPT_IDS = {
+    "PROV-J7-COMPOSE-AWARE-ADOPT",
+    "PROV-E6-ADOPT-TEMP-SUBDOMAIN",
+}
+PHASE_3_5_DUE_IDS = PHASE_3_5_NEW_IDS | PHASE_3_5_ADOPT_IDS
 
 # Registered now, due at phase 4: the unbuilt clause of each split (D-035/D-040).
 PHASE_4_SPLIT_IDS = {"TLS-B2-HUB-DNS01-UNPROXIED", "SEC-F5-T1-HARDWARE-TOUCH"}
@@ -1632,3 +1646,102 @@ def test_host_gated_t3_mark_is_accepted(tmp_path):
         assert res.returncode == 0, (
             f"{label}: a multipass_available()-gated t3 mark was refused:\n"
             f"{res.stdout}{res.stderr}")
+
+
+# ── Phase 3b Task 0: 3.5 due set, adopt bump, DNS-01 stays 4, no tier ──
+
+
+def test_phase_3_5_due_set_includes_bind_plant_f3_and_adopt(tmp_path):
+    """Every 3.5 id exists at phase 3.5, and check.py grades a 3.5 req as due.
+
+    What would make this fail: a missing/rephased id, P3B-ADOPT-DEMO not
+    naming conformance/demos/phase-3.5.md, or argparse/schema refusing 3.5.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_3_5_DUE_IDS - set(reg))
+    assert missing == [], f"phase-3.5 ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_3_5_DUE_IDS if reg[rid]["phase"] != 3.5)
+    assert wrong_phase == [], (
+        f"phase-3.5 ids not registered at phase 3.5: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+
+    demo = reg["P3B-ADOPT-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-3.5.md" in demo_paths, (
+        f"P3B-ADOPT-DEMO must name conformance/demos/phase-3.5.md: {demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P35-DUE", phase=3.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P35-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    yaml_text = (root / "conformance" / "requirements.yaml").read_text()
+    assert re.search(r"^    phase: 3\.5\s*$", yaml_text, re.M), (
+        f"write_repo must emit YAML float 3.5 as a number:\n{yaml_text}")
+    res = run_check(root, phase=3.5)
+    assert res.returncode == 0, (
+        f"--phase 3.5 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 3.5
+    assert header["requirements"]["FIX-P35-DUE"]["due"] is True
+    assert status_of(root, "FIX-P35-DUE") == "verified"
+
+
+def test_phase_3_due_set_no_longer_requires_adopt_ids(tmp_path):
+    """PROV-J7 and PROV-E6 bump to 3.5 so Phase 3 MUST does not demand adopt.
+
+    What would make this fail: leaving them at phase 3 (still due at
+    --phase 3), or check.py grading a 3.5 req as due at --phase 3.
+    """
+    reg = _live_registry()
+    for rid in sorted(PHASE_3_5_ADOPT_IDS):
+        assert rid in reg, f"{rid} is not in the registry"
+        assert reg[rid]["phase"] == 3.5, (
+            f"{rid} must be registered at phase 3.5, got {reg[rid]['phase']}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P3-DUE", phase=3), _req("FIX-P35-ADOPT", phase=3.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P3-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=3)
+    assert res.returncode == 0, (
+        f"an uncovered phase-3.5 adopt req failed the --phase 3 gate:\n{res.stdout}")
+    assert matrix(root)["requirements"]["FIX-P35-ADOPT"]["due"] is False
+    assert matrix(root)["requirements"]["FIX-P3-DUE"]["due"] is True
+
+
+def test_tls_b2_hub_dns01_stays_phase_4():
+    """Hub-central DNS-01 stays phase 4 — 3b does not pull it into the 3.5 due set.
+
+    What would make this fail: TLS-B2-HUB-DNS01-UNPROXIED rephased to 3 or 3.5.
+    """
+    reg = _live_registry()
+    rid = "TLS-B2-HUB-DNS01-UNPROXIED"
+    assert rid in reg, f"{rid} is not in the registry"
+    assert reg[rid]["phase"] == 4, (
+        f"{rid} must stay phase 4, got {reg[rid]['phase']}")
+
+
+def test_new_phase_3_5_ids_have_no_tier():
+    """QE I4: the four new 3.5 ids carry no `tier:` key (T1-verifiable).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so the
+    id cannot verify on this host. Default t1 via absence is the contract;
+    an explicit `tier: t1` is also a `tier:` key and is refused here.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_3_5_NEW_IDS - set(reg))
+    assert missing == [], f"phase-3.5 new ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_3_5_NEW_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-3.5 ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
