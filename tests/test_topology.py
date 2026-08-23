@@ -231,6 +231,126 @@ def test_hub_and_public_origin_same_lan_finding():
     ).exists()
 
 
+def test_graph_change_files_without_calling_evaluate():
+    """§9.6.2: a topology-field save must run the advisor.
+
+    What would make this fail: deleting the notify_graph_changed call-out
+    while tests still import evaluate() themselves — that stay-green is the
+    hole this pin exists to close.
+    """
+    project = _project()
+    zone = _zone("prod", "topo-notify-prod")
+    box = _target(zone, "web-notify.example")
+    shop = _site(project, "shop", box)
+    _instance(shop, box, 20000)
+
+    row = Finding.objects.get(fingerprint=f"topology-site-network:{shop.pk}")
+    assert row.severity == Finding.Severity.P2
+    _copy_ok(row)
+
+
+def test_collect_payload_update_reevaluates_without_map_graph_bump():
+    """Collector cursor+payload saves must re-run r3 without publishing map.graph.
+
+    What would make this fail: only evaluate() on topology-field saves, so a
+    live collect() plants networks and the P2 never clears; or treating
+    collect_payload as a graph bump (the cursor stampede test).
+    """
+    from django.utils import timezone
+
+    from core import events
+
+    project = _project()
+    zone = _zone("prod", "topo-collect-prod")
+    box = _target(zone, "web-collect.example")
+    shop = _site(project, "shop", box)
+    _instance(shop, box, 20000)
+    fp = f"topology-site-network:{shop.pk}"
+    row = Finding.objects.get(fingerprint=fp)
+    assert row.state == Finding.State.OPEN
+
+    before = events.current_seq("map.graph")
+    box.collect_payload = {"schema_version": 1, "networks": [f"site-{shop.pk}"]}
+    box.collect_at = timezone.now()
+    box.save(update_fields=[
+        "collect_log_inode", "collect_log_offset", "collect_payload", "collect_at",
+    ])
+    assert events.current_seq("map.graph") == before
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+
+
+def test_collect_persists_networks_and_clears_r3_without_map_graph_bump():
+    """T1 protocol: collect() stdout may carry networks; persist keeps them;
+    r3 clears; map.graph does not stampede. No docker-network inspect.
+    """
+    import json
+
+    from core import events
+    from monitor.collector import collect
+    from test_collector import CollectorTransport, _noop
+
+    project = _project()
+    zone = _zone("prod", "topo-c3net-prod")
+    box = _target(zone, "web-c3net.example")
+    shop = _site(project, "shop", box)
+    _instance(shop, box, 20000)
+    fp = f"topology-site-network:{shop.pk}"
+    assert Finding.objects.get(fingerprint=fp).state == Finding.State.OPEN
+
+    dedicated = f"site-{shop.pk}"
+    payload = {
+        "schema_version": 1,
+        "target_id": box.pk,
+        "ts": "2026-01-01T00:00:00Z",
+        "metrics": {},
+        "containers": [
+            {"name": "shop", "state": "running", "networks": [dedicated]},
+        ],
+        "log_chunk": {
+            "file": "/var/log/caddy/access.log", "inode": 1, "offset": 0, "bytes": "",
+        },
+        "clock": "2026-01-01T00:00:00Z",
+        "healthz": {"live": True, "ready": True, "checks": {}},
+        "networks": [dedicated],
+    }
+    before = events.current_seq("map.graph")
+    collect(box, CollectorTransport(stdout=json.dumps(payload)), sleep=_noop)
+    box.refresh_from_db()
+    assert events.current_seq("map.graph") == before
+    stored = box.collect_payload or {}
+    assert dedicated in (stored.get("networks") or [])
+    assert Finding.objects.get(fingerprint=fp).state == Finding.State.RESOLVED
+
+
+def test_collect_once_emits_networks_without_docker_network_inspect(tmp_path):
+    """collect_once.py may emit networks; it must not docker-network inspect.
+
+    Absent networks stays fail-closed. The producer includes the key so a
+    live collect can clear r3 once a dedicated net is visible on docker ps.
+    """
+    import json
+    import subprocess
+
+    src = (REPO / "monitor" / "collect_once.py").read_text(encoding="utf-8")
+    assert "network inspect" not in src
+    assert "network ls" not in src
+    lowered = src.lower()
+    assert "docker network inspect" not in lowered
+
+    log = tmp_path / "access.log"
+    log.write_bytes(b'{"status":200}\n')
+    proc = subprocess.run(
+        [sys.executable, str(REPO / "monitor" / "collect_once.py"), "42", "0", str(log)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(proc.stdout)
+    assert "networks" in payload, payload
+    assert isinstance(payload["networks"], list)
+
+
 def test_topology_does_not_import_a_graph_library():
     """D-041: r1–r5 walk the snapshot with plain loops, not networkx et al."""
     path = REPO / "monitor" / "topology.py"
