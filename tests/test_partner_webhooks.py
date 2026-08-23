@@ -227,6 +227,45 @@ def test_sustained_failure_disables_and_files_hub_egress_degraded(monkeypatch):
 
 
 @pytest.mark.req("PART-WEBHOOKS")
+def test_acked_hub_egress_degraded_stays_disabled(monkeypatch):
+    """Ack is not resolve: ACKED hub-egress-degraded still refuses delivery.
+
+    What would make this fail: _is_disabled keying only on OPEN, so ack
+    re-arms Hub egress; finding() will not re-OPEN an ACKED row, and
+    further failures never disable again.
+    """
+    from core.findings import ack
+    from core.models import Finding
+    from core.partner_webhooks import (
+        FakeWebhookSink,
+        WebhookDeliveryError,
+        deliver_partner_webhook,
+        reset_delivery_state,
+    )
+
+    reset_delivery_state()
+    _public_dns(monkeypatch)
+    partner = _partner(slug="wh-acked", url="https://hooks.partner.example/events")
+    sink = FakeWebhookSink()
+    sink.fail = True
+    fingerprint = f"hub-egress-degraded:partner:{partner.pk}"
+    for i in range(5):
+        with pytest.raises(WebhookDeliveryError):
+            deliver_partner_webhook(
+                partner, _event(f"msg_acked_{i}"), sink=sink,
+            )
+    row = Finding.objects.get(fingerprint=fingerprint)
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    posted = len(sink.mutating_calls())
+    sink.fail = False
+    result = deliver_partner_webhook(partner, _event("msg_after_ack"), sink=sink)
+    assert result["status"] == "disabled"
+    assert len(sink.mutating_calls()) == posted
+
+
+@pytest.mark.req("PART-WEBHOOKS")
 def test_webhook_run_twice_zero_mutating_calls(monkeypatch):
     """Second deliver of the same webhook-id is a skip: zero new POSTs.
 

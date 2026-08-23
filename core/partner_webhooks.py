@@ -129,7 +129,7 @@ def _is_disabled(partner):
 
     return Finding.objects.filter(
         fingerprint=f"hub-egress-degraded:partner:{partner.pk}",
-        state=Finding.State.OPEN,
+        state__in=(Finding.State.OPEN, Finding.State.ACKED),
     ).exists()
 
 
