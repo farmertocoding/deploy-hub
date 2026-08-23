@@ -139,6 +139,12 @@ const Readiness = z
     pending_sandbox: z.array(z.object({}).partial().passthrough()),
   })
   .passthrough();
+const EdgeOwnerEnum = z.enum(["host_caddy", "site_caddy"]);
+const PatchedSiteEdgeOwner = z
+  .object({ edge_owner: EdgeOwnerEnum })
+  .partial()
+  .passthrough();
+const SiteEdgeOwner = z.object({ edge_owner: EdgeOwnerEnum }).passthrough();
 const EnvNames = z
   .object({ names: z.array(z.string()), config_stale: z.boolean() })
   .passthrough();
@@ -222,6 +228,9 @@ export const schemas = {
   ExposureEnum,
   ProjectCreate,
   Readiness,
+  EdgeOwnerEnum,
+  PatchedSiteEdgeOwner,
+  SiteEdgeOwner,
   EnvNames,
   EnvApply,
   EnvWrite,

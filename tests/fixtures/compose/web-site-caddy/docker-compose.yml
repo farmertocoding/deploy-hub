@@ -1,0 +1,15 @@
+# J7 shape: app + site-owned Caddy on 80/443 (edge_owner → site_caddy).
+services:
+  web:
+    image: hr:prod
+    expose:
+      - "8000"
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+volumes:
+  caddy_data:

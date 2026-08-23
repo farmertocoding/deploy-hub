@@ -286,6 +286,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Record the operator's Caddy-ownership decision. Never writes dns_zone. */
+        patch: operations["v1_sites_partial_update"];
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/env/": {
         parameters: {
             query?: never;
@@ -405,6 +422,12 @@ export interface components {
             provider_zone_id?: string;
             purpose?: components["schemas"]["PurposeEnum"];
         };
+        /**
+         * @description * `host_caddy` - Host Caddy
+         *     * `site_caddy` - Site Caddy
+         * @enum {string}
+         */
+        EdgeOwnerEnum: "host_caddy" | "site_caddy";
         EnvApply: {
             deployment_id: number;
         };
@@ -512,6 +535,10 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge). */
+        PatchedSiteEdgeOwner: {
+            edge_owner?: components["schemas"]["EdgeOwnerEnum"];
+        };
         /**
          * @description * `public` - public
          *     * `mesh` - mesh
@@ -598,6 +625,10 @@ export interface components {
          * @enum {string}
          */
         SeverityEnum: "p1" | "p2" | "p3";
+        /** @description PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge). */
+        SiteEdgeOwner: {
+            edge_owner: components["schemas"]["EdgeOwnerEnum"];
+        };
         SiteSummary: {
             id: number;
             name: string;
@@ -1010,6 +1041,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    v1_sites_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedSiteEdgeOwner"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedSiteEdgeOwner"];
+                "multipart/form-data": components["schemas"]["PatchedSiteEdgeOwner"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteEdgeOwner"];
                 };
             };
         };

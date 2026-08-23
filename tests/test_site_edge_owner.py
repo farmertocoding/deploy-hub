@@ -173,3 +173,92 @@ def test_checkrun_has_no_site_fk():
     }
     assert Site not in related
     assert not any(field.name == "site" for field in CheckRun._meta.fields)
+
+
+@pytest.fixture
+def auth_client(client, django_user_model):
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = django_user_model.objects.create_user(username="op", password="pw-1234567890")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    return client
+
+
+def _public_site(slug):
+    from dns_fixtures import default_dns_zone
+
+    from core.models import Site
+
+    return Site.objects.create(
+        project=_project(slug),
+        name=slug,
+        domain=f"{slug}.example.com",
+        dns_zone=default_dns_zone(),
+    )
+
+
+def test_patch_edge_owner_only_field(auth_client):
+    """PATCH /api/v1/sites/{id}/ accepts {edge_owner} only (I-edge).
+
+    What would make this fail: a serializer that also writes name/dns_zone,
+    or ignoring extra keys and applying them anyway.
+    """
+    from core.models import Site
+
+    site = _public_site("p3b-patch-only")
+    zone_id = site.dns_zone_id
+    refused = auth_client.patch(
+        f"/api/v1/sites/{site.pk}/",
+        data={
+            "edge_owner": "site_caddy",
+            "dns_zone": None,
+            "name": "renamed",
+        },
+        content_type="application/json",
+    )
+    assert refused.status_code == 400
+    site.refresh_from_db()
+    assert site.edge_owner == Site.EdgeOwner.HOST_CADDY
+    assert site.dns_zone_id == zone_id
+    assert site.name == "p3b-patch-only"
+
+    ok = auth_client.patch(
+        f"/api/v1/sites/{site.pk}/",
+        data={"edge_owner": "site_caddy"},
+        content_type="application/json",
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["edge_owner"] == "site_caddy"
+    assert "dns_zone" not in body
+    site.refresh_from_db()
+    assert site.edge_owner == Site.EdgeOwner.SITE_CADDY
+    assert site.dns_zone_id == zone_id
+
+
+def test_patch_edge_owner_does_not_clear_dns_zone(auth_client):
+    """A legal PATCH must not null the public Site's DnsZone.
+
+    What would make this fail: save() without update_fields, a writable
+    dns_zone on the serializer, or treating omitted keys as None.
+    """
+    site = _public_site("p3b-patch-zone")
+    zone_id = site.dns_zone_id
+    assert zone_id is not None
+    ok = auth_client.patch(
+        f"/api/v1/sites/{site.pk}/",
+        data={"edge_owner": "host_caddy"},
+        content_type="application/json",
+    )
+    assert ok.status_code == 200
+    site.refresh_from_db()
+    assert site.dns_zone_id == zone_id
+    sneaky = auth_client.patch(
+        f"/api/v1/sites/{site.pk}/",
+        data={"edge_owner": "site_caddy", "dns_zone": None},
+        content_type="application/json",
+    )
+    assert sneaky.status_code == 400
+    site.refresh_from_db()
+    assert site.dns_zone_id == zone_id

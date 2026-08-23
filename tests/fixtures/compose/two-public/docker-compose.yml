@@ -1,0 +1,10 @@
+# Two uncompressible public services — refuse, do not invent a second Site.
+services:
+  blog:
+    image: blog:prod
+    ports:
+      - "8000:8000"
+  shop:
+    image: shop:prod
+    ports:
+      - "8001:8001"
