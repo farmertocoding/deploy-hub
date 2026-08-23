@@ -26,6 +26,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 
 import gates
 import pytest
@@ -765,6 +766,73 @@ def test_issue_r8_the_guard_leaves_honest_invocations_alone(env_overrides, args)
     assert result.returncode == 0, (
         f"an honest invocation with {env_overrides or list(args)} was refused:\n"
         f"{result.stdout}{result.stderr}")
+    assert "refusing to run" not in result.stderr
+
+
+@functools.lru_cache(maxsize=1)
+def _make_parses_undefine():
+    """True iff this make accepts the `undefine` directive (GNU Make 3.82+).
+
+    Probe by running a tiny makefile, not by `sys.platform` or `make --version`.
+    3.81 rejects `undefine` as `missing separator` and never reaches a recipe.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "undefine-probe.mk"
+        path.write_text(
+            "undefine FOO\n"
+            "all:\n"
+            "\t@echo parsed-undefine\n",
+            encoding="utf-8")
+        env = dict(os.environ)
+        env.pop("MAKEFLAGS", None)
+        env.pop("GNUMAKEFLAGS", None)
+        result = subprocess.run(
+            ["make", "-f", str(path)],
+            cwd=tmp, capture_output=True, text=True, env=env, timeout=30)
+        return result.returncode == 0 and "parsed-undefine" in result.stdout
+
+
+def _n4_undefined_origin_result(tmp_path, variable, restore, shim_name):
+    """Run py-roots as if `variable` has origin undefined.
+
+    RED: always the undefine shim — a false-red on a make that cannot parse it.
+    """
+    env = dict(os.environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    shim = tmp_path / shim_name
+    shim.write_text(
+        f"undefine {variable}\n"
+        "include " + str(REPO / "Makefile") + "\n"
+        f"{restore}\n",
+        encoding="utf-8")
+    return subprocess.run(
+        ["make", "-f", str(shim), "py-roots"],
+        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+
+
+def test_issue_n4_a_make_that_cannot_parse_undefine_runs_the_native_makefile(tmp_path):
+    """The undefine shim is how modern make simulates 3.81; it is not 3.81 itself.
+
+    `undefine` landed in 3.82. GNU Make 3.81 — stock macOS `/usr/bin/make` —
+    rejects it as `missing separator` and never reads the guard. That is not an
+    override accusation, and it is not the property N4 protects: origin
+    `undefined` is already clean, and this make already has no `.SHELLFLAGS`.
+    Feeding it the shim is a false-red.
+
+    Probe whether this make parses `undefine`. If it does not, N4 must run the
+    real Makefile as the native undefined-origin case. If it does, the shim
+    stays so 4.x still simulates 3.81. Do not hardcode `sys.platform`.
+    """
+    if _make_parses_undefine():
+        return
+    result = _n4_undefined_origin_result(
+        tmp_path, ".SHELLFLAGS", ".SHELLFLAGS := -c", "make381.mk")
+    assert result.returncode == 0, (
+        "this make cannot parse `undefine`; N4 must run the real Makefile as "
+        "the native undefined-origin case, not a shim that dies with missing "
+        f"separator:\n{result.stdout}{result.stderr}")
+    assert "missing separator" not in result.stderr
     assert "refusing to run" not in result.stderr
 
 
