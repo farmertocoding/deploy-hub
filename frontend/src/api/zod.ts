@@ -71,6 +71,21 @@ const Transition = z
     reason: z.string().max(256).optional().default(""),
   })
   .passthrough();
+const IdEnum = z.enum([
+  "enroll_target",
+  "connect_cloudflare",
+  "plant_origin_ca",
+  "add_project",
+]);
+const FirstRunItem = z
+  .object({ id: IdEnum, applicable: z.boolean(), done: z.boolean() })
+  .passthrough();
+const FirstRunProgress = z
+  .object({ owns_home: z.boolean(), items: z.array(FirstRunItem) })
+  .passthrough();
+const FirstRunSnapshot = z
+  .object({ seq: z.number().int(), data: FirstRunProgress })
+  .passthrough();
 const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
 const MapNode = z
   .object({
@@ -216,6 +231,10 @@ export const schemas = {
   FindingDetailSnapshot,
   ActionEnum,
   Transition,
+  IdEnum,
+  FirstRunItem,
+  FirstRunProgress,
+  FirstRunSnapshot,
   KindEnum,
   MapNode,
   PathEnum,

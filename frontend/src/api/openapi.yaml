@@ -300,6 +300,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/FindingDetailSnapshot'
           description: ''
+  /api/v1/first-run/:
+    get:
+      operationId: v1_first_run_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirstRunSnapshot'
+          description: ''
   /api/v1/map/:
     get:
       operationId: v1_map_retrieve
@@ -878,6 +892,53 @@ components:
       required:
       - data
       - seq
+    FirstRunItem:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdEnum'
+        applicable:
+          type: boolean
+        done:
+          type: boolean
+      required:
+      - applicable
+      - done
+      - id
+    FirstRunProgress:
+      type: object
+      properties:
+        owns_home:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirstRunItem'
+      required:
+      - items
+      - owns_home
+    FirstRunSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/FirstRunProgress'
+      required:
+      - data
+      - seq
+    IdEnum:
+      enum:
+      - enroll_target
+      - connect_cloudflare
+      - plant_origin_ca
+      - add_project
+      type: string
+      description: |-
+        * `enroll_target` - enroll_target
+        * `connect_cloudflare` - connect_cloudflare
+        * `plant_origin_ca` - plant_origin_ca
+        * `add_project` - add_project
     KindEnum:
       enum:
       - zone
