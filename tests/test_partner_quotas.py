@@ -114,6 +114,53 @@ def _job(partner, *, tenant_ref="t-new", extra=None):
     }
 
 
+def _raw_pubkey_b64(private):
+    import base64
+
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    raw = private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _sign_headers(private, method, path, body, *, now, nonce):
+    import base64
+
+    from core.partner_verify import canonical_string
+
+    ts = str(int(now.timestamp()) if hasattr(now, "timestamp") else int(now))
+    message = canonical_string(method, path, body, ts, nonce).encode("ascii")
+    return {
+        "X-Partner-Timestamp": ts,
+        "X-Partner-Nonce": nonce,
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Signature": base64.b64encode(private.sign(message)).decode("ascii"),
+    }
+
+
+def _signed_deploy_create_job(partner, private, site, *, tenant_ref, now, nonce):
+    """Intake-shaped POST .../deployments, not POST /partner/v1/sites."""
+    payload = {
+        "tenant_ref": tenant_ref,
+        "subdomain": tenant_ref,
+        "template_ref": TEMPLATE_REF,
+    }
+    path = f"/partner/v1/sites/{site.pk}/deployments"
+    body = json.dumps(payload)
+    return {
+        "id": f"job-{partner.slug}-dc-{tenant_ref}",
+        "type": "partner-job",
+        "action": "deployment.create",
+        "method": "POST",
+        "path": path,
+        "body": body,
+        "payload": payload,
+        "headers": _sign_headers(
+            private, "POST", path, body, now=now, nonce=nonce,
+        ),
+    }
+
+
 def _plant_nonces(partner, n, *, now):
     from core.models import PartnerReplayNonce
 
@@ -270,6 +317,64 @@ def test_sixth_site_refuses():
 
 
 @pytest.mark.req("PART-U2-QUOTAS")
+@override_settings(PARTNER_API_ENABLED=True)
+def test_signed_deploy_create_at_max_sites_does_not_create_site_6():
+    """A signed deploy-create with a new tenant_ref must not mint site 6.
+
+    evaluate_quotas applies max_sites/fleet only on POST /partner/v1/sites, but
+    materialize/_create inserts a PartnerSite for any new or default tenant_ref.
+    What would make this fail: path-gated evaluate_quotas so POST
+    /partner/v1/sites/{id}/deployments at 5 sites creates PartnerSite 6.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from core.models import PartnerSite
+    from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
+    from core.partner_verify import reverify
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    private = Ed25519PrivateKey.generate()
+    partner = _partner("q-dc-sixth", pubkey_current=_raw_pubkey_b64(private))
+    zone = _zone("q-dc-sixth-zone")
+    box = _target(zone, "q-dc-sixth.lan")
+    partner.destination_order = [box.pk]
+    partner.save(update_fields=["destination_order"])
+    sites = _bind_sites(partner, partner.max_sites)
+    assert PartnerSite.objects.filter(partner=partner).count() == 5
+
+    now = timezone.now()
+    job = _signed_deploy_create_job(
+        partner, private, sites[0],
+        tenant_ref="t-sneak-6", now=now, nonce="n-dc-sixth-0001aaaaaaaaaaaaaa",
+    )
+    assert job["action"] == "deployment.create"
+    assert job["path"] != "/partner/v1/sites"
+    assert job["path"].endswith("/deployments")
+
+    verified = reverify(
+        partner, job["method"], job["path"], job["body"], job["headers"],
+        now=now, remember_nonce=False, persist_idempotency=False,
+    )
+    assert verified.status != 401
+
+    try:
+        materialize(partner, job, now=now)
+    except (PartnerRefuse, PartnerNotFound):
+        pass
+    assert PartnerSite.objects.filter(partner=partner).count() == 5
+    assert not PartnerSite.objects.filter(
+        partner=partner, tenant_ref="t-sneak-6",
+    ).exists()
+
+    client = FakeIntakeClient(items=[dict(job)])
+    poll(client=client, now=now, jitter=0, sleep=lambda _s: None)
+    assert PartnerSite.objects.filter(partner=partner).count() == 5
+    assert not PartnerSite.objects.filter(
+        partner=partner, tenant_ref="t-sneak-6",
+    ).exists()
+
+
+@pytest.mark.req("PART-U2-QUOTAS")
 @override_settings(PARTNER_API_ENABLED=True, PARTNER_FLEET_MAX_SITES=12)
 def test_fleet_cap_12_refuses():
     """The thirteenth fleet PartnerSite refuses even when this partner is under max_sites.
@@ -301,6 +406,48 @@ def test_fleet_cap_12_refuses():
         materialize(c, _job(c, tenant_ref="fleet-13"))
     assert exc.value.reason == "quota"
     assert PartnerSite.objects.count() == 12
+
+
+@pytest.mark.req("PART-U2-QUOTAS")
+@override_settings(PARTNER_API_ENABLED=True, PARTNER_FLEET_MAX_SITES=12)
+def test_signed_deploy_create_at_fleet_cap_does_not_create_site_13():
+    """A signed deploy-create with a new tenant_ref must not mint fleet site 13.
+
+    Same insert hole as max_sites: path-gated caps on POST /sites, but
+    materialize mints a PartnerSite for a new tenant_ref on deploy-create.
+    What would make this fail: partner C under its own max_sites minting
+    through POST .../deployments after A+B already hold 12 rows.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from core.models import PartnerSite
+    from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
+
+    zone = _zone("q-dc-fleet-zone")
+    box = _target(zone, "q-dc-fleet.lan")
+    a = _partner("q-dc-fleet-a", max_sites=10, destination_order=[box.pk])
+    b = _partner("q-dc-fleet-b", max_sites=10, destination_order=[box.pk])
+    private = Ed25519PrivateKey.generate()
+    c = _partner(
+        "q-dc-fleet-c", max_sites=10, destination_order=[box.pk],
+        pubkey_current=_raw_pubkey_b64(private),
+    )
+    _bind_sites(a, 6)
+    sites_b = _bind_sites(b, 6)
+    assert PartnerSite.objects.count() == 12
+
+    now = timezone.now()
+    job = _signed_deploy_create_job(
+        c, private, sites_b[0],
+        tenant_ref="fleet-dc-13", now=now, nonce="n-dc-fleet-0001aaaaaaaaaaaaa",
+    )
+    assert job["path"] != "/partner/v1/sites"
+    try:
+        materialize(c, job, now=now)
+    except (PartnerRefuse, PartnerNotFound):
+        pass
+    assert PartnerSite.objects.count() == 12
+    assert not PartnerSite.objects.filter(tenant_ref="fleet-dc-13").exists()
 
 
 @pytest.mark.req("PART-U2-QUOTAS")
