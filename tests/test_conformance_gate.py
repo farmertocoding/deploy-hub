@@ -1836,18 +1836,22 @@ def test_new_phase_4_ids_have_no_tier():
 def test_scan_declared_full_text_is_not_verified_by_parser_only_tests():
     """SCAN-M4: parked parser tests must not carry full-text SCAN-DECLARED-*
     markers. Parser-only proofs do not prove operator acceptance or the five
-    live-path attacks (D-055). Full-text ids stay unmarked until Task 3 E2E.
+    live-path attacks (D-055). Task 3 marks the full-text ids on
+    tests/test_d012_reland.py.
 
     What would make this fail: leaving @pytest.mark.req(SCAN-DECLARED-*) on
-    tests/test_scanner_declarations.py once --phase 4 is due.
+    tests/test_scanner_declarations.py, or failing to mark the live-path E2E.
     """
     markers = check.collect_markers(REPO)
     parser_prefix = "tests/test_scanner_declarations.py::"
+    e2e_prefix = "tests/test_d012_reland.py::"
     for rid in SCAN_DECLARED_FULL_TEXT:
         nodeids = markers.get(rid) or []
         on_parser = [n for n in nodeids if n.startswith(parser_prefix)]
         assert not on_parser, (
             f"{rid} is still marked on parser-only tests — SCAN-M4 forbids "
             f"parser tests verifying the full text: {on_parser}")
-        assert not nodeids, (
-            f"{rid} must carry no marker until Task 3 live-path E2E: {nodeids}")
+        on_e2e = [n for n in nodeids if n.startswith(e2e_prefix)]
+        assert on_e2e, (
+            f"{rid} has no live-path E2E marker on tests/test_d012_reland.py "
+            f"(Task 3): {nodeids}")
