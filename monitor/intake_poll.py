@@ -17,6 +17,8 @@ BATCH_CAP = 20
 FAIL_N = 3
 UNREACHABLE_AFTER = timedelta(minutes=5)
 RESULTS_SCHEMA_VERSION = 1
+TYPE_GIT_PUSH = "git-push"
+TYPE_PARTNER_JOB = "partner-job"
 
 
 class IntakeClientError(Exception):
@@ -41,6 +43,18 @@ class FakeIntakeClient:
     def ack(self, job_id):
         self.acked.append(job_id)
         self.items = [item for item in self.items if item.get("id") != job_id]
+
+    def plant_git_push(self, git_url, ref, sha, *, job_id=None):
+        """Hub-side T1 plant. Does not import intake. No webhook secret."""
+        job = {
+            "id": job_id or f"git-push-{len(self.items) + 1}",
+            "type": TYPE_GIT_PUSH,
+            "git_url": git_url,
+            "ref": ref,
+            "sha": sha,
+        }
+        self.items.append(job)
+        return job
 
 
 class HttpIntakeClient:
@@ -132,26 +146,73 @@ def _partner_for(job):
     return None
 
 
-def _process(client, items, now):
+def _handle_git_push(job, now):
+    from django.core.exceptions import ValidationError
+
+    from core.audit import audit
+    from deploys.poller import enqueue_git_push
+
+    git_url = job.get("git_url") or ""
+    ref = job.get("ref") or ""
+    sha = job.get("sha") or ""
+    try:
+        enqueue_git_push(git_url, ref, sha, now=now)
+    except ValidationError as exc:
+        code = ""
+        if getattr(exc, "error_list", None):
+            code = getattr(exc.error_list[0], "code", "") or ""
+        audit("git-url-blocked", source="celery", code=code or "invalid")
+        return 0
+    return 1
+
+
+def _handle_partner_job(job, now):
     from core.partner_verify import ReplayRejected, SignatureRejected, reverify
 
+    partner = _partner_for(job)
+    if partner is None:
+        return 0
+    try:
+        reverify(
+            partner,
+            job.get("method") or "POST",
+            job.get("path") or "",
+            job.get("body") or b"",
+            job.get("headers") or {},
+            now=now,
+        )
+    except (ReplayRejected, SignatureRejected):
+        return 0
+    return 1
+
+
+def _refuse_unknown(job):
+    from core.audit import audit
+
+    audit(
+        "outbox-type-refused",
+        source="celery",
+        severity="warning",
+        type=str(job.get("type") or ""),
+        job_id=str(job.get("id") or ""),
+    )
+
+
+def _handle_job(job, now):
+    job_type = job.get("type") or ""
+    if job_type == TYPE_GIT_PUSH:
+        return _handle_git_push(job, now)
+    if job_type and job_type != TYPE_PARTNER_JOB:
+        _refuse_unknown(job)
+        return 0
+    return _handle_partner_job(job, now)
+
+
+def _process(client, items, now):
     n = 0
     for job in items:
         job_id = job.get("id")
-        try:
-            partner = _partner_for(job)
-            if partner is not None:
-                reverify(
-                    partner,
-                    job.get("method") or "POST",
-                    job.get("path") or "",
-                    job.get("body") or b"",
-                    job.get("headers") or {},
-                    now=now,
-                )
-                n += 1
-        except (ReplayRejected, SignatureRejected):
-            pass
+        n += int(bool(_handle_job(job, now)))
         if job_id is not None and client is not None:
             ack = getattr(client, "ack", None)
             if callable(ack):
