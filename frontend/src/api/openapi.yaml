@@ -167,6 +167,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/CloudflareConnectResult'
           description: ''
+  /api/v1/dns-accounts/{account_id}/origin-ca-plant/:
+    post:
+      operationId: v1_dns_accounts_origin_ca_plant_create
+      parameters:
+      - in: path
+        name: account_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OriginCaPlantResult'
+          description: ''
   /api/v1/findings/:
     get:
       operationId: v1_findings_retrieve
@@ -294,6 +326,9 @@ paths:
         can answer honestly: does the latest manifest correspond to the CURRENT scan?
         (A true warnings-diff-since-last-manifest would need the prior report stored,
         which it isn't — noted in the F7 design decision rather than faked.)
+
+        POST creates Project + Site in one transaction and binds dns_zone /
+        primary_target from the eligible fleet (I-purpose / I-target).
       tags:
       - v1
       security:
@@ -306,6 +341,42 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProjectSummary'
+          description: ''
+    post:
+      operationId: v1_projects_create
+      description: |-
+        What the readiness screen renders its left column from (F7-lite).
+
+        tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+        projects grow. manifest_current answers the one freshness question the data model
+        can answer honestly: does the latest manifest correspond to the CURRENT scan?
+        (A true warnings-diff-since-last-manifest would need the prior report stored,
+        which it isn't — noted in the F7 design decision rather than faked.)
+
+        POST creates Project + Site in one transaction and binds dns_zone /
+        primary_target from the eligible fleet (I-purpose / I-target).
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSummary'
           description: ''
   /api/v1/projects/{project_id}/readiness/:
     get:
@@ -694,6 +765,14 @@ components:
           description: name -> value. Values are write-only and stored in the vault.
       required:
       - env
+    ExposureEnum:
+      enum:
+      - public
+      - mesh_only
+      type: string
+      description: |-
+        * `public` - Public
+        * `mesh_only` - Mesh Only
     Finding:
       type: object
       properties:
@@ -865,6 +944,22 @@ components:
         confirm_warnings:
           type: boolean
           default: false
+    OriginCaPlant:
+      type: object
+      properties:
+        path:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - path
+    OriginCaPlantResult:
+      type: object
+      properties:
+        planted:
+          type: boolean
+      required:
+      - planted
     PatchedAnswers:
       type: object
       properties:
@@ -892,6 +987,40 @@ components:
       description: |-
         * `public` - public
         * `mesh` - mesh
+    ProjectCreate:
+      type: object
+      description: POST /api/v1/projects/ — Project + Site in one transaction (I-target).
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        git_url:
+          type: string
+          default: ''
+        git_ref:
+          type: string
+          default: main
+        local_path:
+          type: string
+          default: ''
+        domain:
+          type: string
+          default: ''
+        exposure:
+          allOf:
+          - $ref: '#/components/schemas/ExposureEnum'
+          default: public
+        proxied:
+          type: boolean
+          default: true
+        dns_zone:
+          type: integer
+          nullable: true
+        primary_target:
+          type: integer
+          nullable: true
+      required:
+      - name
     ProjectSummary:
       type: object
       properties:

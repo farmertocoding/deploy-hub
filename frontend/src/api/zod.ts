@@ -38,6 +38,8 @@ const DnsZoneConnected = z
 const CloudflareConnectResult = z
   .object({ account: DnsAccountConnected, zone: DnsZoneConnected })
   .passthrough();
+const OriginCaPlant = z.object({ path: z.string().min(1) }).passthrough();
+const OriginCaPlantResult = z.object({ planted: z.boolean() }).passthrough();
 const SeverityEnum = z.enum(["p1", "p2", "p3"]);
 const StateEnum = z.enum(["open", "acked", "resolved", "accepted"]);
 const Finding = z
@@ -110,6 +112,20 @@ const ProjectSummary = z
     scanned_at: z.string().datetime({ offset: true }).nullable(),
     tiers: z.record(z.number().int()),
     sites: z.array(SiteSummary),
+  })
+  .passthrough();
+const ExposureEnum = z.enum(["public", "mesh_only"]);
+const ProjectCreate = z
+  .object({
+    name: z.string().max(128),
+    git_url: z.string().optional().default(""),
+    git_ref: z.string().optional().default("main"),
+    local_path: z.string().optional().default(""),
+    domain: z.string().optional().default(""),
+    exposure: ExposureEnum.optional().default("public"),
+    proxied: z.boolean().optional().default(true),
+    dns_zone: z.number().int().nullish(),
+    primary_target: z.number().int().nullish(),
   })
   .passthrough();
 const Readiness = z
@@ -185,6 +201,8 @@ export const schemas = {
   PurposeEnum,
   DnsZoneConnected,
   CloudflareConnectResult,
+  OriginCaPlant,
+  OriginCaPlantResult,
   SeverityEnum,
   StateEnum,
   Finding,
@@ -201,6 +219,8 @@ export const schemas = {
   CertRefusal,
   SiteSummary,
   ProjectSummary,
+  ExposureEnum,
+  ProjectCreate,
   Readiness,
   EnvNames,
   EnvApply,
