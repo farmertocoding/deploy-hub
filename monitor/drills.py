@@ -13,6 +13,7 @@ _MAX_HUB_DOWN_S = 86400
 _TERMINAL = (CheckRun.Status.SUCCEEDED, CheckRun.Status.FAILED)
 _RESTORE_STUB_REASON = "Phase 2.5 body deferred"
 _NO_ELIGIBLE_SITE = "no eligible site"
+_HUB_NOT_STOPPED = "hub-not-stopped"
 _DEFAULT_PROBER = object()
 
 DRILL_PERIODS = {
@@ -147,6 +148,45 @@ def _skip_no_eligible_site(duration_s):
     )
 
 
+def _noop_hub():
+    """Default stop/start: no-op. Identity is how we detect an unstopped Hub."""
+    return None
+
+
+def _is_default_hub_stopper(stop_hub):
+    return stop_hub is None or stop_hub is _noop_hub
+
+
+def _fail_hub_not_stopped(duration_s):
+    from monitor.alerts import raise_alert
+
+    raise_alert(
+        "drill-missed",
+        "check:hub_down",
+        fingerprint="drill-missed:hub_down:hub-not-stopped",
+        source_engine="monitor.drills",
+        title="Hub-down drill did not stop Hub workers",
+        body=(
+            "Default stop_hub is a no-op. SUCCEEDED would mean the site "
+            "answered while Hub-side workers were down; a no-op stop is "
+            "not that."
+        ),
+        fix_action=(
+            "Inject a real stop_hub/start_hub that takes Hub-side workers "
+            "down for the probe window."
+        ),
+    )
+    return record_run(
+        CheckRun.Kind.HUB_DOWN,
+        CheckRun.Status.FAILED,
+        {
+            "schema_version": RESULTS_SCHEMA_VERSION,
+            "duration_s": duration_s,
+            "reason": _HUB_NOT_STOPPED,
+        },
+    )
+
+
 def run_hub_down_drill(
     *,
     duration_s=60,
@@ -167,8 +207,8 @@ def run_hub_down_drill(
                 "site_prober is required when a live site exists"
             )
         return _skip_no_eligible_site(duration_s)
-    stop = stop_hub or (lambda: None)
-    start = start_hub or (lambda: None)
+    stop = stop_hub if stop_hub is not None else _noop_hub
+    start = start_hub if start_hub is not None else _noop_hub
     stop()
     try:
         serving = bool(site_prober())
@@ -176,6 +216,8 @@ def run_hub_down_drill(
         serving = False
     finally:
         start()
+    if _is_default_hub_stopper(stop_hub):
+        return _fail_hub_not_stopped(duration_s)
     return record_run(
         CheckRun.Kind.HUB_DOWN,
         CheckRun.Status.SUCCEEDED if serving else CheckRun.Status.FAILED,

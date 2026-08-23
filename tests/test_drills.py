@@ -251,17 +251,11 @@ def test_beat_reaper_skips_when_not_test_plane():
     assert result["status"] == CheckRun.Status.SKIPPED
 
 
-@pytest.mark.req("REL-P2-DRILL-STUB")
-@pytest.mark.req("HARNESS-DRILLS-BEAT")
-def test_hub_down_uses_a_real_external_prober_by_default(monkeypatch):
-    """Default hub-down prober is an external HTTP GET of a live site.
-
-    What would make this fail: calling a Hub-internal URL, skipping the
-    GET when a READY site exists, or requiring the caller to inject a prober.
-    """
+def _live_site_2xx_prober(monkeypatch, domain="blog.example.com"):
+    """Plant a READY site and stub the external GET as 2xx. Returns (site, calls)."""
     from uptime_fixtures import make_site
 
-    site = make_site("blog", domain="blog.example.com")
+    site = make_site("blog", domain=domain)
     calls = []
 
     class _Resp:
@@ -284,6 +278,21 @@ def test_hub_down_uses_a_real_external_prober_by_default(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr("monitor.uptime.urlopen", fake_urlopen)
+    return site, calls
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+@pytest.mark.req("HARNESS-DRILLS-BEAT")
+def test_hub_down_uses_a_real_external_prober_by_default(monkeypatch):
+    """Default no-op stop + 2xx GET is not SUCCEEDED; the GET still happens.
+
+    What would make this fail: writing SUCCEEDED when stop_hub is the
+    default no-op, skipping the GET when a READY site exists, omitting
+    hub-not-stopped, or staying silent (no Finding).
+    """
+    from core.models import Finding
+
+    site, calls = _live_site_2xx_prober(monkeypatch)
 
     run = run_hub_down_drill(duration_s=60)
 
@@ -294,7 +303,41 @@ def test_hub_down_uses_a_real_external_prober_by_default(monkeypatch):
     assert "127.0.0.1" not in calls[0]["url"]
     stored = CheckRun.objects.get(pk=run.pk)
     assert stored.kind == CheckRun.Kind.HUB_DOWN
+    assert stored.status != CheckRun.Status.SUCCEEDED
+    assert stored.status in (CheckRun.Status.FAILED, CheckRun.Status.SKIPPED)
+    assert "hub-not-stopped" in stored.results["reason"]
+    row = Finding.objects.get(fingerprint="drill-missed:hub_down:hub-not-stopped")
+    assert row.severity == Finding.Severity.P2
+
+
+@pytest.mark.req("REL-P2-DRILL-STUB")
+@pytest.mark.req("HARNESS-DRILLS-BEAT")
+def test_hub_down_injected_stopper_and_2xx_is_succeeded(monkeypatch):
+    """Injected stop/start + live 2xx is SUCCEEDED from the prober.
+
+    What would make this fail: treating an injected stopper as the default
+    no-op, or skipping the GET when stop_hub is provided.
+    """
+    from core.models import Finding
+
+    site, calls = _live_site_2xx_prober(monkeypatch)
+    events = []
+
+    run = run_hub_down_drill(
+        duration_s=60,
+        stop_hub=lambda: events.append("stop"),
+        start_hub=lambda: events.append("start"),
+    )
+
+    assert calls, "injected-stop path must still issue an HTTP GET"
+    assert calls[0]["url"] == f"https://{site.domain}/healthz"
+    assert events == ["stop", "start"]
+    stored = CheckRun.objects.get(pk=run.pk)
     assert stored.status == CheckRun.Status.SUCCEEDED
+    assert "hub-not-stopped" not in stored.results.get("reason", "")
+    assert not Finding.objects.filter(
+        fingerprint="drill-missed:hub_down:hub-not-stopped"
+    ).exists()
 
 
 @pytest.mark.req("REL-P2-DRILL-STUB")
