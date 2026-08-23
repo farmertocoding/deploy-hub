@@ -2008,9 +2008,10 @@ def test_p5_aws_demo_names_phase_5_md():
     """P5-AWS-DEMO is verify: demo naming conformance/demos/phase-5.md.
 
     What would make this fail: a missing demo: key (fallback would still
-    look at phase-5.md, but the registry would not name the record), or
-    pointing at phase-4.md. Do not create the file in Task 0 — missing
-    is uncovered; a non-empty stub would verify.
+    look at phase-5.md, but the registry would not name the record),
+    pointing at phase-4.md, or a missing / whitespace-only record.
+    Task 0 forbade creating the file so a stub could not verify; Task 11
+    landed the honest T1 record, so the pin is now exists-and-non-empty.
     """
     reg = _live_registry()
     assert "P5-AWS-DEMO" in reg, "P5-AWS-DEMO is not in the registry"
@@ -2022,9 +2023,13 @@ def test_p5_aws_demo_names_phase_5_md():
     assert demo_paths and "conformance/demos/phase-5.md" in demo_paths, (
         f"P5-AWS-DEMO must name conformance/demos/phase-5.md: "
         f"{demo.get('demo')}")
-    assert not (REPO / "conformance" / "demos" / "phase-5.md").exists(), (
-        "Task 0 must not stub conformance/demos/phase-5.md "
-        "(a non-empty stub would verify P5-AWS-DEMO)")
+    path = REPO / "conformance" / "demos" / "phase-5.md"
+    assert path.is_file(), (
+        "conformance/demos/phase-5.md must exist — P5-AWS-DEMO is verify: demo"
+    )
+    assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
+        "a whitespace-only demo is not a record"
+    )
 
 
 def test_valid_tiers_still_t1_t2_t3_only():
