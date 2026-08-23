@@ -282,3 +282,84 @@ def test_conformance_5_is_not_a_nightly_gates_prereq():
         f"nightly-gates must not run conformance-5: {prereqs}")
     assert "conformance-3" in prereqs, (
         f"nightly-gates must still run conformance-3: {prereqs}")
+
+
+def test_review_round_conformance_is_still_phase_5_minus_live_tiers():
+    """Everyday review-round conformance stays phase 5 (D-080). `--phase 5.5`
+    must not land in the `conformance` recipe so U1 cannot hostage T1 merges.
+
+    What would make this fail: rewriting `conformance` to `--phase 5.5`
+    (r1 named that pin; it must not land).
+    """
+    recipe = gates.recipe(REPO, "conformance")
+    assert recipe, "Makefile has no `conformance` recipe"
+    assert "--phase 5.5" not in recipe, (
+        f"conformance must stay phase 5, not 5.5 (D-080):\n{recipe}")
+    assert re.search(r"--phase[ \t]+5(?:[ \t]|$)", recipe), recipe
+    assert "--exclude-tier t2" in recipe, recipe
+    assert "--exclude-tier t3" in recipe, recipe
+    prereqs = gates.review_round_prerequisites(REPO)
+    assert "conformance" in prereqs
+    assert "conformance-5.5" not in prereqs, (
+        f"review-round must not run conformance-5.5: {prereqs}")
+
+
+def test_conformance_5_5_target_exists():
+    """What would make this fail: no `conformance-5.5` target, or leaving it
+    off `.PHONY` so a same-named file could skip the recipe.
+    """
+    targets = gates.makefile_targets(REPO)
+    assert "conformance-5.5" in targets, (
+        "Makefile must declare conformance-5.5 as the phase-5.5 gate")
+    phony = gates.phony_targets(REPO)
+    assert "conformance-5.5" in phony, "conformance-5.5 must be .PHONY"
+
+
+def test_conformance_5_5_is_phase_5_5_minus_live_tiers():
+    """conformance-5.5 is the phase-5.5 gate: --phase 5.5 minus t2/t3.
+
+    What would make this fail: an all-tiers 5.5 recipe, or still grading
+    phase 5 (U1 would never become due).
+    """
+    recipe = gates.recipe(REPO, "conformance-5.5")
+    assert recipe, "Makefile has no `conformance-5.5` recipe"
+    assert "--phase 5.5" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-5.5 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-5.5 must omit t3 (no Multipass on the T1 host):\n{recipe}")
+
+
+def test_conformance_5_5_is_not_a_review_round_or_nightly_prereq():
+    """conformance-5.5 is the Phase 5.5 exit gate, not a review-round or
+    nightly-gates prereq (D-080). U1 due there cannot hostage T1 merges.
+
+    What would make this fail: adding conformance-5.5 to review-round or
+    nightly-gates.
+    """
+    rr = gates.review_round_prerequisites(REPO)
+    assert "conformance-5.5" not in rr, (
+        f"review-round must not run conformance-5.5: {rr}")
+    assert "conformance" in rr, (
+        f"review-round must still run everyday conformance: {rr}")
+    nightly = _target_prereqs("nightly-gates")
+    assert "conformance-5.5" not in nightly, (
+        f"nightly-gates must not run conformance-5.5: {nightly}")
+    assert "conformance-3" in nightly, (
+        f"nightly-gates must still run conformance-3: {nightly}")
+
+
+def test_conformance_5_still_phase_5_minus_live_tiers():
+    """conformance-5 stays phase 5 minus live after conformance-5.5 lands.
+
+    What would make this fail: folding conformance-5 into phase 5.5, or
+    dropping its t2/t3 excludes.
+    """
+    recipe = gates.recipe(REPO, "conformance-5")
+    assert recipe, "Makefile has no `conformance-5` recipe"
+    assert "--phase 5.5" not in recipe, recipe
+    assert re.search(r"--phase[ \t]+5(?:[ \t]|$)", recipe), recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-5 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-5 must omit t3 (no Multipass on the T1 host):\n{recipe}")
