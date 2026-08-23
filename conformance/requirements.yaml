@@ -588,8 +588,9 @@ requirements:
     text_hash: sha256:7642fa533c38cfb1a25c13ebf7fe29fa46e7ac62b0edc4f1bb7fd452ca4bcc4e
     text: Every screen renders empty/loading/live/error/degraded states in simulation mode, including warming and data-stale badges.
 
-  # — Partner surface (Phase 5.5). Task 0 bumps these off the Phase 5 due
-  # set (D-065). text: / text_hash: untouched; do not implement §K.
+  # — Partner surface (Phase 5.5). Stay phase 5.5; due at conformance-5.5
+  # (D-075 / D-080), not on everyday conformance. text: / text_hash:
+  # untouched from 4f30c7a. Do not waive.
   - id: PART-K1-ZERO-INBOUND-HUB
     phase: 5.5
     verify: test
@@ -1184,3 +1185,131 @@ requirements:
     text_hash: sha256:478c38fcb51bb648f0a469458726d438b084f2bda51c420fe324734f3d33abe9
     text: >
       demo record names the MUST path in design note §4; no live AWS, no SSH-CA enablement, no DNS-01.
+
+  # ── Phase 5.5 (docs/phase-5.5-design-note.md §3, Task 0 / D-075…D-085).
+  # PART-K* stay 5.5 above (text:/text_hash: untouched). New MUST ids are
+  # tier-less (no `tier:` key). Q9 T2/T3 carry `tier:` so exclude-tier
+  # drops them. New ids sit `uncovered` until later tasks land proofs.
+  # P55-PARTNER-DEMO names conformance/demos/phase-5.5.md;
+  # PART-U1-NAMED-PARTNER names conformance/demos/named-partner.md; do
+  # not stub those files here (missing is uncovered; a non-empty stub
+  # would verify). Do not hang full-text §K3/K4/K5/K7 (live CF-for-SaaS,
+  # HMAC enablement, MCP, paid edge) on any T1 test.
+  - id: PART-INTAKE-PROCESS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      `intake/**` is a separate process, not `INSTALLED_APPS`; credential-free import wall (no vault/core/deploys/Celery/cloud SDKs); public listener is the six K3 routes only; outbox is mesh-only; Hub product code does not import `intake`.
+  - id: PART-K3-ENDPOINTS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      six K3 endpoints live on the intake under `/partner/v1/…`; Hub urlpatterns contain neither `/api/partner` nor `/mcp`.
+  - id: PART-HUB-POLL
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      Beat polls the outbox every 10 s on `probes`; `intake_client_for` is fail-closed; empty `INTAKE_URL` is SKIPPED/no-op and does not insert a CheckRun every 10 s; N=3 failures file `hub-outbox-poll-failing`; unreachable >5 min files `partner-intake-unreachable`.
+  - id: PART-Q9-SHARED-VECTORS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      one shared signature-vector file drives valid/expired/replayed/mutated-body plus idempotency and quota cases against both the intake verifier and the Hub re-verifier; Hub refuse wins on quota-exceeded.
+  - id: PART-ISOLATION
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      isolation is `Partner` + `PartnerSite` + dedicated destination Targets; no `Site.tier`; no `Site.partner_id`; no `Target.tier`; Hub host and non-partner co-host refuse; partner overflow refuses.
+  - id: PART-TEMPLATES
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      v1 deploys one digest-pinned fixture template image only; partner Dockerfile, build step, git-as-source, and unconstrained image refuse.
+  - id: PART-WEBHOOKS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      Standard Webhooks exact; Hub egress only through `validate_webhook_url`; re-resolve at every delivery (no git clone-TOCTOU exception); T1 fake sink; `whsec_` vaulted Hub-side, never on intake, never in AuditEvent.detail.
+  - id: PART-CUSTOM-HOSTNAME
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      Fake CustomHostname TXT-before-serve as a capability on the object `dns_provider_for` returns; helpers do not construct a Cloudflare client; unverified hostname is never served; no new ACME or DNS-01.
+  - id: PART-KILL-SWITCH
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      `partner.create`/`partner.suspend`/`partner.api_kill_switch` are T1; `partner.site_takedown` is T2; enable is T1 not a toggle; global flag default OFF; Fake Transport stop+detach+revoke; reaper plants orphaned partner sites.
+  - id: PART-M2-GIT-WEBHOOK
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      git-webhook is a second outbox type on the same Hub poller, Fake-planted, not a public intake or Hub route; no webhook secret on intake; Hub re-validates via `validate_git_url`.
+  - id: PART-U2-QUOTAS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      Hub enforces `max_sites=5`, `deploys_per_day=50`, `domains=5`, fleet cap 12; intake copies are edge-only; unbounded max_sites is out.
+  - id: UX-P55-PARTNERS
+    phase: 5.5
+    verify: test
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      Settings Partners tab after AWS is Create partner not Connect; POST 201 returns `hubk_*` + `whsec_` once (Enroll once-panel) and GET never; Fake / empty `INTAKE_URL` / post-create never Connected; destination-order T2 honesty on the tab (K5 abuse/IP-reputation sentence once for own-server); kill-switch overlays (enable is T1 not a toggle; suspend names stop/detach/revoke; takedown T2 on site detail); F8 partner-intake-empty/error/degraded plus kill/rank overlays and PartnerSite seed (never `Site.tier=partner`); Sites All/Mine/Partner + partner badge (symbol + words); hide adopt and job-create on partner site detail; copy never says instance except `single-instance` and never 99.9% SLA; NAV stays six.
+  - id: P55-PARTNER-DEMO
+    phase: 5.5
+    verify: demo
+    source: phase-5.5-design-note.md §3
+    demo:
+      - conformance/demos/phase-5.5.md
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      demo record names the MUST path in design note §4; no named partner, no live intake, no HMAC enablement, no MCP.
+  - id: PART-U1-NAMED-PARTNER
+    phase: 5.5
+    verify: demo
+    source: phase-5.5-design-note.md §3
+    demo:
+      - conformance/demos/named-partner.md
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      a named committed partner exists as a Joseph-filled artifact; missing file is uncovered; T1 fixture slugs are not this proof.
+  - id: PART-Q9-T2-CONTAINER
+    phase: 5.5
+    verify: test
+    tier: t2
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      intake container + Hub poller: signed job becomes a Deployment; tamper audits; replay rejected at Hub even when forwarded.
+  - id: PART-Q9-T3-LIVE-PATH
+    phase: 5.5
+    verify: test
+    tier: t3
+    source: phase-5.5-design-note.md §3
+    text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
+    text: >
+      nightly live partner-path (named partner + test-zone template deploy + live webhook + live kill switch) runs only behind the existing test-plane wall; absent config is skipped-only.

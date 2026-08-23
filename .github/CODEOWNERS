@@ -52,3 +52,11 @@
 /monitor/cloud_reaper.py @farmertocoding
 /provision/aws_enroll.py @farmertocoding
 /core/aws_views.py @farmertocoding
+/monitor/intake_poll.py @farmertocoding
+/core/partner_webhooks.py @farmertocoding
+/providers/custom_hostname.py @farmertocoding
+/core/partner_views.py @farmertocoding
+/monitor/partner_reaper.py @farmertocoding
+/core/partner_verify.py @farmertocoding
+/core/partner_templates.py @farmertocoding
+/core/partner_jobs.py @farmertocoding

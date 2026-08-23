@@ -105,3 +105,16 @@ sensitive:
   - monitor/cloud_reaper.py
   - provision/aws_enroll.py
   - core/aws_views.py
+  # Phase 5.5 (Task 0): the custody set the phase's tasks will land code
+  # into, claimed before the first line of code. intake/** already
+  # listed. providers/** already listed; custom_hostname.py is named
+  # anyway. Do not fold Partners create into unclaimed core/zone_views.py.
+  # Do not broaden to deploys/** or frontend/** wholesale (D-075 / C12).
+  - monitor/intake_poll.py
+  - core/partner_webhooks.py
+  - providers/custom_hostname.py
+  - core/partner_views.py
+  - monitor/partner_reaper.py
+  - core/partner_verify.py
+  - core/partner_templates.py
+  - core/partner_jobs.py

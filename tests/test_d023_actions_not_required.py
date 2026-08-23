@@ -23,10 +23,12 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
     """What would make this fail: no `conformance-3` target, or review-round
     demanding it (which would pull Multipass into the T1 Cloud Agent).
 
-    `conformance` is `--phase 5 --exclude-tier t2 --exclude-tier t3` (D-071).
-    `conformance-4` stays `--phase 4 --exclude-tier t2 --exclude-tier t3`.
-    `conformance-3` stays all-tiers `--phase 3` with no `--exclude-tier`.
-    Does not assert any GitHub Check is green — D-023 forbids that gate.
+    `conformance` is `--phase 5 --exclude-tier t2 --exclude-tier t3` (D-071 /
+    D-080). `conformance-5.5` is `--phase 5.5 --exclude-tier t2 --exclude-tier
+    t3` and is not a review-round prereq. `conformance-4` stays `--phase 4
+    --exclude-tier t2 --exclude-tier t3`. `conformance-3` stays all-tiers
+    `--phase 3` with no `--exclude-tier`. Does not assert any GitHub Check
+    is green — D-023 forbids that gate.
     """
     targets = gates.makefile_targets(REPO)
     assert "conformance-3" in targets, (
@@ -46,6 +48,10 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
     t1_gate = _recipe("conformance")
     assert t1_gate is not None, "conformance has no recipe"
     assert "--phase 5" in t1_gate, t1_gate
+    assert "--phase 5.5" not in t1_gate, (
+        f"review-round conformance must stay phase 5, not 5.5 (D-080):\n"
+        f"{t1_gate}"
+    )
     assert "--phase 4" not in t1_gate, (
         f"review-round conformance still grades phase 4 — the phase-5 gate "
         f"never arms:\n{t1_gate}"
@@ -63,6 +69,17 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
         f"{t1_gate}"
     )
 
+    phase55 = _recipe("conformance-5.5")
+    assert phase55 is not None, "conformance-5.5 has no recipe"
+    assert "--phase 5.5" in phase55, phase55
+    assert "--exclude-tier t2" in phase55, (
+        f"conformance-5.5 must omit t2 so it does not demand docker:\n{phase55}"
+    )
+    assert "--exclude-tier t3" in phase55, (
+        f"conformance-5.5 must omit t3 so it does not demand Multipass:\n"
+        f"{phase55}"
+    )
+
     phase4 = _recipe("conformance-4")
     assert phase4 is not None, "conformance-4 has no recipe"
     assert "--phase 4" in phase4, phase4
@@ -73,4 +90,8 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
     assert "conformance" in prereqs
     assert "conformance-3" not in prereqs, (
         "review-round must not require conformance-3 (D-022 / D-023)"
+    )
+    assert "conformance-5.5" not in prereqs, (
+        "review-round must not require conformance-5.5 (D-080; U1 cannot "
+        "hostage T1 merges)"
     )

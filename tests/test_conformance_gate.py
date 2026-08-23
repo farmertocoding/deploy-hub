@@ -2068,3 +2068,315 @@ def test_no_all_tiers_5_target():
         assert "--exclude-tier t3" in recipe, (
             f"{name} grades phase 5 without omitting t3 (no all-tiers 5):\n"
             f"{recipe}")
+
+
+# ── Phase 5.5 Task 0: due set, PART-K stay 5.5, tier-less MUST, Q9 t2/t3 ──
+
+PHASE_5_5_MUST_IDS = {
+    "PART-INTAKE-PROCESS",
+    "PART-K3-ENDPOINTS",
+    "PART-HUB-POLL",
+    "PART-Q9-SHARED-VECTORS",
+    "PART-ISOLATION",
+    "PART-TEMPLATES",
+    "PART-WEBHOOKS",
+    "PART-CUSTOM-HOSTNAME",
+    "PART-KILL-SWITCH",
+    "PART-M2-GIT-WEBHOOK",
+    "PART-U2-QUOTAS",
+    "UX-P55-PARTNERS",
+    "P55-PARTNER-DEMO",
+    "PART-U1-NAMED-PARTNER",
+}
+PHASE_5_5_TEST_IDS = PHASE_5_5_MUST_IDS - {
+    "P55-PARTNER-DEMO", "PART-U1-NAMED-PARTNER",
+}
+
+# Frozen at master @ 4f30c7a (Phase 5 MUST). Task 0 must not rewrite these.
+PART_K_FROZEN_AT_4F30C7A = {
+    "PART-K1-ZERO-INBOUND-HUB": {
+        "text_hash": (
+            "sha256:3a396c002b618aedf5a09494a991c8404768cc384172dd01787d375eb3267d7d"
+        ),
+        "text": (
+            "The Hub has zero inbound internet paths; the credential-free "
+            "intake is polled by the Hub over the mesh."
+        ),
+    },
+    "PART-K2-REPLAY-AT-HUB": {
+        "text_hash": (
+            "sha256:3063db77a287c37b9bbcac75d6d9d59532c128648430e958efd7d2e1a1e61169"
+        ),
+        "text": (
+            "The Hub owns the authoritative replay defense; a replayed signed "
+            "request is rejected at the Hub even when the intake forwards it."
+        ),
+    },
+    "PART-K6-NO-INTERNAL-ACTIONS": {
+        "text_hash": (
+            "sha256:37f2da3efce2250149de640ee12fdddbafad73c771f7482ad2fd91624867b3b5"
+        ),
+        "text": (
+            "The partner router maps to no internal T1/T2 action; a standing "
+            "test fails if a refactor widens it."
+        ),
+    },
+}
+
+
+def test_phase_5_5_due_set_includes_all_section_3_must_ids(tmp_path):
+    """Every design-note §3 MUST id exists at phase 5.5 with no tier key, and
+    check.py grades a phase-5.5 req as due at `--phase 5.5`.
+
+    What would make this fail: a missing/rephased id, a `tier:` on a MUST
+    id so exclude-tier drops it, P55-PARTNER-DEMO not naming
+    conformance/demos/phase-5.5.md, PART-U1-NAMED-PARTNER not naming
+    named-partner.md, or argparse/schema refusing 5.5.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_5_5_MUST_IDS - set(reg))
+    assert missing == [], f"phase-5.5 §3 MUST ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_5_5_MUST_IDS if reg[rid]["phase"] != 5.5)
+    assert wrong_phase == [], (
+        f"phase-5.5 §3 MUST ids not registered at phase 5.5: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+    tagged = sorted(rid for rid in PHASE_5_5_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"§3 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+    for rid in sorted(PHASE_5_5_TEST_IDS):
+        assert reg[rid]["verify"] == "test", (
+            f"{rid} must be verify: test, got {reg[rid]['verify']}")
+
+    demo = reg["P55-PARTNER-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.5.md" in demo_paths, (
+        f"P55-PARTNER-DEMO must name conformance/demos/phase-5.5.md: "
+        f"{demo.get('demo')}")
+
+    u1 = reg["PART-U1-NAMED-PARTNER"]
+    assert u1["verify"] == "demo"
+    u1_paths = u1.get("demo")
+    if isinstance(u1_paths, str):
+        u1_paths = [u1_paths]
+    assert u1_paths and "conformance/demos/named-partner.md" in u1_paths, (
+        f"PART-U1-NAMED-PARTNER must name conformance/demos/named-partner.md: "
+        f"{u1.get('demo')}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P55-DUE", phase=5.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P55-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    yaml_text = (root / "conformance" / "requirements.yaml").read_text()
+    assert re.search(r"^    phase: 5\.5\s*$", yaml_text, re.M), (
+        f"write_repo must emit YAML float 5.5 as a number:\n{yaml_text}")
+    res = run_check(root, phase=5.5)
+    assert res.returncode == 0, (
+        f"--phase 5.5 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 5.5
+    assert header["requirements"]["FIX-P55-DUE"]["due"] is True
+    assert status_of(root, "FIX-P55-DUE") == "verified"
+
+
+def test_part_k_ids_stay_phase_5_5_and_are_due_at_phase_5_5(tmp_path):
+    """PART-K1 / K2 / K6 stay 5.5 and become due at `--phase 5.5`.
+
+    What would make this fail: bumping them off 5.5, leaving them due at
+    --phase 5, or check.py not grading a 5.5 req as due at --phase 5.5.
+    """
+    reg = _live_registry()
+    for rid in sorted(PART_K_IDS):
+        assert rid in reg, f"{rid} is not in the registry"
+        assert reg[rid]["phase"] == 5.5, (
+            f"{rid} must stay registered at phase 5.5, got {reg[rid]['phase']}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P5-DUE", phase=5), _req("FIX-P55-PART", phase=5.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P5-DUE", name="test_a")
+                   + "\n\n"
+                   + MARKED_TEST.format(rid="FIX-P55-PART", name="test_b")},
+        outcomes={
+            "tests/test_fixture.py::test_a": "passed",
+            "tests/test_fixture.py::test_b": "passed",
+        },
+    )
+    res5 = run_check(root, phase=5)
+    assert res5.returncode == 0, (
+        f"an uncovered phase-5.5 PART-K req failed the --phase 5 gate:\n"
+        f"{res5.stdout}")
+    assert matrix(root)["requirements"]["FIX-P55-PART"]["due"] is False
+    assert matrix(root)["requirements"]["FIX-P5-DUE"]["due"] is True
+
+    res55 = run_check(root, phase=5.5)
+    assert res55.returncode == 0, (
+        f"--phase 5.5 was rejected:\n{res55.stdout}{res55.stderr}")
+    assert matrix(root)["requirements"]["FIX-P55-PART"]["due"] is True
+    assert matrix(root)["requirements"]["FIX-P5-DUE"]["due"] is True
+
+
+def test_new_phase_5_5_must_ids_have_no_tier():
+    """New Phase 5.5 MUST ids are tier-less (no `tier:` key; D-080 / C10).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so
+    exclude-tier drops a MUST id, or an explicit `tier: t1` (absence is
+    the contract).
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_5_5_MUST_IDS - set(reg))
+    assert missing == [], f"phase-5.5 MUST ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_5_5_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-5.5 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+def test_part_q9_t2_is_tier_t2():
+    """PART-Q9-T2-CONTAINER is phase 5.5 with tier: t2 so exclude-tier drops it.
+
+    What would make this fail: omitting `tier:`, tagging t1/t3, or putting
+    this id on the MUST line so T1 Fake tests would have to mark it.
+    """
+    reg = _live_registry()
+    assert "PART-Q9-T2-CONTAINER" in reg, "PART-Q9-T2-CONTAINER is not in the registry"
+    req = reg["PART-Q9-T2-CONTAINER"]
+    assert req["phase"] == 5.5, req
+    assert req.get("tier") == "t2", req
+    assert req["verify"] == "test", req
+
+
+def test_part_q9_t3_is_tier_t3():
+    """PART-Q9-T3-LIVE-PATH is phase 5.5 with tier: t3 so exclude-tier drops it.
+
+    What would make this fail: omitting `tier:`, tagging t1/t2, or putting
+    this id on the MUST line so T1 Fake tests would have to mark it.
+    """
+    reg = _live_registry()
+    assert "PART-Q9-T3-LIVE-PATH" in reg, "PART-Q9-T3-LIVE-PATH is not in the registry"
+    req = reg["PART-Q9-T3-LIVE-PATH"]
+    assert req["phase"] == 5.5, req
+    assert req.get("tier") == "t3", req
+    assert req["verify"] == "test", req
+
+
+def test_p55_partner_demo_names_phase_5_5_md():
+    """P55-PARTNER-DEMO is verify: demo naming conformance/demos/phase-5.5.md.
+
+    What would make this fail: a missing demo: key, pointing at phase-5.md,
+    or a non-empty stub (Task 0 forbids creating the file).
+    """
+    reg = _live_registry()
+    assert "P55-PARTNER-DEMO" in reg, "P55-PARTNER-DEMO is not in the registry"
+    demo = reg["P55-PARTNER-DEMO"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.5.md" in demo_paths, (
+        f"P55-PARTNER-DEMO must name conformance/demos/phase-5.5.md: "
+        f"{demo.get('demo')}")
+    path = REPO / "conformance" / "demos" / "phase-5.5.md"
+    assert not path.exists(), (
+        "conformance/demos/phase-5.5.md must stay absent in Task 0 — "
+        "a non-empty stub would verify P55-PARTNER-DEMO"
+    )
+
+
+def test_part_u1_names_named_partner_md_and_file_is_absent():
+    """PART-U1-NAMED-PARTNER names named-partner.md and that file is absent.
+
+    What would make this fail: pointing at phase-5.5.md, inventing a
+    partner name in a stub, or waiving U1. Missing file = uncovered on
+    conformance-5.5, not on everyday conformance.
+    """
+    reg = _live_registry()
+    assert "PART-U1-NAMED-PARTNER" in reg, "PART-U1-NAMED-PARTNER is not in the registry"
+    demo = reg["PART-U1-NAMED-PARTNER"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/named-partner.md" in demo_paths, (
+        f"PART-U1-NAMED-PARTNER must name conformance/demos/named-partner.md: "
+        f"{demo.get('demo')}")
+    path = REPO / "conformance" / "demos" / "named-partner.md"
+    assert not path.exists(), (
+        "conformance/demos/named-partner.md must stay absent — a stub "
+        "would verify PART-U1-NAMED-PARTNER and invent a partner"
+    )
+
+
+def test_p5_aws_demo_still_phase_5():
+    """P5-AWS-DEMO stays phase 5 naming conformance/demos/phase-5.md.
+
+    What would make this fail: bumping it to 5.5 so everyday conformance
+    no longer grades the AWS demo, or retargeting the record.
+    """
+    reg = _live_registry()
+    assert "P5-AWS-DEMO" in reg, "P5-AWS-DEMO is not in the registry"
+    demo = reg["P5-AWS-DEMO"]
+    assert demo["phase"] == 5, demo
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.md" in demo_paths, (
+        f"P5-AWS-DEMO must still name conformance/demos/phase-5.md: "
+        f"{demo.get('demo')}")
+
+
+def test_no_all_tiers_5_5_target():
+    """No Makefile target grades --phase 5.5 without excluding live tiers.
+
+    What would make this fail: conformance-5.5-all-tiers, or any recipe
+    that is `--phase 5.5` without `--exclude-tier t2` and `t3` (D-080).
+    """
+    targets = gates.makefile_targets(REPO)
+    for forbidden in (
+        "conformance-5.5-all-tiers",
+        "conformance-5.5-all",
+        "all-tiers-5.5",
+        "conformance-all-tiers-5.5",
+    ):
+        assert forbidden not in targets, (
+            f"all-tiers 5.5 target {forbidden!r} must not exist (D-080)")
+    phase55 = re.compile(r"--phase[ \t]+5\.5(?:[ \t]|$)")
+    for name in sorted(targets):
+        recipe = gates.recipe(REPO, name)
+        if not recipe or not phase55.search(recipe):
+            continue
+        assert "--exclude-tier t2" in recipe, (
+            f"{name} grades phase 5.5 without omitting t2 (no all-tiers 5.5):\n"
+            f"{recipe}")
+        assert "--exclude-tier t3" in recipe, (
+            f"{name} grades phase 5.5 without omitting t3 (no all-tiers 5.5):\n"
+            f"{recipe}")
+
+
+def test_part_k_text_and_text_hash_untouched():
+    """PART-K text: / text_hash: stay the 4f30c7a freeze (D-075 / Task 0).
+
+    What would make this fail: rewriting the partner-router / replay /
+    inbound-hub sentences, or re-pinning the hashes.
+    """
+    reg = _live_registry()
+    for rid, frozen in PART_K_FROZEN_AT_4F30C7A.items():
+        assert rid in reg, f"{rid} is not in the registry"
+        assert reg[rid]["text_hash"] == frozen["text_hash"], (
+            f"{rid} text_hash changed from the 4f30c7a freeze: "
+            f"{reg[rid]['text_hash']}")
+        assert reg[rid]["text"] == frozen["text"], (
+            f"{rid} text: changed from the 4f30c7a freeze:\n"
+            f"  now: {reg[rid]['text']!r}\n"
+            f"  was: {frozen['text']!r}")
+        assert "tier" not in reg[rid]
