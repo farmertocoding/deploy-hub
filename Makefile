@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-3 conformance-3.5 review-round generate-client check-generated \
+	conformance conformance-3 conformance-3.5 conformance-4 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -152,11 +152,11 @@ scripts-lint:
 	shfmt -d -i 4 -ci $(SCRIPTS)
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
-# Review-round gate: phase 3 without live-only reqs — tier:t3 (Multipass)
+# Review-round gate: phase 4 without live-only reqs — tier:t3 (Multipass)
 # and tier:t2 (docker) both stay out so review-round grades the T1 report
-# honestly (D-024, D-029, panel F1). conformance-3 demands them all.
+# honestly (D-060). conformance-3 stays all-tiers Phase 3 (nightly).
 conformance:
-	python conformance/check.py --phase 3 --exclude-tier t3 --exclude-tier t2
+	python conformance/check.py --phase 4 --exclude-tier t2 --exclude-tier t3
 
 # All-tiers phase 3 gate. Not a review-round prerequisite (D-023). Replaces
 # conformance-2.5 (phase 2.5 closed; one all-tiers gate, not two).
@@ -164,10 +164,14 @@ conformance-3:
 	python conformance/check.py --phase 3
 
 # Phase 3b gate: phase 3.5 without live-only reqs. Not all-tiers. Leave
-# conformance / review-round as phase 3 minus live tiers, and conformance-3
-# as all-tiers Phase 3 (nightly).
+# conformance-3 as all-tiers Phase 3 (nightly).
 conformance-3.5:
 	python conformance/check.py --phase 3.5 --exclude-tier t2 --exclude-tier t3
+
+# Phase 4 gate: same recipe as `conformance`. Not all-tiers. Do not add an
+# all-tiers 4 target. Do not add t4 (D-060).
+conformance-4:
+	python conformance/check.py --phase 4 --exclude-tier t2 --exclude-tier t3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #
@@ -193,11 +197,11 @@ mutation:
 # $(PY_ROOTS) instead of the four packages that existed when it was written — it had
 # never looked at wizard/ or scanner/ (R4-12).
 #
-# NOT the gate for SEC-69-NO-SECRETS-IN-EXHAUST (round-5 F1). That requirement is about
-# exhaust after write — logs, Celery task args, API responses — and names a CI scrubber
-# over captured *test output*. This greps *source files* for an assignment literal, which
-# is materially less; the requirement is waived in WAIVERS.md until the real gate exists.
-# This target stays because a plaintext key committed to source is worth catching anyway.
+# NOT the gate for SEC-69-NO-SECRETS-IN-EXHAUST (round-5 F1 / Phase 4 Task 8).
+# That requirement is `verify: test` over captured pytest stdout/stderr/log and
+# Celery kwargs (tests/test_secrets_in_exhaust.py + scripts_dev/exhaust.py).
+# This greps *source files* for an assignment literal and stays as that
+# source-scan; a plaintext key committed to source is still worth catching.
 #
 # TWO EXEMPTIONS, both deliberate, both greppable:
 #   1. `settings`  — any path containing it. Settings modules read the key by name; that

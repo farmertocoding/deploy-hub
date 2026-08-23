@@ -18,7 +18,7 @@ from .validators import validate_git_url
 
 
 class AuditEvent(models.Model):
-    """Append-only audit trail (§D1). Off-host shipping lands in Phase 4 (§B3)."""
+    """Append-only audit trail (§D1). prev_hash chains locally; shipped_at is the off-host stamp."""
 
     class Source(models.TextChoices):
         UI = "ui"
@@ -44,6 +44,9 @@ class AuditEvent(models.Model):
     detail = models.JSONField(default=dict, blank=True)
     source_ip = models.GenericIPAddressField(null=True, blank=True)
     severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.INFO)
+    # Local hash chain (D-056). Genesis prev_hash=""; shipped_at is the off-host stamp.
+    prev_hash = models.CharField(max_length=64, blank=True, default="")
+    shipped_at = models.DateTimeField(null=True, blank=True)
     # Phase-5.5 early stub (§K9): becomes a real FK when the Partner model exists.
     partner_id_stub = models.IntegerField(null=True, blank=True)
 
@@ -151,6 +154,8 @@ class DnsZone(models.Model):
 
     account = models.ForeignKey(DnsAccount, on_delete=models.PROTECT,
                                 related_name="zones")
+    # Denormalized from account.provider so (provider, name) can be unique (D-056).
+    provider = models.CharField(max_length=32, blank=True, default="")
     name = models.CharField(max_length=253)
     provider_zone_id = models.CharField(max_length=64, blank=True, default="")
     # Default prod: rows fail-closed under HUB_TEST_MODE, like NetworkZone (§B9).
@@ -170,16 +175,21 @@ class DnsZone(models.Model):
             models.UniqueConstraint(
                 fields=["account", "name"], name="uniq_dnszone_account_name",
             ),
+            models.UniqueConstraint(
+                fields=["provider", "name"], name="uniq_dnszone_provider_name",
+            ),
         ]
 
-    @property
-    def provider(self):
-        return self.account.provider
+    def _copy_provider_from_account(self):
+        if self.account_id is None:
+            return
+        self.provider = self.account.provider
 
     def clean(self):
         """(provider, name) is unique THROUGH the account (D-033): two accounts
         of one provider must not both claim a zone name — dns_provider_for
         would have two candidate credentials for one identity."""
+        self._copy_provider_from_account()
         clash = (
             DnsZone.objects.filter(
                 name=self.name, account__provider=self.account.provider,
@@ -193,7 +203,16 @@ class DnsZone(models.Model):
                          "already exists under another account"}
             )
 
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
+        self._copy_provider_from_account()
+        super().full_clean(
+            exclude=exclude,
+            validate_unique=validate_unique,
+            validate_constraints=validate_constraints,
+        )
+
     def save(self, *args, **kwargs):
+        self._copy_provider_from_account()
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -497,6 +516,10 @@ class CheckRun(models.Model):
         CF_TOKEN_SCOPE = "cf_token_scope"  # nosec B105
         CERT_EXPIRY = "cert_expiry"
         ADOPT = "adopt"
+        SSH_ROTATE = "ssh_rotate"
+        BACKUP = "backup"
+        ATTACK_PLAYBOOK = "attack_playbook"
+        TAILSCALE_DEVICES = "tailscale_devices"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"
@@ -518,6 +541,9 @@ class CheckRun(models.Model):
     _ADOPT_RESULT_KEYS = frozenset(
         {"schema_version", "site_id", "temp_name", "stage", "started_at"}
     )
+    _BACKUP_RESULT_KEYS = frozenset(
+        {"schema_version", "unit_id", "site_id", "bytes", "digest", "stored_at"}
+    )
 
     def clean(self):
         results = self.results
@@ -528,6 +554,14 @@ class CheckRun(models.Model):
                 {"results": "adopt results keys must be exactly "
                             "{schema_version, site_id, temp_name, stage, started_at}"}
             )
+        if self.kind == self.Kind.BACKUP:
+            if set(results) != self._BACKUP_RESULT_KEYS:
+                raise ValidationError(
+                    {"results": "backup results keys must be exactly "
+                                "{schema_version, unit_id, site_id, bytes, digest, stored_at}"}
+                )
+            if type(results.get("bytes")) is not int:
+                raise ValidationError({"results": "bytes must be integer size"})
 
     def save(self, *args, **kwargs):
         self.full_clean()

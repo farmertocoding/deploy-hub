@@ -20,6 +20,7 @@ import { TargetsView } from "../src/screens/Targets.jsx";
 import { DeployStatus, DeploysView } from "../src/screens/Deploys.jsx";
 import { FindingDetail, FindingsView } from "../src/screens/Findings.jsx";
 import { SIM_FIXTURES } from "../src/sim.js";
+import { T1Overlay } from "../src/Tiers.jsx";
 
 const render = (component: any, props: any) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -56,7 +57,8 @@ test("advisors_are_tabs_not_top_level_pages", () => {
   assert.match(markup, /aria-current="page"/, "the current screen is not announced");
 
   // …and the demo pane's actual home is the Settings tab bar.
-  assert.deepEqual(SETTINGS_TABS.map((t) => t.id), ["cloudflare", "developer", "vault"]);
+  assert.deepEqual(SETTINGS_TABS.map((t) => t.id),
+    ["security", "cloudflare", "developer", "vault"]);
 });
 
 test("every_list_screen_has_an_empty_state", () => {
@@ -92,7 +94,8 @@ test("three_named_screens_render_at_phone_width", async () => {
   // §F6: finding detail, site status (with its T3 actions), deploy status. "Usable
   // at 390 px" for an inline-styled tree means: nothing in the markup claims a fixed
   // or minimum width wider than the phone, and the container yields (max-width 100%).
-  assert.deepEqual(PHONE_SCOPE, ["finding-detail", "site-status", "deploy-status"]);
+  assert.deepEqual(PHONE_SCOPE,
+    ["finding-detail", "site-status", "deploy-status", "t1-overlay"]);
 
   const sites = await liveSites();
   const phoneScreens: Array<[string, string]> = [
@@ -100,6 +103,8 @@ test("three_named_screens_render_at_phone_width", async () => {
     ["site-status", render(SiteStatus, { site: sites[0],
       actions: ["site.rollback", "site.restart", "check.rerun"], onRun: () => {} })],
     ["deploy-status", render(DeployStatus, { deploy: DEPLOY })],
+    ["t1-overlay", render(T1Overlay, { label: "Delete target",
+      onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {} })],
   ];
   for (const [name, markup] of phoneScreens) {
     assert.ok(visibleText(markup).length > 0, name);

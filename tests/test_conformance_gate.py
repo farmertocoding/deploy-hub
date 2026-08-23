@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 
+import check
 import gates
 import pytest
 import yaml
@@ -1745,3 +1746,144 @@ def test_new_phase_3_5_ids_have_no_tier():
     assert tagged == [], (
         f"new phase-3.5 ids must omit the tier: key: "
         f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+# ── Phase 4 Task 0: due set, SCAN-M4, tier-less new ids, DNS-01 stays 4 ──
+
+# Already due at phase 4 (design note §3) plus the Task 0 new ids.
+PHASE_4_ALREADY_DUE = {
+    "SCAN-DECLARED-TEST-MATERIAL",
+    "SCAN-DECLARED-GUARDS",
+    "SEC-A2-WEBAUTHN-PHASE4",
+    "SEC-F5-T1-HARDWARE-TOUCH",
+    "TLS-B2-HUB-DNS01-UNPROXIED",
+}
+PHASE_4_NEW_IDS = {
+    "SEC-L5-ATTACK-PLAYBOOK",
+    "SEC-L5-NEVER-SCALE-ATTACK",
+    "TOPO-R1-R5-FINDINGS",
+    "SEC-B7-SSH-QUARTERLY-ROTATE",
+    "UX-E5-BACKUP-OPERATOR",
+    "SEC-B8-TAILSCALE-DEVICE-POLL",
+    "SEC-A3-KMS-KEK-ADAPTER",
+    "SEC-B3-AUDIT-HASH-CHAIN",
+    "P4-SECURITY-DEMO",
+}
+PHASE_4_DUE_IDS = PHASE_4_ALREADY_DUE | PHASE_4_NEW_IDS
+SCAN_DECLARED_FULL_TEXT = (
+    "SCAN-DECLARED-TEST-MATERIAL",
+    "SCAN-DECLARED-GUARDS",
+)
+
+
+def test_phase_4_due_set_includes_webauthn_l5_topo_ssh_backup(tmp_path):
+    """Every Phase-4 Task-0 id exists at phase 4, and check.py grades a
+    phase-4 req as due at `--phase 4`.
+
+    What would make this fail: a missing/rephased id, P4-SECURITY-DEMO not
+    naming conformance/demos/phase-4.md, or argparse/schema refusing 4.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_4_DUE_IDS - set(reg))
+    assert missing == [], f"phase-4 ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_4_DUE_IDS if reg[rid]["phase"] != 4)
+    assert wrong_phase == [], (
+        f"phase-4 ids not registered at phase 4: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+
+    demo = reg["P4-SECURITY-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-4.md" in demo_paths, (
+        f"P4-SECURITY-DEMO must name conformance/demos/phase-4.md: "
+        f"{demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P4-DUE", phase=4)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P4-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=4)
+    assert res.returncode == 0, (
+        f"--phase 4 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 4
+    assert header["requirements"]["FIX-P4-DUE"]["due"] is True
+    assert status_of(root, "FIX-P4-DUE") == "verified"
+
+
+def test_new_phase_4_ids_have_no_tier():
+    """New Phase 4 ids are tier-less (no `tier:` key; D-060 / C10).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so the
+    id cannot verify on this host, or an explicit `tier: t1` (absence is
+    the contract).
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_4_NEW_IDS - set(reg))
+    assert missing == [], f"phase-4 new ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_4_NEW_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-4 ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+SEC_B3_AUDIT_HASH_CHAIN = "SEC-B3-AUDIT-HASH-CHAIN"
+SEC_B3_FUNCTION_DEFS = (
+    "tests/test_audit_ship.py::test_fake_shipper_appends_hash_chain",
+    "tests/test_audit_ship.py::test_absent_bucket_skips",
+    "tests/test_audit_ship.py::test_audit_write_does_not_block_on_s3_down",
+    "tests/test_audit.py::test_audit_genesis_empty_prev",
+    "tests/test_audit.py::test_audit_event_prev_hash_chains",
+    "tests/test_audit.py::test_audit_does_not_call_s3",
+)
+
+
+def test_sec_b3_function_decorators_are_visible_to_collect_markers():
+    """collect_markers only counts @pytest.mark.req on def test_*.
+
+    Module pytestmark is applied by pytest and invisible to the AST walker, so
+    a pytestmark pin on tests/test_audit_ship.py still leaves
+    SEC-B3-AUDIT-HASH-CHAIN uncovered. Task 1 left the local MUST proofs
+    unmarked so a local-only pin could not false-green the S3-down clause;
+    that clause now exists, so both files are the honest full-text pin.
+
+    What would make this fail: leaving the id only on pytestmark, or leaving
+    the genesis / chain / no-S3 tests unmarked now that ship-on-S3-down exists.
+    """
+    markers = check.collect_markers(REPO)
+    nodeids = markers.get(SEC_B3_AUDIT_HASH_CHAIN) or []
+    missing = [n for n in SEC_B3_FUNCTION_DEFS if n not in nodeids]
+    assert missing == [], (
+        f"{SEC_B3_AUDIT_HASH_CHAIN} must be a function-level decorator on the "
+        f"named shipper and local-chain tests; collect_markers missed: {missing}"
+    )
+
+
+def test_scan_declared_full_text_is_not_verified_by_parser_only_tests():
+    """SCAN-M4: parked parser tests must not carry full-text SCAN-DECLARED-*
+    markers. Parser-only proofs do not prove operator acceptance or the five
+    live-path attacks (D-055). Task 3 marks the full-text ids on
+    tests/test_d012_reland.py.
+
+    What would make this fail: leaving @pytest.mark.req(SCAN-DECLARED-*) on
+    tests/test_scanner_declarations.py, or failing to mark the live-path E2E.
+    """
+    markers = check.collect_markers(REPO)
+    parser_prefix = "tests/test_scanner_declarations.py::"
+    e2e_prefix = "tests/test_d012_reland.py::"
+    for rid in SCAN_DECLARED_FULL_TEXT:
+        nodeids = markers.get(rid) or []
+        on_parser = [n for n in nodeids if n.startswith(parser_prefix)]
+        assert not on_parser, (
+            f"{rid} is still marked on parser-only tests — SCAN-M4 forbids "
+            f"parser tests verifying the full text: {on_parser}")
+        on_e2e = [n for n in nodeids if n.startswith(e2e_prefix)]
+        assert on_e2e, (
+            f"{rid} has no live-path E2E marker on tests/test_d012_reland.py "
+            f"(Task 3): {nodeids}")

@@ -102,6 +102,68 @@ export function CertState({ site }) {
   );
 }
 
+// Attack playbook as a SITE STATE, CertState twin (D-057 / C3): Under-Attack
+// is visible, and a missing edge ref is a degraded notify-only line, never
+// silent. Task 7 must not rewrite this component.
+export function AttackState({ site }) {
+  if (!site.attack_state) return null;
+  const degraded = site.attack_state.mode === "notify_only";
+  const label = degraded
+    ? `⚠ Attack playbook notify-only: ${safeText(site.attack_state.detail)}`
+    : `⛔ Under attack: ${safeText(site.attack_state.detail)}`;
+  return (
+    <p style={{ color: degraded ? "#e3b341" : "#ff7b72", margin: "4px 0" }}>
+      {label}{" "}
+      <a href={routeHash("findings", site.attack_state.finding_id)}
+        style={{ color: "#79c0ff" }}>View finding</a>
+    </p>
+  );
+}
+
+// Sites-detail backup list (C7 / D-063): metadata + restore <pre>, T2 test-now.
+// Restore is a command block. No Restore POST / button.
+export async function testBackupNow(siteId, unitId) {
+  return api(`v1/sites/${siteId}/backups/${unitId}/test/`, {});
+}
+
+export function BackupPanel({ site, backups, onTestNow = () => {} }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!backups) return null;
+  const units = backups.units || [];
+  const dumps = units.flatMap((u) =>
+    (u.dumps || []).map((d) => ({ ...d, kind: u.kind, unit_id: u.id })));
+  return (
+    <div style={{ ...box, borderColor: "#3fb950" }}>
+      <h4 style={{ margin: "0 0 8px" }}>Backups</h4>
+      {dumps.length === 0
+        ? <div style={{ color: "#8b949e" }}>No dumps yet</div>
+        : dumps.map((d) => (
+          <div key={d.id}>
+            {d.kind} · {d.bytes} bytes · {safeText(String(d.digest || "").slice(0, 12))}
+            {d.stored_at ? ` · ${safeText(d.stored_at)}` : ""}
+          </div>
+        ))}
+      {backups.restore_command
+        ? <pre style={{ ...box, overflow: "auto", whiteSpace: "pre-wrap" }}>
+            {safeText(backups.restore_command)}
+          </pre>
+        : null}
+      {units.length > 0 && (confirming ? (
+        <div role="dialog" aria-label="Test backup now">
+          <p>Seal a dump with this site's backup key, never the KEK.</p>
+          <button style={{ ...box, marginRight: 8 }}
+            onClick={() => { onTestNow(site, units[0]); setConfirming(false); }}>
+            Confirm — Test backup now</button>
+          <button style={box} onClick={() => setConfirming(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button style={box} onClick={() => setConfirming(true)}>
+          Test backup now</button>
+      ))}
+    </div>
+  );
+}
+
 // Adopt plan on the site detail: edge_owner is a Site column (D-052), shown
 // here and never prompted per run. Start/cancel are T2 because the start
 // confirm names the flip + decommission. No /srv/sites walk — the path field
@@ -158,8 +220,30 @@ export function AdoptPlan({
 // §F6 phone screen: site status + its T3 actions. Live Sites passes the T3
 // ids; only site.rollback has HTTP (pipeline.rollback). Restart / re-run
 // render so the table is visible; they do not invent engines.
-export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () => {} }) {
+export function SiteStatus({
+  site, actions = [], onRun = () => {}, onUndo = () => {},
+  backups: backupsProp, onTestNow,
+}) {
   const [liveComposePath, setLiveComposePath] = useState("");
+  const [backups, setBackups] = useState(backupsProp);
+  useEffect(() => {
+    if (backupsProp !== undefined) {
+      setBackups(backupsProp);
+      return;
+    }
+    if (site?.id == null) return;
+    api(`v1/sites/${site.id}/backups/`).then(({ status, data }) => {
+      if (status === 200) setBackups(data);
+    });
+  }, [site?.id, backupsProp]);
+  const testNow = onTestNow || (async (_current, unit) => {
+    if (!unit) return;
+    const { status } = await testBackupNow(site.id, unit.id);
+    if (status === 201) {
+      const refreshed = await api(`v1/sites/${site.id}/backups/`);
+      if (refreshed.status === 200) setBackups(refreshed.data);
+    }
+  });
   const run = (id, current) => {
     if (id === "site.adopt.start") {
       return onRun(id, {
@@ -180,6 +264,8 @@ export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () =
       <div><ManifestLine site={site} /></div>
       <div><SiteObserved site={site} /></div>
       <CertState site={site} />
+      <AttackState site={site} />
+      <BackupPanel site={site} backups={backups} onTestNow={testNow} />
       {(site.edge_owner || site.adopt) && (
         <AdoptPlan site={site} liveComposePath={liveComposePath}
           onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />
@@ -214,6 +300,7 @@ export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }
           <span style={{ color: "#8b949e" }}>({s.project})</span>{" "}
           <ManifestLine site={s} />
           <CertState site={s} />
+          <AttackState site={s} />
         </div>
       ))}
       {selected && (

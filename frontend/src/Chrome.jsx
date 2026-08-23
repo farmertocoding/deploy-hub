@@ -22,7 +22,7 @@ export const NAV = [
 // §F6: exactly three screens are designed for phone width (390 px). The map is
 // explicitly desktop-only and no alert deep link routes through it — an alert links
 // to the finding detail (#/findings/<id>), which IS in this list.
-export const PHONE_SCOPE = ["finding-detail", "site-status", "deploy-status"];
+export const PHONE_SCOPE = ["finding-detail", "site-status", "deploy-status", "t1-overlay"];
 export const DESKTOP_MIN_PX = 768;
 
 // Hash routes, no router library: "#/sites/3" → {screen:"sites", id:"3"}. An unknown

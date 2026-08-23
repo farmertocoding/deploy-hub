@@ -27,14 +27,11 @@
 // a live-format Stripe key committed to it (/tmp/cleanrepo-rescanned), which is the
 // report `?sim=stale` converges on.
 //
-// D-012 LEFT PHASE 1 (2026-08-16), and these fixtures are what that looks like on a
-// screen. The `qa-drills` project and the `?sim=accepted` state are gone with the
-// mechanism they existed to show: there is no declaration confirm, no acceptance
-// contract on any check, and no blocker an answer clears. legacy-shop still carries a
-// `deployhub.yaml` over a drill tree — that is the point — so its report now shows the
-// ten drill lines as ordinary blocking findings among fifteen, with no declaration
-// header and no third bucket, plus one `core.declaration-file` warning telling the repo
-// its file is not honored this phase.
+// D-012 RE-LAND (Phase 4 Task 3): the live scan labels declared heuristic lines and
+// still reports them at blocker until wizard accept. This fixture's id/tier list must
+// match that scan: no core.declaration-file presence notice (the file is honored).
+// Detail copy here is still the parking-era dump; Task 12 can re-record. Drift
+// compares id+tier only.
 //
 // ROUND 9 added the three payload families §F8 had no fixture for at all, each one a
 // screen a reviewer previously could not reach (finding numbers are round-9 queue items):
@@ -104,7 +101,8 @@ const CLEAN_PROJECT = {
       "domain": "takko.market",
       "latest_manifest_version": 3,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -112,7 +110,8 @@ const CLEAN_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -141,7 +140,8 @@ const CLEAN_PROJECT_AFTER = {
       "domain": "takko.market",
       "latest_manifest_version": 4,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -149,7 +149,8 @@ const CLEAN_PROJECT_AFTER = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -174,7 +175,8 @@ const CLEAN_PROJECT_ANSWERED = {
       "domain": "takko.market",
       "latest_manifest_version": 4,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -182,7 +184,8 @@ const CLEAN_PROJECT_ANSWERED = {
       "domain": "staging.takko.market",
       "latest_manifest_version": 1,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -507,7 +510,7 @@ const MESSY_PROJECT = {
   "scanned_at": "2026-08-09T09:30:00Z",
   "tiers": {
     "blocker": 3,
-    "warning": 3,
+    "warning": 2,
     "advice": 1,
     "pending_sandbox": 3
   },
@@ -518,7 +521,8 @@ const MESSY_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -533,7 +537,7 @@ const MESSY_REPORT = {
   ],
   "summary": {
     "blocker": 3,
-    "warning": 3,
+    "warning": 2,
     "advice": 1,
     "ok": 15,
     "pending_sandbox": 3
@@ -565,14 +569,6 @@ const MESSY_REPORT = {
     }
   ],
   "warnings": [
-    {
-      "id": "core.declaration-file",
-      "tier": "warning",
-      "title": "deployhub.yaml is present but declarations are disabled",
-      "detail": "This repo carries a deployhub.yaml. The declared-test-material mechanism it belongs to is deferred to its own phase, so this scan did not parse the file and no claim in it changed anything: every finding under a declared path is reported at its full tier, exactly as it would be if the file were not here. The file is otherwise ignored — and it is scanned like any other file in the tree, so a credential written into it is a finding of its own.",
-      "fix_hint": "Nothing to do for the deploy: no result above was downgraded. Read this as a correction to what the repo expects — if a tree was declared in deployhub.yaml in the belief that its findings would stop blocking, they are blocking, and either the findings or that expectation needs attention. Leaving the file in place is fine; it will be honored again when the mechanism returns with the threat model it is waiting on.",
-      "execution": "static"
-    },
     {
       "id": "django.secret-dev-fallback",
       "tier": "warning",
@@ -721,10 +717,6 @@ const MESSY_WIZARD = {
   ],
   "warnings": [
     {
-      "id": "core.declaration-file",
-      "title": "deployhub.yaml is present but declarations are disabled"
-    },
-    {
       "id": "django.secret-dev-fallback",
       "title": "Dev-fallback secret committed (prod provably rejects it)"
     },
@@ -811,7 +803,8 @@ const EDGE_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -838,7 +831,8 @@ const EDGE_PROJECT_AFTER = {
       "domain": "edge.atlas.market",
       "latest_manifest_version": 1,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1128,7 +1122,8 @@ const RESCANNED_PROJECT = {
       "domain": "takko.market",
       "latest_manifest_version": 3,
       "manifest_current": false,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -1136,7 +1131,8 @@ const RESCANNED_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1347,7 +1343,8 @@ const UNSCANNED_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1552,6 +1549,7 @@ function adoptSite(stage, extra = {}, adoptExtra = {}) {
     latest_manifest_version: 1,
     manifest_current: true,
     cert_refusal: extra.cert_refusal !== undefined ? extra.cert_refusal : null,
+    attack_state: extra.attack_state !== undefined ? extra.attack_state : null,
     edge_owner: extra.edge_owner || "site_caddy",
     dns_zone: extra.dns_zone || "example.com",
     exposure: extra.exposure || "public",
@@ -1579,10 +1577,54 @@ function adoptProjectsPayload(site) {
   }];
 }
 
+const SIM_BACKUP_LIST = {
+  units: [{
+    id: 1,
+    kind: "postgres",
+    schedule: "0 2 * * *",
+    dumps: [{
+      id: 9,
+      bytes: 4096,
+      digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      stored_at: "2026-08-23T02:00:00+00:00",
+      status: "succeeded",
+    }],
+  }],
+  restore_command: (
+    "# Restore into a clean container.\n"
+    + "# What: decrypt with Secret.Kind.BACKUP_KEY, never the KEK.\n"
+    + "age -d -i /var/lib/deploy-hub/backup-keys/site-11.key \\\n"
+    + "  /var/lib/deploy-hub/backups/9 \\\n"
+    + "  | docker run --rm -i postgres:16 pg_restore -d postgres --clean --if-exists\n"
+  ),
+};
+
+function backupsFixture(path, method) {
+  if (/^v1\/sites\/\d+\/backups\/$/.test(path) && method !== "POST") {
+    return { status: 200, data: SIM_BACKUP_LIST };
+  }
+  if (/^v1\/sites\/\d+\/backups\/\d+\/test\/$/.test(path) && method && method !== "GET") {
+    return {
+      status: 201,
+      data: {
+        schema_version: 1,
+        unit_id: 1,
+        site_id: 11,
+        bytes: 128,
+        digest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        stored_at: "2026-08-23T03:00:00+00:00",
+      },
+    };
+  }
+  return null;
+}
+
 function adoptStateFixture(site) {
   return (path, body, method) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
     if (firstRun) return firstRun;
+    const backups = backupsFixture(path, method);
+    if (backups) return backups;
     if (path === "v1/projects/") return { status: 200, data: adoptProjectsPayload(site) };
     if (/^v1\/sites\/\d+\/adopt\/$/.test(path) && method !== "GET") {
       return { status: 202, data: { stage: site.adopt?.stage, slipped: true } };
@@ -1654,6 +1696,8 @@ export const SIM_FIXTURES = {
   live: (path, body, method) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
     if (firstRun) return firstRun;
+    const backups = backupsFixture(path, method);
+    if (backups) return backups;
     const findings = findingsFixture(path);
     if (findings) return findings;
     if (path === "v1/projects/")
@@ -1799,11 +1843,17 @@ export const SIM_FIXTURES = {
   error: () => ({ status: 0, data: { detail: "Cannot reach server — check your connection and retry." } }),
 
   // Adopt stages. plan includes a populated cert_refusal so Sites CertState
-  // is reachable in this family; the others emit null like project_row_body.
+  // is reachable in this family; attack_state is populated so AttackState is
+  // too. Unused rows emit null like project_row_body.
   plan: adoptStateFixture(adoptSite("plan", {
     cert_refusal: {
       detail: "shop.example.com is public with proxied=false.",
       finding_id: 9,
+    },
+    attack_state: {
+      detail: "Under-Attack mode flipped on example.com; banned 203.0.113.9.",
+      finding_id: 11,
+      mode: "under_attack",
     },
   })),
   verify: adoptStateFixture(adoptSite("verify", {}, {

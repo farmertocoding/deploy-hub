@@ -1,5 +1,6 @@
 """In-memory provider fakes (§A7/§D5) — what T1 tests plug into."""
 import itertools
+import os
 
 from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer, Pager
 
@@ -52,18 +53,27 @@ class FakeDnsProvider(DnsProvider):
 
 
 class FakeEdgeProtection(EdgeProtection):
+    _MUTATING = {"set_security_level", "ban_ip", "purge_cache"}
+
     def __init__(self):
         self.security_level = {}
         self.banned = []
         self.purges = []
+        self.calls = []
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
 
     def set_security_level(self, zone, level):
+        self.calls.append(("set_security_level", zone, level))
         self.security_level[zone] = level
 
     def ban_ip(self, zone, ip, *, note=""):
+        self.calls.append(("ban_ip", zone, ip, note))
         self.banned.append((zone, ip, note))
 
     def purge_cache(self, zone):
+        self.calls.append(("purge_cache", zone))
         self.purges.append(zone)
 
 
@@ -119,6 +129,18 @@ class FakePager(Pager):
         return record
 
 
+class FakeTailscale:
+    """In-memory Tailscale device list for T1 (D-058)."""
+
+    def __init__(self, devices=None):
+        self.devices = list(devices or [])
+        self.calls = []
+
+    def list_devices(self, *, timeout=20):
+        self.calls.append(("list_devices", timeout))
+        return [dict(row) for row in self.devices]
+
+
 class FakeOriginCertIssuer(OriginCertIssuer):
     """Locally-minted leaf so T1/T2 never call Cloudflare. The leaf public
     key is taken from the Hub CSR so key/cert match still holds."""
@@ -134,3 +156,45 @@ class FakeOriginCertIssuer(OriginCertIssuer):
             csr, hostnames, validity_days=validity_days,
         )
         return {"certificate": certificate, "expires_at": expires_at}
+
+
+class FakeKms:
+    """In-memory KMS port for T1. Bulk crypto stays under vault/.
+
+    `.down = True` is the KMS blip: encrypt/decrypt raise, so a get() that
+    still succeeds is proving the process-memory DEK cache, not the fake.
+    """
+
+    def __init__(self, key_id="alias/hub-test"):
+        self.key_id = key_id
+        self.down = False
+        self.encrypt_calls = 0
+        self.decrypt_calls = 0
+        self._blobs = {}
+
+    def _raise_if_down(self):
+        if self.down:
+            raise RuntimeError("fake kms unavailable")
+
+    def check(self):
+        self._raise_if_down()
+        return True
+
+    def encrypt(self, plaintext: bytes) -> bytes:
+        self._raise_if_down()
+        self.encrypt_calls += 1
+        token = os.urandom(16)
+        self._blobs[token] = plaintext
+        return b"fakekms:" + token
+
+    def decrypt(self, ciphertext: bytes) -> bytes:
+        self._raise_if_down()
+        self.decrypt_calls += 1
+        prefix = b"fakekms:"
+        if not ciphertext.startswith(prefix):
+            raise RuntimeError("fake kms: unknown ciphertext")
+        token = ciphertext[len(prefix) :]
+        try:
+            return self._blobs[token]
+        except KeyError as exc:
+            raise RuntimeError("fake kms: unknown ciphertext") from exc

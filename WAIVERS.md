@@ -4,10 +4,13 @@
 WAIVED: .github/workflows+supply-chain+actions-pinned-by-tag — third-party actions pinned by major tag, not SHA; repo is local-only until D-001 GitHub move (Phase 2.5 at latest), at which point actions get SHA-pinned in the same PR that enables branch protection (2026-08-03)
 
 # R4-9 (SPEC-gate-integrity.md §3.2 rule 4): `verify: checklist` reqs now have to name the
-# gate that enforces them. These three have no gate on this tree. Per the spec, a waiver is
+# gate that enforces them. These two have no gate on this tree. Per the spec, a waiver is
 # the correct answer where no gate exists yet — inventing one to reach green is not. Each
 # names what would retire the waiver. Fingerprint = req id + uncovered(no gate).
-WAIVED: SEC-B4-REDIS-CROWN-JEWEL — uncovered(no gate): Redis is compose-internal with requirepass and JSON-pinned Celery serializers in docker-compose.yml today, but nothing asserts it — the compose file is read by no test and the §6B external port-scan of the Hub is a Phase-2 activity. Retire when a test parses docker-compose.yml for {no published redis port, requirepass set, CELERY_*_SERIALIZER == json} and this req becomes verify: test (2026-08-11)
+# RETIRED 2026-08-23 (Phase 4 Task 8): SEC-B4-REDIS-CROWN-JEWEL
+# — tests/test_redis_crown_jewel.py parses docker-compose.yml (redis unpublished
+# + requirepass) and pins CELERY_*_SERIALIZER json; verify: test. C9: compose
+# parse, not an external port-scan.
 WAIVED: PROC-REGRESSION-TEST — uncovered(no gate): build-process.md §5 puts this on the auto-fix PR template plus "a path-glob check on any PR closing an issue"; neither the template nor the check exists on this tree, and a PR-scoped check cannot run until the repo moves to GitHub (D-001). Retire with the PR-template + path-glob workflow in the D-001 move PR (2026-08-11)
 WAIVED: PROC-SENSITIVE-HUMAN-MERGE — uncovered(no gate): the `sensitive-path-guard` job in push-checks.yml is a placeholder that only echoes "wire branch-protection + CODEOWNERS when repo moves to GitHub (D-001)"; naming it in `gate:` would make check.py green on a step that enforces nothing, which is the exact defect R4-9 exists to kill. Retire when CODEOWNERS + branch protection derived from conformance/paths.yaml land with D-001 (2026-08-11)
 
@@ -16,7 +19,10 @@ WAIVED: PROC-SENSITIVE-HUMAN-MERGE — uncovered(no gate): the `sensitive-path-g
 # greps source files for `SECRET_KEY\s*=`; the requirement is about exhaust after write and
 # names a CI scrubber over captured test output. `gate: log-scrub` removed from the registry;
 # log-scrub itself kept as the source-scan gate it genuinely is.
-WAIVED: SEC-69-NO-SECRETS-IN-EXHAUST — uncovered(no gate): the requirement says secrets never appear in logs, Celery task args or frontend responses after write, and that CI greps test output for plaintext markers; nothing on this tree checks any of those three surfaces. `make log-scrub` is a source scan for an assignment literal and enforces materially less, so claiming it as this req's gate reported a green that was not earned. Retire when a gate scans captured test output (pytest stdout/stderr and log capture) and Celery task kwargs for the vault's plaintext markers and this req becomes verify: test (2026-08-11)
+# RETIRED 2026-08-23 (Phase 4 Task 8): SEC-69-NO-SECRETS-IN-EXHAUST
+# — tests/test_secrets_in_exhaust.py + pytest plugin (scripts_dev/exhaust.py)
+# over captured stdout/stderr/log and Celery kwargs; verify: test. C9: captured
+# exhaust, not make log-scrub.
 
 # Round-5 F9: an unreachable check, recorded rather than left silent. Fingerprint = the
 # artifact tree + why nothing reads it.
@@ -120,4 +126,17 @@ WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials: HUB_TEST_CF_TOKEN is not se
 # tests/acceptance/test_phase_3_5.py::test_temp_subdomain_on_site_zone_cleans_up
 # (T1 FakeDnsProvider; temp on Site.dns_zone; cleanup + 24 h reaper).
 WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemented: the full-text id names two clauses; SEC-B2-NO-TOKEN-ON-TARGET is proven by the target-bound surface scan (tests/test_no_token_exfiltration.py, unmarked here); Hub-central DNS-01 for unproxied sites is unbuilt and the honest interim is the named refusal (Finding + Sites-screen state). Retire when TLS-B2-HUB-DNS01-UNPROXIED (registered at phase 4; built in phase 4) is verified and the full-text markers go back on. (2026-08-23)
-WAIVED: UX-F5-ACTION-TIERS — T1 hardware-touch clause unimplemented: the full-text id names T1/T2/T3 friction; UX-F5-T2-T3-FRICTION is proven (frontend/src/actions.js + tests/acceptance/test_phase_3.py::test_rollback_is_one_click_and_never_step_up_gated); WebAuthn hardware touch for T1 is unbuilt (D-040). Retire when SEC-F5-T1-HARDWARE-TOUCH (phase 4) is verified and the full-text markers go back on. (2026-08-23)
+# RETIRED 2026-08-23 (Phase 4 Task 2): UX-F5-ACTION-TIERS
+# — SEC-F5-T1-HARDWARE-TOUCH marked; full-text UX-F5 markers restored.
+# T1 is WebAuthn hardware touch + type-the-name; TOTP never writes
+# hardware_touch_at; T3 never takes RequireRecentTouch (D-062).
+
+# Phase 4 Task 0 (D-054 / D-055 / D-060). Do not retire REL-P2, LE-staging,
+# DNS-CF-T3-LIVE, or full-text SEC-B2.
+WAIVED: TLS-B2-HUB-DNS01-UNPROXIED — first slip: Hub-central DNS-01 is the named Phase 4 slip so conformance-4 can start (D-054, D-060); unproxied public sites keep the named refusal (Finding plus Sites-screen state), never a bare exception. Do not mark full-text SEC-B2-NO-DNS-TOKENS-ON-TARGETS. Retire when Hub-central DNS-01 lands and this id is verified. (2026-08-23)
+# SCAN-DECLARED-TEST-MATERIAL and SCAN-DECLARED-GUARDS: Task 3 retired the
+# clause-scoped full-text waivers. Markers live on tests/test_d012_reland.py.
+
+# Phase 4 Task 9 (D-058 / D-043). Live Tailscale poll is skip-unless-configured.
+# T1 FakeTailscale proves unknown-device. Do not invent a live token env.
+WAIVED: SEC-B8-TAILSCALE-DEVICE-POLL — skip-unless-configured: HUB_TAILSCALE_API_TOKEN_REF defaults empty; the live device-list poll writes CheckRun.Kind.TAILSCALE_DEVICES SKIPPED and never SUCCEEDED. T1 FakeTailscale covers unknown-device Finding. Do not invent a live token env (D-058 / D-043). Retire when a vault ref is present on the host of record. (2026-08-23)

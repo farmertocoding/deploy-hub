@@ -135,7 +135,7 @@ def send_unacked_email(finding, *, now=None):
 def _publish_group(findings, *, pager, now):
     backend = getattr(settings, "HUB_PAGER_BACKEND", "fake")
     labels = [_object_label(row) for row in findings]
-    click = f"{_public_url()}/findings"
+    click = f"{_public_url()}/#/findings"
     title = scrub(f"{len(findings)} P2 findings")
     body = scrub(f"{', '.join(labels)} · p2 · {click}")
     ok, detail = True, "grouped"
@@ -158,7 +158,7 @@ def _minimized(finding, now):
     obj = _object_label(finding)
     start = finding.first_seen
     minutes = max(0, int((now - start).total_seconds() // 60))
-    click = f"{_public_url()}/findings/{finding.pk}"
+    click = f"{_public_url()}/#/findings/{finding.pk}"
     title = f"{obj} · {finding.severity} · {minutes} min"
     body = f"{obj} · {finding.severity} · {minutes} min · {click}"
     return title, body, click

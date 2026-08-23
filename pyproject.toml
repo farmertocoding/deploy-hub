@@ -81,10 +81,18 @@ source_paths = [
 # these modules and the gate goes red until it is listed.
 pytest_add_cli_args_test_selection = [
     "tests/acceptance/test_phase_1.py",
+    "tests/acceptance/test_phase_4.py",
     "tests/test_api_rendering.py",
+    "tests/test_attack_playbook.py",
     "tests/test_cli_render.py",
     "tests/test_d012_out_of_phase_1.py",
+    "tests/test_d012_reland.py",
+    "tests/test_scanner_core.py",
+    "tests/test_scanner_core_hardening.py",
     "tests/test_scanner_declarations.py",
+    "tests/test_scanner_django.py",
+    "tests/test_scanner_fallbacks.py",
+    "tests/test_scanner_node_ts.py",
     "tests/test_wizard.py",
     "tests/test_wizard_round1.py",
     # R19-ARCH-1: the WS escape test imports `scanner.presentation` (a mutated module),

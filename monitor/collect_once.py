@@ -51,7 +51,7 @@ def _containers():
     docker = shutil.which("docker") or "/usr/bin/docker"
     try:
         proc = subprocess.run(  # nosec B603 — argv list; absolute or which()'d docker
-            [docker, "ps", "-a", "--format", "{{.Names}}\t{{.State}}"],
+            [docker, "ps", "-a", "--format", "{{.Names}}\t{{.State}}\t{{.Networks}}"],
             capture_output=True,
             text=True,
             timeout=15,
@@ -63,9 +63,28 @@ def _containers():
     for line in proc.stdout.splitlines():
         if not line.strip():
             continue
-        name, _, state = line.partition("\t")
-        rows.append({"name": name, "state": state or "unknown"})
+        name, _, rest = line.partition("\t")
+        state, _, nets = rest.partition("\t")
+        row = {"name": name, "state": state or "unknown"}
+        names = [part.strip() for part in nets.split(",") if part.strip()]
+        if names:
+            row["networks"] = names
+        rows.append(row)
     return rows
+
+
+def _networks(containers):
+    """Union of docker-ps {{.Networks}} names. No extra docker-network CLI."""
+    names = []
+    seen = set()
+    for row in containers:
+        if not isinstance(row, dict):
+            continue
+        for net in row.get("networks") or []:
+            if net and net not in seen:
+                seen.add(net)
+                names.append(net)
+    return names
 
 
 def _log_chunk(path, offset, expected_inode=0):
@@ -413,6 +432,7 @@ def main():
         "log_chunk": _log_chunk(log_file, offset, expected_inode),
         "clock": _clock(),
         "healthz": _healthz(containers),
+        "networks": _networks(containers),
     }
     json.dump(payload, sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")

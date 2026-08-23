@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .base import DnsProvider, OriginCertIssuer
+from .base import DnsProvider, EdgeProtection, OriginCertIssuer
 
 API = "https://api.cloudflare.com/client/v4"
 
@@ -369,6 +369,115 @@ class CloudflareOriginCertIssuer(OriginCertIssuer):
             "certificate": result["certificate"],
             "expires_at": _parse_expires(result.get("expires_on")),
         }
+
+
+class CloudflareEdge(EdgeProtection):
+    """Cloudflare edge client bound to one verified DnsZone (D-057).
+
+    Constructed ONLY by providers.registry.edge_protection_for. The token
+    appears in the Authorization header and nowhere else.
+    """
+
+    def __init__(self, zone, *, token, timeout=20, on_auth_error=None):
+        self.zone = zone
+        self._token = refuse_global_api_key(token)
+        self.timeout = timeout
+        self._on_auth_error = on_auth_error
+        self.security_level = {}
+        self.banned = []
+
+    def __repr__(self):
+        return f"<CloudflareEdge zone={self.zone.name!r}>"
+
+    __str__ = __repr__
+
+    def set_security_level(self, zone, level):
+        current = self._get_security_level(zone)
+        if current == level:
+            return
+        zone_id = self._zone_id(zone)
+        self._api(
+            "PATCH", f"/zones/{zone_id}/settings/security_level", {"value": level},
+        )
+        self.security_level[zone] = level
+
+    def ban_ip(self, zone, ip, *, note=""):
+        if not ip or self._ip_banned(zone, ip):
+            return
+        zone_id = self._zone_id(zone)
+        self._api(
+            "POST",
+            f"/zones/{zone_id}/firewall/access_rules/rules",
+            {
+                "mode": "block",
+                "configuration": {"target": "ip", "value": ip},
+                "notes": note or "attack-playbook",
+            },
+        )
+        self.banned.append((zone, ip, note))
+
+    def purge_cache(self, zone):
+        zone_id = self._zone_id(zone)
+        self._api("POST", f"/zones/{zone_id}/purge_cache", {"purge_everything": True})
+
+    def _get_security_level(self, zone):
+        cached = self.security_level.get(zone)
+        if cached is not None:
+            return cached
+        zone_id = self._zone_id(zone)
+        body = self._api("GET", f"/zones/{zone_id}/settings/security_level")
+        value = (body.get("result") or {}).get("value")
+        if value:
+            self.security_level[zone] = value
+        return value
+
+    def _ip_banned(self, zone, ip):
+        if any(item[0] == zone and item[1] == ip for item in self.banned):
+            return True
+        zone_id = self._zone_id(zone)
+        page = 1
+        while True:
+            query = urlencode({"per_page": 100, "page": page})
+            body = self._api(
+                "GET", f"/zones/{zone_id}/firewall/access_rules/rules?{query}",
+            )
+            for row in body.get("result") or []:
+                cfg = row.get("configuration") or {}
+                if (
+                    cfg.get("target") == "ip"
+                    and cfg.get("value") == ip
+                    and row.get("mode") == "block"
+                ):
+                    self.banned.append((zone, ip, row.get("notes") or ""))
+                    return True
+            info = body.get("result_info") or {}
+            if page >= int(info.get("total_pages") or 1):
+                break
+            page += 1
+        return False
+
+    def _zone_id(self, zone):
+        if zone is not None and zone is not self.zone:
+            same_row = (
+                getattr(zone, "pk", None) is not None
+                and getattr(zone, "pk", None) == self.zone.pk
+            )
+            if not same_row:
+                raise CloudflareError(
+                    f"this client is bound to zone {self.zone.name!r}; "
+                    f"refusing a call for a different zone"
+                )
+        return self.zone.provider_zone_id
+
+    def _api(self, method, path, payload=None):
+        try:
+            return api_request(
+                self._token, method, path, payload, timeout=self.timeout,
+            )
+        except CloudflareApiError as error:
+            if error.status in (401, 403) and self._on_auth_error is not None:
+                self._on_auth_error()
+            raise
 
 
 def _parse_expires(raw):

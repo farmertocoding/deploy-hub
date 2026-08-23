@@ -73,3 +73,23 @@ sensitive:
   # Claimed before the file exists so the first line written there is already
   # human-merged. Custody parity is two-way with CODEOWNERS.
   - deploys/adopt_flow.py
+  # Phase 4 (Task 0): the custody set the phase's tasks will land code into,
+  # claimed before the first line of code. vault/** and providers/** already
+  # listed. Do not broaden to scanner/** or wizard/** wholesale — name the
+  # files. core/webauthn.py is listed in case Task 2 splits it out of otp.py.
+  # Task 11 named the audit-shipper: core/audit_ship.py.
+  - core/actions.py
+  - core/audit.py
+  - core/audit_ship.py
+  - core/permissions.py
+  - core/webauthn.py
+  - frontend/src/actions.js
+  - wizard/materialize.py
+  - wizard/service.py
+  - scanner/core.py
+  - monitor/attack_playbook.py
+  - monitor/attack_detector.py
+  - monitor/topology.py
+  - scaling/attack_gate.py
+  - provision/ssh_rotate.py
+  - providers/tailscale.py

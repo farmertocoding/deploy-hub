@@ -23,9 +23,9 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
     """What would make this fail: no `conformance-3` target, or review-round
     demanding it (which would pull Multipass into the T1 Cloud Agent).
 
-    Phase 2.5 closed; `conformance-3` is the all-tiers local gate now
-    (phase-3 Task 0) and `conformance-2.5` is deleted with it. Does not
-    assert any GitHub Check is green — D-023 forbids that gate.
+    `conformance` is `--phase 4 --exclude-tier t2 --exclude-tier t3` (D-060).
+    `conformance-3` stays all-tiers `--phase 3` with no `--exclude-tier`.
+    Does not assert any GitHub Check is green — D-023 forbids that gate.
     """
     targets = gates.makefile_targets(REPO)
     assert "conformance-3" in targets, (
@@ -44,7 +44,15 @@ def test_phase_gate_is_local_make_conformance_3_not_a_gha_check():
 
     t1_gate = _recipe("conformance")
     assert t1_gate is not None, "conformance has no recipe"
-    assert "--phase 3" in t1_gate, t1_gate
+    assert "--phase 4" in t1_gate, t1_gate
+    assert "--phase 3" not in t1_gate, (
+        f"review-round conformance still grades phase 3 — the phase-4 gate "
+        f"never arms:\n{t1_gate}"
+    )
+    assert "--exclude-tier t2" in t1_gate, (
+        f"review-round conformance must omit t2 so it does not demand docker:\n"
+        f"{t1_gate}"
+    )
     assert "--exclude-tier t3" in t1_gate, (
         f"review-round conformance must omit t3 so it does not demand Multipass:\n"
         f"{t1_gate}"

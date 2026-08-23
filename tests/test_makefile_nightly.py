@@ -107,16 +107,18 @@ def test_test_target_markexpr_excludes_t2_and_t3():
     assert 'pytest -q -m "not t2 and not t3"' in recipe, recipe
 
 
-def test_review_round_conformance_is_phase_3_minus_live_tiers():
-    """The review-round gate grades phase 3 without the live tiers: t3
+def test_review_round_conformance_is_phase_4_minus_live_tiers():
+    """The review-round gate grades phase 4 without the live tiers: t3
     (Multipass) and t2 (docker) stay out so the T1 report is graded honestly
-    (D-024, D-029, panel F1 — all carried from 2.5 to phase 3 by Task 0).
+    (D-060). `conformance` is the recipe review-round runs.
     """
     recipe = gates.recipe(REPO, "conformance")
     assert recipe, "Makefile has no `conformance` recipe"
-    assert "--phase 3" in recipe, recipe
-    assert "--phase 2.5" not in recipe, (
-        f"conformance still grades phase 2.5 — the phase-3 gate never arms:\n{recipe}")
+    assert "--phase 4" in recipe, recipe
+    assert "--phase 3.5" not in recipe, (
+        f"review-round conformance must be phase 4, not 3.5:\n{recipe}")
+    assert "--phase 3" not in recipe, (
+        f"conformance still grades phase 3 — the phase-4 gate never arms:\n{recipe}")
     assert "--exclude-tier t3" in recipe, (
         f"review-round conformance must omit t3 (no Multipass on the T1 host):\n{recipe}")
     assert "--exclude-tier t2" in recipe, (
@@ -171,21 +173,49 @@ def test_conformance_3_5_is_phase_3_5_minus_live_tiers():
         f"conformance-3.5 must omit t3 (no Multipass on the T1 host):\n{recipe}")
 
 
-def test_review_round_conformance_is_still_phase_3_minus_live_tiers():
-    """review-round still grades the existing `conformance` target (phase 3
-    minus live tiers), not conformance-3 and not conformance-3.5.
-
-    What would make this fail: pointing `conformance` at 3.5, or claiming
-    conformance-3 excludes live tiers.
+def test_conformance_4_target_exists():
+    """What would make this fail: no `conformance-4` target, or leaving it
+    off `.PHONY` so a same-named file could skip the recipe.
     """
-    recipe = gates.recipe(REPO, "conformance")
-    assert recipe, "Makefile has no `conformance` recipe"
+    targets = gates.makefile_targets(REPO)
+    assert "conformance-4" in targets, (
+        "Makefile must declare conformance-4 as the phase-4 gate")
+    phony = gates.phony_targets(REPO)
+    assert "conformance-4" in phony, "conformance-4 must be .PHONY"
+
+
+def test_conformance_4_is_phase_4_minus_live_tiers():
+    """conformance-4 is the phase-4 gate: --phase 4 minus t2/t3. Not all-tiers.
+
+    What would make this fail: an all-tiers 4 recipe, or still grading phase 3.
+    """
+    recipe = gates.recipe(REPO, "conformance-4")
+    assert recipe, "Makefile has no `conformance-4` recipe"
+    assert "--phase 4" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-4 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-4 must omit t3 (no Multipass on the T1 host):\n{recipe}")
+
+
+def test_conformance_3_still_all_tiers_phase_3():
+    """conformance-3 stays all-tiers Phase 3 (nightly). Do not claim it
+    excludes live tiers. Do not add an all-tiers 4 gate (D-060).
+    """
+    recipe = gates.recipe(REPO, "conformance-3")
+    assert recipe, "Makefile has no `conformance-3` recipe"
     assert "--phase 3" in recipe, recipe
-    assert "--phase 3.5" not in recipe, (
-        f"review-round conformance must stay phase 3, not 3.5:\n{recipe}")
-    assert "--exclude-tier t3" in recipe, recipe
-    assert "--exclude-tier t2" in recipe, recipe
-    full = gates.recipe(REPO, "conformance-3")
-    assert "--exclude-tier" not in full, (
+    assert "--exclude-tier" not in recipe, (
         f"conformance-3 stays all-tiers Phase 3 — do not claim it excludes "
-        f"live tiers:\n{full}")
+        f"live tiers:\n{recipe}")
+
+
+def test_conformance_4_is_not_a_nightly_gates_prereq():
+    """nightly-gates keeps conformance-3. conformance-4 is the review-round
+    / phase-4 gate, not the nightly all-tiers Phase 3 gate (D-060).
+    """
+    prereqs = _target_prereqs("nightly-gates")
+    assert "conformance-4" not in prereqs, (
+        f"nightly-gates must not run conformance-4: {prereqs}")
+    assert "conformance-3" in prereqs, (
+        f"nightly-gates must still run conformance-3: {prereqs}")

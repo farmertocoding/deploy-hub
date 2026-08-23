@@ -1,19 +1,27 @@
-"""Mandatory-2FA enforcement (§6.10) — server-side, not just UI routing.
+"""Mandatory-2FA enforcement (§6.10) and idle session timeout (D-062).
 
 A session belonging to a user with NO confirmed OTP device may only reach the
 enrollment endpoints (and login/logout/me/schema). Round-1 security finding:
 without this, a stolen password of a not-yet-enrolled user gives full API access
 — including enrolling the attacker's own device. The gate lives in middleware so
 no future endpoint can forget it.
+
+IdleTimeoutMiddleware enforces existing HUB_SESSION_IDLE_TIMEOUT (~30 min) so a
+stolen live session dies even when the absolute cookie age is still 12 h.
 """
+import time
+
+from django.contrib.auth import logout
 from django.http import JsonResponse
 
 ENROLLMENT_ALLOWED_PREFIXES = (
-    "/api/auth/",     # login, logout, me, totp/enroll, totp/confirm
+    "/api/auth/",     # login, logout, me, totp/*, webauthn/*
     "/api/schema/",
     "/admin/",        # dev convenience; Tailscale-IP-bound + 2FA in deployment (§B10)
     "/static/",
 )
+
+LAST_ACTIVITY_KEY = "_hub_last_activity"
 
 
 class EnrollmentRequiredMiddleware:
@@ -40,3 +48,24 @@ def _has_confirmed_device(user):
     from django_otp import devices_for_user
 
     return any(devices_for_user(user, confirmed=True))
+
+
+class IdleTimeoutMiddleware:
+    """Rolling idle timeout on HUB_SESSION_IDLE_TIMEOUT. After AuthenticationMiddleware."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        from django.conf import settings
+
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated:
+            now = time.time()
+            last = request.session.get(LAST_ACTIVITY_KEY)
+            timeout = int(getattr(settings, "HUB_SESSION_IDLE_TIMEOUT", 30 * 60))
+            if last is not None and (now - float(last)) > timeout:
+                logout(request)
+            else:
+                request.session[LAST_ACTIVITY_KEY] = now
+        return self.get_response(request)

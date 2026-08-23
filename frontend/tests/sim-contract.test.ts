@@ -3,6 +3,7 @@
 // the build here instead.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { schemas } from "../src/api/zod.ts";
 import { SIM_FIXTURES, TAKKO_SITES } from "../src/sim.js";
 
@@ -63,9 +64,32 @@ test("project list site fixtures emit cert_refusal like project_row_body", async
           `${state}: ${row.name}/${site.name} omitted cert_refusal`);
         assert.equal(site.cert_refusal, null,
           `${state}: ${row.name}/${site.name} unused cert_refusal must be null`);
+        assert.ok(Object.prototype.hasOwnProperty.call(site, "attack_state"),
+          `${state}: ${row.name}/${site.name} omitted attack_state`);
+        assert.equal(site.attack_state, null,
+          `${state}: ${row.name}/${site.name} unused attack_state must be null`);
       }
     }
   }
+});
+
+test("live_backup_list_parses_against_generated_BackupList", async () => {
+  const { status, data } = await (SIM_FIXTURES.live as any)("v1/sites/1/backups/");
+  assert.equal(status, 200);
+  const parsed = schemas.BackupList.safeParse(data);
+  assert.ok(parsed.success, JSON.stringify((parsed as any).error?.issues));
+  assert.ok(data.restore_command.includes("/var/lib/deploy-hub/backups/"));
+  const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
+  assert.match(src, /export function AttackState/);
+});
+
+test("generated_site_summary_includes_attack_state", () => {
+  const openapi = readFileSync(new URL("../src/api/openapi.yaml", import.meta.url), "utf8");
+  assert.match(openapi, /attack_state:/);
+  const zod = readFileSync(new URL("../src/api/zod.ts", import.meta.url), "utf8");
+  assert.match(zod, /attack_state:/);
+  const types = readFileSync(new URL("../src/api/types.ts", import.meta.url), "utf8");
+  assert.match(types, /attack_state/);
 });
 
 test("live readiness report parses against the generated Readiness schema", async () => {
@@ -114,43 +138,55 @@ test("r8-4: every wizard/readiness pair the UI can reach parses against its sche
   }
 });
 
-// §4b.4 — THE ALARM THAT WOULD HAVE CAUGHT THE FICTION, RE-AIMED.
+// §4b.4 — THE ALARM THAT WOULD HAVE CAUGHT THE FICTION, RE-AIMED AT THE GRANT.
 //
 // Parsing proves nothing on its own here: `ReadinessSerializer.blockers` is a ListField
 // of DictField and `blocking` is one too, so a fixture can hand the UI any refusal shape
 // it likes and stay green. The first remedy for R8-1 did exactly that and was reviewed
 // against it.
 //
-// r8's cross-check asserted the acceptance invariant — a blocker publishing an
-// `acceptance` contract appears in `blocking` as an item carrying `awaiting_acceptance`
-// if and only if its confirm is unanswered. D-012 left Phase 1, so no check publishes
-// that contract and no `preflight` emits that item; the invariant now has NO instances,
-// and a test that walks an empty set passes for the wrong reason forever. What replaces
-// it is the same idea against what the server does send: every refusal item names a
-// check the readiness report really reports as a blocker, and no fixture invents the
-// acceptance shape the phase removed.
-test("d012: no fixture carries an acceptance contract or an acceptance-pending refusal", async () => {
+// Parking-era pins forbade `acceptance`, `awaiting_acceptance`, and
+// `scanner.test_material.*`, and treated `can_materialize` plus a blocker-tier check as
+// illegal. Those sentences were true under the cap decision. After D-012 re-land they
+// are a lie: wizard True is the grant, the scan report is never rewritten, and a
+// declared-only blocker sits next to an enabled Materialize button. Task 12 owns the
+// `?sim=accepted` re-record; this file must not go red when that fixture lands.
+test("d012: acceptance on a fixture is the grant shape, not a parking-era lie", async () => {
   for (const state of ["live", "stale", "degraded"]) {
     for (const id of [1, 2]) {
       const { data: report } = await (SIM_FIXTURES[state] as any)(`v1/projects/${id}/readiness/`);
+      const { data: wizard } = await (SIM_FIXTURES[state] as any)(`v1/sites/${id}/wizard/`);
+      const confirmIds = new Set(
+        (wizard.questions || [])
+          .filter((q: any) => q.id.startsWith("scanner.test_material."))
+          .map((q: any) => q.id),
+      );
+      const answered = wizard.answered || {};
+
       for (const tier of ["blockers", "warnings", "advice", "pending_sandbox"]) {
         for (const check of report[tier] || []) {
-          assert.ok(!("acceptance" in check),
-            `${state}/${id}: ${check.id} carries an acceptance contract, which no ` +
-            "scanner in this phase emits");
+          if (!("acceptance" in check)) continue;
+          for (const qid of check.acceptance?.questions || []) {
+            assert.ok(confirmIds.has(qid),
+              `${state}/${id}: ${check.id} names confirm ${qid} the wizard does not ask`);
+          }
         }
       }
-      const { data: wizard } = await (SIM_FIXTURES[state] as any)(`v1/sites/${id}/wizard/`);
+
       for (const problem of wizard.blocking || []) {
+        if (problem.code !== "blockers_present") continue;
         for (const item of problem.items || []) {
-          assert.ok(!("awaiting_acceptance" in item),
-            `${state}/${id}: a refusal item waits on an acceptance, which preflight ` +
-            "cannot produce this phase");
+          if (!(item.awaiting_acceptance || []).length) continue;
+          const check = (report.blockers || []).find((c: any) => c.id === item.id);
+          assert.equal(check?.acceptance?.blocking_only_declared, true,
+            `${state}/${id}: awaiting_acceptance on ${item.id}, which no confirm can clear`);
+          for (const q of item.awaiting_acceptance) {
+            assert.notEqual(answered[q.id], true,
+              `${state}/${id}: ${q.id} is awaiting_acceptance but answered True`);
+            assert.ok(confirmIds.has(q.id),
+              `${state}/${id}: awaiting_acceptance names ${q.id} the wizard does not ask`);
+          }
         }
-      }
-      for (const question of wizard.questions || []) {
-        assert.ok(!question.id.startsWith("scanner.test_material."),
-          `${state}/${id}: the wizard asks a declaration confirm`);
       }
     }
   }
@@ -170,31 +206,32 @@ test("d012: every blocking refusal names a check the readiness report reports", 
             "report does not report as a blocker");
         }
       }
-      // …and the other way: a blocker in the report and a wizard that says go is the
-      // combination this phase must never show, because nothing clears a blocker.
-      if (wizard.can_materialize)
-        assert.equal(reported.size, 0,
-          `${state}/${id}: the wizard says the deploy may proceed while the report ` +
-          "still reports a blocker — no answer clears a blocker this phase");
+      // Re-land: an answer CAN clear a declared-only blocker. can_materialize next to
+      // a blocker-tier check is legal only when every remaining blocker publishes
+      // blocking_only_declared: true. A [proof] / .env / undeclared heuristic still
+      // makes this combination illegal.
+      if (wizard.can_materialize) {
+        for (const check of report.blockers || []) {
+          assert.equal(check.acceptance?.blocking_only_declared, true,
+            `${state}/${id}: can_materialize while ${check.id} is a blocker no ` +
+            "confirm can clear");
+        }
+      }
     }
   }
 });
 
-test("d012: the legacy-shop report shows the drill tree at full tier", async () => {
+test("d012: the legacy-shop report still blocks on the drill tree", async () => {
   // The fixture repo carries a `deployhub.yaml` declaring `frontend/scripts/drill`.
-  // What the operator must see is fifteen ordinary blocking lines — ten of them under
-  // the declared path — with no header claiming a downgrade, and one warning saying the
-  // file is not honored.
+  // Re-land: findings under that path stay blocker-tier until wizard accept.
+  // This static fixture's detail copy is still the parking-era dump (Task 12 can
+  // re-record); the presence notice that said the file was ignored is gone.
   const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/2/readiness/");
   const secretScan = report.blockers.find((c: any) => c.id === "core.secret-scan");
   assert.ok(secretScan, "the messy fixture lost its secret scan");
-  const lines = secretScan.detail.split("\n\n")[0].split("\n");
-  assert.equal(lines.length, 15, `expected 15 blocking lines, got ${lines.length}`);
-  assert.equal(lines.filter((l: string) => l.startsWith("frontend/scripts/drill/")).length, 10);
-  assert.ok(!/Downgrades claimed|declared:/.test(secretScan.detail),
-    "the report still shows a declaration header or label");
+  assert.equal(secretScan.tier, "blocker");
   const notices = report.warnings.filter((c: any) => c.id === "core.declaration-file");
-  assert.equal(notices.length, 1, "the presence notice is missing or duplicated");
+  assert.equal(notices.length, 0, "core.declaration-file was the parking-era lie");
 });
 
 // ── round 9: the payload families §F8 had no fixture for ──────────────────────
@@ -400,6 +437,8 @@ async function parseEveryRead(state: string, when: string) {
         for (const site of row.sites || []) {
           assert.ok(Object.prototype.hasOwnProperty.call(site, "cert_refusal"),
             `${state} ${when}: ${row.name}/${site.name} omitted cert_refusal`);
+          assert.ok(Object.prototype.hasOwnProperty.call(site, "attack_state"),
+            `${state} ${when}: ${row.name}/${site.name} omitted attack_state`);
         }
       }
     }
@@ -528,7 +567,7 @@ test("r11-ux-f1: no takko site can materialize under the converged blocking repo
         // taken against the moved report, not the live state's memory.
         assert.equal(patched.data.can_materialize, false,
           `site ${site}: the wizard says the deploy may proceed while the report ` +
-          "reports a blocker — no answer clears a blocker this phase");
+          "reports a blocker that publishes no acceptance");
       } else {
         assert.match(patched.data.detail, /^\[sim\] NOT COVERED/,
           `site ${site}: a state that will not answer must say so as the simulation, ` +

@@ -8,11 +8,38 @@ import os
 
 from django.utils import timezone
 
-from .kek import KEKError, get_backend
+from .kek import KEKError, backend_for_stored_kek_id, get_backend
 from .models import Secret
 
 DEK_BYTES = 32   # AES-256
 NONCE_BYTES = 12  # GCM standard
+
+# In-process unwrapped DEKs (D-059). Keyed by (secret pk, kek_id). Never log or
+# serialize — a KMS blip must not fail every get once a row has been unwrapped.
+_DEK_CACHE = {}
+
+
+def reset_dek_cache():
+    """Drop cached DEKs. Tests and rewrap; this map is never serialized."""
+    _DEK_CACHE.clear()
+
+
+def _cache_key(secret: Secret):
+    # wrapped_dek distinguishes a reused pk and a rewrap this process did not see.
+    return (secret.pk, secret.kek_id, bytes(secret.wrapped_dek))
+
+
+def _unwrap_dek(secret: Secret) -> bytes:
+    key = _cache_key(secret)
+    dek = _DEK_CACHE.get(key)
+    if dek is not None:
+        return dek
+    backend = get_backend()
+    if secret.kek_id != backend.kek_id:
+        backend = backend_for_stored_kek_id(secret.kek_id)
+    dek = backend.unwrap(bytes(secret.wrapped_dek))
+    _DEK_CACHE[key] = dek
+    return dek
 
 
 class VaultDecryptError(RuntimeError):
@@ -69,9 +96,8 @@ def get(secret: Secret, *, actor=None, reason="") -> bytes:
     (§7.4), which is the whole point of routing reads through a function."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    backend = get_backend()
     try:
-        dek = backend.unwrap(bytes(secret.wrapped_dek))
+        dek = _unwrap_dek(secret)
         plaintext = AESGCM(dek).decrypt(
             bytes(secret.nonce), bytes(secret.ciphertext), secret.aad
         )
@@ -97,17 +123,18 @@ def rewrap(secret: Secret, *, actor=None) -> Secret:
     which is the operational reason the envelope pattern exists. Phase 4 uses this to
     migrate rung ① → ③.
     """
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
-
     backend = get_backend()
     old_backend_id = secret.kek_id
     try:
-        dek = get_backend().unwrap(bytes(secret.wrapped_dek))
+        dek = _unwrap_dek(secret)
     except KEKError as exc:
         raise VaultDecryptError(f"cannot rewrap secret {secret.pk}") from exc
     secret.wrapped_dek = backend.wrap(dek)
     secret.kek_id = backend.kek_id
     secret.save(update_fields=["wrapped_dek", "kek_id"])
+    for cached in [k for k in _DEK_CACHE if k[0] == secret.pk]:
+        _DEK_CACHE.pop(cached, None)
+    _DEK_CACHE[_cache_key(secret)] = dek
     _audit("vault-secret-rewrapped", secret, actor=actor, from_kek=old_backend_id,
            to_kek=backend.kek_id)
     return secret

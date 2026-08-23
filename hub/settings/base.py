@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "channels",
     "django_otp",
     "django_otp.plugins.otp_totp",
+    "django_otp_webauthn",
     # otp_static removed 2026-08-03 (round 2): recovery codes live in
     # core.RecoveryCode (sha256-hashed); keeping the plugin would let match_token
     # accept legacy plaintext StaticToken rows as second factors.
@@ -50,6 +51,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django_otp.middleware.OTPMiddleware",
     "core.middleware.EnrollmentRequiredMiddleware",  # §6.10 server-side 2FA gate
+    "core.middleware.IdleTimeoutMiddleware",  # HUB_SESSION_IDLE_TIMEOUT
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -105,8 +107,17 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 60 * 60 * 12          # absolute ~12 h
 SESSION_SAVE_EVERY_REQUEST = True           # rolling idle timeout base
-HUB_SESSION_IDLE_TIMEOUT = 60 * 30          # enforced by middleware in a later slice
+HUB_SESSION_IDLE_TIMEOUT = 60 * 30          # IdleTimeoutMiddleware rolling idle
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# django-otp-webauthn (WebAuthn primary second factor; TOTP remains fallback)
+OTP_WEBAUTHN_RP_NAME = "Deploy Hub"
+OTP_WEBAUTHN_RP_ID = "localhost"
+OTP_WEBAUTHN_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://localhost:5173",
+]
+OTP_WEBAUTHN_ALLOW_PASSWORDLESS_LOGIN = False
 
 # --- DRF + schema (§4.5: serializers are the source of truth) ---
 REST_FRAMEWORK = {
@@ -143,14 +154,15 @@ SPECTACULAR_SETTINGS = {
 HUB_TRUSTED_PROXY_HOPS = int(os.environ.get("HUB_TRUSTED_PROXY_HOPS", "0"))
 
 # --- Vault (§6.9 envelope encryption) ---
-# Rung ① of the KEK placement ladder: a 32-byte keyfile outside the DB and excluded
-# from backups. Rungs ② (YubiKey unlock) and ③ (cloud KMS) are Phase 4 and change only
-# VAULT_KEK_BACKEND — ciphertexts and schema are identical (D-006).
+# Rung ① (local keyfile) is test/dev and does not defeat a stolen Hub disk.
+# Rung ② (YubiKey) may slip. Rung ③ is KmsKEK (D-059): HUB_VAULT_KEK_BACKEND=kms
+# refuses unless HUB_VAULT_KMS_KEY_ID is set. Prod must not default to kms.
 VAULT_KEK_BACKEND = os.environ.get("HUB_VAULT_KEK_BACKEND", "local")
 VAULT_KEYFILE = os.environ.get("HUB_VAULT_KEYFILE", "/etc/deploy-hub/vault.key")
 VAULT_KEYFILE_REQUIRE_MODE = True
 # The in-memory test KEK is opt-in and off by default; prod.py hard-fails on it.
 VAULT_ALLOW_FAKE_KEK = False
+VAULT_KMS_KEY_ID = os.environ.get("HUB_VAULT_KMS_KEY_ID", "")
 
 # Fleet reconciler kill switch. Per-site Site.reconcile_enabled still applies when
 # this is True. Default on: an unset env must not park the fleet.
@@ -168,6 +180,15 @@ HUB_TEST_ZONE_SLUGS = [
     for slug in os.environ.get("HUB_TEST_ZONE_SLUGS", "hub-test").split(",")
     if slug.strip()
 ]
+
+# --- Tailscale device-list poll (D-058 / C6) ---
+# Vault owner-id, never a token value. Default empty → skip-only CheckRun.
+# Do not invent a live token env.
+HUB_TAILSCALE_API_TOKEN_REF = os.environ.get("HUB_TAILSCALE_API_TOKEN_REF", "")
+
+# --- Audit off-host ship (SLIP, C6). Skip unless bucket configured. ---
+# T1 fake lives in core/ with no AWS SDK. Live Object Lock is a Joseph interrupt.
+AUDIT_S3_BUCKET = os.environ.get("HUB_AUDIT_S3_BUCKET", "")
 
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
@@ -235,9 +256,21 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.run_restore_clean_drill",
         "schedule": 30 * 86400,
     },
+    "backup-nightly": {
+        "task": "provision.tasks.run_backup_nightly",
+        "schedule": crontab(hour=2, minute=0),
+    },
     "cf-token-scope-daily": {
         "task": "monitor.tasks.audit_cf_token_scope",
         "schedule": 86400.0,
+    },
+    "tailscale-device-audit-daily": {
+        "task": "monitor.tasks.audit_tailscale_devices",
+        "schedule": 86400.0,
+    },
+    "ssh-rotate-quarterly": {
+        "task": "provision.tasks.rotate_ssh_keys",
+        "schedule": 90 * 86400,
     },
     "probe-uptime": {
         "task": "monitor.tasks.probe_uptime",
@@ -273,7 +306,7 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 # crontab entries honour TIME_ZONE (digest 08:00 local, weekly Monday,
-# retention janitor midnight).
+# retention janitor midnight, backup-nightly 02:00).
 CELERY_TIMEZONE = TIME_ZONE
 
 # --- Pager (D-036) ---

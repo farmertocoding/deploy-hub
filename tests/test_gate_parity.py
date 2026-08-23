@@ -252,39 +252,29 @@ def _waived_fingerprints():
     return waivers
 
 
-def test_issue_f1_secrets_in_exhaust_is_waived_not_gated_by_log_scrub():
-    """`make log-scrub` is a source scan; SEC-69-NO-SECRETS-IN-EXHAUST is about exhaust.
+def test_issue_f1_secrets_in_exhaust_is_not_gated_by_log_scrub():
+    """`make log-scrub` is a source scan; SEC-69-NO-SECRETS-IN-EXHAUST is exhaust.
 
-    Round-5 finding F1: the requirement says secrets never reach logs, Celery task args
-    or frontend responses *after write*, and that CI greps **test output** for plaintext
-    markers. `make log-scrub` greps **source files** for `SECRET_KEY\\s*=`. Naming it in
-    `gate:` made check.py report the requirement `verified` on the strength of a gate
-    that enforces materially less — the same defect class R4-9 exists to kill, one level
-    up: not a gate that does nothing, a gate that does something *else*.
-
-    Until a gate exists that scans captured test output and Celery task kwargs for the
-    vault's plaintext markers, the honest state is an explicit waiver.
+    Round-5 finding F1: naming `gate: log-scrub` reported the requirement
+    `verified` on a source grep for `SECRET_KEY\\s*=`. Phase 4 Task 8 converted
+    the req to `verify: test` over captured pytest stdout/stderr/log and Celery
+    kwargs. log-scrub stays as the source-scan it is; it is still not this
+    requirement's gate.
     """
     req = _req("SEC-69-NO-SECRETS-IN-EXHAUST")
+    assert req["verify"] == "test", (
+        f"SEC-69-NO-SECRETS-IN-EXHAUST must be verify: test, got {req['verify']!r}"
+    )
     assert "gate" not in req, (
-        f"SEC-69-NO-SECRETS-IN-EXHAUST names gate: {req['gate']!r}, but no gate on this "
-        f"tree enforces what the requirement says ('secrets never appear in logs, Celery "
-        f"task args, or frontend responses after write; a CI log-scrubber greps test "
-        f"output for plaintext markers'). `make log-scrub` greps source files for an "
-        f"assignment literal — a different property. Remove the gate: key and carry the "
-        f"requirement in WAIVERS.md until the real gate exists."
+        f"SEC-69-NO-SECRETS-IN-EXHAUST names gate: {req['gate']!r} — `make log-scrub` "
+        "greps source files for an assignment literal, which is a different property. "
+        "The exhaust gate is verify: test (captured output + Celery kwargs)."
     )
 
     waivers = _waived_fingerprints()
-    assert "SEC-69-NO-SECRETS-IN-EXHAUST" in waivers, (
-        "SEC-69-NO-SECRETS-IN-EXHAUST has no gate and no WAIVERS.md line — "
-        "build-process.md §4 allows a fix-with-regression-test or a waiver, nothing else. "
+    assert "SEC-69-NO-SECRETS-IN-EXHAUST" not in waivers, (
+        "SEC-69-NO-SECRETS-IN-EXHAUST is verified by test; the waiver must stay retired. "
         f"Waived today: {sorted(waivers)}"
-    )
-    line = waivers["SEC-69-NO-SECRETS-IN-EXHAUST"]
-    assert "test output" in line and "Celery" in line, (
-        "the waiver must name its retirement condition — a gate that scans captured test "
-        f"output and Celery task kwargs for the vault's plaintext markers. Line:\n  {line}"
     )
 
     # The source scan itself is useful and stays; it is simply not this req's gate.

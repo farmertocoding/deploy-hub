@@ -5,11 +5,23 @@ const Login = z
     username: z.string(),
     password: z.string(),
     otp_code: z.string().optional(),
+    webauthn: z.unknown().optional(),
+  })
+  .passthrough();
+const Me = z
+  .object({
+    authenticated: z.boolean(),
+    username: z.string().optional(),
+    otp_enrolled: z.boolean().optional(),
+    webauthn_count: z.number().int().optional(),
+    totp_enrolled: z.boolean().optional(),
+    t1_available: z.boolean().optional(),
   })
   .passthrough();
 const Confirm = z
   .object({ otp_code: z.string().regex(/^\d{6}$/) })
   .passthrough();
+const WebAuthnLoginBegin = z.object({ username: z.string() }).passthrough();
 const DemoJob = z
   .object({
     name: z.string().regex(/^[a-z][a-z0-9-]{1,30}$/),
@@ -109,6 +121,13 @@ const MapSnapshot = z
 const CertRefusal = z
   .object({ detail: z.string(), finding_id: z.number().int() })
   .passthrough();
+const AttackState = z
+  .object({
+    detail: z.string(),
+    finding_id: z.number().int(),
+    mode: z.string(),
+  })
+  .passthrough();
 const EdgeOwnerEnum = z.enum(["host_caddy", "site_caddy"]);
 const SiteSummary = z
   .object({
@@ -118,6 +137,7 @@ const SiteSummary = z
     latest_manifest_version: z.number().int().nullable(),
     manifest_current: z.boolean().nullable(),
     cert_refusal: CertRefusal.nullish(),
+    attack_state: AttackState.nullish(),
     edge_owner: EdgeOwnerEnum.optional(),
   })
   .passthrough();
@@ -161,6 +181,36 @@ const PatchedSiteEdgeOwner = z
   .partial()
   .passthrough();
 const SiteEdgeOwner = z.object({ edge_owner: EdgeOwnerEnum }).passthrough();
+const BackupDump = z
+  .object({
+    id: z.number().int(),
+    bytes: z.number().int(),
+    digest: z.string(),
+    stored_at: z.string(),
+    status: z.string(),
+  })
+  .passthrough();
+const BackupUnit = z
+  .object({
+    id: z.number().int(),
+    kind: z.string(),
+    schedule: z.string(),
+    dumps: z.array(BackupDump),
+  })
+  .passthrough();
+const BackupList = z
+  .object({ units: z.array(BackupUnit), restore_command: z.string() })
+  .passthrough();
+const BackupRun = z
+  .object({
+    schema_version: z.number().int(),
+    unit_id: z.number().int(),
+    site_id: z.number().int(),
+    bytes: z.number().int(),
+    digest: z.string(),
+    stored_at: z.string(),
+  })
+  .passthrough();
 const EnvNames = z
   .object({ names: z.array(z.string()), config_stale: z.boolean() })
   .passthrough();
@@ -212,10 +262,14 @@ const WizardState = z
 const PatchedAnswers = z
   .object({ answers: z.object({}).partial().passthrough() })
   .passthrough();
+const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
+const SshRotate = z.object({ confirm_name: z.string() }).passthrough();
 
 export const schemas = {
   Login,
+  Me,
   Confirm,
+  WebAuthnLoginBegin,
   DemoJob,
   CloudflareConnect,
   ProviderEnum,
@@ -243,6 +297,7 @@ export const schemas = {
   MapGraph,
   MapSnapshot,
   CertRefusal,
+  AttackState,
   EdgeOwnerEnum,
   SiteSummary,
   ProjectSummary,
@@ -251,6 +306,10 @@ export const schemas = {
   Readiness,
   PatchedSiteEdgeOwner,
   SiteEdgeOwner,
+  BackupDump,
+  BackupUnit,
+  BackupList,
+  BackupRun,
   EnvNames,
   EnvApply,
   EnvWrite,
@@ -261,4 +320,6 @@ export const schemas = {
   Question,
   WizardState,
   PatchedAnswers,
+  TargetDelete,
+  SshRotate,
 };

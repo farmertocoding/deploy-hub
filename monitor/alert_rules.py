@@ -89,6 +89,12 @@ RULES = (
         "alert-protocol.md §2 P1",
     ),
     _r(
+        "ssh-rotation-incomplete",
+        "p1",
+        "SSH key rotation started but did not finish; old key remains the login path",
+        "D-064 / phase-4-design-note.md §7 C8",
+    ),
+    _r(
         "disk-critical",
         "p1",
         "Disk > 95% on any host (at 95% you're minutes from an outage; "
@@ -158,6 +164,12 @@ RULES = (
         "(3 failed convergences → backoff alert), or \"something is "
         "fighting the reconciler\"",
         "alert-protocol.md §2 P2",
+    ),
+    _r(
+        "ssh-rotation-stale-key",
+        "p2",
+        "Old SSH pubkey still authenticates after rotation intended to revoke it",
+        "D-064 / phase-4-design-note.md §7 C8",
     ),
     _r(
         "cert-expiry-warning",
@@ -305,6 +317,18 @@ RULES = (
         "Cloudflare token scope drift (daily audit) or construction-time "
         "scope refusal",
         "D-034 / SEC-B5",
+    ),
+    _r(
+        "tailscale-unknown-device",
+        "p2",
+        "A Tailscale device the Hub did not create appeared on the tailnet",
+        "D-058",
+    ),
+    _r(
+        "audit-ship-failed",
+        "p2",
+        "Off-host audit ship put failed; the local hash chain is intact",
+        "D-056 / phase-4-design-note.md §1.1 item 10",
     ),
     _r(
         "unproxied-cert-refusal",

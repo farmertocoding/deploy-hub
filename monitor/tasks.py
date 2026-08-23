@@ -28,6 +28,9 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
                 tick_started=started, monotonic=mono,
             )
             ingest_traffic(target, payload)
+            from monitor.attack_playbook import run_for_target
+
+            run_for_target(target)
             n += 1
         except Exception as exc:
             audit(
@@ -111,6 +114,16 @@ def audit_cf_token_scope():
     from monitor.token_audit import audit_cloudflare_credentials
 
     run = audit_cloudflare_credentials()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+
+
+@shared_task(ignore_result=True)
+def audit_tailscale_devices():
+    """Beat `tailscale-device-audit-daily`. Takes no args so nothing
+    credential-shaped can appear in task args or the result."""
+    from providers.tailscale import audit_devices
+
+    run = audit_devices()
     return {"ok": True, "status": run.status, "kind": run.kind}
 
 

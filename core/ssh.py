@@ -55,6 +55,24 @@ def _refuse(target, hostname, presented, expected):
         expected=expected,
         presented=presented,
     )
+    from monitor.alerts import raise_alert
+
+    raise_alert(
+        "ssh-host-key-mismatch",
+        f"target:{getattr(target, 'pk', '')}",
+        fingerprint=f"ssh-host-key-mismatch:{getattr(target, 'pk', '')}",
+        source_engine="core.ssh",
+        title="SSH host-key mismatch",
+        body=(
+            f"Pinned host key for {hostname} did not match "
+            f"(expected {expected}, presented {presented}). "
+            "Possible MITM/hijack — never auto-retried."
+        ),
+        fix_action=(
+            "Do not retry. Verify the host on the console and update the pin "
+            "only after out-of-band confirmation."
+        ),
+    )
     raise HostKeyMismatch(
         f"host key mismatch for {hostname}: expected {expected}, presented {presented}"
     )

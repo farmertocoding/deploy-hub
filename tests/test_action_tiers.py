@@ -1,8 +1,8 @@
 """Server↔client ACTION_TIERS bijection (UX-F5, phase-exit I4).
 
 core/actions.py is the source. frontend/src/api/action_tiers.js is the
-generated mirror. Do not mark UX-F5-ACTION-TIERS — the T1 hardware clause
-is unbuilt (SCAN-M4).
+generated mirror. Full-text UX-F5-ACTION-TIERS is marked on the hardware
+tests, not this bijection file.
 """
 import ast
 import json

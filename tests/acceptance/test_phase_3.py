@@ -503,14 +503,14 @@ def test_findings_inbox_requires_a_reason_to_accept_risk():
     """Accept-risk without a one-line reason is refused; findings is canonical.
 
     Transcribes tests/test_findings.py::test_accept_risk_requires_a_reason and
-    tests/test_findings_api.py::test_alerts_alias_delivers_the_same_payload_as_findings
-    (D-045: `findings` is the one attention stream).
+    tests/test_findings_api.py::test_findings_topic_unchanged
+    (D-045/D-061: `findings` is the one attention stream; `alerts` retired).
     """
     from test_findings import _file
 
     from core.findings import accept_risk
     from core.models import Finding
-    from realtime.authorize import DEPRECATED_ALIASES
+    from realtime.authorize import ALLOWED_PREFIXES, authorize_topic
 
     row = _file(fingerprint="p3-accept")
     with pytest.raises(ValueError):
@@ -525,7 +525,13 @@ def test_findings_inbox_requires_a_reason_to_accept_risk():
     assert row.state == Finding.State.ACCEPTED
     assert row.accepted_reason == "internal-only site; downtime is acceptable"
 
-    assert DEPRECATED_ALIASES["alerts"] == "findings"
+    class _Authed:
+        is_authenticated = True
+
+    assert "findings" in ALLOWED_PREFIXES
+    assert "alerts" not in ALLOWED_PREFIXES
+    assert authorize_topic(_Authed(), "findings") is True
+    assert authorize_topic(_Authed(), "alerts") is False
     auth = (REPO / "realtime" / "authorize.py").read_text(encoding="utf-8")
     assert '"findings"' in auth
     assert "canonical" in auth.lower()
@@ -550,10 +556,11 @@ def test_rollback_is_one_click_and_never_step_up_gated():
         'if (row.tier === "T3") return { confirm: false, undo: true, stepUp: "none" }'
         in src
     )
-    # T3 click runs immediately: confirm is the T2 path; deferred is T1.
+    # T3 click runs immediately: confirm is the T2 path. T1 is step-up
+    # ("required"), never attached to these recovery ids.
     assert "if (p.confirm)" in src
-    assert 'if (p.stepUp === "deferred")' in src
     assert "run(args)" in src
+    assert 'stepUp: "none"' in src
     tests = (REPO / "frontend" / "tests" / "actions.test.ts").read_text(encoding="utf-8")
     assert "rollback_restart_and_rerun_are_t3_and_never_behind_step_up" in tests
     assert "t3_runs_on_one_click_with_an_undo_window" in tests
@@ -915,7 +922,7 @@ def test_clause_scoped_full_text_ids_are_waived_not_marked():
 
     markers = check.collect_markers(REPO)
     assert FULL_TEXT_SEC_B2 not in markers
-    assert FULL_TEXT_UX_F5 not in markers
+    assert FULL_TEXT_UX_F5 in markers
 
     sec = _waiver_lines(FULL_TEXT_SEC_B2)
     assert sec, f"{FULL_TEXT_SEC_B2} must have a clause-scoped WAIVED line"
@@ -923,9 +930,8 @@ def test_clause_scoped_full_text_ids_are_waived_not_marked():
     assert "TLS-B2-HUB-DNS01-UNPROXIED" in sec[0]
 
     ux = _waiver_lines(FULL_TEXT_UX_F5)
-    assert ux, f"{FULL_TEXT_UX_F5} must have a clause-scoped WAIVED line"
-    assert "hardware" in ux[0].lower() or "T1" in ux[0]
-    assert "SEC-F5-T1-HARDWARE-TOUCH" in ux[0]
+    assert not ux, f"{FULL_TEXT_UX_F5} waiver retires with the hardware clause"
+    assert "RETIRED 2026-08-23 (Phase 4 Task 2): UX-F5-ACTION-TIERS" in _waivers()
 
     text = _waivers()
     for rid in ADOPT_IDS:

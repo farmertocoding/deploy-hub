@@ -36,6 +36,15 @@ ALIASES = {
 
 REQUIRED_IDS = {"site.domain"}
 
+# Round 7 (R7-1) / Phase 4 Task 3 re-land. Every question under this prefix is a
+# declaration confirm: the scanned repo asked, in its own deployhub.yaml, for
+# heuristic secret findings under a tree it named to stop blocking, and this is
+# the answer that grants or refuses it.
+#
+# It is required, and REQUIRED_IDS could never have said so: these ids carry the
+# declared PATH, so they are per-project and a static set cannot name them.
+DECLARATION_PREFIX = "scanner.test_material."
+
 
 class UnknownQuestion(ValidationError):
     pass
@@ -166,25 +175,30 @@ def validate_answers(project, incoming: dict):
     return cleaned
 
 
-def missing_required(answered_ids):
-    """Required questions still unanswered — `REQUIRED_IDS`, and nothing else.
+def declaration_question_ids(project):
+    """Every declaration confirm this project's scan raised, in id order.
 
-    Module questions are advisory in v1 because a module cannot know which of its env
-    vars the operator intends to supply at the target instead.
-
-    D-012 out of Phase 1 (2026-08-16): round 7 widened this with
-    `declaration_question_ids(project)`, because a declaration confirm is the one answer
-    nobody but the operator can supply and the deploy hung on it. There are no
-    declaration confirms this phase — nothing raises one — so the widening and the
-    second literal copy of the `scanner.test_material.` prefix that carried it (R8-13)
-    both go, and this reverts to the static set it was before.
-
-    ROUND 9: and so does the `project` parameter, which is what the widening had needed
-    and which nothing has read since it left. The mutation gate found it —
-    `wizard.materialize.x_preflight__mutmut_103` replaces the argument with `None` and
-    no test can tell, because no test CAN tell: an argument nobody reads has no
-    observable behaviour to assert. A signature that still asks for a project tells the
-    next caller this answer depends on one, and the next widening will be written as
-    though it does.
+    Read off the project's own question set rather than kept in a second list: the set
+    is what the operator is shown, so an id that can be required here is by construction
+    an id they were asked. A project with no deployhub.yaml has none of these.
     """
-    return sorted(REQUIRED_IDS - set(answered_ids))
+    return sorted(q.id for q in question_set(project)
+                  if q.id.startswith(DECLARATION_PREFIX))
+
+
+def missing_required(project, answered_ids):
+    """Required questions still unanswered. Domain is required, and so is every
+    declaration confirm (see DECLARATION_PREFIX); other module questions are advisory
+    in v1 because a module cannot know which of its env vars the operator intends to
+    supply at the target instead.
+
+    ANSWERED, not accepted: `False` satisfies this. Refusing a declaration is an answer,
+    and it is a different refusal from never having been asked — the first keeps the
+    findings blocking and is recorded in the manifest, the second means the operator
+    never saw the claim at all.
+
+    The project argument is load-bearing again (D-012 re-land): declaration confirm
+    ids come from the project's scan report and are content-keyed (D-012r2).
+    """
+    required = REQUIRED_IDS | set(declaration_question_ids(project))
+    return sorted(required - set(answered_ids))

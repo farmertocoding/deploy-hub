@@ -94,6 +94,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/webauthn/login/begin/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Unauthenticated begin so login can take a WebAuthn assertion as 2FA. */
+        post: operations["auth_webauthn_login_begin_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/demo-jobs/": {
         parameters: {
             query?: never;
@@ -319,6 +336,40 @@ export interface paths {
         patch: operations["v1_sites_partial_update"];
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/backups/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET: metadata-only dumps plus the restore command block. */
+        get: operations["v1_sites_backups_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/backups/{unit_id}/test/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description POST: seal a dump with BACKUP_KEY, persist Hub-local, return metadata. */
+        post: operations["v1_sites_backups_test_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/env/": {
         parameters: {
             query?: never;
@@ -392,6 +443,40 @@ export interface paths {
         patch: operations["v1_sites_wizard_partial_update"];
         trace?: never;
     };
+    "/api/v1/targets/{id}/delete/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name. */
+        post: operations["v1_targets_delete_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{id}/ssh-rotate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name, then rotate. */
+        post: operations["v1_targets_ssh_rotate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -403,6 +488,36 @@ export interface components {
          * @enum {string}
          */
         ActionEnum: "ack" | "resolve" | "accept_risk";
+        AttackState: {
+            detail: string;
+            finding_id: number;
+            mode: string;
+        };
+        BackupDump: {
+            id: number;
+            bytes: number;
+            digest: string;
+            stored_at: string;
+            status: string;
+        };
+        BackupList: {
+            units: components["schemas"]["BackupUnit"][];
+            restore_command: string;
+        };
+        BackupRun: {
+            schema_version: number;
+            unit_id: number;
+            site_id: number;
+            bytes: number;
+            digest: string;
+            stored_at: string;
+        };
+        BackupUnit: {
+            id: number;
+            kind: string;
+            schedule: string;
+            dumps: components["schemas"]["BackupDump"][];
+        };
         CertRefusal: {
             detail: string;
             finding_id: number;
@@ -521,6 +636,7 @@ export interface components {
             username: string;
             password: string;
             otp_code?: string;
+            webauthn?: unknown;
         };
         Manifest: {
             version: number;
@@ -553,6 +669,14 @@ export interface components {
         Materialize: {
             /** @default false */
             confirm_warnings: boolean;
+        };
+        Me: {
+            authenticated: boolean;
+            username?: string;
+            otp_enrolled?: boolean;
+            webauthn_count?: number;
+            totp_enrolled?: boolean;
+            t1_available?: boolean;
         };
         OriginCaPlant: {
             path: string;
@@ -673,7 +797,11 @@ export interface components {
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
+            attack_state?: components["schemas"]["AttackState"] | null;
             edge_owner?: components["schemas"]["EdgeOwnerEnum"];
+        };
+        SshRotate: {
+            confirm_name: string;
         };
         /**
          * @description * `open` - Open
@@ -683,10 +811,16 @@ export interface components {
          * @enum {string}
          */
         StateEnum: "open" | "acked" | "resolved" | "accepted";
+        TargetDelete: {
+            confirm_name: string;
+        };
         Transition: {
             action: components["schemas"]["ActionEnum"];
             /** @default  */
             reason: string;
+        };
+        WebAuthnLoginBegin: {
+            username: string;
         };
         WizardState: {
             questions: components["schemas"]["Question"][];
@@ -764,12 +898,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
             };
         };
     };
@@ -815,6 +950,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    auth_webauthn_login_begin_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebAuthnLoginBegin"];
+                "application/x-www-form-urlencoded": components["schemas"]["WebAuthnLoginBegin"];
+                "multipart/form-data": components["schemas"]["WebAuthnLoginBegin"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
         };
     };
@@ -1129,6 +1291,49 @@ export interface operations {
             };
         };
     };
+    v1_sites_backups_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupList"];
+                };
+            };
+        };
+    };
+    v1_sites_backups_test_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRun"];
+                };
+            };
+        };
+    };
     v1_sites_env_retrieve: {
         parameters: {
             query?: never;
@@ -1339,6 +1544,58 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WizardState"];
                 };
+            };
+        };
+    };
+    v1_targets_delete_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TargetDelete"];
+                "application/x-www-form-urlencoded": components["schemas"]["TargetDelete"];
+                "multipart/form-data": components["schemas"]["TargetDelete"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_targets_ssh_rotate_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SshRotate"];
+                "application/x-www-form-urlencoded": components["schemas"]["SshRotate"];
+                "multipart/form-data": components["schemas"]["SshRotate"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
