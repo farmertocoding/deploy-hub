@@ -14,11 +14,12 @@ from django.test import override_settings
 
 from core.audit import _canonical_row, audit
 
-pytestmark = [pytest.mark.django_db, pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")]
+pytestmark = pytest.mark.django_db
 
 BUCKET = "hub-audit-t1"
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_fake_shipper_appends_hash_chain():
     """A configured bucket plus the T1 fake store appends events in chain order.
 
@@ -55,6 +56,7 @@ def test_fake_shipper_appends_hash_chain():
     assert AuditEvent.objects.filter(shipped_at__isnull=True).count() == 0
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_absent_bucket_skips():
     """Empty AUDIT_S3_BUCKET is skip, never SUCCEEDED, never a live Object Lock.
 
@@ -86,6 +88,7 @@ def test_absent_bucket_skips():
     assert "botocore" not in src
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_audit_write_does_not_block_on_s3_down(monkeypatch):
     """audit() stays local when the off-host put would fail; ship files P2.
 

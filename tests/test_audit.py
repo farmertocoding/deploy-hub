@@ -24,6 +24,7 @@ def _canonical_row(event):
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_audit_genesis_empty_prev():
     """The first audit() row stores prev_hash="", not a hash of itself.
 
@@ -39,6 +40,7 @@ def test_audit_genesis_empty_prev():
     assert event.prev_hash == ""
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_audit_event_prev_hash_chains():
     """Each later row's prev_hash is sha256(prev.prev_hash + canonical(prev)).
 
@@ -69,6 +71,7 @@ def test_audit_event_prev_hash_chains():
     assert third.prev_hash == expected_third
 
 
+@pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
 def test_audit_does_not_call_s3(monkeypatch):
     """Writing the chain is local. A missing bucket must not raise or delay.
 
