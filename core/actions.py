@@ -13,6 +13,8 @@ ACTION_TIERS = (
     {"id": "site.deploy", "tier": "T2", "label": "Deploy"},
     {"id": "dns.change", "tier": "T2", "label": "Change DNS"},
     {"id": "site.auto_mode", "tier": "T2", "label": "Toggle auto-mode"},
+    {"id": "site.adopt.start", "tier": "T2", "label": "Start adopt"},
+    {"id": "site.adopt.cancel", "tier": "T2", "label": "Cancel adopt"},
     {"id": "demo.launch", "tier": "T2", "label": "Launch demo job"},
     {"id": "target.delete", "tier": "T1", "label": "Delete target"},
     {"id": "key.export", "tier": "T1", "label": "Export key"},
