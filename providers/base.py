@@ -38,7 +38,7 @@ class EdgeProtection:
 
 class CloudProvider:
     def create_instance(self, spec):
-        """Returns instance info INCLUDING provider-fetched host keys (§6.8 pinning)."""
+        """Return {id, state, public_ip, host_key_fingerprint} (+ optional host_keys)."""
         raise NotImplementedError
 
     def get_instance(self, instance_id):

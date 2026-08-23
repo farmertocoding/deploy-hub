@@ -285,3 +285,42 @@ def _file_scope_finding(zone, error, *, role="dns"):
         body=str(error),
         fix_action=fix,
     )
+
+
+def cloud_provider_for(*, region_name="us-east-1", **kwargs):
+    """The only CloudProvider constructor (D-068). Fail-closed.
+
+    Loads vault-ref credentials via load_aws_credentials, observes
+    sts:GetCallerIdentity, applies the AWS test-plane wall, and returns
+    Ec2CloudProvider. boto3 stays in aws_creds / ec2 — never imported here.
+    """
+    from core.test_mode import assert_test_aws
+
+    from .aws_creds import boto3_client
+    from .ec2 import Ec2CloudProvider
+
+    creds = load_aws_credentials(reason="ec2 client construction")
+    sts = boto3_client(
+        "sts",
+        access_key_id=creds["access_key_id"],
+        secret_access_key=creds["secret_access_key"],
+        region_name=region_name,
+    )
+    try:
+        ident = sts.get_caller_identity()
+    except Exception as exc:
+        raise ScopeError("sts:GetCallerIdentity failed") from exc
+    account_id = str(ident["Account"])
+    assert_test_aws(account_id, region_name)
+    client = boto3_client(
+        "ec2",
+        access_key_id=creds["access_key_id"],
+        secret_access_key=creds["secret_access_key"],
+        region_name=region_name,
+    )
+    return Ec2CloudProvider(
+        client,
+        region_name=region_name,
+        account_id=account_id,
+        **kwargs,
+    )
