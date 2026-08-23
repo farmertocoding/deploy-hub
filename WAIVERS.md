@@ -76,7 +76,10 @@ WAIVED: mutation+hub/renderers.py+hub.renderers.xǁContainedJSONRendererǁrender
 # Fingerprints match `.superpowers/sdd/phase-2-tasks/round-1-*.md`.
 WAIVED: tests.test_crash_kill_matrix+REL-P3+t1-runtimeerror-not-t2-crash — HUB_TEST_CRASH_AFTER_STEP as in-process RuntimeError is the Phase 2 kill-matrix; SIGKILL of a live worker is Phase 2.5 harness. The T1 1–9 matrix stays. (2026-08-21)
 WAIVED: tests.acceptance.test_phase_2+Q4-transcription+hub-test-target-is-t1 — T1 FakeTransport acceptance is allowed; hub-test-target is the T2 demo record. Retire when the acceptance clause is the T2/T3 nodeid. (2026-08-21)
-WAIVED: tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-ready-stub — T2 alpine COPY-from-tree is the recorded vfs exception; PIPE-S4 is proven on T1. Retire when T2 builds the fixture image. (2026-08-21)
+# RETIRED 2026-08-23 (leftover Task 7): tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+t2-instant-ready-stub
+# — host-built sample-node-site image docker-load into hub-test-target;
+# tests/test_pipeline_sample_node_site.py::test_t2_real_node_image_builds_on_vfs
+# deploys Fastify /healthz (backfill_pct, not alpine T2_SERVE_PY).
 # RETIRED 2026-08-22 (Task 13): frontend/src/App.jsx+UX-F8-SIMULATION-STATES+demo-pane-no-site-deploy-topics
 # — frontend/tests/simulation-states.test.ts::every_new_state_renders_in_simulation_mode
 # paints site/deploy/finding/map states on product screens, not the demo pane.
@@ -105,8 +108,9 @@ WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials: HUB_TEST_CF_TOKEN is not se
 # Phase 3 exit (Task 19). Clause-scoped full-text ids (SCAN-M4 shape, D-035 /
 # D-040): the buildable clauses are marked on their split ids; these two sit
 # uncovered because a marker would claim the unbuilt clause. Adopt (Task 15)
-# slipped to Phase 3b (D-044). REL-P2 24 h, D-025 alpine, and the D-022
-# checklist lines stay above. UX-F8 and SEC-P5 stay RETIRED. Do not read a
+# slipped to Phase 3b (D-044). REL-P2 24 h and the D-022
+# checklist lines stay above. D-025 alpine PIPE-S4 is RETIRED (host-load).
+# UX-F8 and SEC-P5 stay RETIRED. Do not read a
 # MON-C7 or MAP-96 line here — both landed.
 WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemented: the full-text id names two clauses; SEC-B2-NO-TOKEN-ON-TARGET is proven by the target-bound surface scan (tests/test_no_token_exfiltration.py, unmarked here); Hub-central DNS-01 for unproxied sites is unbuilt and the honest interim is the named refusal (Finding + Sites-screen state). Retire when TLS-B2-HUB-DNS01-UNPROXIED (registered at phase 4; built in Phase 3b) is verified and the full-text markers go back on. (2026-08-23)
 WAIVED: UX-F5-ACTION-TIERS — T1 hardware-touch clause unimplemented: the full-text id names T1/T2/T3 friction; UX-F5-T2-T3-FRICTION is proven (frontend/src/actions.js + tests/acceptance/test_phase_3.py::test_rollback_is_one_click_and_never_step_up_gated); WebAuthn hardware touch for T1 is unbuilt (D-040). Retire when SEC-F5-T1-HARDWARE-TOUCH (phase 4) is verified and the full-text markers go back on. (2026-08-23)

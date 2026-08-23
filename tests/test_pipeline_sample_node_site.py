@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 from pipeline_fakes import (
+    GIT_SHA,
     NPM_CI_DOCKERFILE,
     SAMPLE_NODE_SITE,
     PipelineTransport,
@@ -192,20 +193,126 @@ CMD ["python3", "/app/serve.py"]
 
 
 @pytest.mark.t2
-def test_t2_real_node_image_builds_on_vfs():
-    """Documented D-025 skip: vfs did not land the real sample-node-site image.
+@pytest.mark.skipif(not _docker_available(), reason="docker is not available")
+@pytest.mark.req("PIPE-S4-READINESS-GATE")
+def test_t2_real_node_image_builds_on_vfs(hub_target):
+    """Host-built sample-node-site image loads into hub-test-target and deploys.
 
-    What would make this fail: hanging PIPE-S4-READINESS-GATE on this skip,
-    or retiring the alpine waiver without a green real-image build.
+    What would make this fail: in-target docker build/pull, alpine T2_SERVE_PY
+    instant-ready JSON, or cutover before smoke sees ready.
     """
-    pytest.skip(
-        "D-025 2026-08-22: hub-test-target vfs refused the real node image "
-        "within 240s. NPM_CI_DOCKERFILE: npm ci exit 1 (no package-lock). "
-        "pnpm frozen fixture Dockerfile: ERR_PNPM_TARBALL_INTEGRITY on "
-        "zod/ccxt fetch. Alpine T2_DOCKERFILE + waiver "
-        "tests.test_pipeline_sample_node_site+PIPE-S4-READINESS-GATE+"
-        "t2-instant-ready-stub stay. This skip does not verify PIPE-S4."
+    from core.models import NetworkZone, Project, Site, Target
+    from core.ssh import SshTransport
+    from core.transport import RecordingTransport
+    from deploys.models import Manifest
+    from deploys.pipeline import execute
+    from deploys.steps import image_tag
+    from tests.harness.target import (
+        SAMPLE_NODE_SITE_IMAGE,
+        _wait_exec,
+        ensure_image_on_target,
+        host_build_sample_node_site,
     )
+    from vault import service
+    from vault.models import Secret
+
+    _wait_exec(
+        hub_target.container,
+        ["systemctl", "is-active", "docker"],
+        ready=lambda r: r.stdout.strip() == "active",
+        deadline=time.time() + 90,
+    )
+    _wait_exec(
+        hub_target.container,
+        ["systemctl", "is-active", "caddy"],
+        ready=lambda r: r.stdout.strip() == "active",
+        deadline=time.time() + 60,
+    )
+
+    owner_id = f"t2-real-{uuid.uuid4().hex[:12]}"
+    zone = NetworkZone.objects.create(name="t2", slug=f"t2-real-{uuid.uuid4().hex[:8]}")
+    target = Target.objects.create(
+        zone=zone,
+        kind=Target.Kind.SSH,
+        host=f"{hub_target.host}:{hub_target.port}",
+        ssh_user=hub_target.user,
+        ssh_key_ref=owner_id,
+        host_key_fingerprint=hub_target.host_key_fingerprint,
+        lifecycle=Target.Lifecycle.PERMANENT,
+        status=Target.Status.READY,
+    )
+    service.put(
+        kind=Secret.Kind.SSH_PRIVATE_KEY,
+        owner_type="target",
+        owner_id=owner_id,
+        plaintext=hub_target.client_key_pem,
+    )
+    slug = f"t2r{uuid.uuid4().hex[:6]}"
+    project = Project.objects.create(name=slug, slug=f"p-{slug}")
+    from dns_fixtures import default_dns_zone
+
+    site = Site.objects.create(
+        project=project,
+        name=slug,
+        domain=f"{slug}.example.test",
+        primary_target=target,
+        dns_zone=default_dns_zone(),
+        deploy_strategy=Site.DeployStrategy.RECREATE,
+        readiness_path="/healthz",
+        warmup_timeout_s=30,
+    )
+    body = fixture_body(slug, extra={
+        "readiness_path": "/healthz",
+        "warmup_timeout_s": 30,
+        "docker_run_extra": ["-p", "127.0.0.1:20000:80"],
+        "internal_port": 80,
+        "upstream": "127.0.0.1:20000",
+        "caddy_listen": "127.0.0.1:8088",
+    })
+    tag = image_tag(GIT_SHA, body)
+    host_build_sample_node_site()
+    ensure_image_on_target(hub_target.container, SAMPLE_NODE_SITE_IMAGE, tag)
+
+    manifest = Manifest.objects.create(site=site, version=1, body=body)
+    first = Deployment.objects.create(manifest=manifest)
+    rec = RecordingTransport(SshTransport(target))
+    try:
+        result = execute(first.pk, transport=rec, dns=FakeDnsProvider())
+    except Exception as exc:
+        ssh = SshTransport(target)
+        name = f"site-{slug}-{first.pk}"
+        ps = ssh.probe(["docker", "ps", "-a", "--format", "{{.Names}} {{.Status}}"])
+        logs = ssh.probe(["docker", "logs", name])
+        direct = ssh.probe(["curl", "-sS", "http://127.0.0.1:20000/healthz"])
+        raise AssertionError(
+            f"execute raised {exc!r}\nps={ps.stdout!r}\nlogs={logs.stdout!r} {logs.stderr!r}\n"
+            f"direct={direct.stdout!r} {direct.stderr!r}"
+        ) from exc
+    first.refresh_from_db()
+    assert first.status == Deployment.Status.SUCCEEDED, result
+
+    builds = [
+        argv for kind, argv in rec.calls
+        if kind == "run" and isinstance(argv, list) and argv[:2] == ["docker", "build"]
+    ]
+    assert builds == [], builds
+
+    smoke = first.steps.get(name=DeploymentStep.Name.SMOKE_TEST)
+    cutover = first.steps.get(name=DeploymentStep.Name.CUTOVER)
+    assert smoke.status == DeploymentStep.Status.SUCCEEDED
+    assert cutover.status == DeploymentStep.Status.SUCCEEDED
+    assert smoke.finished is not None and cutover.started is not None
+    assert smoke.finished <= cutover.started
+
+    health = rec.probe(["curl", "-sf", "http://127.0.0.1:20000/healthz"])
+    assert health.ok, health.stderr
+    payload = json.loads(health.stdout)
+    assert payload.get("live") is True
+    assert payload.get("ready") is True
+    checks = payload.get("checks") or {}
+    assert "backfill_pct" in checks, payload
+    assert "feed_age_s" in checks, payload
+    assert checks.get("backfill_pct") == 100
 
 
 @pytest.mark.t2
@@ -225,7 +332,13 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
     from core.transport import RecordingTransport
     from deploys.models import Manifest
     from deploys.pipeline import execute
-    from tests.harness.target import _docker, _wait_exec
+    from deploys.steps import image_tag
+    from tests.harness.target import (
+        _docker,
+        _wait_exec,
+        ensure_image_on_target,
+        host_build_image,
+    )
     from vault import service
     from vault.models import Secret
 
@@ -295,6 +408,12 @@ def test_t2_execute_sample_node_site_twice(hub_target, tmp_path):
         "upstream": "127.0.0.1:20000",
         "caddy_listen": "127.0.0.1:8088",
     })
+    (ctx / "Dockerfile").write_text(T2_DOCKERFILE)
+    alpine_tag = f"t2-alpine-{slug}"
+    host_build_image(alpine_tag, ctx)
+    ensure_image_on_target(
+        hub_target.container, alpine_tag, image_tag(GIT_SHA, body),
+    )
     manifest = Manifest.objects.create(site=site, version=1, body=body)
     first = Deployment.objects.create(manifest=manifest)
     rec = RecordingTransport(SshTransport(target))
