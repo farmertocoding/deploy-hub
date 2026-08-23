@@ -171,21 +171,26 @@ def test_dns_provider_for_route53_fail_closed():
 
     name = "r53-failclosed.example"
     _put_aws(owner_id="leftover-r53")
-    account = _account(dns_token_ref=REF, label="r53-fc")
-    zone = _zone(account, name=name, provider_zone_id="ZLEFTOVER")
+    leftover = _zone(
+        _account(dns_token_ref=REF, label="r53-fc"),
+        name="r53-leftover.example",
+        provider_zone_id="ZLEFTOVER",
+    )
     with override_settings(AWS_CREDENTIALS_REF=""):
         with pytest.raises(ScopeError, match="AWS_CREDENTIALS_REF|HUB_AWS_CREDENTIALS_REF"):
-            dns_provider_for(zone)
+            dns_provider_for(leftover)
+
+    missing = _zone(
+        _account(label="r53-missing-secret"),
+        name="r53-missing.example",
+        provider_zone_id="ZMISSING",
+    )
+    with override_settings(AWS_CREDENTIALS_REF=REF):
+        with pytest.raises(ScopeError, match="cloud_credential|vault"):
+            dns_provider_for(missing)
 
     _put_aws()
     with override_settings(AWS_CREDENTIALS_REF=REF):
-        with pytest.raises(ScopeError, match="cloud_credential|vault"):
-            dns_provider_for(_zone(
-                _account(label="r53-missing-secret"),
-                name="r53-missing.example",
-                provider_zone_id="ZMISSING",
-            ))
-
         with mock_aws_route53():
             zid = create_test_hosted_zone(name)
             mismatch = _zone(

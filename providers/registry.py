@@ -73,6 +73,10 @@ def dns_provider_for(zone, *, now=time.monotonic, ttl_s=VERIFY_TTL_S):
     """
     _purpose_wall(zone)
     account = zone.account
+    if account.provider == "route53":
+        from .route53 import construct as construct_route53
+
+        return construct_route53(zone)
     if account.provider != "cloudflare":
         raise ScopeError(
             f"no DNS provider adapter for provider {account.provider!r}"
