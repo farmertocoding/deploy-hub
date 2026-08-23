@@ -1833,6 +1833,38 @@ def test_new_phase_4_ids_have_no_tier():
         f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
 
 
+SEC_B3_AUDIT_HASH_CHAIN = "SEC-B3-AUDIT-HASH-CHAIN"
+SEC_B3_FUNCTION_DEFS = (
+    "tests/test_audit_ship.py::test_fake_shipper_appends_hash_chain",
+    "tests/test_audit_ship.py::test_absent_bucket_skips",
+    "tests/test_audit_ship.py::test_audit_write_does_not_block_on_s3_down",
+    "tests/test_audit.py::test_audit_genesis_empty_prev",
+    "tests/test_audit.py::test_audit_event_prev_hash_chains",
+    "tests/test_audit.py::test_audit_does_not_call_s3",
+)
+
+
+def test_sec_b3_function_decorators_are_visible_to_collect_markers():
+    """collect_markers only counts @pytest.mark.req on def test_*.
+
+    Module pytestmark is applied by pytest and invisible to the AST walker, so
+    a pytestmark pin on tests/test_audit_ship.py still leaves
+    SEC-B3-AUDIT-HASH-CHAIN uncovered. Task 1 left the local MUST proofs
+    unmarked so a local-only pin could not false-green the S3-down clause;
+    that clause now exists, so both files are the honest full-text pin.
+
+    What would make this fail: leaving the id only on pytestmark, or leaving
+    the genesis / chain / no-S3 tests unmarked now that ship-on-S3-down exists.
+    """
+    markers = check.collect_markers(REPO)
+    nodeids = markers.get(SEC_B3_AUDIT_HASH_CHAIN) or []
+    missing = [n for n in SEC_B3_FUNCTION_DEFS if n not in nodeids]
+    assert missing == [], (
+        f"{SEC_B3_AUDIT_HASH_CHAIN} must be a function-level decorator on the "
+        f"named shipper and local-chain tests; collect_markers missed: {missing}"
+    )
+
+
 def test_scan_declared_full_text_is_not_verified_by_parser_only_tests():
     """SCAN-M4: parked parser tests must not carry full-text SCAN-DECLARED-*
     markers. Parser-only proofs do not prove operator acceptance or the five
