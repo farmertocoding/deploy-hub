@@ -70,5 +70,10 @@ export const ACTION_TIERS = [
     "id": "ssh.rotate",
     "tier": "T1",
     "label": "Rotate SSH key"
+  },
+  {
+    "id": "instance.create",
+    "tier": "T1",
+    "label": "Create target"
   }
 ];

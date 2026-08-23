@@ -386,6 +386,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/FirstRunSnapshot'
           description: ''
+  /api/v1/instance/create/:
+    get:
+      operationId: v1_instance_create_retrieve
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-name, then
+        enroll.'
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceCreateCost'
+          description: ''
+    post:
+      operationId: v1_instance_create_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-name, then
+        enroll.'
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InstanceCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InstanceCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceCreateResult'
+          description: ''
   /api/v1/map/:
     get:
       operationId: v1_map_retrieve
@@ -1238,6 +1281,47 @@ components:
         * `connect_cloudflare` - connect_cloudflare
         * `plant_origin_ca` - plant_origin_ca
         * `add_project` - add_project
+    InstanceCreate:
+      type: object
+      properties:
+        confirm_name:
+          type: string
+        host:
+          type: string
+        zone:
+          type: string
+          pattern: ^[-a-zA-Z0-9_]+$
+        instance_type:
+          type: string
+          default: t3.micro
+      required:
+      - confirm_name
+      - host
+      - zone
+    InstanceCreateCost:
+      type: object
+      properties:
+        cost:
+          type: number
+          format: double
+        cost_display:
+          type: string
+      required:
+      - cost
+      - cost_display
+    InstanceCreateResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        host:
+          type: string
+        kind:
+          type: string
+      required:
+      - host
+      - id
+      - kind
     KindEnum:
       enum:
       - zone
@@ -1476,8 +1560,11 @@ components:
     ProviderEnum:
       enum:
       - cloudflare
+      - route53
       type: string
-      description: '* `cloudflare` - Cloudflare'
+      description: |-
+        * `cloudflare` - Cloudflare
+        * `route53` - Route53
     PurposeEnum:
       enum:
       - prod

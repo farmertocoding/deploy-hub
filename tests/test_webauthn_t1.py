@@ -450,6 +450,7 @@ def test_login_webauthn_and_recovery_do_not_write_hardware_touch_at(client, monk
 T1_HTTP = {
     "target.delete": "/api/v1/targets/{pk}/delete/",
     "ssh.rotate": "/api/v1/targets/{pk}/ssh-rotate/",
+    "instance.create": "/api/v1/instance/create/",
 }
 
 

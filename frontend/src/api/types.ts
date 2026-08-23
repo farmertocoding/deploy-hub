@@ -256,6 +256,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instance/create/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name, then enroll. */
+        get: operations["v1_instance_create_retrieve"];
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name, then enroll. */
+        post: operations["v1_instance_create_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/map/": {
         parameters: {
             query?: never;
@@ -653,6 +671,23 @@ export interface components {
          * @enum {string}
          */
         IdEnum: "enroll_target" | "connect_cloudflare" | "plant_origin_ca" | "add_project";
+        InstanceCreate: {
+            confirm_name: string;
+            host: string;
+            zone: string;
+            /** @default t3.micro */
+            instance_type: string;
+        };
+        InstanceCreateCost: {
+            /** Format: double */
+            cost: number;
+            cost_display: string;
+        };
+        InstanceCreateResult: {
+            id: number;
+            host: string;
+            kind: string;
+        };
         /**
          * @description * `zone` - zone
          *     * `host` - host
@@ -767,9 +802,10 @@ export interface components {
         };
         /**
          * @description * `cloudflare` - Cloudflare
+         *     * `route53` - Route53
          * @enum {string}
          */
-        ProviderEnum: "cloudflare";
+        ProviderEnum: "cloudflare" | "route53";
         /**
          * @description * `prod` - Prod
          *     * `test` - Test
@@ -1250,6 +1286,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FirstRunSnapshot"];
+                };
+            };
+        };
+    };
+    v1_instance_create_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceCreateCost"];
+                };
+            };
+        };
+    };
+    v1_instance_create_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstanceCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["InstanceCreate"];
+                "multipart/form-data": components["schemas"]["InstanceCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceCreateResult"];
                 };
             };
         };

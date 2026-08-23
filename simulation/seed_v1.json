@@ -2,7 +2,8 @@
   "comment": "Simulation-mode seed v1 (§F8): v0 shape (2 zones, 4 targets, 6 sites) plus every Task-13 state. Scripted events publish finding payloads on `findings` (D-045); site/deploy status stay on the authorized site./deploy. prefixes. Warming carries elapsed_s/expected_s so the badge is reviewable.",
   "zones": [
     {"name": "zone-a-home", "kind": "home_lan", "cidr": "192.168.1.0/24"},
-    {"name": "zone-b-office", "kind": "home_lan", "cidr": "10.0.0.0/24"}
+    {"name": "zone-b-office", "kind": "home_lan", "cidr": "10.0.0.0/24"},
+    {"name": "aws-use1", "kind": "aws", "cidr": "10.10.0.0/16", "purpose": "test"}
   ],
   "targets": [
     {"name": "home-server-1", "zone": "zone-a-home", "kind": "ssh", "lifecycle": "permanent"},
@@ -249,6 +250,18 @@
         {"domain": "lab.example.com"},
         {"domain": "docs.example.com"}
       ]
+    },
+    {
+      "id": "enroll-empty",
+      "must_render": ["No targets enrolled", "Create target", "$0.05/h", "five cents per hour"]
+    },
+    {
+      "id": "enroll-error",
+      "must_render": ["Target create failed"]
+    },
+    {
+      "id": "enroll-degraded",
+      "must_render": ["not connected", "HUB_AWS_CREDENTIALS_REF"]
     }
   ],
   "scripted_events": [
@@ -271,6 +284,9 @@
     {"t": 31, "state_id": "finding-p3-accepted", "topic": "findings", "event": {"kind": "finding", "action": "accepted", "id": 5, "severity": "p3", "state": "accepted", "entity": "site:lab.example.com", "title": "lab.example.com is a single-instance experiment", "accepted_reason": "lab is experiment-only"}},
     {"t": 33, "state_id": "finding-p1-resolved", "topic": "findings", "event": {"kind": "finding", "action": "resolved", "id": 6, "severity": "p1", "state": "resolved", "entity": "site:shop.example.com", "title": "shop.example.com recovered"}},
     {"t": 35, "state_id": "degraded-polling", "topic": "findings", "event": {"kind": "status", "status": "degraded", "title": "degraded — polling every 10 s"}},
-    {"t": 37, "state_id": "single-instance", "topic": "site.lab.status", "event": {"site": "lab.example.com", "instances": 1, "single_instance": true, "badge": "single-instance"}}
+    {"t": 37, "state_id": "single-instance", "topic": "site.lab.status", "event": {"site": "lab.example.com", "instances": 1, "single_instance": true, "badge": "single-instance"}},
+    {"t": 39, "state_id": "enroll-empty", "topic": "findings", "event": {"kind": "enroll", "state": "empty", "title": "No targets enrolled"}},
+    {"t": 41, "state_id": "enroll-error", "topic": "findings", "event": {"kind": "enroll", "state": "error", "title": "Target create failed"}},
+    {"t": 43, "state_id": "enroll-degraded", "topic": "findings", "event": {"kind": "enroll", "state": "degraded", "title": "AWS is not connected"}}
   ]
 }

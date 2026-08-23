@@ -11,12 +11,16 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
+(globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
-import { StatusPill } from "../src/Chrome.jsx";
+import { NAV, StatusPill } from "../src/Chrome.jsx";
 import { FindingDetail, FindingsView } from "../src/screens/Findings.jsx";
 import { DeployStatus } from "../src/screens/Deploys.jsx";
 import { CertState, SiteObserved, SiteStatus } from "../src/screens/Sites.jsx";
 import { MapPanel } from "../src/screens/Home.jsx";
+import { TargetsView } from "../src/screens/Targets.jsx";
+import { AwsPanel } from "../src/screens/Settings.jsx";
+import { T1Overlay } from "../src/Tiers.jsx";
 
 const render = (component: any, props: any = {}) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -46,6 +50,9 @@ const REQUIRED_STATE_IDS = [
   "host-down-suppression",
   "map-empty",
   "map-populated",
+  "enroll-empty",
+  "enroll-error",
+  "enroll-degraded",
 ];
 
 function loadSeed() {
@@ -102,6 +109,19 @@ const RENDER: Record<string, (state: any) => string> = {
   "map-populated": (s) => render(MapPanel, {
     width: 1280, sites: s.sites || [{ domain: "shop.example.com" }],
   }),
+  "enroll-empty": () =>
+    render(TargetsView, {
+      phase: "live", targets: [], awsCredentialsRef: "hub-aws",
+      cost: "$0.05/h", onCopy: () => {}, onCreate: () => {},
+    }) + render(T1Overlay, {
+      label: "Create target", cost: "$0.05/h",
+      onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+    }),
+  "enroll-error": () => render(TargetsView, {
+    phase: "error",
+    onError: { text: "Target create failed", retry: () => {} },
+  }),
+  "enroll-degraded": () => render(AwsPanel),
 };
 
 test("every_new_state_renders_in_simulation_mode", () => {
@@ -148,6 +168,21 @@ test("every_new_state_renders_in_simulation_mode", () => {
 
   const site = states.find((s) => s.id === "unproxied-cert-refusal");
   assert.ok(visibleText(render(SiteStatus, { site: site.site })).length > 0);
+
+  const enrollEmpty = visibleText(RENDER["enroll-empty"](
+    states.find((s) => s.id === "enroll-empty") || {}));
+  assert.match(enrollEmpty, /Create target/);
+  assert.match(enrollEmpty, /\$0\.05\/h/);
+  assert.match(enrollEmpty, /five cents per hour/i);
+  assert.doesNotMatch(enrollEmpty, /\binstance\b/i);
+
+  const enrollDegraded = visibleText(RENDER["enroll-degraded"](
+    states.find((s) => s.id === "enroll-degraded") || {}));
+  assert.match(enrollDegraded, /not connected/i);
+  assert.ok(!/\bConnected\b/.test(enrollDegraded), enrollDegraded);
+  assert.match(enrollDegraded, /HUB_AWS_CREDENTIALS_REF/);
+
+  assert.equal(NAV.length, 6, "NAV stays six — no 7th AWS/Instances item");
 });
 
 test("every_seed_state_has_a_scripted_event", () => {
