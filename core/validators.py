@@ -38,11 +38,12 @@ def _is_blocked_ip(ip: ipaddress._BaseAddress) -> str | None:
     return None
 
 
-def resolve_and_check_host(host: str):
+def resolve_and_check_host(host: str, *, role="git source"):
     """Resolve host and reject if ANY returned address is non-public.
 
     Any, not all: a name resolving to one public and one private address is a
-    deliberate attack shape, not a misconfiguration.
+    deliberate attack shape, not a misconfiguration. Webhook delivery passes
+    role="webhook destination" so a rebind cannot inherit git's clone wording.
     """
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
@@ -58,7 +59,7 @@ def resolve_and_check_host(host: str):
         if reason:
             raise ValidationError(
                 f"host {host!r} resolves to a {reason} ({raw}) and cannot be a "
-                f"git source",
+                f"{role}",
                 code="blocked_address",
             )
     return addresses
@@ -165,6 +166,92 @@ def validate_git_url(value: str, *, resolve=True):
             )
     elif resolve:
         resolve_and_check_host(host)
+
+    return value
+
+
+WEBHOOK_SCHEMES = {"https"}
+WEBHOOK_PORTS = {None, 443}
+
+
+def validate_webhook_url(value: str, *, resolve=True):
+    """Validate a partner webhook URL for Hub egress (§7 C7, B10).
+
+    HTTPS-only, ports {None, 443}, then the same B10 address checks as git
+    (loopback / link-local including 169.254.169.254 / private / reserved /
+    multicast / unspecified / CGNAT / ``.local`` suffixes). Do not reuse
+    ``validate_git_url``: ssh/22 would pass. Delivery **re-resolves and
+    re-runs B10 on every send** — this is not git's clone-off-Hub TOCTOU
+    exception (D-007). Redirects are refused at the sink, not here.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("a webhook URL is required", code="required")
+    value = value.strip()
+
+    if len(value) > MAX_URL_LENGTH:
+        raise ValidationError(
+            f"webhook URL exceeds {MAX_URL_LENGTH} characters", code="too_long"
+        )
+    if _CONTROL_CHARS.search(value):
+        raise ValidationError(
+            "webhook URL contains control characters", code="control_chars"
+        )
+    if "://" not in value:
+        raise ValidationError(
+            "webhook URL must include a scheme — use https", code="no_scheme"
+        )
+
+    parts = urlsplit(value)
+    if parts.scheme not in WEBHOOK_SCHEMES:
+        raise ValidationError(
+            f"scheme {parts.scheme!r} is not allowed — webhook egress is "
+            f"https-only (plaintext http and ssh are not Hub destinations)",
+            code="bad_scheme",
+        )
+    if parts.password or parts.username:
+        raise ValidationError(
+            "credentials must not be embedded in the webhook URL — the "
+            "signing secret is vaulted Hub-side",
+            code="embedded_credentials",
+        )
+
+    host = parts.hostname
+    if not host:
+        raise ValidationError("webhook URL has no host", code="no_host")
+
+    lowered = host.lower()
+    if lowered in {"localhost"} or lowered.endswith(BLOCKED_SUFFIXES):
+        raise ValidationError(
+            f"host {host!r} is a private-network name and cannot be a "
+            "webhook destination",
+            code="blocked_host",
+        )
+
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise ValidationError(
+            "webhook URL has an invalid port", code="bad_port"
+        ) from exc
+    if port not in WEBHOOK_PORTS:
+        raise ValidationError(
+            f"port {port} is not allowed — webhook egress uses 443",
+            code="bad_port",
+        )
+
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        reason = _is_blocked_ip(literal)
+        if reason:
+            raise ValidationError(
+                f"{host} is a {reason} and cannot be a webhook destination",
+                code="blocked_address",
+            )
+    elif resolve:
+        resolve_and_check_host(host, role="webhook destination")
 
     return value
 

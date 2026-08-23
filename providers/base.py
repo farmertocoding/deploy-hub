@@ -6,6 +6,14 @@ clients import ONLY under providers/.
 
 
 class DnsProvider:
+    """DNS adapter bound to one zone.
+
+    ``capabilities()`` may include ``proxied`` (orange-cloud) and
+    ``custom_hostname`` (create/status/TXT live on this object, D-079).
+    Route 53 and Fake-without-the-flag omit ``custom_hostname``. Construction
+    stays ``dns_provider_for``; this base does not grow a second client.
+    """
+
     def list_records(self, zone):
         raise NotImplementedError
 

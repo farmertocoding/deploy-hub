@@ -17,13 +17,19 @@ _ids = itertools.count(1)
 class FakeDnsProvider(DnsProvider):
     """Zone keys may be strings, NetworkZones, or DnsZone rows — whatever the
     caller hands over is recorded verbatim in `calls`, so tests can assert
-    the pipeline passed a DnsZone and never a NetworkZone (Task 1)."""
+    the pipeline passed a DnsZone and never a NetworkZone (Task 1).
 
-    _MUTATING = {"upsert_record", "delete_record"}
+    ``custom_hostname=True`` adds the D-079 capability; the default Fake
+    omits it (same as Route 53).
+    """
 
-    def __init__(self):
+    _MUTATING = {"upsert_record", "delete_record", "create_custom_hostname"}
+
+    def __init__(self, *, custom_hostname=False):
         self.zones = {}  # zone -> {record_id: record}
         self.calls = []  # (method, zone-or-domain, *args)
+        self.hostnames = {}
+        self._custom_hostname = bool(custom_hostname)
 
     def mutating_calls(self):
         return [call for call in self.calls if call[0] in self._MUTATING]
@@ -56,7 +62,84 @@ class FakeDnsProvider(DnsProvider):
         return ["fake.ns1.example", "fake.ns2.example"]
 
     def capabilities(self):
-        return {"proxied"}
+        caps = {"proxied"}
+        if self._custom_hostname:
+            caps.add("custom_hostname")
+        return caps
+
+    def _require_custom_hostname(self):
+        from .custom_hostname import CustomHostnameError
+
+        if "custom_hostname" not in self.capabilities():
+            raise CustomHostnameError("custom_hostname capability is off")
+
+    def _txt_present(self, name, value):
+        want_name = str(name or "").rstrip(".").lower()
+        want_value = str(value or "")
+        for records in self.zones.values():
+            for rec in records.values():
+                if rec["rtype"] != "TXT":
+                    continue
+                if rec["name"].rstrip(".").lower() != want_name:
+                    continue
+                values = [str(item) for item in rec["values"]]
+                if want_value in values:
+                    return True
+        return False
+
+    def create_custom_hostname(self, hostname):
+        from .custom_hostname import (
+            CustomHostnameError,
+            ownership_txt,
+            refuse_partner_base_collision,
+        )
+
+        self._require_custom_hostname()
+        host = str(hostname or "").rstrip(".").lower()
+        refuse_partner_base_collision(host)
+        self.calls.append(("create_custom_hostname", host))
+        if host in self.hostnames:
+            raise CustomHostnameError(f"custom hostname {host!r} already exists")
+        txt = ownership_txt(host, f"own-{next(_ids)}")
+        rec = {
+            "id": f"chn-{next(_ids)}",
+            "hostname": host,
+            "status": "pending",
+            "ownership_verification": txt,
+        }
+        self.hostnames[host] = rec
+        return dict(rec)
+
+    def custom_hostname_status(self, hostname):
+        from .custom_hostname import CustomHostnameError
+
+        self._require_custom_hostname()
+        host = str(hostname or "").rstrip(".").lower()
+        rec = self.hostnames.get(host)
+        if rec is None:
+            raise CustomHostnameError(f"unknown custom hostname {host!r}")
+        self.calls.append(("custom_hostname_status", host))
+        txt = rec["ownership_verification"]
+        if self._txt_present(txt["name"], txt["value"]):
+            rec["status"] = "active"
+        return rec["status"]
+
+    def custom_hostname_txt(self, hostname):
+        from .custom_hostname import CustomHostnameError
+
+        self._require_custom_hostname()
+        host = str(hostname or "").rstrip(".").lower()
+        rec = self.hostnames.get(host)
+        if rec is None:
+            raise CustomHostnameError(f"unknown custom hostname {host!r}")
+        self.calls.append(("custom_hostname_txt", host))
+        return dict(rec["ownership_verification"])
+
+    def serve_custom_hostname(self, hostname):
+        from .custom_hostname import caddy_route_for
+
+        self._require_custom_hostname()
+        return caddy_route_for(self, hostname)
 
 
 class FakeEdgeProtection(EdgeProtection):

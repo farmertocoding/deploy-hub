@@ -17,7 +17,9 @@ pytestmark = pytest.mark.django_db
 # nosec B105 — T1 fixture, never a live credential and never logged as plaintext.
 _WHSEC = "whsec_" + base64.b64encode(b"t1-partner-webhook-secret-32b!!").decode()
 
-PUBLIC_A = (2, 1, 6, "", ("203.0.113.10", 0))
+# 140.82.121.4 is the same public fixture test_validators.py uses; TEST-NET-3
+# (203.0.113.0/24) is is_private on Python 3.13 and would fail closed as B10.
+PUBLIC_A = (2, 1, 6, "", ("140.82.121.4", 0))
 METADATA_A = (2, 1, 6, "", ("169.254.169.254", 0))
 
 
