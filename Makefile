@@ -197,11 +197,11 @@ mutation:
 # $(PY_ROOTS) instead of the four packages that existed when it was written — it had
 # never looked at wizard/ or scanner/ (R4-12).
 #
-# NOT the gate for SEC-69-NO-SECRETS-IN-EXHAUST (round-5 F1). That requirement is about
-# exhaust after write — logs, Celery task args, API responses — and names a CI scrubber
-# over captured *test output*. This greps *source files* for an assignment literal, which
-# is materially less; the requirement is waived in WAIVERS.md until the real gate exists.
-# This target stays because a plaintext key committed to source is worth catching anyway.
+# NOT the gate for SEC-69-NO-SECRETS-IN-EXHAUST (round-5 F1 / Phase 4 Task 8).
+# That requirement is `verify: test` over captured pytest stdout/stderr/log and
+# Celery kwargs (tests/test_secrets_in_exhaust.py + scripts_dev/exhaust.py).
+# This greps *source files* for an assignment literal and stays as that
+# source-scan; a plaintext key committed to source is still worth catching.
 #
 # TWO EXEMPTIONS, both deliberate, both greppable:
 #   1. `settings`  — any path containing it. Settings modules read the key by name; that
