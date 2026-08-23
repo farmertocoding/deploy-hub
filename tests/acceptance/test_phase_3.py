@@ -550,10 +550,11 @@ def test_rollback_is_one_click_and_never_step_up_gated():
         'if (row.tier === "T3") return { confirm: false, undo: true, stepUp: "none" }'
         in src
     )
-    # T3 click runs immediately: confirm is the T2 path; deferred is T1.
+    # T3 click runs immediately: confirm is the T2 path. T1 is step-up
+    # ("required"), never attached to these recovery ids.
     assert "if (p.confirm)" in src
-    assert 'if (p.stepUp === "deferred")' in src
     assert "run(args)" in src
+    assert 'stepUp: "none"' in src
     tests = (REPO / "frontend" / "tests" / "actions.test.ts").read_text(encoding="utf-8")
     assert "rollback_restart_and_rerun_are_t3_and_never_behind_step_up" in tests
     assert "t3_runs_on_one_click_with_an_undo_window" in tests

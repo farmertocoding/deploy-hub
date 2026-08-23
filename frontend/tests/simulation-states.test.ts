@@ -166,3 +166,44 @@ test("every_seed_state_has_a_scripted_event", () => {
   assert.deepEqual(missing, [],
     `scripted_events omit states: ${missing.join(", ")}`);
 });
+
+test("sim_shell_mounts_login_enroll_t1_overlay", async () => {
+  // C9: ?sim= mounts Shell; Login/Enroll are extracted so F8 can see them;
+  // the T1 overlay is in the 390 px phone set.
+  (globalThis as any).window.location = {
+    search: "?sim=login", hash: "", protocol: "http:", host: "localhost",
+    href: "http://localhost/?sim=login",
+  };
+  (globalThis as any).window.innerWidth = 390;
+  (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
+
+  const { Login } = await import("../src/screens/Login.jsx");
+  const { Enroll } = await import("../src/screens/Enroll.jsx");
+  const { T1Overlay } = await import("../src/Tiers.jsx");
+  const { PHONE_SCOPE } = await import("../src/Chrome.jsx");
+  const { default: App, Shell } = await import("../src/App.jsx");
+
+  const login = visibleText(render(Login, { onLogin: () => {} }));
+  assert.match(login, /passkey|WebAuthn|security key/i, login);
+  assert.match(login, /authenticator code instead/i, login);
+
+  const enroll = visibleText(render(Enroll, { onDone: () => {} }));
+  assert.match(enroll, /passkey|WebAuthn/i, enroll);
+  assert.match(enroll, /phone/i, enroll);
+
+  const overlay = visibleText(render(T1Overlay, {
+    label: "Delete target", expected: "box-1",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.match(overlay, /Delete target/);
+  assert.match(overlay, /touch|passkey|security key/i, overlay);
+  assert.ok(PHONE_SCOPE.includes("t1-overlay"),
+    "T1 overlay belongs in the 390 px phone set (C9)");
+
+  assert.ok(Shell, "Shell must be exported so ?sim= can mount it");
+  (globalThis as any).window.location.search = "?sim=live";
+  const shell = render(App, {});
+  assert.ok(visibleText(shell).length > 0, " ?sim= must not skip the operator chrome");
+  assert.match(shell, /Home|Sites|Settings/,
+    "?sim= mounts Shell, not a bare ReadinessScreen");
+});
