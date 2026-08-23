@@ -986,3 +986,123 @@ requirements:
       host adopt, temp subdomain (public) or mesh-only verify-without-temp,
       verify-before-flip, live stays up until flip, abandon cleanup, volumes
       registered and never docker volume rm (D-047).
+
+  # ── Phase 4 (docs/phase-4-design-note.md §3, Task 0 / D-054…D-064).
+  # Already-due ids above stay phase 4 (text:/text_hash: untouched). New ids
+  # are tier-less (no `tier:` key). TLS-B2-HUB-DNS01-UNPROXIED stays phase 4
+  # and is waived as the named first slip. New ids sit `uncovered` until later
+  # tasks land proofs. SCAN-DECLARED full-text stays unmarked until Task 3
+  # (SCAN-M4). P4-SECURITY-DEMO names conformance/demos/phase-4.md; do not
+  # stub that file here (missing is uncovered; a non-empty stub would verify).
+  - id: SEC-L5-ATTACK-PLAYBOOK
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      monitor/attack_detector.py z-scores existing TrafficStat minute rows.
+      monitor/attack_playbook.py engages set_security_level(under_attack),
+      then ban_ip, then pager notify, then auto-relax. edge_protection_for(zone)
+      is the only EdgeProtection constructor; CloudflareEdge lives in
+      providers/cloudflare.py and loads edge_token_ref. Absent edge ref
+      degrades to notify-only, never a silent no-op. Fingerprint is
+      attack-playbook-engaged:{zone.pk}. deploys/ never imports
+      providers.cloudflare. Token values never appear in Findings, CheckRun,
+      logs, or task args (D-057).
+  - id: SEC-L5-NEVER-SCALE-ATTACK
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      scaling/attack_gate.py::refuse_if_attack(site) is a named refuse:
+      attack-shaped load never scales. Phase 6 must call it; Phase 4 tests
+      the refuse. No scaler loop (D-057).
+  - id: TOPO-R1-R5-FINDINGS
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      Topology advisor r1-r5 files Findings from monitor/map_graph.py::graph_snapshot
+      plus Site/Target/SiteInstance, with no new graph library (D-041).
+      Fingerprints are topology-hub-isolation:hub, topology-blast-radius:{target_pk},
+      topology-site-network:{site_pk}, topology-db-mesh-only:{site_pk},
+      topology-lan-segment:{zone_pk}. Accept-risk requires a reason.
+  - id: SEC-B7-SSH-QUARTERLY-ROTATE
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      Scheduled quarterly SSH rotation is dual-key overlap: generate new Ed25519
+      in-Hub, append pubkey, Transport.probe login with the new key, only then
+      drop the old pubkey, point Target.ssh_key_ref, probe old fails / new works,
+      revoke old Secret. ssh.rotate is T1. Beat ssh-rotate-quarterly is 90 d.
+      Incomplete rotation is P1 ssh-rotation-incomplete; stale-old after intended
+      revoke is P2 ssh-rotation-stale-key. Run-twice second pass has zero mutating
+      Transport calls. Never ssh-keygen on the target (D-064).
+  - id: UX-E5-BACKUP-OPERATOR
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      Backup operator surface persists sealed dumps at
+      /var/lib/deploy-hub/backups/{checkrun_pk} mode 0600. CheckRun.Kind.BACKUP
+      closed results are schema_version, unit_id, site_id, bytes, digest,
+      stored_at (bytes is integer size; digest is sha256 of the sealed blob).
+      Beat backup-nightly. Collect/seal/store failure and a missing nightly dump
+      for a registered unit raise_alert hub-db-or-backup-failure P1. Sites-detail
+      list plus T2 test-backup-now plus a restore command block; no Restore POST.
+      Sealed dump uses Secret.Kind.BACKUP_KEY, never the KEK (D-063).
+  - id: SEC-B8-TAILSCALE-DEVICE-POLL
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      Tailscale device-list poll is providers/tailscale.py plus FakeTailscale.
+      Beat tailscale-device-audit-daily. Absent vault ref is skip-only plus a
+      dated waiver. Settings ref is HUB_TAILSCALE_API_TOKEN_REF (vault owner-id,
+      default empty). Do not invent a live token env. Tailnet-lock enablement
+      is SLIP (D-058).
+  - id: SEC-A3-KMS-KEK-ADAPTER
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      AWS KMS client lives in providers/kms.py. vault/kek.py::KmsKEK takes that
+      port and never imports boto3. Env HUB_VAULT_KMS_KEY_ID maps to
+      VAULT_KMS_KEY_ID default empty; VAULT_KEK_BACKEND=kms with empty key id
+      refuses. T1 moto on the provider module. In-process DEK cache keyed by
+      secret pk plus kek_id. Keyfile remains test/dev and does not defeat a
+      stolen Hub disk. Live AWS KMS is a Joseph interrupt. vault/ and tests/
+      do not import boto3 (D-059).
+  - id: SEC-B3-AUDIT-HASH-CHAIN
+    phase: 4
+    verify: test
+    source: phase-4-design-note.md §3
+    text_hash: sha256:816a778bedf4a51cdd22ce92991ad0ed7280ca330f8e1b779dc1677587621ef7
+    text: >
+      audit() writes AuditEvent.prev_hash as sha256 of (prev_hash plus the
+      canonical JSON row of ts, actor_id, source, action, object_type,
+      object_id, detail, source_ip, severity with sorted keys and no
+      whitespace) and never blocks on S3. Genesis prev_hash is empty. detail
+      may hold refs and fingerprints, never DEKs, tokens, recovery codes, or
+      PEM. S3 down files P2 audit-ship-failed.
+  - id: P4-SECURITY-DEMO
+    phase: 4
+    verify: demo
+    source: phase-4-design-note.md §4
+    demo:
+      - conformance/demos/phase-4.md
+    text_hash: sha256:f1992fe8f7ce5a85d2225936b204b6335cffbcea2535e42f53b60b4dcd79531f
+    text: >
+      The phase-4 exit demo is recorded under conformance/demos/phase-4.md -
+      WebAuthn plus phone passkey, T1 hardware touch, D-012 re-land, L5
+      playbook on FakeEdgeProtection, never-scale refuse, topology r1-r5
+      Findings, dual-key SSH rotate, backup persist and command-block restore,
+      leftover honesty, Tailscale skip-unless or FakeTailscale, KmsKEK under
+      moto (D-054).

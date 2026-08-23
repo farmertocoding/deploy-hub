@@ -10,6 +10,10 @@ a labelled third bucket, a header, an `acceptance` contract, a confirm in a scan
 left with the wiring it described. The scan-level properties Phase 1 does hold are in
 tests/test_d012_out_of_phase_1.py.
 
+SCAN-M4 (Phase 4 Task 0 / D-055): these parser tests keep running but no longer carry
+full-text SCAN-DECLARED-TEST-MATERIAL / SCAN-DECLARED-GUARDS markers. Parser-only
+proofs do not prove the live path. Full-text markers land in Task 3 E2E.
+
 So every test below asks `scanner.declarations` a question directly:
 
     declarations.load(root)              what the file parsed to, and what it refused
@@ -99,7 +103,6 @@ def _problems(loaded):
 
 # ── what a declaration parses to ───────────────────────────────────────────────
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_well_formed_declaration_is_accepted_with_its_words_intact(tmp_path):
     """The measured case, at the parser. The entry is accepted, normalized, and carries
     the repo's own words verbatim — `reason` is copied, never repaired, because the
@@ -115,7 +118,6 @@ def test_a_well_formed_declaration_is_accepted_with_its_words_intact(tmp_path):
     assert entry.label() == f'declared: frontend/scripts/drill — "{DRILL_REASON}"'
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_declaration_covers_only_its_own_subtree(tmp_path):
     """Prefix matching is on PATH SEGMENTS, not on strings: `drill` must not cover
     `drillbits`, and a declaration deep in the tree must not reach its siblings.
@@ -138,7 +140,6 @@ def test_a_declaration_covers_only_its_own_subtree(tmp_path):
     assert loaded.covering("frontend/scripts/drillbits/real.mjs") is None
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_repo_with_no_declaration_file_parses_to_nothing(tmp_path):
     """`present` is False and nothing is accepted — the state every repo in the fleet
     but one is in, and the reason the whole feature could be added (and now unwired)
@@ -153,7 +154,6 @@ def test_a_repo_with_no_declaration_file_parses_to_nothing(tmp_path):
 
 # ── the guards ─────────────────────────────────────────────────────────────────
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("path", [".", "./", "", "/", "  ", "./."])
 def test_declaring_the_scan_root_is_rejected(tmp_path, path):
     """A declaration that swallows the whole repo is indistinguishable from hiding."""
@@ -164,7 +164,6 @@ def test_declaring_the_scan_root_is_rejected(tmp_path, path):
     assert "scan root" in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("path", ["../outside", "frontend/../../etc",
                                   "/etc/secrets", "frontend/scripts/*",
                                   "frontend/scripts/dr?ll"])
@@ -178,7 +177,6 @@ def test_an_escaping_or_globbed_path_is_rejected(tmp_path, path):
     assert loaded.problems, "an escaping path was refused silently"
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_declared_path_missing_from_the_tree_is_rejected_as_stale(tmp_path):
     """A declaration that outlives its directory is exactly the rot a report has to
     surface: it is a live claim that nobody re-read, and the next directory to be given
@@ -191,7 +189,6 @@ def test_a_declared_path_missing_from_the_tree_is_rejected_as_stale(tmp_path):
     assert "does not exist" in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("manifest", sorted(declarations.SCANNER_KEY_FILES))
 def test_a_path_holding_a_manifest_the_scanner_keys_on_is_rejected(tmp_path, manifest):
     """The subtler half of the root guard. `backend/` holding `manage.py` is not a
@@ -209,7 +206,6 @@ def test_a_path_holding_a_manifest_the_scanner_keys_on_is_rejected(tmp_path, man
     assert manifest in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_the_scanner_key_file_set_is_frozen_and_covers_the_module_manifests():
     """Freezing the set makes both directions — adding a name and deleting one — a
     reviewed act, and the second assertion keeps it honest against the module that
@@ -232,7 +228,6 @@ def test_the_parked_parser_and_the_live_notice_name_the_same_file():
     assert fallbacks.DECLARATION_FILE == declarations.DECLARATION_FILE
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("body", [
     "scanner: [this is not a mapping\n",                     # unparseable YAML
     "scanner: a string\n",                                   # wrong type, one level in
@@ -265,7 +260,6 @@ def test_a_malformed_deployhub_yaml_produces_problems_and_applies_nothing(tmp_pa
 # mechanism re-introduces that surface.
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_reason_cannot_forge_report_lines(tmp_path):
     """The forged-evidence case, verbatim from the adversarial pass.
 
@@ -297,7 +291,6 @@ def test_a_reason_cannot_forge_report_lines(tmp_path):
         assert not line.startswith("src/app.py:1"), line
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("payload", [
     '"line one\\nline two"',
     '"tabbed\\there"',
@@ -319,7 +312,6 @@ def test_any_control_character_in_a_reason_is_a_malformed_entry(tmp_path, payloa
     assert "control character" in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_control_character_in_a_path_is_a_malformed_entry(tmp_path):
     """The path is embedded in the same places the reason is."""
     loaded = _declared(tmp_path, "scanner:\n"
@@ -331,7 +323,6 @@ def test_a_control_character_in_a_path_is_a_malformed_entry(tmp_path):
     assert "control character" in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_reason_longer_than_the_cap_is_a_malformed_entry(tmp_path):
     """A wall of text is the other way to edit the report: the findings count sits at
     the end of the header line, and 40 KB of prose in front of it buries the number the
@@ -352,7 +343,6 @@ def test_a_reason_longer_than_the_cap_is_a_malformed_entry(tmp_path):
         "the refusal pasted the wall of text back in")
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_manifest_the_scanner_walks_is_never_hidden_from_the_guard(tmp_path):
     """The N6 class, one layer in: the guard pruned `vendor`, `.hg` and `.svn` while the
     secret scanner's own walk does not, so `svc/vendor/package.json` was invisible to
@@ -367,7 +357,6 @@ def test_a_manifest_the_scanner_walks_is_never_hidden_from_the_guard(tmp_path):
     assert "package.json" in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_the_guard_prunes_nothing_the_secret_scanner_walks():
     """The parity assertion behind the test above, stated as a property so the two
     lists cannot drift apart again: the guard may skip a directory only where the
@@ -375,7 +364,6 @@ def test_the_guard_prunes_nothing_the_secret_scanner_walks():
     assert declarations.guard_prune_dirs() <= fallbacks._SKIP_DIRS
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_an_oversized_declaration_file_is_refused_unparsed(tmp_path):
     """`load` used to read the file unbounded, so a repo could hand the scanner a
     gigabyte of YAML. A config file larger than a quarter of a megabyte is not a config
@@ -411,7 +399,6 @@ ZWSP = "\u200b"        # ZERO WIDTH SPACE — renders as nothing at all
 CHINESE_REASON = "\u7d05\u968a\u6f14\u7df4\u7528\u5047\u5bc6\u78bc"
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_unicode_line_separator_in_a_reason_is_refused(tmp_path):
     """The verifier's round-2 case. `[\\x00-\\x1f\\x7f]` does not contain U+2028, and
     every line of a report is produced by `splitlines`, which does."""
@@ -428,7 +415,6 @@ def test_a_unicode_line_separator_in_a_reason_is_refused(tmp_path):
         assert not line.startswith("src/app.py:1"), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_unicode_line_separator_in_a_real_directory_name_is_refused(tmp_path):
     """The path vector, with the directory actually on disk — the case round 1 left
     fully open. A filesystem accepts every byte but `/` and NUL, so the declaration
@@ -453,7 +439,6 @@ def test_a_unicode_line_separator_in_a_real_directory_name_is_refused(tmp_path):
         assert line.strip() != "Also in test material (not blocking)", loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("char,name", [
     (LSEP, "U+2028 LINE SEPARATOR"),
     (PSEP, "U+2029 PARAGRAPH SEPARATOR"),
@@ -496,7 +481,6 @@ def test_deceptive_code_points_are_refused_in_both_fields(tmp_path, char, name):
         assert loaded.problems, f"{name} in {field} was refused silently"
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_an_ordinary_non_ascii_reason_is_accepted(tmp_path):
     """The over-correction guard, and the one that matters most for this fleet: every
     repo it scans is Taiwanese, and the reasons will be written in Chinese. A validator
@@ -522,7 +506,6 @@ def test_an_ordinary_non_ascii_reason_is_accepted(tmp_path):
 # environment variable.
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_issue_r7_11_the_confirm_question_has_no_default(tmp_path):
     """R7-11. "An unanswered claim is not an accepted one" is the property the whole
     acceptance gate rested on, and until round 7 it was pinned by nothing — mutating
@@ -539,7 +522,6 @@ def test_issue_r7_11_the_confirm_question_has_no_default(tmp_path):
     assert DRILL_REASON in questions[0].prompt
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_14_the_env_name_defense_travelled_with_the_slug_scheme(tmp_path):
     """The defense the id scheme exists for, asserted where the scheme lives:
     `wizard.materialize._env_name` turns any question id containing `.env.` into an
@@ -557,7 +539,6 @@ def test_issue_r7_14_the_env_name_defense_travelled_with_the_slug_scheme(tmp_pat
 # ── round 7, second veto: the id is of a CLAIM, not of a slot ─────────────────
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_issue_r7_1r_the_confirm_id_changes_when_only_the_reason_changes(tmp_path):
     """The id used to be `(index, slug(path))`, so the `reason` — the ENTIRE reviewable
     content of a declaration, and the one field `_read_entry` refuses an entry for
@@ -582,7 +563,6 @@ def test_issue_r7_1r_the_confirm_id_changes_when_only_the_reason_changes(tmp_pat
     assert declarations.confirm_questions(declarations.load(same_path))[0].id == first.id
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_issue_r7_1r_the_id_is_a_function_of_the_claim_not_of_its_position(tmp_path):
     """The other half of the round-trip attack, at the unit, and the design decision it
     forced. The index used to be part of the key, which made the id a SLOT — something
@@ -604,7 +584,6 @@ def test_issue_r7_1r_the_id_is_a_function_of_the_claim_not_of_its_position(tmp_p
         "the confirm id still encodes a position, which is a slot an orphan can sit in")
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_issue_r7_1r_one_claim_written_twice_is_asked_about_once(tmp_path):
     """The cost of dropping the index, paid deliberately. Two entries with the same path
     AND the same reason collapse to one confirm — one claim written twice, and asking
@@ -633,7 +612,6 @@ def test_issue_r7_1r_one_claim_written_twice_is_asked_about_once(tmp_path):
         two_claims.accepted[0])
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_1r_a_directory_named_env_cannot_forge_an_environment_variable(
         tmp_path):
     """The `_env_name` defense, re-asserted against the shape that nearly broke it.
@@ -656,7 +634,6 @@ def test_issue_r7_1r_a_directory_named_env_cannot_forge_an_environment_variable(
         assert ".env." not in questions[0].id, (path, questions[0].id)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_1r_the_confirm_id_fits_the_column_it_is_stored_in():
     """`WizardAnswer.question_id` is `CharField(max_length=128)` and the slug comes from
     a path the scanned repo chooses, so its length is repo-controlled. The slug is
@@ -671,7 +648,6 @@ def test_issue_r7_1r_the_confirm_id_fits_the_column_it_is_stored_in():
 
 # ── round 7-B: the rest of the queue (spec-r7-scanner-findings.md) ─────────────
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_3_a_reason_cannot_forge_a_second_finding_inside_one_line(tmp_path):
     """The forgery class reopening a THIRD way. Rounds 1 and 2 closed the structure
     BETWEEN lines (a reason that writes lines of its own); this is the structure WITHIN
@@ -692,7 +668,6 @@ def test_issue_r7_3_a_reason_cannot_forge_a_second_finding_inside_one_line(tmp_p
         "the forged label text reached the refusal as text")
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_3_a_directory_name_cannot_forge_a_second_finding_either(tmp_path):
     """The same hole through the other field of the same label. `path` is repo-controlled
     text too — a real directory may be named `drill" — "anything` on every filesystem this
@@ -718,7 +693,6 @@ def test_issue_r7_3_a_directory_name_cannot_forge_a_second_finding_either(tmp_pa
     assert loaded.problems, "a forging directory name was refused silently"
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("reason", [
     "red-team drill — deliberate fake credentials",      # em dash, the label's own
     "QA's drill scripts, don't panic",                   # apostrophes
@@ -738,7 +712,6 @@ def test_issue_r7_3_a_legitimate_reason_is_not_collateral(tmp_path, reason):
             == f'declared: frontend/scripts/drill — "{reason}"')
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_3_the_labels_structural_characters_are_frozen():
     """The drift test, and it is the answer to "the next delimiter someone adds".
 
@@ -763,7 +736,6 @@ def test_issue_r7_3_the_labels_structural_characters_are_frozen():
     assert set(declarations.LABEL_ENCLOSURE_CLOSERS) == {'"', "]"}
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_4_a_declared_split_settings_package_is_rejected(tmp_path):
     """The fleet's own layout. `SCANNER_KEY_FILES` names a literal `settings.py`, and
     not one repo in the fleet has one: they all carry a settings PACKAGE
@@ -781,7 +753,6 @@ def test_issue_r7_4_a_declared_split_settings_package_is_rejected(tmp_path):
     assert "settings" in _problems(loaded)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_4_the_guard_reads_djangos_own_settings_rule(tmp_path):
     """DERIVED, not restated — the N6/N7 lesson, and R7-4 is precisely that drift: the
     guard held its own idea of what a settings file is, django held another, and the
@@ -811,7 +782,6 @@ def test_issue_r7_4_the_guard_reads_djangos_own_settings_rule(tmp_path):
             f"the drift R7-4 is")
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_4_a_settings_directory_of_non_python_files_is_not_rejected(tmp_path):
     """The over-correction guard the spec names. The rule is "django would read a
     settings module here", not "a directory called settings exists here" — the second is
@@ -826,7 +796,6 @@ def test_issue_r7_4_a_settings_directory_of_non_python_files_is_not_rejected(tmp
     assert len(loaded.accepted) == 1, loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_5_a_deeply_nested_declaration_file_cannot_crash_the_load(tmp_path):
     """The module docstring promises `load` never raises for anything the scanned repo
     controls. It did: 100k `[` characters is 100 KB — comfortably under the 256 KB byte
@@ -840,7 +809,6 @@ def test_issue_r7_5_a_deeply_nested_declaration_file_cannot_crash_the_load(tmp_p
     assert loaded.problems, "a file that could not be parsed produced no problem line"
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_10_the_declaration_count_is_capped(tmp_path):
     """`MAX_REASON_CHARS` stops one entry burying the findings count under a wall of
     prose; ~3000 entries fit under the byte cap and rebuild the wall out of header lines
@@ -864,7 +832,6 @@ def test_issue_r7_10_the_declaration_count_is_capped(tmp_path):
     assert loaded.covering(f"d{declarations.MAX_DECLARATIONS + 1}/qa.mjs") is None
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r7_7_one_bad_entry_does_not_take_its_siblings_down(tmp_path):
     """Entry-level isolation: whole-file structure is fatal to the whole file, a bad
     ENTRY costs only itself. A mutation making one bad entry drop every sibling survived
@@ -892,7 +859,6 @@ def test_issue_r7_15_the_declarations_record_carries_no_dead_field():
         "accepted", "problems", "present"}
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_issue_r7f_the_confirm_digest_is_sixteen_hex_characters():
     """The length is the security argument, and it was asserted by nothing: shortening
     `_CONFIRM_DIGEST_CHARS` to 4 survived the whole suite, because every other test
@@ -911,7 +877,6 @@ def test_issue_r7f_the_confirm_digest_is_sixteen_hex_characters():
     assert len(qid) <= 128, len(qid)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("reason,closer", [
     ("fake creds] hardcoded admin_password value", "]"),
     ('fake creds" — "covers prod too', '"'),
@@ -934,7 +899,6 @@ def test_issue_r7f_each_enclosure_closer_is_refused_on_its_own(tmp_path, reason,
 # ── round 8: two assertions that asserted nothing ──────────────────────────────
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("escape,name", [
     ("\\x9b", "U+009B CONTROL SEQUENCE INTRODUCER"),
     ("\\x9c", "U+009C STRING TERMINATOR"),
@@ -992,7 +956,6 @@ def test_issue_r8_5_a_c1_control_reaches_a_value_as_a_yaml_escape_and_is_refused
         assert f"U+{ord(chr(int(escape[2:], 16))):04X}" in problems, problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_issue_r8_12_a_refusal_quotes_back_a_bounded_amount_of_a_giant_value(tmp_path):
     """R8-12: `_QUOTE_LIMIT` was asserted by nothing — raising it to 10**9 survived the
     whole suite, because every test that trips a `_quote`-carrying refusal uses a short
@@ -1038,7 +1001,6 @@ def test_issue_r8_12_a_refusal_quotes_back_a_bounded_amount_of_a_giant_value(tmp
 # assertion here, and half is what almost all of these lines had.
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("body,why", [
     ("", "an empty file"),
     ("scanner:\n", "no `scanner` mapping"),
@@ -1070,7 +1032,6 @@ def test_the_declaration_file_is_reported_as_present_however_it_parses(tmp_path,
     assert loaded.present is True, f"{why} reported no declaration file"
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_declaration_file_that_is_not_utf8_is_a_problem_not_a_crash(tmp_path):
     """`load` promises it never raises for anything the scanned repo controls, and the
     `UnicodeDecodeError` arm of that promise was exercised by nothing — its whole
@@ -1086,7 +1047,6 @@ def test_a_declaration_file_that_is_not_utf8_is_a_problem_not_a_crash(tmp_path):
     assert any("could not be read" in p for p in loaded.problems), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_declaration_file_that_cannot_be_stat_ed_is_a_problem_not_a_crash(tmp_path,
                                                                            monkeypatch):
     """The other unreadable arm, and the one no filesystem this suite can build reaches:
@@ -1115,7 +1075,6 @@ def test_a_declaration_file_that_cannot_be_stat_ed_is_a_problem_not_a_crash(tmp_
     assert any("could not be read" in p for p in loaded.problems), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_file_exactly_at_the_byte_cap_is_still_parsed(tmp_path):
     """The byte cap's boundary, in the direction the existing test does not look: it
     feeds a file far over the limit, so `>` could become `>=` and the only casualty
@@ -1130,7 +1089,6 @@ def test_a_file_exactly_at_the_byte_cap_is_still_parsed(tmp_path):
     assert len(loaded.accepted) == 1, loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_file_with_exactly_the_maximum_number_of_entries_is_read_whole(tmp_path):
     """`MAX_DECLARATIONS`' boundary, same argument as the byte cap's: the R7-10 test
     uses 120 entries, so the comparison could move by one and take a legitimate 50th
@@ -1148,7 +1106,6 @@ def test_a_file_with_exactly_the_maximum_number_of_entries_is_read_whole(tmp_pat
     assert loaded.problems == (), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_the_refusal_quoter_truncates_and_escapes_and_quotes_the_value_itself():
     """`_quote` is four lines and carried five mutants: `repr` could be handed `None` on
     any of its three branches and the truncation marker could be rewritten, because
@@ -1167,7 +1124,6 @@ def test_the_refusal_quoter_truncates_and_escapes_and_quotes_the_value_itself():
     assert declarations._quote(17) == "17"                   # the non-string arm
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("path,reason", [
     ("frontend/scripts/drill", "''"),                    # no reason
     ("frontend/scripts/drill", "x" * 201),               # reason over the cap
@@ -1193,7 +1149,6 @@ def test_every_refusal_that_quotes_a_path_quotes_the_real_one(tmp_path, path, re
     assert repr(path) in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_an_enclosure_closer_at_the_very_start_of_a_value_is_refused(tmp_path):
     """`if at >= 0` — weakened to `> 0` or `>= 1`, a value that OPENS with `]` or `"`
     walks straight through the guard, and opening with the closer is the easiest forgery
@@ -1209,7 +1164,6 @@ def test_an_enclosure_closer_at_the_very_start_of_a_value_is_refused(tmp_path):
         assert "at offset 0" in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_the_refusal_reports_the_first_closer_not_the_last(tmp_path):
     """`value.find(closer)` could become `rfind` and the coordinates the refusal gives —
     the only thing it gives, since it deliberately quotes nothing — would point at a
@@ -1224,7 +1178,6 @@ def test_the_refusal_reports_the_first_closer_not_the_last(tmp_path):
     assert "at offset 1" in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 @pytest.mark.parametrize("path,phrase", [
     (".//", "declares the scan root"),
     ("/etc/secrets", "is an absolute path"),
@@ -1251,7 +1204,6 @@ def test_each_path_refusal_says_which_rule_refused_it(tmp_path, path, phrase):
     assert phrase in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_trailing_slash_is_normalized_away_rather_than_refused(tmp_path):
     """The other side of `rstrip("/")`: a declaration written with a trailing slash is
     how people write directories, and it must be the SAME declaration."""
@@ -1269,7 +1221,6 @@ def test_a_trailing_slash_is_normalized_away_rather_than_refused(tmp_path):
         named_x.problems)
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_an_unparseable_file_reports_the_parsers_own_first_line(tmp_path):
     """The YAML refusal quotes `str(exc).splitlines()[0]` — the parser's one-line
     summary — and it could become `None`, or line 1 instead of line 0, with nothing
@@ -1284,7 +1235,6 @@ def test_an_unparseable_file_reports_the_parsers_own_first_line(tmp_path):
     assert "<unicode string>" not in problems, problems
 
 
-@pytest.mark.req("SCAN-DECLARED-GUARDS")
 def test_a_settings_package_refusal_names_the_file_django_would_read(tmp_path):
     """R7-4's guard reports WHICH file made it fire, and `str(PurePosixPath(*rel.parts))`
     could be handed `None` — the refusal then names a directory holding `None`. The
@@ -1298,7 +1248,6 @@ def test_a_settings_package_refusal_names_the_file_django_would_read(tmp_path):
     assert "settings/base.py" in _problems(loaded), loaded.problems
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_the_confirm_slug_is_lowercased_alphanumerics_with_the_edges_trimmed():
     """Three mutations lived in one line of `confirm_question_id`: the character class
     could lose its uppercase range, and the `strip("-")` could strip whitespace or the
@@ -1321,7 +1270,6 @@ def test_the_confirm_slug_is_lowercased_alphanumerics_with_the_edges_trimmed():
         _re.escape(declarations.CONFIRM_ID_PREFIX) + r"x-drill--[0-9a-f]{16}", qid), qid
 
 
-@pytest.mark.req("SCAN-DECLARED-TEST-MATERIAL")
 def test_a_repeated_claim_is_skipped_without_dropping_the_ones_after_it(tmp_path):
     """`continue` in the de-duplication loop could become `break`, and every claim after
     a repeat would go unasked — an operator confirming the questions they were shown
