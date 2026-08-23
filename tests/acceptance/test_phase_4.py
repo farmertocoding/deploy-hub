@@ -225,12 +225,12 @@ def test_t1_target_delete_and_ssh_rotate_need_touch_and_name(client, monkeypatch
     from django_otp.plugins.otp_totp.models import TOTPDevice
     from test_webauthn_t1 import (
         T1_HTTP,
+        _current_code,
         _delete_url,
         _login_password,
         _make_cred,
         _make_target,
         _patch_webauthn_helper,
-        _current_code,
     )
 
     from core.actions import ACTION_TIERS
@@ -333,7 +333,11 @@ def test_totp_only_session_refused_with_add_a_passkey(client, monkeypatch):
     from django.contrib.auth.models import User
     from django_otp.plugins.otp_totp.models import TOTPDevice
     from test_webauthn_t1 import (
-        _delete_url, _login_password, _make_cred, _make_target, _patch_webauthn_helper,
+        _delete_url,
+        _login_password,
+        _make_cred,
+        _make_target,
+        _patch_webauthn_helper,
     )
 
     from core.models import Target
@@ -376,9 +380,8 @@ def test_t3_rollback_is_one_click_and_never_step_up_gated():
     """
     import inspect
 
-    from deploys.views import SiteRollbackView
-
     from core.actions import ACTION_TIERS
+    from deploys.views import SiteRollbackView
 
     classes = SiteRollbackView.permission_classes
     names = [getattr(cls, "__name__", str(cls)) for cls in classes]
@@ -456,8 +459,8 @@ def test_declared_drill_tree_blocks_until_wizard_accept(tmp_path):
         DRILL_CONFIRM,
         DRILL_PATH,
         DRILL_REASON,
-        GHP_TOKEN,
         FAKE_HIGH_ENTROPY,
+        GHP_TOKEN,
         _answer_domain,
         _codes,
         _confirm_ids,
@@ -469,8 +472,8 @@ def test_declared_drill_tree_blocks_until_wizard_accept(tmp_path):
         _site,
     )
 
-    from wizard.materialize import MaterializeRefused, materialize, preflight
     from wizard import service
+    from wizard.materialize import MaterializeRefused, materialize, preflight
 
     site = _site(tmp_path, _drill_files(), name="p4-drill")
     secret = _secret(site)
@@ -557,7 +560,10 @@ def test_attack_playbook_fake_edge_and_never_scale():
     frontend/tests/sites.test.ts::home_attack_banner_links_hash_findings.
     """
     from test_attack_playbook import (
-        ATTACKER_IP, _attack_shaped, _plant_traffic, _world,
+        ATTACKER_IP,
+        _attack_shaped,
+        _plant_traffic,
+        _world,
     )
 
     from core.models import Finding, TrafficStat
@@ -640,7 +646,12 @@ def test_topology_r1_r5_findings():
     ::test_topology_does_not_import_a_graph_library.
     """
     from test_topology import (
-        HUB_HOST, _copy_ok, _instance, _site, _target, _zone,
+        HUB_HOST,
+        _copy_ok,
+        _instance,
+        _site,
+        _target,
+        _zone,
         test_topology_does_not_import_a_graph_library,
     )
 
@@ -726,7 +737,11 @@ def test_ssh_rotate_dual_key_run_twice():
     ::test_ssh_rotate_run_twice_zero_mutating_calls.
     """
     from test_ssh_rotate import (
-        OPERATOR_LINE, _blob, _factory, _public_line, _world,
+        OPERATOR_LINE,
+        _blob,
+        _factory,
+        _public_line,
+        _world,
     )
 
     from provision.ssh_rotate import rotate_ssh
@@ -789,7 +804,12 @@ def test_backup_list_test_now_command_block_and_p1(
 
     from django_otp.plugins.otp_totp.models import TOTPDevice
     from test_backup_operator import (
-        DUMP, FORBIDDEN_LIST_NEEDLES, KIND, SITES_JSX, _blob_text, _unit,
+        DUMP,
+        FORBIDDEN_LIST_NEEDLES,
+        KIND,
+        SITES_JSX,
+        _blob_text,
+        _unit,
     )
 
     from core.models import AuditEvent, CheckRun, Finding
@@ -941,7 +961,11 @@ def test_tailscale_skip_unless_or_fake_unknown_device():
     """
     from django.test import override_settings
     from test_tailscale_devices import (
-        KIND, REF, TOKEN, _findings, _plant_token,
+        KIND,
+        REF,
+        TOKEN,
+        _findings,
+        _plant_token,
     )
 
     from core.models import CheckRun, Finding
@@ -992,6 +1016,7 @@ def test_kms_kek_moto_refuse_cache_keyfile():
     import os
 
     from django.test import override_settings
+
     from providers.fakes import FakeKms
     from providers.kms import KmsClient, create_test_key, mock_aws_kms
     from vault import service

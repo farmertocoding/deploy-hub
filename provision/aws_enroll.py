@@ -95,12 +95,19 @@ def enroll_aws_target(
         _file_create_failed(name)
         raise EnrollError("create_instance failed") from exc
 
+    instance_id = (inst or {}).get("id") or (inst or {}).get("instance_id") or ""
+    if instance_id:
+        target.provider_ref = instance_id
+        target.host = host
+        target.kind = Target.Kind.AWS_EC2
+        target.save(update_fields=["provider_ref", "host", "kind"])
+
     fingerprint = (inst or {}).get("host_key_fingerprint") or ""
     if not str(fingerprint).strip():
         raise EnrollError("empty host key pin; refusing Transport")
 
     target.host_key_fingerprint = fingerprint
-    target.provider_ref = inst.get("id") or inst.get("instance_id")
+    target.provider_ref = instance_id or target.provider_ref
     target.host = host
     target.kind = Target.Kind.AWS_EC2
     target.save(
@@ -128,8 +135,8 @@ def terminate_aws_target(target, *, provider=None, region_name="us-east-1"):
         raise TerminateError("instance.terminate is the AWS call")
     if target.status == Target.Status.DECOMMISSIONED:
         return target
-    provider = provider or _cloud_provider(region_name=region_name)
     try:
+        provider = provider or _cloud_provider(region_name=region_name)
         provider.terminate_instance(target.provider_ref)
     except Exception as exc:
         _file_terminate_failed(target)

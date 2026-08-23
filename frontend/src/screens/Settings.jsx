@@ -8,7 +8,7 @@
 // socket, and its Launch goes through the §F5 tier machinery — demo.launch is a T2
 // row, so the confirm dialog summarizing what will run is the live wiring of the
 // tier table to the one mutating action the product has today.
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { schemas } from "../api/zod.ts";
@@ -43,9 +43,26 @@ export async function awsStatus() {
   return api("v1/aws/connect/");
 }
 
+export function AwsStatusBanner({ connected, reason, accountLast4, region }) {
+  if (connected || accountLast4) {
+    if (!accountLast4 || !region) return null;
+    return (
+      <div style={{ color: "#7ee787", marginTop: 8 }}>
+        Account ···{accountLast4} in {region}.
+      </div>
+    );
+  }
+  return (
+    <div style={{ color: "#f0b72f", marginBottom: 8 }}>
+      AWS is not connected. {reason}
+    </div>
+  );
+}
+
 export function AwsPanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [awsOk, setAwsOk] = useState(false);
   const [statusReason, setStatusReason] = useState("set HUB_AWS_CREDENTIALS_REF");
   const {
     register, handleSubmit, setError, reset, clearErrors,
@@ -54,6 +71,13 @@ export function AwsPanel() {
     resolver: zodResolver(schemas.AwsConnect),
     defaultValues: { access_key_id: "", secret_access_key: "" },
   });
+
+  useEffect(() => {
+    awsStatus().then(({ data }) => {
+      setAwsOk(Boolean(data?.connected));
+      setStatusReason(data?.reason || "set HUB_AWS_CREDENTIALS_REF");
+    });
+  }, []);
 
   async function submit(values) {
     if (busy) return;
@@ -67,12 +91,14 @@ export function AwsPanel() {
     if (status === 201) {
       const parsed = schemas.AwsConnectResult.safeParse(data);
       setResult(parsed.success ? parsed.data : data);
+      setAwsOk(true);
       reset({ access_key_id: "", secret_access_key: "" });
       return;
     }
     const field = Object.values(data.errors ?? {}).flat()[0];
     const message = field?.message ?? data.detail ?? data.reason
       ?? `Unexpected ${status} response.`;
+    setAwsOk(false);
     setStatusReason(message);
     setError("root", { type: field?.code ?? String(status), message });
   }
@@ -84,9 +110,12 @@ export function AwsPanel() {
         the C4 allowlist (user <em>and</em> groups) before any vault write —
         the secret never comes back. Unconfigured is degraded: set
         <code> HUB_AWS_CREDENTIALS_REF</code>.</p>
-      <div style={{ color: "#f0b72f", marginBottom: 8 }}>
-        AWS is not connected. {statusReason}
-      </div>
+      <AwsStatusBanner
+        connected={awsOk}
+        reason={statusReason}
+        accountLast4={result?.account_id_last4}
+        region={result?.region}
+      />
       <form onSubmit={handleSubmit(submit)}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
@@ -105,11 +134,6 @@ export function AwsPanel() {
       </form>
       {errors.root && (
         <div style={{ color: "#ff7b72", marginTop: 8 }}>{errors.root.message}</div>
-      )}
-      {result && (
-        <div style={{ color: "#7ee787", marginTop: 8 }}>
-          Account ···{result.account_id_last4} in {result.region}.
-        </div>
       )}
     </div>
   );
