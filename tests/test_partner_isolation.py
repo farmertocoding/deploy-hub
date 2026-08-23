@@ -21,7 +21,9 @@ HUB_URL = "https://hub.example.test"
 HUB_HOST = "hub.example.test"
 TEMPLATE_REF = "partner-t1-static"
 DIGEST_PATH = REPO / "conformance" / "fixtures" / "partner-t1-template.digest"
+VECTORS_PATH = REPO / "conformance" / "fixtures" / "partner-signature-vectors.json"
 SOURCE_DIR = REPO / "images" / "partner-t1-static"
+DECOY_PUBKEY_B64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 INTAKE_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+intake\b", re.M)
 HUB_MODULES = (
     REPO / "core" / "partner_jobs.py",
@@ -93,6 +95,27 @@ def _job(partner, *, tenant_ref="t1", subdomain="acme", extra=None, job_id=None)
         "body": json.dumps(payload),
         "payload": payload,
         "headers": {},
+    }
+
+
+def _vectors():
+    return json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
+
+
+def _intake_shaped_job(vectors, *, job_id):
+    """Mesh outbox shape from intake/app.py _outbox_job: no partner_pk."""
+    case = vectors["cases"]["valid"]
+    payload = json.loads(case["body"])
+    payload.setdefault("template_ref", TEMPLATE_REF)
+    return {
+        "id": job_id,
+        "type": "partner-job",
+        "action": "site.create",
+        "method": case["method"],
+        "path": case["path"],
+        "body": case["body"],
+        "headers": dict(case["headers"]),
+        "payload": payload,
     }
 
 
@@ -494,7 +517,8 @@ def test_flag_off_does_not_create_deployment():
     """PARTNER_API_ENABLED default False leaves jobs un-materialized.
 
     What would make this fail: creating a Deployment on the default-off flag
-    so a T1 poll of Fake intake becomes a live partner site.
+    so a T1 poll of Fake intake becomes a live partner site; or acking the
+    outbox job so Task 7 enable finds nothing to apply.
     """
     from core.partner_jobs import materialize
     from django.conf import settings
@@ -503,17 +527,64 @@ def test_flag_off_does_not_create_deployment():
     from monitor.intake_poll import FakeIntakeClient, poll
 
     assert settings.PARTNER_API_ENABLED is False
+    vectors = _vectors()
     zone = _zone("flag-zone")
     box = _target(zone, "flag.lan")
-    partner = _partner("flag-p", [box])
-    job = _job(partner, tenant_ref="flag-t")
+    partner = _partner(
+        "flag-p", [box], pubkey_current=vectors["public_key_raw_b64"],
+    )
+    job = _intake_shaped_job(vectors, job_id="job-flag-t")
+    assert "partner_pk" not in job
+    assert "partner_id" not in job
     with override_settings(PARTNER_API_ENABLED=False):
         assert materialize(partner, job) is None
         client = FakeIntakeClient(items=[job])
         poll(
-            client=client, now=None, jitter=0, sleep=lambda _s: None,
+            client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None,
         )
     assert Deployment.objects.count() == 0
+    assert client.acked == []
+    assert client.items == [job]
+
+
+@pytest.mark.req("PART-ISOLATION")
+@override_settings(PARTNER_API_ENABLED=True)
+def test_intake_shaped_job_without_partner_pk_materializes():
+    """A job with method/path/body/headers and no partner_pk still materializes.
+
+    What would make this fail: binding Partner from planted partner_pk so
+    production-shaped intake outbox rows skip reverify and never become a
+    Deployment, or applying the decoy Partner whose key does not verify.
+    """
+    from core.models import PartnerSite
+    from deploys.models import Deployment
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    vectors = _vectors()
+    zone = _zone("bind-zone")
+    box = _target(zone, "bind.lan")
+    decoy = _partner("bind-decoy", [], pubkey_current=DECOY_PUBKEY_B64)
+    partner = _partner(
+        "bind-p", [box], pubkey_current=vectors["public_key_raw_b64"],
+    )
+    job = _intake_shaped_job(vectors, job_id="job-bind-t")
+    assert "partner_pk" not in job
+    assert "partner_id" not in job
+    assert job["headers"].get("X-Partner-Key-Id")
+    client = FakeIntakeClient(items=[job])
+    poll(
+        client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None,
+    )
+    assert Deployment.objects.count() == 1
+    dep = Deployment.objects.select_related("manifest__site").get()
+    binding = PartnerSite.objects.get(site=dep.manifest.site)
+    assert binding.partner_id == partner.pk
+    assert binding.partner_id != decoy.pk
+    assert client.acked == [job["id"]]
+    assert client.items == []
+    src = (REPO / "monitor" / "intake_poll.py").read_text(encoding="utf-8")
+    assert 'job.get("partner_pk")' not in src
+    assert 'job.get("partner_id")' not in src
 
 
 @pytest.mark.req("PART-ISOLATION")
