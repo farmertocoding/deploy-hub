@@ -26,8 +26,24 @@ export async function instanceCreateCost() {
   return api("v1/instance/create/");
 }
 
+export const TARGET_CREATE_FAILED = "Target create failed";
+
+export async function runCreateTarget(createFn, host, extra = {}) {
+  const { status, data } = await createFn(host, host, extra);
+  if (status < 200 || status >= 300) {
+    return { ok: false, text: TARGET_CREATE_FAILED, status, data };
+  }
+  return { ok: true, host, status, data };
+}
+
+export function costFromCreateGet(status, data) {
+  if (status === 200 && data?.cost_display) return data.cost_display;
+  return null;
+}
+
 export function TargetsView({
   phase, targets = [], awsCredentialsRef = "", cost, onError, onCopy, onCreate,
+  onRetryCost,
 }) {
   if (phase === "loading") return <LoadingLine what="targets" />;
   if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
@@ -36,6 +52,11 @@ export function TargetsView({
       return <EmptyState
         sentence="No targets enrolled — provision a machine and it appears here."
         button="Copy the provision command" onAction={onCopy} />;
+    }
+    if (cost == null || cost === "") {
+      return <EmptyState
+        sentence="No targets enrolled — hourly cost is not available."
+        button="Retry cost" onAction={onRetryCost} />;
     }
     return (
       <div style={{ margin: "10vh auto", width: "fit-content", textAlign: "center" }}>
@@ -62,7 +83,10 @@ export function TargetsView({
 export default function Targets() {
   const [copied, setCopied] = useState(false);
   const [awsRef, setAwsRef] = useState("");
-  const [cost, setCost] = useState("$0.05/h");
+  const [cost, setCost] = useState(null);
+  const [phase, setPhase] = useState("live");
+  const [errorText, setErrorText] = useState("");
+  const [createdHost, setCreatedHost] = useState("");
   useEffect(() => {
     api("v1/aws/connect/").then(({ data }) => {
       const reason = data?.reason || "";
@@ -70,15 +94,36 @@ export default function Targets() {
       else if (data?.connected || reason) setAwsRef("set");
     });
     instanceCreateCost().then(({ status, data }) => {
-      if (status === 200 && data?.cost_display) setCost(data.cost_display);
+      setCost(costFromCreateGet(status, data));
     });
   }, []);
+  async function onCreate(host) {
+    const result = await runCreateTarget(createTarget, host, { zone: "aws-use1" });
+    if (!result.ok) {
+      setPhase("error");
+      setErrorText(TARGET_CREATE_FAILED);
+      return;
+    }
+    setCreatedHost(host);
+  }
+  if (phase === "error") {
+    return (
+      <TargetsView phase="error"
+        onError={{ text: errorText, retry: () => { setPhase("live"); setErrorText(""); } }} />
+    );
+  }
   return (
     <div>
       <TargetsView phase="live" targets={[]} awsCredentialsRef={awsRef} cost={cost}
-        onCreate={(host) => createTarget(host, host, { zone: "aws-use1" })}
+        onCreate={onCreate}
+        onRetryCost={() => instanceCreateCost().then(({ status, data }) => {
+          setCost(costFromCreateGet(status, data));
+        })}
         onCopy={() => navigator.clipboard.writeText(PROVISION_CMD)
           .then(() => setCopied("ok"), () => setCopied("failed"))} />
+      {createdHost && (
+        <p style={{ textAlign: "center" }}>created {createdHost}</p>
+      )}
       {copied === "ok" && (
         <p style={{ textAlign: "center", color: "#3fb950" }}>
           Copied ✔ — <code>{PROVISION_CMD}</code></p>

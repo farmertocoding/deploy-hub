@@ -185,6 +185,56 @@ test("every_new_state_renders_in_simulation_mode", () => {
   assert.equal(NAV.length, 6, "NAV stays six — no 7th AWS/Instances item");
 });
 
+test("live_create_failure_and_cost_only_from_get_200", async () => {
+  const {
+    TargetsView, runCreateTarget, TARGET_CREATE_FAILED, costFromCreateGet,
+  } = await import("../src/screens/Targets.jsx");
+
+  const failed409 = await runCreateTarget(
+    async () => ({ status: 409, data: { detail: "unconfigured hourly cost estimate" } }),
+    "100.64.0.10",
+  );
+  assert.equal(failed409.ok, false);
+  assert.equal(failed409.text, "Target create failed");
+  assert.equal(failed409.status, 409);
+  assert.ok(failed409.data);
+
+  const failed400 = await runCreateTarget(
+    async () => ({ status: 400, data: { detail: "create_instance failed" } }),
+    "100.64.0.10",
+  );
+  assert.equal(failed400.ok, false);
+  assert.equal(failed400.text, TARGET_CREATE_FAILED);
+
+  const errorText = visibleText(render(TargetsView, {
+    phase: "error",
+    onError: { text: failed409.text, retry: () => {} },
+  }));
+  assert.equal(errorText.includes("Target create failed"), true, errorText);
+  assert.match(errorText, /Retry/);
+
+  const ok = await runCreateTarget(
+    async () => ({ status: 201, data: { host: "100.64.0.10", id: 1, kind: "aws_ec2" } }),
+    "100.64.0.10",
+  );
+  assert.equal(ok.ok, true);
+  assert.equal(ok.host, "100.64.0.10");
+  assert.doesNotMatch(String(ok.host), /instance/i);
+
+  const noCost = visibleText(render(TargetsView, {
+    phase: "live", targets: [], awsCredentialsRef: "hub-aws",
+    onCopy: () => {}, onCreate: () => {}, onRetryCost: () => {},
+  }));
+  assert.doesNotMatch(noCost, /\$0\.05\/h/);
+  assert.doesNotMatch(noCost, /Create target/);
+  assert.doesNotMatch(noCost, /\$0(?:\.00)?(?:\/h)?/);
+  assert.match(noCost, /Retry cost/);
+
+  assert.equal(costFromCreateGet(409, {}), null);
+  assert.equal(costFromCreateGet(200, { cost_display: "$0.05/h" }), "$0.05/h");
+  assert.equal(costFromCreateGet(200, {}), null);
+});
+
 test("every_seed_state_has_a_scripted_event", () => {
   // What would make this fail: states[] enumerating a topic the replayer
   // never publishes (P3 / acked / accepted / resolved / degraded-polling /
