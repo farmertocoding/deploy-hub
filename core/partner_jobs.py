@@ -134,13 +134,14 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
 
     method = job.get("method") or "POST"
     path = job.get("path") or "/partner/v1/sites"
+    body = job.get("body") or payload
     decision = evaluate_quotas(
-        partner, method, path, now=now, body=job.get("body") or payload,
+        partner, method, path, now=now, body=body,
     )
     if decision.refused:
         raise PartnerRefuse(decision.reason or "quota")
 
-    result = _create(partner, job, payload, target, domain, digest)
+    result = _create(partner, job, payload, target, domain, digest, now=now)
     _ship(digest, target, transport=transport, registry=registry)
     return result
 
@@ -316,7 +317,16 @@ def _probe_only(result, digest, *, transport, registry):
         registry.pull_spec(digest, target=result.site.primary_target)
 
 
-def _create(partner, job, payload, target, domain, digest):
+def _require_quota(partner, method, path, *, now=None, body=None):
+    """Raise PartnerRefuse when Hub evaluate_quotas refuses this insert."""
+    from core.partner_verify import evaluate_quotas
+
+    decision = evaluate_quotas(partner, method, path, now=now, body=body)
+    if decision.refused:
+        raise PartnerRefuse(decision.reason or "quota")
+
+
+def _create(partner, job, payload, target, domain, digest, *, now=None):
     from core.models import PartnerSite, Project, Site
     from deploys.models import Deployment, Manifest
 
@@ -325,6 +335,19 @@ def _create(partner, job, payload, target, domain, digest):
         PartnerSite.objects.filter(partner=partner, tenant_ref=tenant_ref)
         .select_related("site")
         .first()
+    )
+    body = job.get("body") or payload
+    # Minting a PartnerSite pays max_sites/fleet even when path is deploy-create.
+    if binding is None:
+        _require_quota(
+            partner, "POST", "/partner/v1/sites", now=now, body=body,
+        )
+        site_token = tenant_ref
+    else:
+        site_token = binding.site_id
+    _require_quota(
+        partner, "POST", f"/partner/v1/sites/{site_token}/deployments",
+        now=now, body=body,
     )
     if binding is None:
         slug = f"p-{partner.slug}-{tenant_ref}"[:128]
