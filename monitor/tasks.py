@@ -28,6 +28,9 @@ def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
                 tick_started=started, monotonic=mono,
             )
             ingest_traffic(target, payload)
+            from monitor.attack_playbook import run_for_target
+
+            run_for_target(target)
             n += 1
         except Exception as exc:
             audit(

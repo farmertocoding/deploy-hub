@@ -403,6 +403,11 @@ export interface components {
          * @enum {string}
          */
         ActionEnum: "ack" | "resolve" | "accept_risk";
+        AttackState: {
+            detail: string;
+            finding_id: number;
+            mode: string;
+        };
         CertRefusal: {
             detail: string;
             finding_id: number;
@@ -673,6 +678,7 @@ export interface components {
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
+            attack_state?: components["schemas"]["AttackState"] | null;
             edge_owner?: components["schemas"]["EdgeOwnerEnum"];
         };
         /**

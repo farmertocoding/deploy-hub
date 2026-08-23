@@ -52,18 +52,27 @@ class FakeDnsProvider(DnsProvider):
 
 
 class FakeEdgeProtection(EdgeProtection):
+    _MUTATING = {"set_security_level", "ban_ip", "purge_cache"}
+
     def __init__(self):
         self.security_level = {}
         self.banned = []
         self.purges = []
+        self.calls = []
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
 
     def set_security_level(self, zone, level):
+        self.calls.append(("set_security_level", zone, level))
         self.security_level[zone] = level
 
     def ban_ip(self, zone, ip, *, note=""):
+        self.calls.append(("ban_ip", zone, ip, note))
         self.banned.append((zone, ip, note))
 
     def purge_cache(self, zone):
+        self.calls.append(("purge_cache", zone))
         self.purges.append(zone)
 
 

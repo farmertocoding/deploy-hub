@@ -101,7 +101,8 @@ const CLEAN_PROJECT = {
       "domain": "takko.market",
       "latest_manifest_version": 3,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -109,7 +110,8 @@ const CLEAN_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -138,7 +140,8 @@ const CLEAN_PROJECT_AFTER = {
       "domain": "takko.market",
       "latest_manifest_version": 4,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -146,7 +149,8 @@ const CLEAN_PROJECT_AFTER = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -171,7 +175,8 @@ const CLEAN_PROJECT_ANSWERED = {
       "domain": "takko.market",
       "latest_manifest_version": 4,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -179,7 +184,8 @@ const CLEAN_PROJECT_ANSWERED = {
       "domain": "staging.takko.market",
       "latest_manifest_version": 1,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -515,7 +521,8 @@ const MESSY_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -796,7 +803,8 @@ const EDGE_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -823,7 +831,8 @@ const EDGE_PROJECT_AFTER = {
       "domain": "edge.atlas.market",
       "latest_manifest_version": 1,
       "manifest_current": true,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1113,7 +1122,8 @@ const RESCANNED_PROJECT = {
       "domain": "takko.market",
       "latest_manifest_version": 3,
       "manifest_current": false,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     },
     {
       "id": 4,
@@ -1121,7 +1131,8 @@ const RESCANNED_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1332,7 +1343,8 @@ const UNSCANNED_PROJECT = {
       "domain": "",
       "latest_manifest_version": null,
       "manifest_current": null,
-      "cert_refusal": null
+      "cert_refusal": null,
+      "attack_state": null
     }
   ]
 };
@@ -1537,6 +1549,7 @@ function adoptSite(stage, extra = {}, adoptExtra = {}) {
     latest_manifest_version: 1,
     manifest_current: true,
     cert_refusal: extra.cert_refusal !== undefined ? extra.cert_refusal : null,
+    attack_state: extra.attack_state !== undefined ? extra.attack_state : null,
     edge_owner: extra.edge_owner || "site_caddy",
     dns_zone: extra.dns_zone || "example.com",
     exposure: extra.exposure || "public",
@@ -1784,11 +1797,17 @@ export const SIM_FIXTURES = {
   error: () => ({ status: 0, data: { detail: "Cannot reach server — check your connection and retry." } }),
 
   // Adopt stages. plan includes a populated cert_refusal so Sites CertState
-  // is reachable in this family; the others emit null like project_row_body.
+  // is reachable in this family; attack_state is populated so AttackState is
+  // too. Unused rows emit null like project_row_body.
   plan: adoptStateFixture(adoptSite("plan", {
     cert_refusal: {
       detail: "shop.example.com is public with proxied=false.",
       finding_id: 9,
+    },
+    attack_state: {
+      detail: "Under-Attack mode flipped on example.com; banned 203.0.113.9.",
+      finding_id: 11,
+      mode: "under_attack",
     },
   })),
   verify: adoptStateFixture(adoptSite("verify", {}, {

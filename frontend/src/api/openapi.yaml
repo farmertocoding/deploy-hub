@@ -696,6 +696,19 @@ components:
         * `ack` - ack
         * `resolve` - resolve
         * `accept_risk` - accept_risk
+    AttackState:
+      type: object
+      properties:
+        detail:
+          type: string
+        finding_id:
+          type: integer
+        mode:
+          type: string
+      required:
+      - detail
+      - finding_id
+      - mode
     CertRefusal:
       type: object
       properties:
@@ -1282,6 +1295,10 @@ components:
         cert_refusal:
           allOf:
           - $ref: '#/components/schemas/CertRefusal'
+          nullable: true
+        attack_state:
+          allOf:
+          - $ref: '#/components/schemas/AttackState'
           nullable: true
         edge_owner:
           $ref: '#/components/schemas/EdgeOwnerEnum'

@@ -6,10 +6,11 @@
 // client stays on `findings` (D-045) — do not open a second socket.
 import React, { useEffect, useState } from "react";
 import ReadinessScreen from "../Readiness.jsx";
-import { DESKTOP_MIN_PX, LoadingLine } from "../Chrome.jsx";
+import { DESKTOP_MIN_PX, LoadingLine, routeHash } from "../Chrome.jsx";
 import FleetMap from "../Map.jsx";
 import { api } from "../api.js";
 import { CHECKLIST_COPY, remainingItems } from "../checklist.js";
+import { safeText } from "../safe-display.js";
 import { findingsSnapshot } from "./Findings.jsx";
 import { PROVISION_CMD } from "./Targets.jsx";
 
@@ -62,10 +63,14 @@ export async function addProject(body) {
   }
 }
 
-export function attachFirstRun(events, onProgress) {
+export function attachFirstRun(events, onProgress, onFindings) {
   const load = () => firstRunSnapshot().then((snap) => onProgress(snap.data)).catch(() => {});
   const handler = (event) => {
     if (event.__snapshot_failed) return;
+    if (onFindings) {
+      if (event.__snapshot && Array.isArray(event.data)) onFindings(event.data);
+      else findingsSnapshot().then((snap) => onFindings(snap.data || [])).catch(() => {});
+    }
     load();
   };
   events.subscribe("findings", handler, findingsSnapshot);
@@ -161,12 +166,36 @@ export function ChecklistCard({ progress, onNav, onProgress }) {
   );
 }
 
-export function HomeView({ width, progress, onNav, onProgress, events }) {
+export function AttackBanner({ findings }) {
+  const open = (findings || []).filter((row) => {
+    const fp = String(row.fingerprint || "");
+    return fp.startsWith("attack-playbook-engaged:") && row.state !== "resolved";
+  });
+  if (!open.length) return null;
+  const first = open[0];
+  return (
+    <p role="status" style={{ ...box, color: "#ff7b72", margin: 16 }}>
+      ⛔ Under attack — {safeText(first.title)}{" "}
+      <a href={routeHash("findings", first.id)} style={{ color: "#79c0ff" }}>
+        View finding
+      </a>
+    </p>
+  );
+}
+
+export function HomeView({ width, progress, onNav, onProgress, events, findings }) {
+  const banner = <AttackBanner findings={findings} />;
   if (progress?.owns_home) {
-    return <ChecklistCard progress={progress} onNav={onNav} onProgress={onProgress} />;
+    return (
+      <div>
+        {banner}
+        <ChecklistCard progress={progress} onNav={onNav} onProgress={onProgress} />
+      </div>
+    );
   }
   return (
     <div>
+      {banner}
       <MapPanel width={width} events={events} />
       <ReadinessScreen />
     </div>
@@ -175,16 +204,18 @@ export function HomeView({ width, progress, onNav, onProgress, events }) {
 
 export default function Home({ width, events, onNav }) {
   const [progress, setProgress] = useState(undefined);
+  const [findings, setFindings] = useState([]);
   const subscribe = events?.subscribe;
   const unsubscribe = events?.unsubscribe;
   useEffect(() => {
     if (!subscribe) {
       firstRunSnapshot().then((snap) => setProgress(snap.data)).catch(() => {});
+      findingsSnapshot().then((snap) => setFindings(snap.data || [])).catch(() => {});
       return undefined;
     }
-    return attachFirstRun({ subscribe, unsubscribe }, setProgress);
+    return attachFirstRun({ subscribe, unsubscribe }, setProgress, setFindings);
   }, [subscribe, unsubscribe]);
   if (!progress) return <LoadingLine what="home" />;
   return <HomeView width={width} progress={progress} onNav={onNav}
-    onProgress={setProgress} events={events} />;
+    onProgress={setProgress} events={events} findings={findings} />;
 }
