@@ -74,3 +74,62 @@ def test_site_rollback_http_kwargs_are_ids_only():
     assert "rollback(" in source
     assert "token" not in source.lower()
     assert "secret" not in source.lower()
+
+
+def test_rollback_requires_session(client):
+    """Rollback is a live T3 mutation — session-gated like findings (§6.10)."""
+    site, original = queued_deployment("rb-unauth")
+    original.status = Deployment.Status.SUCCEEDED
+    original.save(update_fields=["status"])
+    before = Deployment.objects.count()
+    assert client.post(
+        ROLLBACK.format(site.pk), content_type="application/json",
+    ).status_code == 403
+    assert Deployment.objects.count() == before
+    assert Deployment.objects.filter(rollback_of=original).count() == 0
+
+
+def test_rollback_seam_refuse_is_409(client, monkeypatch):
+    """DeploySeamRefused from rollback() is 409, not 500.
+
+    What would make this fail: the view leaking the refuse as a 500, swallowing
+    the factory Finding, or echoing vault values / token bytes in detail.
+    """
+    from vault import service as vault_service
+
+    from core.models import Finding
+    from deploys import views as deploy_views
+    from deploys.seams import resolve_production_seams
+
+    site, original = queued_deployment("rb-seam")
+    original.status = Deployment.Status.SUCCEEDED
+    original.save(update_fields=["status"])
+    token_bytes = b"t1-rollback-leak-token-not-a-credential"
+    vault_service.put(
+        kind="api_token",
+        owner_type="dns_account",
+        owner_id=f"dnsacct-{site.dns_zone.account_id}-unused",
+        plaintext=token_bytes,
+    )
+
+    def refuse_after_factory(deployment_id, **kwargs):
+        assert kwargs == {}, f"rollback kwargs must stay empty, got {kwargs}"
+        Deployment.objects.create(
+            manifest=original.manifest,
+            status=Deployment.Status.FAILED,
+            rollback_of=original,
+        )
+        resolve_production_seams(site)
+        raise AssertionError("factory was expected to refuse")
+
+    monkeypatch.setattr(deploy_views, "rollback", refuse_after_factory)
+    _enrolled_client(client)
+
+    response = client.post(ROLLBACK.format(site.pk), content_type="application/json")
+    assert response.status_code == 409, response.content
+    detail = response.json()["detail"]
+    assert token_bytes not in response.content
+    assert token_bytes.decode() not in str(detail)
+    created = Deployment.objects.get(rollback_of=original)
+    assert created.status == Deployment.Status.FAILED
+    assert Finding.objects.filter(fingerprint=f"deploy-seam:{site.pk}").exists()

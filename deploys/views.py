@@ -13,6 +13,7 @@ from core.models import Site
 from deploys.env import apply_env, list_env_names, merge_env, put_env
 from deploys.models import Deployment
 from deploys.pipeline import rollback
+from deploys.seams import DeploySeamRefused
 
 
 class EnvNamesSerializer(serializers.Serializer):
@@ -102,7 +103,13 @@ class SiteRollbackView(APIView):
                 {"detail": "no succeeded deployment to roll back"},
                 status=status.HTTP_409_CONFLICT,
             )
-        result = rollback(original.pk)
+        try:
+            result = rollback(original.pk)
+        except DeploySeamRefused as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
         created = (
             Deployment.objects.filter(rollback_of=original)
             .order_by("-pk")
