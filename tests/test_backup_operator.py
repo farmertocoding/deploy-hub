@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 import pytest
+import yaml
 from django.conf import settings
 from django.urls import get_resolver
 from django.utils import timezone
@@ -269,6 +270,103 @@ def test_failed_dump_files_hub_db_or_backup_failure(backup_dir):
     event = AuditEvent.objects.get(action="backup-failed")
     assert event.severity == AuditEvent.Severity.WARNING
     assert event.object_id == str(unit.pk)
+
+
+def _named_volume_at(service, container_path):
+    """Return declared named-volume sources mounted at container_path."""
+    found = []
+    for mount in service.get("volumes") or []:
+        if isinstance(mount, str):
+            parts = mount.split(":")
+            if len(parts) < 2:
+                continue
+            src, dest = parts[0], parts[1]
+            if dest != container_path:
+                continue
+            if src in {".", ""} or src.startswith(".") or "/" in src:
+                continue
+            found.append(src)
+        elif isinstance(mount, dict):
+            dest = mount.get("target") or mount.get("destination")
+            if dest != container_path:
+                continue
+            if (mount.get("type") or "volume") != "volume":
+                continue
+            src = mount.get("source")
+            if not src or "/" in str(src) or str(src).startswith("."):
+                continue
+            found.append(src)
+    return found
+
+
+def test_compose_mounts_named_backup_volume_on_web_deploys_and_probes():
+    """Nightly persist, test-now, and restore-drill share the C7 backup path.
+
+    What would make this fail: leaving /var/lib/deploy-hub/backups on each
+    container's writable layer, a bind mount, or three different volume names
+    so worker-deploys persist is invisible to worker-probes restore-drill and
+    the web command block.
+    """
+    compose = yaml.safe_load((REPO / "docker-compose.yml").read_text(encoding="utf-8"))
+    declared = compose.get("volumes") or {}
+    path = "/var/lib/deploy-hub/backups"
+    names = []
+    for svc_name in ("web", "worker-deploys", "worker-probes"):
+        sources = _named_volume_at(compose["services"][svc_name], path)
+        named = [src for src in sources if src in declared]
+        assert named, (
+            f"{svc_name} has no named volume at {path}; "
+            f"mounts={compose['services'][svc_name].get('volumes')!r}"
+        )
+        names.append(named[0])
+    assert len(set(names)) == 1, names
+
+
+def test_succeeded_checkrun_without_blob_files_missing_nightly_p1(backup_dir):
+    """A SUCCEEDED BACKUP row with no file at BACKUP_STORE_DIR/{pk} pages P1.
+
+    What would make this fail: treating CheckRun-only success as a usable
+    nightly so a crash between save() and os.replace, a deleted blob, or a
+    split-brain store leaves hub-db-or-backup-failure silent.
+    """
+    from core.models import AuditEvent, CheckRun, Finding
+    from provision.backup import check_missing_nightly, persist_backup
+
+    site, unit = _unit("ghost")
+    now = timezone.now()
+    run = CheckRun.objects.create(
+        kind=CheckRun.Kind.BACKUP,
+        status=CheckRun.Status.SUCCEEDED,
+        started=now,
+        finished=now,
+        results={
+            "schema_version": 1,
+            "unit_id": unit.pk,
+            "site_id": site.pk,
+            "bytes": 32,
+            "digest": "b" * 64,
+            "stored_at": now.isoformat(),
+        },
+    )
+    assert not (backup_dir / str(run.pk)).exists()
+    blob = json.dumps(run.results, default=str)
+    for needle in FORBIDDEN_LIST_NEEDLES:
+        assert needle not in blob, needle
+
+    n = check_missing_nightly(now=now)
+    assert n == 1
+    finding = Finding.objects.get(fingerprint=f"{KIND}:{unit.pk}")
+    assert finding.severity == Finding.Severity.P1
+    event = AuditEvent.objects.get(action="backup-failed")
+    assert event.severity == AuditEvent.Severity.WARNING
+    assert event.object_id == str(unit.pk)
+    assert event.detail.get("missing") is True
+
+    _, ok_unit = _unit("with-blob")
+    ok_run = persist_backup(ok_unit, plaintext=DUMP)
+    assert (backup_dir / str(ok_run.pk)).is_file()
+    check_missing_nightly(now=now)
+    assert not Finding.objects.filter(fingerprint=f"{KIND}:{ok_unit.pk}").exists()
 
 
 def test_missing_nightly_files_same_kind(backup_dir):
