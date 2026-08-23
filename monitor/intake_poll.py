@@ -133,6 +133,7 @@ def _partner_for(job):
 
 
 def _process(client, items, now):
+    from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
     from core.partner_verify import ReplayRejected, SignatureRejected, reverify
 
     n = 0
@@ -141,7 +142,7 @@ def _process(client, items, now):
         try:
             partner = _partner_for(job)
             if partner is not None:
-                reverify(
+                result = reverify(
                     partner,
                     job.get("method") or "POST",
                     job.get("path") or "",
@@ -149,7 +150,14 @@ def _process(client, items, now):
                     job.get("headers") or {},
                     now=now,
                 )
-                n += 1
+                if result.ok:
+                    n += 1
+                    job_type = job.get("type") or "partner-job"
+                    if job_type == "partner-job":
+                        try:
+                            materialize(partner, job)
+                        except (PartnerRefuse, PartnerNotFound):
+                            pass
         except (ReplayRejected, SignatureRejected):
             pass
         if job_id is not None and client is not None:
