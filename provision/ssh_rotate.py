@@ -80,6 +80,7 @@ def _current_secret(target):
 
 
 def _pending_secrets(target):
+    """Newer-than-current prefix rows: resume incomplete, never a kept stale old."""
     prefix = f"target-{target.pk}-ssh-"
     qs = Secret.objects.filter(
         kind=Secret.Kind.SSH_PRIVATE_KEY,
@@ -88,14 +89,21 @@ def _pending_secrets(target):
     )
     if target.ssh_key_ref:
         qs = qs.exclude(owner_id=target.ssh_key_ref)
-    return list(qs.order_by("-created_at"))
+    rows = list(qs.order_by("-created_at"))
+    current = _current_secret(target)
+    if current is None or current.created_at is None:
+        return rows
+    return [row for row in rows if row.created_at > current.created_at]
 
 
 def _inspect(transport, path):
+    """Read authorized_keys. Non-ok cat is not an empty file (D-064)."""
     result = transport.probe(["cat", path])
     text = result.stdout or ""
     if isinstance(text, (bytes, bytearray)):
         text = bytes(text).decode(errors="replace")
+    if not result.ok:
+        return None
     return text
 
 
@@ -233,6 +241,9 @@ def rotate_ssh(target, transport, *, make_transport=None, now=None, force=False)
     now = now or timezone.now()
     path = authorized_keys_path(target)
     text = _inspect(transport, path)
+    if text is None:
+        _incomplete(target, "could not read authorized_keys")
+        return {"status": "incomplete", "new_ref": target.ssh_key_ref}
     current = _current_secret(target)
     pending = _pending_secrets(target)
 
@@ -287,6 +298,10 @@ def rotate_ssh(target, transport, *, make_transport=None, now=None, force=False)
     if current is not None and current_blob:
         old_login = _login(make_transport, target, current.owner_id)
         inspect_after = _inspect(transport, path)
+        if inspect_after is None:
+            _incomplete(target, "could not re-read authorized_keys after drop")
+            return {"status": "incomplete", "new_ref": new_ref,
+                    "old_ref": current.owner_id}
         if old_login or current_blob in inspect_after:
             old_still = True
             _stale(target, "old pubkey still present or still authenticates")

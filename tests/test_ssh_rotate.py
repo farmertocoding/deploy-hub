@@ -600,7 +600,7 @@ def test_rotate_all_rotates_ready_ssh_targets():
     assert control.pk not in seen
     control.refresh_from_db()
     assert control.ssh_key_ref == "vault-ssh-control"
-    for pk, (target, transport, old) in worlds.items():
+    for target, transport, old in worlds.values():
         target.refresh_from_db()
         assert target.ssh_key_ref != old.owner_id
         assert transport.mutating_calls()
