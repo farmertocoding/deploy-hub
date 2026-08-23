@@ -93,3 +93,15 @@ sensitive:
   - scaling/attack_gate.py
   - provision/ssh_rotate.py
   - providers/tailscale.py
+  # Phase 5 (Task 0): the custody set the phase's tasks will land code into,
+  # claimed before the first line of code. providers/** already listed.
+  # Do not fold AWS connect into unclaimed core/zone_views.py. Do not
+  # broaden to deploys/** or frontend/** wholesale (D-065 / C12).
+  - providers/ec2.py
+  - providers/route53.py
+  - providers/ssm.py
+  - providers/image_registry.py
+  - providers/aws_creds.py
+  - monitor/cloud_reaper.py
+  - provision/aws_enroll.py
+  - core/aws_views.py

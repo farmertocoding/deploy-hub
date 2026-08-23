@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-3 conformance-3.5 conformance-4 review-round generate-client check-generated \
+	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -152,11 +152,12 @@ scripts-lint:
 	shfmt -d -i 4 -ci $(SCRIPTS)
 	@for f in $(SCRIPTS); do bash -n $$f || exit 1; done
 
-# Review-round gate: phase 4 without live-only reqs — tier:t3 (Multipass)
+# Review-round gate: phase 5 without live-only reqs — tier:t3 (Multipass)
 # and tier:t2 (docker) both stay out so review-round grades the T1 report
-# honestly (D-060). conformance-3 stays all-tiers Phase 3 (nightly).
+# honestly (D-071). conformance-3 stays all-tiers Phase 3 (nightly).
+# conformance-4 stays phase 4 minus live. Do not add an all-tiers 5 target.
 conformance:
-	python conformance/check.py --phase 4 --exclude-tier t2 --exclude-tier t3
+	python conformance/check.py --phase 5 --exclude-tier t2 --exclude-tier t3
 
 # All-tiers phase 3 gate. Not a review-round prerequisite (D-023). Replaces
 # conformance-2.5 (phase 2.5 closed; one all-tiers gate, not two).
@@ -168,10 +169,15 @@ conformance-3:
 conformance-3.5:
 	python conformance/check.py --phase 3.5 --exclude-tier t2 --exclude-tier t3
 
-# Phase 4 gate: same recipe as `conformance`. Not all-tiers. Do not add an
-# all-tiers 4 target. Do not add t4 (D-060).
+# Phase 4 gate: phase 4 minus live. Not all-tiers. Left in place after
+# `conformance` moved to phase 5 (D-071). Do not add t4.
 conformance-4:
 	python conformance/check.py --phase 4 --exclude-tier t2 --exclude-tier t3
+
+# Phase 5 gate: same recipe as `conformance`. Not all-tiers. Do not add an
+# all-tiers 5 target. Do not add t4 (D-071).
+conformance-5:
+	python conformance/check.py --phase 5 --exclude-tier t2 --exclude-tier t3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #
