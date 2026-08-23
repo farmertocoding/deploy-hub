@@ -102,12 +102,34 @@ def api_request(token, method, path, payload=None, *, timeout=20):
     return body
 
 
+def zone_set_size(probe):
+    """The token's zone-set size from a GET /zones probe body (D-046).
+
+    When result_info.total_count is present, that integer is the set size —
+    a one-row page is not one zone (a later per_page=1 must not construct
+    an over-scoped token). When total_count is absent, fall back to
+    len(result), today's rule, so probe bodies that omit result_info still
+    construct when they contain exactly one row.
+    """
+    info = probe.get("result_info") or {}
+    if not isinstance(info, dict):
+        info = {}
+    if "total_count" in info and info["total_count"] is not None:
+        return int(info["total_count"])
+    return len(probe.get("result") or [])
+
+
 def observe_token(token, *, timeout=20):
     """The one spelling of SEC-B5's pinned token observation (D-046).
 
     verify proves liveness (it returns no policy set, so it can never prove
     scope); the zone-set probe proves reach. Returns
-    ``{"status": <verify result.status>, "zones": [{"id", "name"}, ...]}``.
+    ``{"status": <verify result.status>, "zones": [{"id", "name"}, ...],
+    "zone_count": <set size>}``. ``zone_count`` is the set-size fact
+    ``zone_set_size`` reads from the probe — ``result_info.total_count``
+    when present, else ``len(result)``. A one-row page is never returned
+    as "one zone" when that fact is not 1.
+
     The probe is skipped when verify already failed the token — a dead
     credential's reach is not worth a second request, and the construction
     wall's tests pin that an inactive token sends exactly one request.
@@ -117,19 +139,22 @@ def observe_token(token, *, timeout=20):
     the wire by handing this helper a raw vault value. Judgment stays with the
     callers: the registry refuses construction on anything but exactly the one
     expected zone; the daily audit files Findings on drift against the
-    declared zone rows.
+    declared zone rows. Both judges must use ``zone_count``, not page length.
     """
     token = refuse_global_api_key(token)
     verify = api_request(token, "GET", TOKEN_VERIFY_PATH, timeout=timeout)
     status = (verify.get("result") or {}).get("status")
     if status != "active":
-        return {"status": status, "zones": []}
+        return {"status": status, "zones": [], "zone_count": 0}
     probe = api_request(token, "GET", ZONE_PROBE_PATH, timeout=timeout)
-    zones = [
+    rows = [
         {"id": row.get("id"), "name": row.get("name")}
         for row in probe.get("result") or []
     ]
-    return {"status": status, "zones": zones}
+    count = zone_set_size(probe)
+    # Do not return a one-row page as "one zone" when the set is not 1.
+    zones = [] if count != 1 and len(rows) == 1 else rows
+    return {"status": status, "zones": zones, "zone_count": count}
 
 
 def origin_ca_request(origin_ca_key, method, path, payload=None, *, timeout=20):

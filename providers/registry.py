@@ -6,10 +6,11 @@ Scope is enforced synchronously, before the client is usable (D-034 panel r2):
       request (refuse_global_api_key);
   (b) `GET /user/tokens/verify` must return success plus result.status ==
       "active";
-  (c) the zone-authorization probe `GET /zones?per_page=50` must return
-      EXACTLY one zone whose id equals DnsZone.provider_zone_id — more,
-      fewer, or a mismatch refuses. verify alone cannot prove scope: it
-      returns no policy set (D-046);
+      (c) the zone-authorization probe `GET /zones?per_page=50` must report
+      set size 1 (result_info.total_count when present, else len(result))
+      and that one zone's id must equal DnsZone.provider_zone_id — more,
+      fewer, or a mismatch refuses. A one-row page is not one zone.
+      verify alone cannot prove scope: it returns no policy set (D-046);
   (d) the purpose wall — under HUB_TEST_MODE only a triple-keyed test zone
       (HUB_TEST_MODE + purpose=test + HUB_TEST_ZONE_SLUGS); outside it,
       never a purpose=test zone.
@@ -138,11 +139,17 @@ def _verify_scope(token, zone):
             f"token verify returned status {status!r}, not 'active' — refusing"
         )
 
+    count = observed["zone_count"]
     zones = observed["zones"]
-    if len(zones) != 1:
+    if count != 1:
         raise ScopeError(
-            f"zone probe returned {len(zones)} zones; the DNS token must be "
+            f"zone probe returned {count} zones; the DNS token must be "
             f"scoped to exactly the one zone {zone.name!r} (D-046)"
+        )
+    if not zones:
+        raise ScopeError(
+            f"zone probe reported one zone but returned no row for "
+            f"{zone.name!r} — refusing"
         )
     if zones[0]["id"] != zone.provider_zone_id:
         raise ScopeError(

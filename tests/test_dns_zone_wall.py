@@ -50,11 +50,14 @@ def _zone(*, name="wall.example", zone_id="zid-wall", purpose="prod",
     )
 
 
-def _routes(zone, *, status="active", zones=None):
+def _routes(zone, *, status="active", zones=None, result_info=None):
     result = [{"id": zone.provider_zone_id, "name": zone.name}] if zones is None else zones
+    probe = {"success": True, "result": result}
+    if result_info is not None:
+        probe["result_info"] = result_info
     return {
         VERIFY: {"success": True, "result": {"id": "tok-1", "status": status}},
-        PROBE: {"success": True, "result": result},
+        PROBE: probe,
     }
 
 
@@ -102,6 +105,82 @@ def test_inactive_token_refuses_construction(monkeypatch):
     with pytest.raises(ScopeError):
         dns_provider_for(zone)
     assert [req[1] for req in http.requests] == [VERIFY[1]]
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_one_row_page_with_total_count_2_refuses_construction(monkeypatch):
+    """Set size is result_info.total_count, not the page length (D-046).
+
+    What would make this fail: judging len(result) so a later per_page=1
+    constructs an over-scoped token from a one-row page of a two-zone set.
+    """
+    import providers.cloudflare as cloudflare
+    from core.models import Finding
+    from providers.registry import ScopeError, dns_provider_for
+
+    zone = _zone()
+    http = _http(monkeypatch, _routes(
+        zone,
+        zones=[{"id": zone.provider_zone_id, "name": zone.name}],
+        result_info={"page": 1, "per_page": 50, "total_count": 2},
+    ))
+
+    observed = cloudflare.observe_token(TOKEN)
+    assert observed["zone_count"] == 2
+    assert len(observed["zones"]) != 1, "a one-row page is not one zone"
+
+    with pytest.raises(ScopeError) as exc:
+        dns_provider_for(zone)
+    assert [req[1] for req in http.requests] == [
+        VERIFY[1], PROBE[1], VERIFY[1], PROBE[1],
+    ]
+    assert "2" in str(exc.value)
+    finding = Finding.objects.get(source_engine="dns_scope")
+    assert finding.state == Finding.State.OPEN
+    assert TOKEN not in finding.body
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_one_row_page_with_total_count_1_still_constructs(monkeypatch):
+    """total_count=1 is a real one-zone set, not a truncated page.
+
+    What would make this fail: refusing any body that carries result_info,
+    so a well-scoped token Cloudflare reports as one of one cannot construct.
+    """
+    import providers.cloudflare as cloudflare
+    from providers.cloudflare import CloudflareDnsProvider
+    from providers.registry import dns_provider_for
+
+    zone = _zone()
+    _http(monkeypatch, _routes(
+        zone, result_info={"page": 1, "per_page": 50, "total_count": 1},
+    ))
+    observed = cloudflare.observe_token(TOKEN)
+    assert observed["zone_count"] == 1
+    assert len(observed["zones"]) == 1
+    provider = dns_provider_for(zone)
+    assert isinstance(provider, CloudflareDnsProvider)
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_absent_result_info_one_row_still_constructs(monkeypatch):
+    """Compat: no result_info and one row is still a one-zone set.
+
+    What would make this fail: requiring result_info.total_count, so today's
+    test doubles and older probe bodies stop constructing.
+    """
+    import providers.cloudflare as cloudflare
+    from providers.cloudflare import CloudflareDnsProvider
+    from providers.registry import dns_provider_for
+
+    zone = _zone()
+    _http(monkeypatch, _routes(zone))
+    observed = cloudflare.observe_token(TOKEN)
+    assert "result_info" not in _routes(zone)[PROBE]
+    assert observed["zone_count"] == 1
+    assert len(observed["zones"]) == 1
+    provider = dns_provider_for(zone)
+    assert isinstance(provider, CloudflareDnsProvider)
 
 
 @pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
