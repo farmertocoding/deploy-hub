@@ -1,10 +1,10 @@
 """T3: HTTPS + LE staging + wss through CF+Caddy (HARNESS-T3-LE-STAGING).
 
-Credential-gated (D-028 / D-031): every test here needs HUB_TEST_DNS_ZONE
-(the Cloudflare TEST zone name) and HUB_TEST_CF_TOKEN (a token scoped to that
-zone — never a prod token name). Absent credentials are skipped-only; check.py
-refuses to green a tier:t3 req from a skip, and the D-031 waiver is the honest
-record of that state — not a T1 sibling green.
+Credential-gated (D-028 / D-031): every test here needs HUB_TEST_CF_TOKEN
+and a purpose=test DnsZone whose name is on HUB_TEST_ZONE_SLUGS. Absent
+credentials are skipped-only; check.py refuses to green a tier:t3 req from
+a skip, and the D-031 waiver is the honest record of that state — not a T1
+sibling green.
 
 Documented run preconditions (per the task brief):
 
@@ -35,26 +35,36 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from tests.harness.multipass import multipass_available
+from tests.harness.multipass import credentials_present, multipass_available
 
 pytest_plugins = ["tests.harness.t3_deploy"]
 
 TOKEN_ENV = "HUB_TEST_CF_TOKEN"
-ZONE_ENV = "HUB_TEST_DNS_ZONE"
 ORIGIN_ENV = "HUB_TEST_ORIGIN_IPV4"
 LE_STAGING_CA = "https://acme-staging-v02.api.letsencrypt.org/directory"
 SKIP_REASON = (
-    f"{ZONE_ENV} / {TOKEN_ENV} not set: no test-zone credentials on this host "
+    f"{TOKEN_ENV} + purpose=test DnsZone on HUB_TEST_ZONE_SLUGS not set: "
+    "no test-zone credentials on this host "
     "(HARNESS-T3-LE-STAGING stays skipped-only; D-031 waiver)"
 )
 
 
 def _zone_name():
-    return os.environ.get(ZONE_ENV, "").strip()
+    """Allowlisted purpose=test DnsZone name. The retired zone env is unused."""
+    from django.conf import settings
+
+    from core.models import DnsZone
+
+    slugs = list(getattr(settings, "HUB_TEST_ZONE_SLUGS", None) or [])
+    zones = DnsZone.objects.filter(purpose="test")
+    if slugs:
+        zones = zones.filter(name__in=slugs)
+    zone = zones.first()
+    return zone.name if zone else ""
 
 
 def _credentialed():
-    return bool(_zone_name() and os.environ.get(TOKEN_ENV, "").strip())
+    return credentials_present()
 
 
 pytestmark = [
@@ -97,8 +107,8 @@ def _dns_plane_impl(settings):
     from tests.harness.t3_deploy import allow_test_zone
 
     settings.HUB_TEST_MODE = True
-    # S1: the configured DNS zone must itself pass the allowlist — the
-    # provider fails closed on a zone that is only named by the env var.
+    # Zone name is the allowlisted purpose=test DnsZone, then re-pinned on
+    # HUB_TEST_ZONE_SLUGS so the test-plane provider can construct.
     allow_test_zone(settings, _zone_name())
     plane = DnsPlane(provider=TestDnsProvider(), zone=_zone_name())
     try:
