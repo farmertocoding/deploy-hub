@@ -30,6 +30,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"   # localhost only; Tailscale fronts it in real use
     networks: [internal]
+    volumes:
+      - hub-backups:/var/lib/deploy-hub/backups   # C7: test-now + command block
 
   worker-deploys:
     build: .
@@ -37,6 +39,8 @@ services:
     environment: *hub-env
     depends_on: [db, redis]
     networks: [internal]
+    volumes:
+      - hub-backups:/var/lib/deploy-hub/backups   # C7: backup-nightly persist
 
   worker-probes:
     build: .
@@ -44,6 +48,8 @@ services:
     environment: *hub-env
     depends_on: [db, redis]
     networks: [internal]
+    volumes:
+      - hub-backups:/var/lib/deploy-hub/backups   # C7: restore-drill unseal
 
   worker-control:
     build: .
@@ -61,6 +67,7 @@ services:
 
 volumes:
   pgdata:
+  hub-backups:
 
 networks:
   internal:
