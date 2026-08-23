@@ -8,6 +8,7 @@ import that adapter.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from provision.adopt import (
     DB_URL_MISSING_FP,
     _env_map,
     _named_volume_targets,
+    _project_tree,
     _services,
     classify_services,
     read_compose,
@@ -72,7 +74,10 @@ def ensure_temp_dns(desired):
         return
     temp = (run.results.get("temp_name") if run else "") or ""
     if not temp:
-        temp = f"{site.name}-adopt-{secrets.token_hex(4)}.{site.dns_zone.name}"
+        temp = (
+            f"{_dns_label(site.name)}-adopt-{secrets.token_hex(4)}"
+            f".{site.dns_zone.name}"
+        )
         _write_checkrun(desired, temp_name=temp, stage="temp_dns")
     zone = site.dns_zone
     dns = desired["dns"]
@@ -277,8 +282,15 @@ def _write_checkrun(desired, *, temp_name=None, stage=None, status=None):
     return run
 
 
+def _dns_label(name):
+    """DNS label from a human Site.name: lowercase, [a-z0-9-], junk collapsed."""
+    text = re.sub(r"[^a-z0-9]+", "-", (name or "").lower())
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return (text[:48].strip("-") or "site")
+
+
 def _compose_doc(site):
-    tree = Path(site.project.local_path) if site.project.local_path else None
+    tree = _project_tree(site.project)
     if tree is None:
         return {}, Path()
     try:

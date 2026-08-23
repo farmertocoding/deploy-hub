@@ -39,6 +39,7 @@ UNCOMPRESSIBLE_FP = "adopt-uncompressible:{site_id}"
 PLAN_FP = "adopt-plan:{site_id}"
 DB_URL_MISSING_FP = "adopt-db-url-missing:{site_id}"
 CACHE_URL_MISSING_FP = "adopt-cache-url-missing:{site_id}"
+TREE_MISSING_FP = "adopt-tree-missing:{site_id}"
 
 
 @dataclass
@@ -134,6 +135,16 @@ def adoption_plan(project):
     if site is None:
         raise ValueError("adoption_plan requires a Site on the Project")
     tree = _project_tree(project)
+    if tree is None:
+        filed = [_file_no_tree(site)]
+        return AdoptionPlan(
+            refused=True,
+            blocked=False,
+            classified={key: None for key in ROLE_KEYS},
+            manifest=None,
+            volumes=[],
+            findings=filed,
+        )
     compose = read_compose(tree)
     roles = classify_services(compose)
     services = _services(compose)
@@ -183,9 +194,29 @@ def adoption_plan(project):
 
 
 def _project_tree(project):
+    """local_path if set, else the Hub checkout already on a Manifest. No clone."""
     if project.local_path:
-        return Path(project.local_path)
-    raise ValueError("adoption_plan reads the Project tree (local_path or clone)")
+        path = Path(project.local_path)
+        return path if path.is_dir() else None
+    return _existing_hub_checkout(project)
+
+
+def _existing_hub_checkout(project):
+    """Read compose from the tree the pipeline already uses (source_dir)."""
+    from django.apps import apps
+
+    Manifest = apps.get_model("deploys", "Manifest")
+    site = project.sites.order_by("pk").first()
+    if site is None:
+        return None
+    for manifest in Manifest.objects.filter(site=site).order_by("-version", "-pk"):
+        source = (manifest.body or {}).get("source_dir") or ""
+        if not source:
+            continue
+        path = Path(source)
+        if path.is_dir():
+            return path
+    return None
 
 
 def _services(compose):
@@ -398,6 +429,20 @@ def _file(site, fingerprint, *, severity, title, body, fix_action):
         title=title,
         body=body,
         fix_action=fix_action,
+    )
+
+
+def _file_no_tree(site):
+    return _file(
+        site,
+        TREE_MISSING_FP.format(site_id=site.pk),
+        severity=Finding.Severity.P2,
+        title="Adoption plan has no Project tree",
+        body=(
+            "Compose is read from Project.local_path or the Hub checkout. "
+            "This Project has neither, so the plan will not walk a live host."
+        ),
+        fix_action="Set local_path or give the Hub a clone checkout of the git URL.",
     )
 
 

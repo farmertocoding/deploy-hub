@@ -31,9 +31,8 @@ claim. DNS-01 still not due.
 T1. `FakeDnsProvider` + `AdoptTransport` + Hub-local plant files. The
 test-plane token env is unset (`cf_token_set False` this session).
 `HUB_TEST_ZONE_SLUGS` is the allowlist; the retired zone-name env is not
-used. Multipass is not part of this record. Leftover Task 8 (HTTP start /
-Sites adopt UI) did not land — `p3b-t8` is still `41e5b7d`. The MUST
-demo does not wait on that HTTP.
+used. Multipass is not part of this record. Task 8 UI landed; HTTP start
+still 404. The MUST demo does not wait on that HTTP.
 
 ## What actually landed (Tasks 0–7, T1)
 
@@ -125,8 +124,7 @@ green. Retirement does not wait on a live zone token.
   DNS-01 clause unimplemented).
 - `HARNESS-T3-LE-STAGING` stays waived (`no-test-zone-credentials`).
   Leftover Task 8 owns that line. 3b neither freezes nor retires it.
-- Task 8 HTTP start / Sites adopt UI slipped. No `frontend/tests/adopt.test.ts`
-  on this tree.
+- Task 8 UI landed; HTTP start still 404.
 
 ## Acceptance transcription — real nodeids
 
