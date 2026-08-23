@@ -217,6 +217,10 @@ class Site(models.Model):
         CONFIRM = "confirm"
         WINDOWED = "windowed"
 
+    class EdgeOwner(models.TextChoices):
+        HOST_CADDY = "host_caddy"
+        SITE_CADDY = "site_caddy"
+
     project = models.ForeignKey(Project, on_delete=models.CASCADE,
                                 related_name="sites")
     name = models.CharField(max_length=128)
@@ -251,6 +255,11 @@ class Site(models.Model):
         related_name="sites",
     )
     proxied = models.BooleanField(default=True)
+    # Who owns Caddy for this Site (D-052). Fresh Hub sites stay host_caddy;
+    # adoption_plan writes site_caddy when the compose edge is unambiguous.
+    edge_owner = models.CharField(
+        max_length=16, choices=EdgeOwner.choices, default=EdgeOwner.HOST_CADDY,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL,
@@ -487,6 +496,7 @@ class CheckRun(models.Model):
         # nosec B105 — a Kind label naming what the check audits, not a credential.
         CF_TOKEN_SCOPE = "cf_token_scope"  # nosec B105
         CERT_EXPIRY = "cert_expiry"
+        ADOPT = "adopt"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"
@@ -505,10 +515,19 @@ class CheckRun(models.Model):
     class Meta:
         indexes = [models.Index(fields=["kind", "due_at"])]
 
+    _ADOPT_RESULT_KEYS = frozenset(
+        {"schema_version", "site_id", "temp_name", "stage", "started_at"}
+    )
+
     def clean(self):
         results = self.results
         if not isinstance(results, dict) or "schema_version" not in results:
             raise ValidationError({"results": "results must include schema_version"})
+        if self.kind == self.Kind.ADOPT and set(results) != self._ADOPT_RESULT_KEYS:
+            raise ValidationError(
+                {"results": "adopt results keys must be exactly "
+                            "{schema_version, site_id, temp_name, stage, started_at}"}
+            )
 
     def save(self, *args, **kwargs):
         self.full_clean()
