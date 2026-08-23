@@ -169,6 +169,11 @@ HUB_TEST_ZONE_SLUGS = [
     if slug.strip()
 ]
 
+# --- Tailscale device-list poll (D-058 / C6) ---
+# Vault owner-id, never a token value. Default empty → skip-only CheckRun.
+# Do not invent a live token env.
+HUB_TAILSCALE_API_TOKEN_REF = os.environ.get("HUB_TAILSCALE_API_TOKEN_REF", "")
+
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
@@ -237,6 +242,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "cf-token-scope-daily": {
         "task": "monitor.tasks.audit_cf_token_scope",
+        "schedule": 86400.0,
+    },
+    "tailscale-device-audit-daily": {
+        "task": "monitor.tasks.audit_tailscale_devices",
         "schedule": 86400.0,
     },
     "probe-uptime": {

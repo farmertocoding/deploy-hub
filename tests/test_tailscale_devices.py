@@ -72,11 +72,10 @@ def test_unknown_device_files_finding():
     What would make this fail: swallowing the stranger, filing at the wrong
     severity, or skipping classify() so an unregistered kind ships.
     """
-    from providers.tailscale import audit_devices
-
     from core.models import CheckRun, Finding
     from monitor.alert_rules import classify
     from providers.fakes import FakeTailscale
+    from providers.tailscale import audit_devices
 
     assert classify(KIND) == "p2"
     _plant_token(REF, TOKEN)
@@ -104,10 +103,9 @@ def test_hub_created_target_is_silent():
     What would make this fail: treating every tailnet row as unknown, so the
     fleet the Hub enrolled becomes a standing P2 inbox.
     """
-    from providers.tailscale import audit_devices
-
     from core.models import CheckRun
     from providers.fakes import FakeTailscale
+    from providers.tailscale import audit_devices
 
     _target("hub-box")
     _plant_token(REF, TOKEN)
@@ -135,23 +133,22 @@ def test_absent_ref_skips_and_does_not_green_a_live_tier():
     Beat owner, or skipping the dated skip-unless-configured waiver (D-043).
     """
     from django.conf import settings
-    from providers.tailscale import audit_devices
 
     from core.models import CheckRun
     from monitor import tasks as monitor_tasks
+    from providers.tailscale import audit_devices
 
-    assert getattr(settings, "HUB_TAILSCALE_API_TOKEN_REF", None) == ""
+    with override_settings(HUB_TAILSCALE_API_TOKEN_REF=""):
+        run = audit_devices()
+        assert run.kind == CheckRun.Kind.TAILSCALE_DEVICES
+        assert run.status == CheckRun.Status.SKIPPED
+        assert run.status != CheckRun.Status.SUCCEEDED
+        assert _findings().count() == 0
 
-    run = audit_devices()
-    assert run.kind == CheckRun.Kind.TAILSCALE_DEVICES
-    assert run.status == CheckRun.Status.SKIPPED
-    assert run.status != CheckRun.Status.SUCCEEDED
-    assert _findings().count() == 0
-
-    outcome = monitor_tasks.audit_tailscale_devices()
-    assert outcome["kind"] == CheckRun.Kind.TAILSCALE_DEVICES
-    assert outcome["status"] == CheckRun.Status.SKIPPED
-    assert TOKEN not in json.dumps(outcome)
+        outcome = monitor_tasks.audit_tailscale_devices()
+        assert outcome["kind"] == CheckRun.Kind.TAILSCALE_DEVICES
+        assert outcome["status"] == CheckRun.Status.SKIPPED
+        assert TOKEN not in json.dumps(outcome)
 
     entry = settings.CELERY_BEAT_SCHEDULE["tailscale-device-audit-daily"]
     assert entry["task"] == monitor_tasks.audit_tailscale_devices.name
@@ -170,7 +167,7 @@ def test_absent_ref_skips_and_does_not_green_a_live_tier():
     assert live_marks == [], f"T1 skip proof must not carry a live-tier mark: {live_marks}"
 
     base = (REPO / "hub" / "settings" / "base.py").read_text(encoding="utf-8")
-    assert "HUB_TAILSCALE_API_TOKEN_REF" in base
+    assert 'os.environ.get("HUB_TAILSCALE_API_TOKEN_REF", "")' in base
     assert "HUB_TEST_TAILSCALE" not in base
     assert "HUB_TEST_CF_TOKEN" not in base
 
@@ -192,10 +189,9 @@ def test_no_token_in_finding_or_checkrun():
     body, fingerprint, or AuditEvent.detail — the exact exhaust the poll
     exists to keep off the inbox.
     """
-    from providers.tailscale import audit_devices
-
     from core.models import CheckRun
     from providers.fakes import FakeTailscale
+    from providers.tailscale import audit_devices
 
     _plant_token(REF, TOKEN)
     fake = FakeTailscale(devices=[{
