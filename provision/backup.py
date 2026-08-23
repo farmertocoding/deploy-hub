@@ -253,9 +253,12 @@ def _succeeded_runs(unit):
 
 
 def _has_recent_succeeded_dump(unit, cutoff):
+    """True only when a recent SUCCEEDED row has a blob file. Never the KEK."""
     for run in _succeeded_runs(unit):
         when = run.finished or run.started
-        if when is not None and when >= cutoff:
+        if when is None or when < cutoff:
+            continue
+        if (BACKUP_STORE_DIR / str(run.pk)).is_file():
             return True
     return False
 
