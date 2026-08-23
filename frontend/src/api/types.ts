@@ -143,6 +143,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dns-accounts/{account_id}/origin-ca-plant/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_dns_accounts_origin_ca_plant_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/findings/": {
         parameters: {
             query?: never;
@@ -223,10 +239,25 @@ export interface paths {
          *     can answer honestly: does the latest manifest correspond to the CURRENT scan?
          *     (A true warnings-diff-since-last-manifest would need the prior report stored,
          *     which it isn't — noted in the F7 design decision rather than faked.)
+         *
+         *     POST creates Project + Site in one transaction and binds dns_zone /
+         *     primary_target from the eligible fleet (I-purpose / I-target).
          */
         get: operations["v1_projects_list"];
         put?: never;
-        post?: never;
+        /**
+         * @description What the readiness screen renders its left column from (F7-lite).
+         *
+         *     tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+         *     projects grow. manifest_current answers the one freshness question the data model
+         *     can answer honestly: does the latest manifest correspond to the CURRENT scan?
+         *     (A true warnings-diff-since-last-manifest would need the prior report stored,
+         *     which it isn't — noted in the F7 design decision rather than faked.)
+         *
+         *     POST creates Project + Site in one transaction and binds dns_zone /
+         *     primary_target from the eligible fleet (I-purpose / I-target).
+         */
+        post: operations["v1_projects_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,6 +418,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description * `public` - Public
+         *     * `mesh_only` - Mesh Only
+         * @enum {string}
+         */
+        ExposureEnum: "public" | "mesh_only";
         Finding: {
             readonly id: number;
             source_engine: string;
@@ -457,6 +494,12 @@ export interface components {
             /** @default false */
             confirm_warnings: boolean;
         };
+        OriginCaPlant: {
+            path: string;
+        };
+        OriginCaPlantResult: {
+            planted: boolean;
+        };
         PatchedAnswers: {
             /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
             answers: {
@@ -475,6 +518,24 @@ export interface components {
          * @enum {string}
          */
         PathEnum: "public" | "mesh";
+        /** @description POST /api/v1/projects/ — Project + Site in one transaction (I-target). */
+        ProjectCreate: {
+            name: string;
+            /** @default  */
+            git_url: string;
+            /** @default main */
+            git_ref: string;
+            /** @default  */
+            local_path: string;
+            /** @default  */
+            domain: string;
+            /** @default public */
+            exposure: components["schemas"]["ExposureEnum"];
+            /** @default true */
+            proxied: boolean;
+            dns_zone?: number | null;
+            primary_target?: number | null;
+        };
         ProjectSummary: {
             id: number;
             name: string;
@@ -760,6 +821,33 @@ export interface operations {
             };
         };
     };
+    v1_dns_accounts_origin_ca_plant_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OriginCaPlant"];
+                "application/x-www-form-urlencoded": components["schemas"]["OriginCaPlant"];
+                "multipart/form-data": components["schemas"]["OriginCaPlant"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OriginCaPlantResult"];
+                };
+            };
+        };
+    };
     v1_findings_retrieve: {
         parameters: {
             query?: {
@@ -876,6 +964,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectSummary"][];
+                };
+            };
+        };
+    };
+    v1_projects_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["ProjectCreate"];
+                "multipart/form-data": components["schemas"]["ProjectCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
                 };
             };
         };
