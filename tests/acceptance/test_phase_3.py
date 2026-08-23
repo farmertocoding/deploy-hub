@@ -255,7 +255,8 @@ def test_unproxied_refusal_is_a_finding_and_a_visible_site_state():
 
     row = Finding.objects.get()
     assert row.severity == Finding.Severity.P2
-    assert "Phase 3b" in row.fix_action
+    assert "phase 4" in row.fix_action.lower()
+    assert "3b" not in row.fix_action.lower()
     assert row.title and row.body and row.entity
 
     sites_src = (REPO / "frontend" / "src" / "screens" / "Sites.jsx").read_text(

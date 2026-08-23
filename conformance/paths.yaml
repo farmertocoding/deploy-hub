@@ -68,3 +68,8 @@ sensitive:
   - monitor/alert_rules.py
   - deploys/certs.py
   - provision/adopt.py
+  # Phase 3b (Task 0): adopt_flow is the MUST start that talks to a live
+  # occupied host through Transport and upserts temp DNS via desired["dns"].
+  # Claimed before the file exists so the first line written there is already
+  # human-merged. Custody parity is two-way with CODEOWNERS.
+  - deploys/adopt_flow.py

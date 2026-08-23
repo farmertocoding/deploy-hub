@@ -19,7 +19,7 @@ RENEW_BEFORE_DAYS = 30
 
 
 class UnproxiedCertUnsupported(RuntimeError):
-    """Public site with proxied=false: Hub-central DNS-01 is Phase 3b."""
+    """Public site with proxied=false: Hub-central DNS-01 is phase 4."""
 
 
 class CertKeyMismatch(RuntimeError):
@@ -140,7 +140,7 @@ def _refuse_unproxied(site):
         ),
         fix_action=(
             "Enable Cloudflare proxy (proxied=true) for an Origin certificate, "
-            "or wait for Phase 3b Hub-central DNS-01."
+            "or wait for phase 4 Hub-central DNS-01."
         ),
     )
     raise UnproxiedCertUnsupported(

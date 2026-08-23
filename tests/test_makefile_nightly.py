@@ -144,3 +144,48 @@ def test_nightly_gates_use_conformance_3():
     assert "conformance-3" in prereqs, (
         f"nightly-gates must run conformance-3: {prereqs}")
     assert "conformance-2.5" not in prereqs, prereqs
+
+
+def test_conformance_3_5_target_exists():
+    """What would make this fail: no `conformance-3.5` target, or leaving it
+    off `.PHONY` so a same-named file could skip the recipe.
+    """
+    targets = gates.makefile_targets(REPO)
+    assert "conformance-3.5" in targets, (
+        "Makefile must declare conformance-3.5 as the phase-3.5 gate")
+    phony = gates.phony_targets(REPO)
+    assert "conformance-3.5" in phony, "conformance-3.5 must be .PHONY"
+
+
+def test_conformance_3_5_is_phase_3_5_minus_live_tiers():
+    """conformance-3.5 is the 3b gate: --phase 3.5 minus t2/t3. Not all-tiers.
+
+    What would make this fail: an all-tiers 3.5 recipe, or grading phase 3.
+    """
+    recipe = gates.recipe(REPO, "conformance-3.5")
+    assert recipe, "Makefile has no `conformance-3.5` recipe"
+    assert "--phase 3.5" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-3.5 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-3.5 must omit t3 (no Multipass on the T1 host):\n{recipe}")
+
+
+def test_review_round_conformance_is_still_phase_3_minus_live_tiers():
+    """review-round still grades the existing `conformance` target (phase 3
+    minus live tiers), not conformance-3 and not conformance-3.5.
+
+    What would make this fail: pointing `conformance` at 3.5, or claiming
+    conformance-3 excludes live tiers.
+    """
+    recipe = gates.recipe(REPO, "conformance")
+    assert recipe, "Makefile has no `conformance` recipe"
+    assert "--phase 3" in recipe, recipe
+    assert "--phase 3.5" not in recipe, (
+        f"review-round conformance must stay phase 3, not 3.5:\n{recipe}")
+    assert "--exclude-tier t3" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, recipe
+    full = gates.recipe(REPO, "conformance-3")
+    assert "--exclude-tier" not in full, (
+        f"conformance-3 stays all-tiers Phase 3 — do not claim it excludes "
+        f"live tiers:\n{full}")

@@ -381,7 +381,7 @@ def test_unproxied_public_site_refusal_files_a_finding_with_a_fix_action():
     """Unproxied public sites refuse with a named error and a P2 Finding.
 
     What would make this fail: a bare traceback, or a Finding whose fix_action
-    does not name Phase 3b (Task 12/13 render this as the Sites-screen state).
+    does not name phase 4 (Task 12/13 render this as the Sites-screen state).
     """
     from core.models import Finding
     from deploys.certs import UnproxiedCertUnsupported, ensure_site_certificate
@@ -393,7 +393,8 @@ def test_unproxied_public_site_refusal_files_a_finding_with_a_fix_action():
 
     row = Finding.objects.get()
     assert row.severity == Finding.Severity.P2
-    assert "Phase 3b" in row.fix_action
+    assert "phase 4" in row.fix_action.lower()
+    assert "3b" not in row.fix_action.lower()
     assert row.title
     assert row.body
     assert row.entity
