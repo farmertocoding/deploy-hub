@@ -427,6 +427,15 @@ def test_empty_pin_still_refuses_transport():
     assert events == [], "empty pin must not construct Transport"
     assert transport.calls == []
 
+    from core.models import Target
+    from provision.aws_enroll import terminate_aws_target
+
+    target = Target.objects.get(host=HOST, kind=Target.Kind.AWS_EC2)
+    assert target.provider_ref
+    assert target.provider_ref in provider.instances
+    terminate_aws_target(target, provider=provider)
+    assert target.provider_ref not in provider.instances
+
 
 @pytest.mark.req("AWS-ENROLL-PIN")
 def test_host_key_timeout_does_not_tofu():
