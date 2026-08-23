@@ -795,11 +795,19 @@ def _make_parses_undefine():
 def _n4_undefined_origin_result(tmp_path, variable, restore, shim_name):
     """Run py-roots as if `variable` has origin undefined.
 
-    RED: always the undefine shim — a false-red on a make that cannot parse it.
+    On a make that parses `undefine` (3.82+), a shim undefines then includes the
+    real Makefile then restores so the recipe can run — that is how 4.x simulates
+    3.81. On a make that does not, the native Makefile is already the case: 3.81
+    has no `.SHELLFLAGS`, and feeding it `undefine` is `missing separator`, not
+    an override accusation.
     """
     env = dict(os.environ)
     env.pop("MAKEFLAGS", None)
     env.pop("GNUMAKEFLAGS", None)
+    if not _make_parses_undefine():
+        return subprocess.run(
+            ["make", "-f", str(REPO / "Makefile"), "py-roots"],
+            cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
     shim = tmp_path / shim_name
     shim.write_text(
         f"undefine {variable}\n"
@@ -847,24 +855,19 @@ def test_issue_n4_a_make_without_shellflags_is_not_accused_of_overriding_it(tmp_
     before including the real Makefile puts the origin in exactly the state 3.81
     reports natively, so this test fails on the unfixed guard without needing a 2006
     make on the box.
+
+    `undefine` is 3.82+. On a make that cannot parse it, the shim is `missing
+    separator` — a false-red, not an override accusation. Probe and run the real
+    Makefile as the native undefined-origin case instead (3.81 already has no
+    `.SHELLFLAGS`).
     """
     # The guard is evaluated while the Makefile is being read, so the undefine is what
     # it sees. The restoration afterward is simulation plumbing only: real 3.81 needs
     # none — its `-c` is hardcoded — but on modern make an actually-undefined
     # .SHELLFLAGS invokes `sh` without `-c` and the recipe itself breaks, which would
-    # test the wrong thing.
-    shim = tmp_path / "make381.mk"
-    shim.write_text(
-        "undefine .SHELLFLAGS\n"
-        "include " + str(REPO / "Makefile") + "\n"
-        ".SHELLFLAGS := -c\n",
-        encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("MAKEFLAGS", None)
-    env.pop("GNUMAKEFLAGS", None)
-    result = subprocess.run(
-        ["make", "-f", str(shim), "py-roots"],
-        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    # test the wrong thing. A make that cannot parse `undefine` skips the shim.
+    result = _n4_undefined_origin_result(
+        tmp_path, ".SHELLFLAGS", ".SHELLFLAGS := -c", "make381.mk")
     assert result.returncode == 0, (
         f"a make whose .SHELLFLAGS does not exist was refused — the guard is again "
         f"accusing GNU make 3.81 of an override it cannot express:\n"
@@ -881,21 +884,15 @@ def test_issue_n4_residual_a_real_shellflags_override_is_still_refused():
 
 
 def test_issue_n4_residual_an_undefined_shell_is_also_clean_not_an_offense(tmp_path):
-    """The same reasoning covers `SHELL`, symmetrically, should a make ever lack it."""
+    """The same reasoning covers `SHELL`, symmetrically, should a make ever lack it.
+
+    Same `undefine` probe as the .SHELLFLAGS test: a make that cannot parse the
+    directive runs the real Makefile instead of a shim it rejects as syntax.
+    """
     # Same simulation plumbing as the .SHELLFLAGS test: the guard reads the undefined
     # origin at include time; the restoration only lets the recipe execute afterward.
-    shim = tmp_path / "noshell.mk"
-    shim.write_text(
-        "undefine SHELL\n"
-        "include " + str(REPO / "Makefile") + "\n"
-        "SHELL := /bin/sh\n",
-        encoding="utf-8")
-    env = dict(os.environ)
-    env.pop("MAKEFLAGS", None)
-    env.pop("GNUMAKEFLAGS", None)
-    result = subprocess.run(
-        ["make", "-f", str(shim), "py-roots"],
-        cwd=REPO, capture_output=True, text=True, env=env, timeout=120)
+    result = _n4_undefined_origin_result(
+        tmp_path, "SHELL", "SHELL := /bin/sh", "noshell.mk")
     assert result.returncode == 0, (
         f"an undefined SHELL was treated as an override:\n{result.stdout}{result.stderr}")
 
