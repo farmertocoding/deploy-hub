@@ -18,9 +18,11 @@ def write_runbook(desired):
     transport = desired["transport"]
     slug = desired["site_slug"]
     path = f"/srv/sites/{slug}/BREAK-GLASS.md"
-    # Root-owned 0400 cannot be overwritten by the deploy user. Put a
-    # deploy-writable temp, then sudo mv onto the final path (certs._atomic_write).
-    tmp = f"{path}.tmp"
+    # Root-owned 0400 cannot be overwritten by the deploy user, and the
+    # site dir itself can be root:root 0755 after Origin certs mkdir.
+    # Put a deploy-writable temp under /tmp, then sudo mv onto the final
+    # path so we never need to widen the site-dir window.
+    tmp = f"/tmp/hub-runbook-{slug}.tmp"
     transport.put(_render_runbook(desired).encode(), tmp, mode=0o400)
     transport.run(["sudo", "mv", tmp, path])
     transport.run(["sudo", "chown", "root:root", path])

@@ -374,3 +374,86 @@ def test_second_write_over_root_0400_uses_temp_then_sudo_mv():
             assert isinstance(payload, list)
             assert "u+w" not in payload
             assert "<<" not in payload
+
+
+class RootOwnedSiteDirTransport(RootOwnedTransport):
+    """SFTP-like: put into a root-owned 0755 site dir raises EACCES.
+
+    After Origin certs `sudo mkdir -p .../tls`, /srv/sites/{slug} can be
+    root:root 0755. Deploy can traverse but cannot create {path}.tmp there.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.dir_owners = {}
+        self.dir_modes = {}
+
+    def plant_root_owned_dir(self, directory, mode=0o755):
+        self.dir_owners[directory.rstrip("/")] = "root"
+        self.dir_modes[directory.rstrip("/")] = mode
+
+    def _parent_blocks_deploy_put(self, remote_path):
+        parent = str(pathlib.Path(remote_path).parent)
+        if self.dir_owners.get(parent) != "root":
+            return False
+        mode = self.dir_modes.get(parent, 0o755)
+        return (mode & 0o022) == 0
+
+    def put(self, local_path_or_bytes, remote_path, *, mode=0o644):
+        if self._parent_blocks_deploy_put(remote_path):
+            raise PermissionError(errno.EACCES, "Permission denied", remote_path)
+        super().put(local_path_or_bytes, remote_path, mode=mode)
+
+
+@pytest.mark.req("SEC-P5-BREAK-GLASS")
+@pytest.mark.req("VAL-45-SHELL-ARGLISTS")
+def test_write_runbook_puts_tmp_when_site_dir_is_root_owned():
+    """First write still lands when /srv/sites/{slug} is root-owned 0755.
+
+    What would make this fail: putting {path}.tmp inside the site dir
+    (SFTP EACCES — deploy cannot create files in a root:root 0755
+    directory), or skipping sudo mv onto the final 0400 path.
+    """
+    from deploys.breakglass import write_runbook
+
+    path = f"/srv/sites/{SLUG}/BREAK-GLASS.md"
+    site_dir = f"/srv/sites/{SLUG}"
+    extra = {
+        "step": "cutover",
+        "strategy": "blue_green",
+        "image_tag": IMAGE,
+        "generated_at": GENERATED_AT,
+    }
+
+    transport = RootOwnedSiteDirTransport()
+    transport.plant_root_owned_dir(site_dir, mode=0o755)
+    with pytest.raises(PermissionError, match="Permission denied"):
+        transport.put(b"probe", f"{site_dir}/probe.tmp", mode=0o400)
+    write_runbook(_desired(transport, extra=extra))
+
+    text = _text(transport.files[path])
+    assert "probe" not in text
+    assert GENERATED_AT in text
+    assert SLUG in text
+    assert transport.put_modes.get(path) == 0o400
+
+    puts = [remote for kind, remote in transport.calls if kind == "put"]
+    assert puts, "expected transport.put of the runbook"
+    assert all(remote.endswith(".tmp") for remote in puts)
+    assert all(not remote.startswith(site_dir + "/") for remote in puts)
+
+    mvs = [
+        argv for kind, argv in transport.calls
+        if kind == "run" and isinstance(argv, list) and "mv" in argv
+    ]
+    assert mvs, "expected sudo mv of the temp file onto the runbook"
+    assert any(argv[:2] == ["sudo", "mv"] for argv in mvs)
+    assert any(
+        path in argv and any(str(part).endswith(".tmp") for part in argv)
+        for argv in mvs
+    )
+
+    for kind, payload in transport.calls:
+        if kind in {"run", "probe"}:
+            assert isinstance(payload, list)
+            assert "<<" not in payload
