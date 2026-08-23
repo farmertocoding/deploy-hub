@@ -1,0 +1,6 @@
+# J7 shape: single public container. Still one V5 manifest; host_caddy.
+services:
+  web:
+    image: blog:prod
+    ports:
+      - "8000:8000"

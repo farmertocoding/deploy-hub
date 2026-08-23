@@ -311,3 +311,39 @@ class ReadinessView(APIView):
     def get(self, request, project_id):
         project = get_object_or_404(Project, pk=project_id)
         return Response(readiness_body(project.scan_report, project.scanned_at))
+
+
+class SiteEdgeOwnerSerializer(serializers.Serializer):
+    """PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge)."""
+
+    edge_owner = serializers.ChoiceField(choices=Site.EdgeOwner.choices)
+
+    def to_internal_value(self, data):
+        extra = set(getattr(data, "keys", lambda: [])()) - {"edge_owner"}
+        if extra:
+            raise ValidationError({
+                field: "this endpoint accepts edge_owner only" for field in extra
+            })
+        return super().to_internal_value(data)
+
+
+class SiteEdgeOwnerView(APIView):
+    """Record the operator's Caddy-ownership decision. Never writes dns_zone."""
+
+    @extend_schema(
+        request=SiteEdgeOwnerSerializer,
+        responses={200: SiteEdgeOwnerSerializer},
+    )
+    def patch(self, request, site_id):
+        from provision.adopt import apply_edge_owner
+
+        site = get_object_or_404(Site, pk=site_id)
+        payload = SiteEdgeOwnerSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        apply_edge_owner(
+            site,
+            payload.validated_data["edge_owner"],
+            actor=request.user,
+        )
+        site.refresh_from_db()
+        return Response(SiteEdgeOwnerSerializer({"edge_owner": site.edge_owner}).data)

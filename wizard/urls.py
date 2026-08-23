@@ -9,4 +9,6 @@ urlpatterns = [
     path("sites/<int:site_id>/wizard/", views.WizardView.as_view(), name="wizard"),
     path("sites/<int:site_id>/manifest/", views.ManifestView.as_view(),
          name="manifest"),
+    path("sites/<int:site_id>/", views.SiteEdgeOwnerView.as_view(),
+         name="site-detail"),
 ]
