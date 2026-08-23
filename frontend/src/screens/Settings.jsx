@@ -15,6 +15,7 @@ import { schemas } from "../api/zod.ts";
 import { api } from "../api.js";
 import { presentation, tierFor } from "../actions.js";
 import { ConfirmDialog } from "../Tiers.jsx";
+import { registerPasskey } from "../webauthn.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -162,12 +163,10 @@ export function SecurityPanel({ user }) {
     else setError(data.detail || "Code did not verify");
   }
   async function addPasskey() {
-    const begin = await api("auth/webauthn/registration/begin/", {});
-    if (begin.status !== 200) {
-      setError(begin.data.detail || "Passkey enrollment failed to start");
-      return;
+    const { status, data } = await registerPasskey("phone");
+    if (status !== 200 && status !== 201) {
+      setError(data.detail || "Passkey enrollment failed to start");
     }
-    await api("auth/webauthn/registration/complete/", { name: "phone", id: "phone" });
   }
 
   return (

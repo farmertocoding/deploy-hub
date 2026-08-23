@@ -1,7 +1,7 @@
 // First-run: WebAuthn, then recovery-codes-once, then a phone passkey prompt.
 // TOTP is Settings fallback, not this screen.
 import React, { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { registerPasskey } from "../webauthn.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -21,21 +21,7 @@ export function Enroll({ onDone }) {
 
   async function register(name) {
     setError("");
-    const begin = await api("auth/webauthn/registration/begin/", {});
-    if (begin.status !== 200 && begin.status !== 201) {
-      setError(begin.data.detail || "Enrollment failed to start");
-      return;
-    }
-    let cred = { name, id: name };
-    if (typeof navigator !== "undefined" && navigator.credentials?.create) {
-      try {
-        cred = { ...await navigator.credentials.create({ publicKey: begin.data }), name };
-      } catch (err) {
-        setError(err?.message || "Passkey was cancelled");
-        return;
-      }
-    }
-    const { status, data } = await api("auth/webauthn/registration/complete/", cred);
+    const { status, data } = await registerPasskey(name);
     if (status !== 200 && status !== 201) {
       setError(data.detail || "Enrollment did not complete");
       return;

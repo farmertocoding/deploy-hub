@@ -88,6 +88,15 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class MeSerializer(serializers.Serializer):
+    authenticated = serializers.BooleanField()
+    username = serializers.CharField(required=False)
+    otp_enrolled = serializers.BooleanField(required=False)
+    webauthn_count = serializers.IntegerField(required=False)
+    totp_enrolled = serializers.BooleanField(required=False)
+    t1_available = serializers.BooleanField(required=False)
+
+
 class MeView(APIView):
     """Session hydration for the SPA. AllowAny: the anonymous response is the
     SPA's pre-login bootstrap and plants the CSRF cookie (get_token) so the
@@ -95,10 +104,11 @@ class MeView(APIView):
 
     permission_classes = [AllowAny]
 
+    @extend_schema(responses={200: MeSerializer})
     def get(self, request):
         get_token(request)
         if not request.user.is_authenticated:
-            return Response({"authenticated": False})
+            return Response(MeSerializer({"authenticated": False}).data)
         from django_otp.plugins.otp_totp.models import TOTPDevice
         from django_otp_webauthn.models import WebAuthnCredential
 
@@ -108,16 +118,14 @@ class MeView(APIView):
         totp_enrolled = TOTPDevice.objects.filter(
             user=request.user, confirmed=True,
         ).exists()
-        return Response(
-            {
-                "authenticated": True,
-                "username": request.user.username,
-                "otp_enrolled": any(devices_for_user(request.user, confirmed=True)),
-                "webauthn_count": webauthn_count,
-                "totp_enrolled": totp_enrolled,
-                "t1_available": webauthn_count >= 2,
-            }
-        )
+        return Response(MeSerializer({
+            "authenticated": True,
+            "username": request.user.username,
+            "otp_enrolled": any(devices_for_user(request.user, confirmed=True)),
+            "webauthn_count": webauthn_count,
+            "totp_enrolled": totp_enrolled,
+            "t1_available": webauthn_count >= 2,
+        }).data)
 
 
 def _verify_webauthn_login(request, user, data):
@@ -138,15 +146,21 @@ def _verify_webauthn_login(request, user, data):
     return device
 
 
+class TargetDeleteSerializer(serializers.Serializer):
+    confirm_name = serializers.CharField()
+
+
 class TargetDeleteView(APIView):
     """T1: two passkeys + recent WebAuthn touch + type-the-name."""
 
     permission_classes = [IsAuthenticated, RequireRecentTouch]
 
+    @extend_schema(request=TargetDeleteSerializer, responses={204: None})
     def post(self, request, pk):
         target = get_object_or_404(Target, pk=pk)
-        name = request.data.get("confirm_name") or ""
-        if name != target.host:
+        ser = TargetDeleteSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        if ser.validated_data["confirm_name"] != target.host:
             return Response(
                 {"detail": "Type the target host name to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,

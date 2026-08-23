@@ -15,6 +15,8 @@ from django_otp_webauthn.views import (
     CompleteCredentialAuthenticationView,
     CompleteCredentialRegistrationView,
 )
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -39,6 +41,10 @@ class CompleteRegistrationView(CompleteCredentialRegistrationView):
         return JsonResponse(payload)
 
 
+class WebAuthnLoginBeginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+
+
 @method_decorator(csrf_protect, name="post")
 class LoginBeginView(APIView):
     """Unauthenticated begin so login can take a WebAuthn assertion as 2FA."""
@@ -46,11 +52,13 @@ class LoginBeginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
 
+    @extend_schema(request=WebAuthnLoginBeginSerializer, responses={200: dict})
     def post(self, request):
         from django.contrib.auth.models import User
 
-        username = request.data.get("username") or ""
-        user = User.objects.filter(username=username).first()
+        ser = WebAuthnLoginBeginSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        user = User.objects.filter(username=ser.validated_data["username"]).first()
         helper = WebAuthnCredential.get_webauthn_helper(request=request)
         data, state = helper.authenticate_begin(
             user=user, require_user_verification=True,

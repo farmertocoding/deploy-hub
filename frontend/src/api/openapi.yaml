@@ -58,7 +58,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
   /api/auth/totp/confirm/:
     post:
       operationId: auth_totp_confirm_create
@@ -96,6 +100,35 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/auth/webauthn/login/begin/:
+    post:
+      operationId: auth_webauthn_login_begin_create
+      description: Unauthenticated begin so login can take a WebAuthn assertion as
+        2FA.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginBegin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginBegin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginBegin'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/demo-jobs/:
     post:
       operationId: demo_jobs_create
@@ -684,6 +717,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/WizardState'
           description: ''
+  /api/v1/targets/{id}/delete/:
+    post:
+      operationId: v1_targets_delete_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-name.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetDelete'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TargetDelete'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TargetDelete'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
     ActionEnum:
@@ -962,6 +1024,7 @@ components:
           type: string
         otp_code:
           type: string
+        webauthn: {}
       required:
       - password
       - username
@@ -1045,6 +1108,23 @@ components:
         confirm_warnings:
           type: boolean
           default: false
+    Me:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        username:
+          type: string
+        otp_enrolled:
+          type: boolean
+        webauthn_count:
+          type: integer
+        totp_enrolled:
+          type: boolean
+        t1_available:
+          type: boolean
+      required:
+      - authenticated
     OriginCaPlant:
       type: object
       properties:
@@ -1303,6 +1383,13 @@ components:
         * `acked` - Acked
         * `resolved` - Resolved
         * `accepted` - Accepted
+    TargetDelete:
+      type: object
+      properties:
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
     Transition:
       type: object
       properties:
@@ -1314,6 +1401,13 @@ components:
           maxLength: 256
       required:
       - action
+    WebAuthnLoginBegin:
+      type: object
+      properties:
+        username:
+          type: string
+      required:
+      - username
     WizardState:
       type: object
       properties:

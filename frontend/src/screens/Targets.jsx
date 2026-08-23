@@ -5,8 +5,15 @@
 // renderable (and pinned) before the endpoint exists.
 import React, { useState } from "react";
 import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
+import { ActionButton } from "../Tiers.jsx";
+import { tierFor } from "../actions.js";
+import { api } from "../api.js";
 
 export const PROVISION_CMD = "python -m hub provision <host>";
+
+export async function deleteTarget(id, confirmName) {
+  return api(`v1/targets/${id}/delete/`, { confirm_name: confirmName });
+}
 
 export function TargetsView({ phase, targets = [], onError, onCopy }) {
   if (phase === "loading") return <LoadingLine what="targets" />;
@@ -17,7 +24,14 @@ export function TargetsView({ phase, targets = [], onError, onCopy }) {
       button="Copy the provision command" onAction={onCopy} />;
   return (
     <div style={{ padding: 16 }}>
-      {targets.map((t) => <div key={t.id}>{t.name}</div>)}
+      {targets.map((t) => (
+        <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "center",
+          marginBottom: 8 }}>
+          <span>{t.host || t.name}</span>
+          <ActionButton row={tierFor("target.delete")} confirmName={t.host}
+            onRun={() => deleteTarget(t.id, t.host)} />
+        </div>
+      ))}
     </div>
   );
 }

@@ -5,6 +5,7 @@
 // renderToStaticMarkup test can reach.
 import React, { useRef, useState } from "react";
 import { makeTierRunner, presentation } from "./actions.js";
+import { performHardwareTouch } from "./webauthn.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -63,7 +64,7 @@ export function T1Overlay({ label, onTouch, onConfirm, onDismiss }) {
 // T3 renders a single button that runs on click and offers UndoToast; T2 renders a
 // button that opens ConfirmDialog with the caller's `summary`; T1 opens the
 // type-the-name + hardware-touch overlay (SEC-F5-T1-HARDWARE-TOUCH).
-export function ActionButton({ row, summary, onRun, onUndo }) {
+export function ActionButton({ row, summary, confirmName, onRun, onUndo }) {
   const [state, setState] = useState({ phase: "idle" });
   // The runner is one-shot (it owns the tier state machine for this control's
   // lifetime) but its callbacks read THROUGH this ref, refreshed every render —
@@ -85,11 +86,14 @@ export function ActionButton({ row, summary, onRun, onUndo }) {
   if (p.stepUp === "required") {
     return (
       <span style={{ marginRight: 8 }}>
-        <button style={box} onClick={() => runner.click({ expected: row.label })}>
+        <button style={box} onClick={() => runner.click({ expected: confirmName })}>
           {row.label}</button>
         {state.phase === "steppingUp" && (
           <T1Overlay label={row.label}
-            onTouch={() => runner.touch()}
+            onTouch={async () => {
+              const { status } = await performHardwareTouch();
+              if (status === 200) runner.touch();
+            }}
             onConfirm={(payload) => runner.confirmStepUp(payload)}
             onDismiss={() => runner.dismiss()} />
         )}
