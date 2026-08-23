@@ -513,7 +513,7 @@ def test_hub_central_dns01_still_not_due():
         assert not _waiver_lines(rid), (
             f"{rid} must be retired — Tasks 4+6+7 marked T1 tests are green"
         )
-        assert f"RETIRED" in _waivers() and rid in _waivers()
+        assert "RETIRED" in _waivers() and rid in _waivers()
 
     doc = _unproxied_class_docstring()
     assert "phase 4" in doc.lower()
