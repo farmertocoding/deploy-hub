@@ -12,3 +12,5 @@ fakeredis[lua]>=2.25
 # a range here would make the gate's strength a function of when CI last resolved it.
 # Moving the pin is its own reviewed edit, with the new run's survivor list in the diff.
 mutmut==3.7.0
+# D-059 T1: moto 5.x @mock_aws in providers/kms.py (not LocalStack). Pulls boto3.
+moto>=5,<6
