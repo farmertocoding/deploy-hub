@@ -472,6 +472,189 @@ def test_off_zone_route53_refuses():
 
 
 @pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_empty_hosted_zone_allowlist_refuses_route53():
+    """Empty hosted_zone_ids refuses Change/Get/List, not 'any zone'.
+
+    What would make this fail: `if hosted_zone_ids:` skipping the bound so
+    Settings observe (which has no DnsZone set yet) vaults a user that can
+    mutate an unlisted hosted zone.
+    """
+    from providers.aws_creds import AwsScopeError, refuse_iam_scope
+
+    doc = {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "route53:ChangeResourceRecordSets",
+                "Resource": "arn:aws:route53:::hostedzone/ZTESTZONE",
+            }
+        ]
+    }
+    with pytest.raises(AwsScopeError, match="Route 53|route53|zone"):
+        refuse_iam_scope(documents=[doc], account_id=ACCOUNT, ref=REF)
+    with pytest.raises(AwsScopeError, match="Route 53|route53|zone"):
+        refuse_iam_scope(
+            documents=[doc], account_id=ACCOUNT, ref=REF, hosted_zone_ids=(),
+        )
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_empty_pass_role_allowlist_refuses():
+    """Empty pass_role_arns refuses PassRole on a specific ARN, not only *.
+
+    What would make this fail: skipping the bound when the set is empty so
+    connect vaults PassRole to an Admin role because the resource was not *.
+    """
+    from providers.aws_creds import AwsScopeError, refuse_iam_scope
+
+    admin_role = f"arn:aws:iam::{ACCOUNT}:role/Admin"
+    ssm_role = f"arn:aws:iam::{ACCOUNT}:role/hub-ssm"
+    doc = {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": admin_role,
+            }
+        ]
+    }
+    with pytest.raises(AwsScopeError, match="PassRole"):
+        refuse_iam_scope(documents=[doc], account_id=ACCOUNT, ref=REF)
+    with pytest.raises(AwsScopeError, match="PassRole"):
+        refuse_iam_scope(
+            documents=[doc], account_id=ACCOUNT, ref=REF, pass_role_arns=(),
+        )
+    with pytest.raises(AwsScopeError, match="PassRole"):
+        refuse_iam_scope(
+            documents=[doc],
+            account_id=ACCOUNT,
+            ref=REF,
+            pass_role_arns={ssm_role},
+        )
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_observe_without_allow_set_refuses_pass_role_and_off_zone_r53():
+    """Settings observe passes empty allow-sets; PassRole-to-Admin and R53 refuse.
+
+    What would make this fail: observe_credentials forwarding empty
+    hosted_zone_ids / pass_role_arns into a helper that treats empty as
+    unconstrained, so connect 201s and vaults the overscope.
+    """
+    from providers.aws_creds import AwsScopeError, FakeIam, observe_credentials
+
+    class _Sts:
+        def get_caller_identity(self):
+            return {
+                "Account": ACCOUNT,
+                "Arn": f"arn:aws:iam::{ACCOUNT}:user/hub",
+            }
+
+    admin_role = f"arn:aws:iam::{ACCOUNT}:role/Admin"
+    pass_iam = FakeIam(
+        inline=[
+            {
+                "name": "pass-admin",
+                "document": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "iam:PassRole",
+                            "Resource": admin_role,
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+    with pytest.raises(AwsScopeError, match="PassRole"):
+        observe_credentials(AKI, SAK, iam=pass_iam, sts=_Sts(), ref=REF)
+
+    r53_iam = FakeIam(
+        inline=[
+            {
+                "name": "r53-any",
+                "document": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "route53:ChangeResourceRecordSets",
+                            "Resource": "arn:aws:route53:::hostedzone/ZPROD",
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+    with pytest.raises(AwsScopeError, match="Route 53|route53|zone"):
+        observe_credentials(AKI, SAK, iam=r53_iam, sts=_Sts(), ref=REF)
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_ec2_region_condition_must_match_allowlist():
+    """EC2 RunInstances/Describe*/SG mutate need a region condition on the allowlist.
+
+    What would make this fail: allowing Resource * with no aws:RequestedRegion
+    / ec2:Region condition, or skipping the check when allowed_regions is empty,
+    so construction vaults a Hub user that RunInstances in any region.
+    """
+    from providers.aws_creds import AwsScopeError, refuse_iam_scope
+
+    unbounded = {
+        "Statement": [
+            {"Effect": "Allow", "Action": "ec2:RunInstances", "Resource": "*"}
+        ]
+    }
+    with pytest.raises(AwsScopeError, match="region"):
+        refuse_iam_scope(documents=[unbounded], account_id=ACCOUNT, ref=REF)
+    with pytest.raises(AwsScopeError, match="region"):
+        refuse_iam_scope(
+            documents=[unbounded],
+            account_id=ACCOUNT,
+            ref=REF,
+            allowed_regions={"us-east-1"},
+        )
+    off = {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "ec2:RunInstances",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {"aws:RequestedRegion": "eu-west-1"}
+                },
+            }
+        ]
+    }
+    with pytest.raises(AwsScopeError, match="region"):
+        refuse_iam_scope(
+            documents=[off],
+            account_id=ACCOUNT,
+            ref=REF,
+            allowed_regions={"us-east-1"},
+        )
+    pinned = {
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "ec2:RunInstances",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {"aws:RequestedRegion": "us-east-1"}
+                },
+            }
+        ]
+    }
+    refuse_iam_scope(
+        documents=[pinned],
+        account_id=ACCOUNT,
+        ref=REF,
+        allowed_regions={"us-east-1"},
+        file=False,
+    )
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
 def test_finding_body_has_refs_never_secret():
     """The aws-scope Finding names the vault ref and account, never the keys.
 
