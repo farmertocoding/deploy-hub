@@ -14,7 +14,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { schemas } from "../api/zod.ts";
 import { api } from "../api.js";
 import { presentation, tierFor } from "../actions.js";
-import { ConfirmDialog } from "../Tiers.jsx";
+import { ActionButton, ConfirmDialog } from "../Tiers.jsx";
 import { registerPasskey } from "../webauthn.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
@@ -23,6 +23,7 @@ export const SETTINGS_TABS = [
   { id: "security", label: "Security" },
   { id: "cloudflare", label: "Cloudflare" },
   { id: "aws", label: "AWS" },
+  { id: "partners", label: "Partners" },
   { id: "developer", label: "Developer" },
   { id: "vault", label: "Vault" },
 ];
@@ -41,6 +42,119 @@ export async function connectAws(access_key_id, secret_access_key) {
 
 export async function awsStatus() {
   return api("v1/aws/connect/");
+}
+
+export async function partnersList() {
+  return api("v1/partners/");
+}
+
+export async function createPartner(slug, confirmName) {
+  return api("v1/partners/", {
+    slug,
+    name: slug,
+    confirm_name: confirmName,
+  });
+}
+
+export function intakeLine(intake) {
+  const stamp = intake?.as_of
+    ? ` · data as of ${new Date(intake.as_of).toLocaleTimeString([], { hour12: false })}`
+    : "";
+  if (intake?.status === "error") return `Intake error${stamp}`;
+  const fake = intake?.mode === "fake" || !intake?.configured ? "Fake intake" : "Intake";
+  return `⚠ degraded — ${fake}${stamp}`;
+}
+
+export function PartnerEnrollOnce({ hubk, whsec, onSaved }) {
+  const [copied, setCopied] = useState(false);
+  const blob = `${hubk}\n${whsec}`;
+  return (
+    <div role="dialog" aria-label="Enroll once" style={{ ...box, marginTop: 8 }}>
+      <h3 style={{ marginTop: 0 }}>Partner keys — shown once</h3>
+      <p>Copy these now. Closing this panel loses them; GET will never return them.</p>
+      <pre style={{ ...box, lineHeight: 1.8 }}>{hubk}{"\n"}{whsec}</pre>
+      <button style={{ ...box, marginRight: 8 }}
+        onClick={() => {
+          const clip = typeof navigator !== "undefined" ? navigator.clipboard : null;
+          if (!clip?.writeText) { setCopied("failed"); return; }
+          clip.writeText(blob).then(() => setCopied("ok"), () => setCopied("failed"));
+        }}>
+        {copied === "ok" ? "Copied ✔"
+          : copied === "failed" ? "Copy failed — select the keys manually"
+          : "Copy"}
+      </button>
+      <button style={box} onClick={onSaved}>I saved them</button>
+    </div>
+  );
+}
+
+export function PartnersPanel({
+  partners: partnersProp,
+  intake: intakeProp,
+  minted: mintedProp,
+}) {
+  const [partners, setPartners] = useState(partnersProp ?? []);
+  const [intake, setIntake] = useState(
+    intakeProp ?? { status: "degraded", mode: "fake", configured: false },
+  );
+  const [minted, setMinted] = useState(mintedProp ?? null);
+
+  useEffect(() => {
+    if (partnersProp !== undefined) return undefined;
+    partnersList().then(({ status, data }) => {
+      if (status === 200) {
+        setPartners(data.partners || []);
+        setIntake(data.intake || {
+          status: "degraded", mode: "fake", configured: false,
+        });
+      }
+    });
+    return undefined;
+  }, [partnersProp]);
+
+  async function runCreate(args) {
+    const slug = (args?.name || "").trim();
+    const { status, data } = await createPartner(slug, slug);
+    if (status !== 201) return;
+    setMinted({ hubk: data.hubk, whsec: data.whsec });
+    const listed = await partnersList();
+    if (listed.status === 200) {
+      setPartners(listed.data.partners || []);
+      setIntake(listed.data.intake || intake);
+    }
+  }
+
+  const empty = partners.length === 0 && !minted;
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2>Partners</h2>
+      <p style={{ color: "#e3b341" }}>{intakeLine(intake)}</p>
+      <p>Fake / empty INTAKE_URL is degraded. Partner intake SLA is
+        response-time, not uptime.</p>
+      {minted && (
+        <PartnerEnrollOnce hubk={minted.hubk} whsec={minted.whsec}
+          onSaved={() => setMinted(null)} />
+      )}
+      {empty && (
+        <p>No partners yet — create a partner to mint Hub keys.</p>
+      )}
+      {partners.map((p) => (
+        <div key={p.id} style={{ ...box, marginBottom: 8 }}>
+          <strong>{p.slug}</strong>
+          <div>
+            {(p.destination_order || []).length === 0
+              ? "Destination order is empty — partner-site create will refuse. Default: dedicated cloud first."
+              : `Destination order: ${(p.destination_order || []).join(", ")}. Default: dedicated cloud first.`}
+          </div>
+        </div>
+      ))}
+      {!minted && (
+        <ActionButton row={tierFor("partner.create")}
+          onRun={runCreate} />
+      )}
+      {/* Create partner — mint keys, not a paste form. */}
+    </div>
+  );
 }
 
 export function AwsStatusBanner({ connected, reason, accountLast4, region }) {
@@ -318,6 +432,7 @@ export default function Settings({ user, events }) {
       {tab === "security" && <SecurityPanel user={user} />}
       {tab === "cloudflare" && <CloudflarePanel />}
       {tab === "aws" && <AwsPanel />}
+      {tab === "partners" && <PartnersPanel />}
       {tab === "developer" && <DemoPanel user={user} events={events} />}
       {tab === "vault" && (
         <p style={{ color: "#8b949e" }}>Vault management gets its screen in Phase 4;

@@ -19,8 +19,9 @@ import { DeployStatus } from "../src/screens/Deploys.jsx";
 import { CertState, SiteObserved, SiteStatus } from "../src/screens/Sites.jsx";
 import { MapPanel } from "../src/screens/Home.jsx";
 import { TargetsView } from "../src/screens/Targets.jsx";
-import { AwsPanel } from "../src/screens/Settings.jsx";
+import { AwsPanel, PartnersPanel } from "../src/screens/Settings.jsx";
 import { T1Overlay } from "../src/Tiers.jsx";
+import { SitesView } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -53,6 +54,10 @@ const REQUIRED_STATE_IDS = [
   "enroll-empty",
   "enroll-error",
   "enroll-degraded",
+  "partner-intake-empty",
+  "partner-intake-error",
+  "partner-intake-degraded",
+  "partner-site",
 ];
 
 function loadSeed() {
@@ -122,6 +127,34 @@ const RENDER: Record<string, (state: any) => string> = {
     onError: { text: "Target create failed", retry: () => {} },
   }),
   "enroll-degraded": () => render(AwsPanel),
+  "partner-intake-empty": (s) =>
+    render(PartnersPanel, {
+      partners: [],
+      intake: s.intake || { status: "degraded", mode: "fake", configured: false },
+    }) + render(T1Overlay, {
+      label: "Create partner",
+      onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+    }),
+  "partner-intake-error": (s) =>
+    render(PartnersPanel, {
+      partners: [],
+      intake: s.intake || {
+        status: "error", mode: "fake", configured: false,
+        as_of: "2026-08-24T02:03:04Z",
+      },
+    }) + render(FindingDetail, {
+      finding: findingFrom(s), onBack: () => {},
+    }),
+  "partner-intake-degraded": (s) =>
+    render(PartnersPanel, {
+      partners: s.partners || [{
+        id: 1, slug: "fixture-partner", destination_order: [],
+      }],
+      intake: s.intake || { status: "degraded", mode: "fake", configured: false },
+    }),
+  "partner-site": (s) => render(SitesView, {
+    phase: "live", sites: [s.site], onSelect: () => {}, onNav: () => {},
+  }),
 };
 
 test("every_new_state_renders_in_simulation_mode", () => {
@@ -183,6 +216,25 @@ test("every_new_state_renders_in_simulation_mode", () => {
   assert.match(enrollDegraded, /HUB_AWS_CREDENTIALS_REF/);
 
   assert.equal(NAV.length, 6, "NAV stays six — no 7th AWS/Instances item");
+
+  const partnerEmpty = visibleText(RENDER["partner-intake-empty"](
+    states.find((s) => s.id === "partner-intake-empty") || {}));
+  assert.match(partnerEmpty, /Create partner/);
+  assert.match(partnerEmpty, /Fake/);
+  assert.doesNotMatch(partnerEmpty, /\bConnected\b/);
+  assert.doesNotMatch(partnerEmpty, /\$0\.05/);
+  assert.doesNotMatch(partnerEmpty, /\binstance\b/i);
+
+  const partnerDegraded = visibleText(RENDER["partner-intake-degraded"](
+    states.find((s) => s.id === "partner-intake-degraded") || {}));
+  assert.doesNotMatch(partnerDegraded, /\bConnected\b/);
+  assert.doesNotMatch(partnerDegraded, /hubk_/);
+  assert.doesNotMatch(partnerDegraded, /whsec_/);
+
+  const partnerSite = visibleText(RENDER["partner-site"](
+    states.find((s) => s.id === "partner-site") || {}));
+  assert.match(partnerSite, /◆ partner/);
+  assert.match(partnerSite, /All/);
 });
 
 test("live_create_failure_and_cost_only_from_get_200", async () => {

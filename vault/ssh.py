@@ -22,6 +22,26 @@ def generate_ed25519_keypair():
     return pem, pub
 
 
+def generate_ed25519_raw():
+    """Return ``(private_raw: bytes, public_raw: bytes)`` — 32-byte seeds.
+
+    Partner mint uses this so core/ never imports cryptography.hazmat.
+    The caller prefixes hubk_*; this helper does not vault the private bytes.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        PublicFormat,
+    )
+
+    key = Ed25519PrivateKey.generate()
+    private_raw = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    public_raw = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return private_raw, public_raw
+
+
 def public_openssh_from_pem(pem):
     """Return the OpenSSH public line for an OpenSSH PEM private key."""
     from cryptography.hazmat.primitives.serialization import (

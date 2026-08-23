@@ -80,5 +80,10 @@ export const ACTION_TIERS = [
     "id": "instance.terminate",
     "tier": "T1",
     "label": "Terminate target"
+  },
+  {
+    "id": "partner.create",
+    "tier": "T1",
+    "label": "Create partner"
   }
 ];

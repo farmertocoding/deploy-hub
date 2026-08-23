@@ -291,6 +291,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/partners/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET is the operator list (no secrets). POST is T1 partner.create. */
+        get: operations["v1_partners_retrieve"];
+        put?: never;
+        /** @description GET is the operator list (no secrets). POST is T1 partner.create. */
+        post: operations["v1_partners_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/partners/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET never echoes hubk_ or whsec_. */
+        get: operations["v1_partners_retrieve_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/": {
         parameters: {
             query?: never;
@@ -708,6 +743,12 @@ export interface components {
         InstanceTerminate: {
             confirm_name: string;
         };
+        IntakeStatus: {
+            status: components["schemas"]["StatusEnum"];
+            mode: components["schemas"]["ModeEnum"];
+            configured: boolean;
+            as_of?: string | null;
+        };
         /**
          * @description * `zone` - zone
          *     * `host` - host
@@ -763,11 +804,42 @@ export interface components {
             totp_enrolled?: boolean;
             t1_available?: boolean;
         };
+        /**
+         * @description * `fake` - fake
+         *     * `configured` - configured
+         * @enum {string}
+         */
+        ModeEnum: "fake" | "configured";
         OriginCaPlant: {
             path: string;
         };
         OriginCaPlantResult: {
             planted: boolean;
+        };
+        PartnerCreate: {
+            slug: string;
+            /** @default  */
+            name: string;
+            confirm_name: string;
+        };
+        PartnerCreateResult: {
+            id: number;
+            slug: string;
+            name: string;
+            hubk: string;
+            whsec: string;
+        };
+        PartnerList: {
+            partners: components["schemas"]["PartnerPublic"][];
+            intake: components["schemas"]["IntakeStatus"];
+        };
+        PartnerPublic: {
+            id: number;
+            slug: string;
+            name: string;
+            destination_order: number[];
+            suspended: boolean;
+            site_ids: number[];
         };
         PatchedAnswers: {
             /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
@@ -897,6 +969,12 @@ export interface components {
          * @enum {string}
          */
         StateEnum: "open" | "acked" | "resolved" | "accepted";
+        /**
+         * @description * `degraded` - degraded
+         *     * `error` - error
+         * @enum {string}
+         */
+        StatusEnum: "degraded" | "error";
         TargetDelete: {
             confirm_name: string;
         };
@@ -1369,6 +1447,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MapSnapshot"];
+                };
+            };
+        };
+    };
+    v1_partners_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerList"];
+                };
+            };
+        };
+    };
+    v1_partners_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["PartnerCreate"];
+                "multipart/form-data": components["schemas"]["PartnerCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerCreateResult"];
+                };
+            };
+        };
+    };
+    v1_partners_retrieve_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPublic"];
                 };
             };
         };
