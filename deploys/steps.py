@@ -255,7 +255,10 @@ def ensure_route_tls(desired):
 
     Public sites first converge certificate material (vault-first Origin CA
     push, or the named unproxied refusal). mesh_only is unchanged.
+    site_caddy owns the edge: do not PUT a colliding host-Caddy route.
     """
+    if getattr(desired.get("site"), "edge_owner", None) == "site_caddy":
+        return {"status": "skipped", "id": f"site-{desired['site_slug']}"}
     if desired.get("site") is not None and _exposure(desired) != "mesh_only":
         from deploys.certs import ensure_site_certificate
 

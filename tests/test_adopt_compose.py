@@ -392,3 +392,75 @@ def test_ambiguous_edge_is_non_edge_image_on_80_443_or_two_edge_images(tmp_path)
         state=Finding.State.OPEN,
     ).exists()
     _assert_no_secret_on_findings()
+
+
+def test_plan_reads_clone_shaped_tree_without_local_path(tmp_path):
+    """A git Project with a Hub checkout (no local_path) still classifies.
+
+    What would make this fail: reading local_path only and raising ValueError
+    when the compose already lives on the clone-shaped tree the Hub uses.
+    """
+    from core.models import Project, Site
+    from deploys.models import Manifest
+    from provision.adopt import adoption_plan
+
+    root = tmp_path / "cloned-shop"
+    root.mkdir()
+    (root / ".git").mkdir()
+    (root / "docker-compose.yml").write_text(
+        "services:\n"
+        "  web:\n"
+        "    image: shop:1\n"
+        "    ports: ['8000:8000']\n"
+    )
+    project = Project.objects.create(
+        name="p3b-clone-tree",
+        slug="p3b-clone-tree",
+        source_kind=Project.Source.GIT,
+        git_url="https://github.com/o/r.git",
+        local_path="",
+    )
+    site = Site.objects.create(
+        project=project,
+        name="p3b-clone-tree",
+        exposure=Site.Exposure.MESH_ONLY,
+    )
+    Manifest.objects.create(
+        site=site,
+        version=1,
+        body={"source_dir": str(root), "git_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    )
+    plan = adoption_plan(project)
+    assert plan.refused is False
+    assert plan.classified["web"] == "web"
+    _assert_no_secret_on_findings()
+
+
+def test_plan_refuses_with_finding_when_no_tree_exists():
+    """git_url alone is not a tree. Finding + refuse, not a raw 500 exception.
+
+    What would make this fail: raising ValueError/FileNotFoundError so the
+    operator sees a 500, or inventing a /srv/sites walk to find compose.
+    """
+    from core.models import Finding, Project, Site
+    from provision.adopt import adoption_plan
+
+    project = Project.objects.create(
+        name="p3b-no-tree",
+        slug="p3b-no-tree",
+        source_kind=Project.Source.GIT,
+        git_url="https://github.com/o/r.git",
+        local_path="",
+    )
+    site = Site.objects.create(
+        project=project,
+        name="p3b-no-tree",
+        exposure=Site.Exposure.MESH_ONLY,
+    )
+    plan = adoption_plan(project)
+    assert plan.refused is True
+    assert plan.manifest is None
+    row = Finding.objects.get(fingerprint=f"adopt-tree-missing:{site.pk}")
+    assert row.state == Finding.State.OPEN
+    assert row.title.strip() and row.body.strip() and row.fix_action.strip()
+    _assert_no_secret_on_findings()

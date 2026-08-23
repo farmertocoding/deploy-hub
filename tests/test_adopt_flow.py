@@ -843,3 +843,28 @@ def test_adopt_container_for_a_different_image_tag_is_not_reused():
     assert runs, "verify must start the current image_tag"
     assert transport.container_images.get(name) == "fresh-adopt-tag"
     assert desired["_adopt_verified_tag"] == "fresh-adopt-tag"
+
+
+def test_temp_name_slugifies_human_site_name_to_dns_safe_host():
+    """A Site named 'My Shop' mints {slug}-adopt-{8hex}.{zone}, not spaces/caps.
+
+    What would make this fail: interpolating site.name so the temp is
+    'My Shop-adopt-…' (invalid DNS).
+    """
+    from core.validators import validate_domain
+    from deploys.adopt_flow import ensure_temp_dns
+
+    site, deployment = _site("shop-human")
+    site.name = "My Shop"
+    site.save(update_fields=["name"])
+    transport = AdoptTransport()
+    dns = FakeDnsProvider()
+    desired = _desired(site, deployment, transport, dns)
+    ensure_temp_dns(desired)
+    temp = _checkrun(site).results["temp_name"]
+    assert " " not in temp
+    assert temp == temp.lower()
+    assert TEMP_NAME_RE.match(temp)
+    assert temp.startswith("my-shop-adopt-")
+    assert temp.endswith(f".{site.dns_zone.name}")
+    validate_domain(temp)
