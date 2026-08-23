@@ -25,6 +25,9 @@ PINNED_KINDS = {
     # cert-expiry check get their CheckRun kinds with the rest of the schema.
     "cf_token_scope",
     "cert_expiry",
+    # Phase 3b Task 1: adopt progress reuses CheckRun (Python choices; no
+    # CheckRun migration). site_id lives in results, not an FK.
+    "adopt",
 }
 
 
