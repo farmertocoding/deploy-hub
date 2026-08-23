@@ -468,7 +468,6 @@ def test_single_zone_allowlist_namespace(monkeypatch):
     """
     legacy_only = {
         "providers/test_dns.py",
-        "tests/test_t3_https.py",
         "tests/test_test_dns_provider.py",
         "tests/test_dns_zone_wall.py",  # this test names it to ban it
     }
