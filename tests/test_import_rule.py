@@ -13,16 +13,32 @@ FORBIDDEN = re.compile(r"^\s*(import|from)\s+(boto3|botocore|azure|cloudflare|Cl
 # import hiding in test or process code still violates the seam.
 APPS = ["core", "vault", "catalog", "scanner", "provision", "deploys",
         "reconcile", "monitor", "scaling", "realtime", "hub", "wizard",
+        "intake",
         "tests", "scripts_dev", "conformance"]
+
+# Credential-free intake (§7 C3): public keys + counters + outbox only.
+INTAKE_FORBIDDEN = (
+    "vault", "core", "deploys", "celery", "hub", "django",
+    "boto3", "botocore", "azure", "cloudflare", "CloudFlare",
+    "flask", "fastapi", "starlette", "rest_framework",
+)
+INTAKE_FORBIDDEN_RE = re.compile(
+    r"^\s*(?:from|import)\s+(" + "|".join(INTAKE_FORBIDDEN) + r")\b", re.M,
+)
+INTAKE_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+intake\b", re.M)
+HUB_PRODUCT = ("monitor", "core", "hub", "deploys")
 
 
 @pytest.mark.req("P0-IMPORT-RULE")
 @pytest.mark.req("ARCH-D4-IMPORT-RULE")
 def test_cloud_sdk_imports_only_under_providers():
     assert "wizard" in APPS, "wizard/ is a first-party app; an SDK import there is the seam"
+    assert "intake" in APPS, "intake/ is a first-party process; an SDK import there is the seam"
     violations = []
     for app in APPS:
-        for py in (REPO / app).rglob("*.py"):
+        root = REPO / app
+        assert root.is_dir(), f"{app}/ missing from SDK scan list"
+        for py in root.rglob("*.py"):
             if FORBIDDEN.search(py.read_text(encoding="utf-8")):
                 violations.append(str(py.relative_to(REPO)))
     assert violations == [], f"Cloud SDK imports outside providers/: {violations}"
@@ -101,3 +117,35 @@ def test_monitor_never_imports_scanner():
     """Collector JSON lives in monitor/; it must not grow a scanner edge either."""
     path = _reaches("monitor", "scanner")
     assert path is None, "monitor reaches scanner via: " + " -> ".join(path or [])
+
+
+@pytest.mark.req("PART-INTAKE-PROCESS")
+def test_intake_does_not_import_vault_core_deploys_celery_hub_django_cloud_sdks():
+    """intake/ holds public keys, counters, and an outbox — not Hub internals.
+
+    What would make this fail: `from core.models import Partner` (or django,
+    celery, vault, a cloud SDK) inside intake/, so a compromised intake
+    process reaches crown-jewel code.
+    """
+    root = REPO / "intake"
+    assert root.is_dir(), "intake/ process tree is missing"
+    violations = []
+    for py in root.rglob("*.py"):
+        if INTAKE_FORBIDDEN_RE.search(py.read_text(encoding="utf-8")):
+            violations.append(str(py.relative_to(REPO)))
+    assert violations == [], f"intake credential-free wall: {violations}"
+
+
+@pytest.mark.req("PART-INTAKE-PROCESS")
+def test_hub_product_modules_do_not_import_intake():
+    """Hub product code talks HTTP or FakeIntakeClient, never `import intake`.
+
+    What would make this fail: monitor/intake_poll.py importing intake.outbox
+    so the Hub process loads the public listener's code.
+    """
+    violations = []
+    for pkg in HUB_PRODUCT:
+        for py in (REPO / pkg).rglob("*.py"):
+            if INTAKE_IMPORT_RE.search(py.read_text(encoding="utf-8")):
+                violations.append(str(py.relative_to(REPO)))
+    assert violations == [], f"Hub product imports intake: {violations}"

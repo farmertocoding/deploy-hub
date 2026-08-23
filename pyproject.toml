@@ -118,7 +118,7 @@ timeout_multiplier = 1.0
 # the Makefile's $(PY_ROOTS) derivation finds, so a package that lands next week cannot
 # leave the sandbox half-built.
 also_copy = [
-    "catalog", "core", "deploys", "hub", "monitor", "providers", "provision",
+    "catalog", "core", "deploys", "hub", "intake", "monitor", "providers", "provision",
     "realtime", "reconcile", "scaling", "scanner", "vault", "wizard",
     "conformance", "manage.py",
     # the acceptance tier scans this fixture repo from disk
