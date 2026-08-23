@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ACTION_TIERS, makeTierRunner, presentation, tierFor } from "../src/actions.js";
-import { ActionButton, ConfirmDialog, UndoToast } from "../src/Tiers.jsx";
+import { ActionButton, ConfirmDialog, T1Overlay, UndoToast } from "../src/Tiers.jsx";
 
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 
@@ -60,10 +60,13 @@ test("deploy_and_dns_change_are_t2_with_a_confirm", () => {
 test("t1_rows_are_named_and_refused_not_weakened", () => {
   // T1 is hardware touch + type-the-name (SEC-F5-T1-HARDWARE-TOUCH). The client
   // must not improvise a T2 confirm, and TOTP must not be a substitute for touch.
-  for (const id of ["target.delete", "key.export", "kek.rotate", "ssh.rotate"]) {
+  for (const id of ["target.delete", "key.export", "kek.rotate", "ssh.rotate",
+                    "instance.create"]) {
     assert.equal(tierFor(id).tier, "T1", id);
     assert.equal(presentation(tierFor(id)).stepUp, "required", id);
   }
+  assert.equal(tierFor("instance.create").label, "Create target");
+  assert.doesNotMatch(tierFor("instance.create").label, /instance/i);
   const ran: string[] = [];
   const runner = makeTierRunner({ row: tierFor("target.delete"),
     onRun: () => ran.push("ran"), onUndo: () => {} });
@@ -199,6 +202,30 @@ test("the_tier_controls_render_what_the_runner_decides", () => {
   const t3 = render(ActionButton, { row: tierFor("site.rollback"), onRun: () => {} });
   assert.ok(!/role="dialog"/.test(t3));
   assert.equal(visibleText(t3).trim(), "Roll back");
+});
+
+test("instance_create_overlay_shows_cost_in_words_and_copy_says_target", () => {
+  // T1Overlay.cost is required on create (symbol + words, not color-only) and
+  // omitted on other T1 ids. Visible copy says Target, never "instance".
+  const create = visibleText(render(T1Overlay, {
+    label: "Create target", cost: "$0.05/h",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.match(create, /Create target/);
+  assert.match(create, /\$0\.05\/h/);
+  assert.match(create, /five cents per hour/i);
+  assert.doesNotMatch(create, /\binstance\b/i);
+  const confirmAt = create.toLowerCase().indexOf("confirm");
+  const costAt = create.indexOf("$0.05/h");
+  assert.ok(costAt >= 0 && costAt < confirmAt, "cost must paint before Confirm");
+
+  const del = visibleText(render(T1Overlay, {
+    label: "Delete target",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  }));
+  assert.doesNotMatch(del, /\$0\.05/);
+  assert.doesNotMatch(del, /five cents/i);
+  assert.doesNotMatch(del, /\binstance\b/i);
 });
 
 test("a_mounted_action_button_reads_current_props_not_first_render_ones", async () => {
