@@ -793,6 +793,36 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/targets/{id}/ssh-rotate/:
+    post:
+      operationId: v1_targets_ssh_rotate_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-name, then
+        rotate.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SshRotate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SshRotate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SshRotate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
     ActionEnum:
@@ -1506,6 +1536,13 @@ components:
       - latest_manifest_version
       - manifest_current
       - name
+    SshRotate:
+      type: object
+      properties:
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
     StateEnum:
       enum:
       - open

@@ -263,6 +263,7 @@ const PatchedAnswers = z
   .object({ answers: z.object({}).partial().passthrough() })
   .passthrough();
 const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
+const SshRotate = z.object({ confirm_name: z.string() }).passthrough();
 
 export const schemas = {
   Login,
@@ -320,4 +321,5 @@ export const schemas = {
   WizardState,
   PatchedAnswers,
   TargetDelete,
+  SshRotate,
 };

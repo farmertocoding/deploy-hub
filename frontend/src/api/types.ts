@@ -460,6 +460,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/targets/{id}/ssh-rotate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name, then rotate. */
+        post: operations["v1_targets_ssh_rotate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -782,6 +799,9 @@ export interface components {
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
             attack_state?: components["schemas"]["AttackState"] | null;
             edge_owner?: components["schemas"]["EdgeOwnerEnum"];
+        };
+        SshRotate: {
+            confirm_name: string;
         };
         /**
          * @description * `open` - Open
@@ -1541,6 +1561,32 @@ export interface operations {
                 "application/json": components["schemas"]["TargetDelete"];
                 "application/x-www-form-urlencoded": components["schemas"]["TargetDelete"];
                 "multipart/form-data": components["schemas"]["TargetDelete"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_targets_ssh_rotate_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SshRotate"];
+                "application/x-www-form-urlencoded": components["schemas"]["SshRotate"];
+                "multipart/form-data": components["schemas"]["SshRotate"];
             };
         };
         responses: {

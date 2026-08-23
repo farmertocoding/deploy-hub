@@ -65,5 +65,10 @@ export const ACTION_TIERS = [
     "id": "kek.rotate",
     "tier": "T1",
     "label": "Rotate KEK"
+  },
+  {
+    "id": "ssh.rotate",
+    "tier": "T1",
+    "label": "Rotate SSH key"
   }
 ];

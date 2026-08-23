@@ -264,6 +264,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.audit_tailscale_devices",
         "schedule": 86400.0,
     },
+    "ssh-rotate-quarterly": {
+        "task": "provision.tasks.rotate_ssh_keys",
+        "schedule": 90 * 86400,
+    },
     "probe-uptime": {
         "task": "monitor.tasks.probe_uptime",
         "schedule": 60.0,

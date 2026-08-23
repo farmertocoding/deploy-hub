@@ -19,4 +19,5 @@ ACTION_TIERS = (
     {"id": "target.delete", "tier": "T1", "label": "Delete target"},
     {"id": "key.export", "tier": "T1", "label": "Export key"},
     {"id": "kek.rotate", "tier": "T1", "label": "Rotate KEK"},
+    {"id": "ssh.rotate", "tier": "T1", "label": "Rotate SSH key"},
 )
