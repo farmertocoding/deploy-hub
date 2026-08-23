@@ -165,6 +165,16 @@ class TargetDeleteView(APIView):
                 {"detail": "Type the target host name to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if target.kind == Target.Kind.AWS_EC2:
+            from provision.aws_enroll import TerminateError, terminate_aws_target
+
+            try:
+                terminate_aws_target(target)
+            except TerminateError as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         audit("target.delete", source="api", actor=request.user, obj=target,
               severity="security")
         target.delete()
@@ -286,3 +296,41 @@ class InstanceCreateView(APIView):
             {"id": target.pk, "host": target.host, "kind": target.kind}
         )
         return Response(body.data, status=status.HTTP_201_CREATED)
+
+
+class InstanceTerminateSerializer(serializers.Serializer):
+    confirm_name = serializers.CharField()
+
+
+class InstanceTerminateView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-name, then AWS terminate."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(request=InstanceTerminateSerializer, responses={204: None})
+    def post(self, request, pk):
+        target = get_object_or_404(Target, pk=pk)
+        ser = InstanceTerminateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        if ser.validated_data["confirm_name"] != target.host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from provision.aws_enroll import TerminateError, terminate_aws_target
+
+        try:
+            terminate_aws_target(target)
+        except TerminateError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "instance.terminate",
+            source="api",
+            actor=request.user,
+            obj=target,
+            severity="security",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

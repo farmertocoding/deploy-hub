@@ -451,6 +451,7 @@ T1_HTTP = {
     "target.delete": "/api/v1/targets/{pk}/delete/",
     "ssh.rotate": "/api/v1/targets/{pk}/ssh-rotate/",
     "instance.create": "/api/v1/instance/create/",
+    "instance.terminate": "/api/v1/targets/{pk}/terminate/",
 }
 
 

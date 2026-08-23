@@ -511,6 +511,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/targets/{id}/terminate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-name, then AWS terminate. */
+        post: operations["v1_targets_terminate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -687,6 +704,9 @@ export interface components {
             id: number;
             host: string;
             kind: string;
+        };
+        InstanceTerminate: {
+            confirm_name: string;
         };
         /**
          * @description * `zone` - zone
@@ -1741,6 +1761,32 @@ export interface operations {
                 "application/json": components["schemas"]["SshRotate"];
                 "application/x-www-form-urlencoded": components["schemas"]["SshRotate"];
                 "multipart/form-data": components["schemas"]["SshRotate"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_targets_terminate_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstanceTerminate"];
+                "application/x-www-form-urlencoded": components["schemas"]["InstanceTerminate"];
+                "multipart/form-data": components["schemas"]["InstanceTerminate"];
             };
         };
         responses: {
