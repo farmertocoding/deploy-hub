@@ -1887,3 +1887,179 @@ def test_scan_declared_full_text_is_not_verified_by_parser_only_tests():
         assert on_e2e, (
             f"{rid} has no live-path E2E marker on tests/test_d012_reland.py "
             f"(Task 3): {nodeids}")
+
+
+# ── Phase 5 Task 0: due set, PART-K → 5.5, tier-less new ids, no t4 ──
+
+PHASE_5_SECTION_3_IDS = {
+    "AWS-EC2-ADAPTER",
+    "AWS-R53-ADAPTER",
+    "AWS-ENROLL-PIN",
+    "AWS-TEST-PLANE",
+    "AWS-IAM-ALLOWLIST",
+    "AWS-SSM-PULL",
+    "AWS-IMAGE-REGISTRY",
+    "AWS-INSTANCE-T1",
+    "UX-P5-AWS-OPERATOR",
+    "P5-AWS-DEMO",
+}
+PHASE_5_TEST_IDS = PHASE_5_SECTION_3_IDS - {"P5-AWS-DEMO"}
+PART_K_IDS = {
+    "PART-K1-ZERO-INBOUND-HUB",
+    "PART-K2-REPLAY-AT-HUB",
+    "PART-K6-NO-INTERNAL-ACTIONS",
+}
+
+
+def test_phase_5_due_set_includes_all_ten_section_3_ids(tmp_path):
+    """Every design-note §3 id exists at phase 5 with no tier key, and
+    check.py grades a phase-5 req as due at `--phase 5`.
+
+    What would make this fail: a missing/rephased id, a `tier:` on a new
+    id so it cannot verify on this host, P5-AWS-DEMO not naming
+    conformance/demos/phase-5.md, or argparse/schema refusing 5.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_5_SECTION_3_IDS - set(reg))
+    assert missing == [], f"phase-5 §3 ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_5_SECTION_3_IDS if reg[rid]["phase"] != 5)
+    assert wrong_phase == [], (
+        f"phase-5 §3 ids not registered at phase 5: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+    tagged = sorted(rid for rid in PHASE_5_SECTION_3_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"§3 ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+    for rid in sorted(PHASE_5_TEST_IDS):
+        assert reg[rid]["verify"] == "test", (
+            f"{rid} must be verify: test, got {reg[rid]['verify']}")
+
+    demo = reg["P5-AWS-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.md" in demo_paths, (
+        f"P5-AWS-DEMO must name conformance/demos/phase-5.md: "
+        f"{demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P5-DUE", phase=5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P5-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=5)
+    assert res.returncode == 0, (
+        f"--phase 5 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 5
+    assert header["requirements"]["FIX-P5-DUE"]["due"] is True
+    assert status_of(root, "FIX-P5-DUE") == "verified"
+
+
+def test_part_k_ids_are_phase_5_5_not_5(tmp_path):
+    """PART-K1 / K2 / K6 bump to 5.5 so Phase 5 MUST does not demand §K.
+
+    What would make this fail: leaving them at phase 5 (still due at
+    --phase 5), or check.py grading a 5.5 req as due at --phase 5.
+    """
+    reg = _live_registry()
+    for rid in sorted(PART_K_IDS):
+        assert rid in reg, f"{rid} is not in the registry"
+        assert reg[rid]["phase"] == 5.5, (
+            f"{rid} must be registered at phase 5.5, got {reg[rid]['phase']}")
+
+    root = write_repo(
+        tmp_path,
+        reqs=[_req("FIX-P5-DUE", phase=5), _req("FIX-P55-PART", phase=5.5)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P5-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=5)
+    assert res.returncode == 0, (
+        f"an uncovered phase-5.5 PART-K req failed the --phase 5 gate:\n"
+        f"{res.stdout}")
+    assert matrix(root)["requirements"]["FIX-P55-PART"]["due"] is False
+    assert matrix(root)["requirements"]["FIX-P5-DUE"]["due"] is True
+
+
+def test_new_phase_5_ids_have_no_tier():
+    """New Phase 5 ids are tier-less (no `tier:` key; D-071 / C10).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so the
+    id cannot verify on this host, or an explicit `tier: t1` (absence is
+    the contract).
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_5_SECTION_3_IDS - set(reg))
+    assert missing == [], f"phase-5 new ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_5_SECTION_3_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-5 ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+def test_p5_aws_demo_names_phase_5_md():
+    """P5-AWS-DEMO is verify: demo naming conformance/demos/phase-5.md.
+
+    What would make this fail: a missing demo: key (fallback would still
+    look at phase-5.md, but the registry would not name the record), or
+    pointing at phase-4.md. Do not create the file in Task 0 — missing
+    is uncovered; a non-empty stub would verify.
+    """
+    reg = _live_registry()
+    assert "P5-AWS-DEMO" in reg, "P5-AWS-DEMO is not in the registry"
+    demo = reg["P5-AWS-DEMO"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.md" in demo_paths, (
+        f"P5-AWS-DEMO must name conformance/demos/phase-5.md: "
+        f"{demo.get('demo')}")
+    assert not (REPO / "conformance" / "demos" / "phase-5.md").exists(), (
+        "Task 0 must not stub conformance/demos/phase-5.md "
+        "(a non-empty stub would verify P5-AWS-DEMO)")
+
+
+def test_valid_tiers_still_t1_t2_t3_only():
+    """VALID_TIERS stays {t1, t2, t3}. Do not extend with t4 (D-071).
+
+    What would make this fail: adding t4 (Playwright) so a Phase 5 id
+    could hide behind a live tier the T1 host does not have.
+    """
+    assert check.VALID_TIERS == {"t1", "t2", "t3"}
+    assert "t4" not in check.VALID_TIERS
+
+
+def test_no_all_tiers_5_target():
+    """No Makefile target grades --phase 5 without excluding live tiers.
+
+    What would make this fail: conformance-5-all-tiers, or any recipe
+    that is `--phase 5` without `--exclude-tier t2` and `t3` (D-071).
+    """
+    targets = gates.makefile_targets(REPO)
+    for forbidden in (
+        "conformance-5-all-tiers",
+        "conformance-5-all",
+        "all-tiers-5",
+        "conformance-all-tiers-5",
+    ):
+        assert forbidden not in targets, (
+            f"all-tiers 5 target {forbidden!r} must not exist (D-071)")
+    phase5 = re.compile(r"--phase[ \t]+5(?:[ \t]|$)")
+    for name in sorted(targets):
+        recipe = gates.recipe(REPO, name)
+        if not recipe or not phase5.search(recipe):
+            continue
+        assert "--exclude-tier t2" in recipe, (
+            f"{name} grades phase 5 without omitting t2 (no all-tiers 5):\n"
+            f"{recipe}")
+        assert "--exclude-tier t3" in recipe, (
+            f"{name} grades phase 5 without omitting t3 (no all-tiers 5):\n"
+            f"{recipe}")
