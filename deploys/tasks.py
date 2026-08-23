@@ -29,3 +29,11 @@ def poll_git():
     from deploys.poller import poll
 
     return poll()
+
+
+@shared_task
+def reap_adopt_temps():
+    """Beat `adopt-temp-reaper`: cleanup adopt temps older than 24 h."""
+    from deploys.adopt_reaper import reap
+
+    return reap()
