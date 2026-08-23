@@ -23,4 +23,8 @@ ACTION_TIERS = (
     {"id": "instance.create", "tier": "T1", "label": "Create target"},
     {"id": "instance.terminate", "tier": "T1", "label": "Terminate target"},
     {"id": "partner.create", "tier": "T1", "label": "Create partner"},
+    {"id": "partner.suspend", "tier": "T1", "label": "Suspend partner"},
+    {"id": "partner.api_kill_switch", "tier": "T1", "label": "Disable partner API"},
+    {"id": "partner.site_takedown", "tier": "T2", "label": "Take down site"},
+    {"id": "partner.destination_rank", "tier": "T2", "label": "Rank partner destination"},
 )

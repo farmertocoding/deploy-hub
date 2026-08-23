@@ -16,7 +16,6 @@ import time
 
 import pytest
 from django.contrib.auth.models import User
-from django.test import override_settings
 
 from core.transport import FakeTransport
 

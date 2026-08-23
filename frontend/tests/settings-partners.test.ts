@@ -193,7 +193,9 @@ test("partner_create_confirm_step_up_with_non_empty_name_runs", async () => {
       intake: { status: "degraded", mode: "fake", configured: false },
     }));
   });
-  const wired = tree.root.findByType(ActionButton);
+  const wired = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.create");
+  assert.ok(wired, "Create partner ActionButton must still be wired");
   assert.equal(wired.props.row.id, "partner.create");
   const confirmName = wired.props.confirmName;
   act(() => { tree.unmount(); });

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 
 from core.findings import resolve
-from core.models import AlertState, Finding, Site, Target
+from core.models import AlertState, Finding, Partner, PartnerSite, Site, Target
 from monitor.alerts import raise_alert
 
 OPEN_AFTER = 3
@@ -308,13 +308,20 @@ def _file_open(fingerprint, entity, title, body, fix_action):
         fix_action=fix_action,
         source_engine="monitor.antinoise",
     )
-    if fingerprint.startswith("host-down:") or fingerprint.startswith("zone-down:"):
-        return raise_alert("partner-aggregate-down", entity, **kwargs)
+    if fingerprint.startswith("host-down:"):
+        host = entity.partition(":")[2]
+        if _host_is_partner_tier(host):
+            return raise_alert("partner-aggregate-down", entity, **kwargs)
+        return raise_alert("prod-site-hard-down", entity, **kwargs)
+    if fingerprint.startswith("zone-down:"):
+        return raise_alert("prod-site-hard-down", entity, **kwargs)
     kind = _site_down_kind(entity)
     if kind == "staging-or-flapping":
         return raise_alert("staging-or-flapping", entity, **kwargs)
     if kind == "partner-site-hard-down":
-        return raise_alert("partner-site-hard-down", entity, **kwargs)
+        row = raise_alert("partner-site-hard-down", entity, **kwargs)
+        _maybe_file_partner_aggregate(entity)
+        return row
     return raise_alert("prod-site-hard-down", entity, **kwargs)
 
 
@@ -338,7 +345,60 @@ def _site_down_kind(entity):
     return "prod-site-hard-down"
 
 
+def _host_is_partner_tier(host):
+    """Partner-ness for host-down: PartnerSite on the target, or pk in destination_order."""
+    target = Target.objects.filter(host=host).first()
+    if target is None:
+        return False
+    if PartnerSite.objects.filter(site__primary_target=target).exists():
+        return True
+    for partner in Partner.objects.iterator():
+        if target.pk in (partner.destination_order or []):
+            return True
+    return False
+
+
+def _maybe_file_partner_aggregate(entity):
+    """N≥2 partner sites down → fingerprint partner-aggregate-down:{partner.pk}."""
+    kind, _, name = entity.partition(":")
+    if kind != "site":
+        return None
+    binding = (
+        PartnerSite.objects.filter(site__name=name)
+        .select_related("partner")
+        .first()
+    )
+    if binding is None:
+        return None
+    partner = binding.partner
+    down = 0
+    for ps in partner.partner_sites.select_related("site"):
+        if _fingerprint_open(f"site-down:{ps.site.name}"):
+            down += 1
+    if down < 2:
+        return None
+    fp = f"partner-aggregate-down:{partner.pk}"
+    existing = (
+        Finding.objects.filter(fingerprint=fp)
+        .exclude(state=Finding.State.RESOLVED)
+        .first()
+    )
+    if existing is not None:
+        return existing
+    return raise_alert(
+        "partner-aggregate-down",
+        f"partner:{partner.pk}",
+        fingerprint=fp,
+        source_engine="monitor.antinoise",
+        title=f"Partner {partner.slug} aggregate down",
+        body=f"{down} partner sites are down.",
+        fix_action="Check the partner-tier destination host before paging each site.",
+    )
+
+
 def _env_role_label(site):
+    if site is not None and PartnerSite.objects.filter(site_id=site.pk).exists():
+        return "partner"
     for obj in (site, getattr(site, "primary_target", None)):
         if obj is None:
             continue

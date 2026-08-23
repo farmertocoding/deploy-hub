@@ -56,6 +56,30 @@ export async function createPartner(slug, confirmName) {
   });
 }
 
+export async function suspendPartner(partnerId, confirmName) {
+  return api(`v1/partners/${partnerId}/suspend/`, { confirm_name: confirmName });
+}
+
+export async function killPartnerApi(confirmName) {
+  return api("v1/partner-api/kill-switch/", { confirm_name: confirmName });
+}
+
+export async function rankPartnerDestination(partnerId, destinationOrder) {
+  return api(`v1/partners/${partnerId}/destination-rank/`, {
+    destination_order: destinationOrder,
+  });
+}
+
+export const OWN_SERVER_HONESTY =
+  "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of";
+
+export function rankSummary(partner) {
+  const dest = partner?.destinations || [];
+  const includesSsh = dest.some((d) => d.kind === "ssh");
+  if (includesSsh) return OWN_SERVER_HONESTY;
+  return "Default: dedicated cloud first.";
+}
+
 export function intakeLine(intake) {
   const stamp = intake?.as_of
     ? ` · data as of ${new Date(intake.as_of).toLocaleTimeString([], { hour12: false })}`
@@ -92,12 +116,14 @@ export function PartnersPanel({
   partners: partnersProp,
   intake: intakeProp,
   minted: mintedProp,
+  apiEnabled: apiEnabledProp,
 }) {
   const [partners, setPartners] = useState(partnersProp ?? []);
   const [intake, setIntake] = useState(
     intakeProp ?? { status: "degraded", mode: "fake", configured: false },
   );
   const [minted, setMinted] = useState(mintedProp ?? null);
+  const [apiEnabled, setApiEnabled] = useState(Boolean(apiEnabledProp));
 
   useEffect(() => {
     if (partnersProp !== undefined) return undefined;
@@ -107,24 +133,49 @@ export function PartnersPanel({
         setIntake(data.intake || {
           status: "degraded", mode: "fake", configured: false,
         });
+        setApiEnabled(Boolean(data.api_enabled));
       }
     });
     return undefined;
   }, [partnersProp]);
+
+  async function refreshList() {
+    const listed = await partnersList();
+    if (listed.status === 200) {
+      setPartners(listed.data.partners || []);
+      setIntake(listed.data.intake || intake);
+      setApiEnabled(Boolean(listed.data.api_enabled));
+    }
+  }
 
   async function runCreate(args) {
     const slug = (args?.name || "").trim();
     const { status, data } = await createPartner(slug, slug);
     if (status !== 201) return;
     setMinted({ hubk: data.hubk, whsec: data.whsec });
-    const listed = await partnersList();
-    if (listed.status === 200) {
-      setPartners(listed.data.partners || []);
-      setIntake(listed.data.intake || intake);
-    }
+    await refreshList();
+  }
+
+  async function runKillSwitch(args) {
+    const { status, data } = await killPartnerApi(args?.name || "partner-api");
+    if (status === 200) setApiEnabled(Boolean(data?.api_enabled));
+  }
+
+  async function runSuspend(partner, args) {
+    await suspendPartner(partner.id, args?.name || partner.slug);
+    await refreshList();
+  }
+
+  async function runRank(partner) {
+    await rankPartnerDestination(partner.id, partner.destination_order || []);
+    await refreshList();
   }
 
   const empty = partners.length === 0 && !minted;
+  const killRow = {
+    ...tierFor("partner.api_kill_switch"),
+    label: apiEnabled ? "Disable partner API" : "Enable partner API",
+  };
   return (
     <div style={{ maxWidth: 720 }}>
       <h2>Partners</h2>
@@ -146,13 +197,26 @@ export function PartnersPanel({
               ? "Destination order is empty — partner-site create will refuse. Default: dedicated cloud first."
               : `Destination order: ${(p.destination_order || []).join(", ")}. Default: dedicated cloud first.`}
           </div>
+          <ActionButton row={tierFor("partner.suspend")}
+            confirmName={p.slug}
+            summary="Stop containers, detach routes, revoke the Hub-side key."
+            onRun={(args) => runSuspend(p, args)} />
+          {/* Suspend partner — stop containers / detach routes / revoke key. */}
+          <ActionButton row={tierFor("partner.destination_rank")}
+            summary={(p.destinations || []).some((d) => d.kind === "ssh")
+              ? "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of"
+              : "Default: dedicated cloud first."}
+            onRun={() => runRank(p)} />
+          {/* Own-server kind === "ssh" confirm is the K5 honesty sentence once. */}
         </div>
       ))}
       {!minted && (
         <ActionButton row={tierFor("partner.create")}
           onRun={runCreate} />
       )}
-      {/* Create partner — mint keys, not a paste form. */}
+      <ActionButton row={killRow} confirmName="partner-api"
+        onRun={runKillSwitch} />
+      {/* Create partner — mint keys, not a paste form. Enable is T1 not a toggle. */}
     </div>
   );
 }

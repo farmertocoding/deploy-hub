@@ -25,6 +25,10 @@ export async function rollbackSite(siteId) {
   return api(`v1/sites/${siteId}/rollback/`, {});
 }
 
+export async function takedownPartnerSite(siteId, confirmName) {
+  return api(`v1/sites/${siteId}/takedown/`, { confirm_name: confirmName });
+}
+
 export function adoptActions() {
   return ["site.adopt.start", "site.adopt.cancel"];
 }
@@ -293,6 +297,15 @@ export function SiteStatus({
       {jobCreateVisible(site) && (
         <button style={box}>Create job</button>
       )}
+      {isPartnerSite(site) && (
+        <>
+          <div>{site.domain || site.name} route → 410</div>
+          <ActionButton row={tierFor("partner.site_takedown")}
+            confirmName={site.domain || site.name}
+            summary={`${site.domain || site.name} route → 410`}
+            onRun={() => onRun("partner.site_takedown", site)} />
+        </>
+      )}
       {actions.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {actions.map((id) => (
@@ -346,6 +359,9 @@ export function SitesView({
         <SiteStatus site={selected} actions={t3SiteActions()}
           onRun={(id, site) => {
             if (id === "site.rollback") return rollbackSite(site.id);
+            if (id === "partner.site_takedown") {
+              return takedownPartnerSite(site.id, site.domain || site.name);
+            }
             if (id === "site.adopt.start") {
               return startAdopt(site.id, {
                 live_compose_path: site.adopt?.live_compose_path,

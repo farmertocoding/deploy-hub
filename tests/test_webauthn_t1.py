@@ -453,6 +453,8 @@ T1_HTTP = {
     "instance.create": "/api/v1/instance/create/",
     "instance.terminate": "/api/v1/targets/{pk}/terminate/",
     "partner.create": "/api/v1/partners/",
+    "partner.suspend": "/api/v1/partners/{pk}/suspend/",
+    "partner.api_kill_switch": "/api/v1/partner-api/kill-switch/",
 }
 
 
