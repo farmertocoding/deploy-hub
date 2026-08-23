@@ -76,6 +76,7 @@ _ESCALATION = frozenset({
 })
 _SERVICE_STARS = frozenset({"ec2:*", "ssm:*", "iam:*"})
 _SSM_PREFIX = "/deploy-hub/"
+_REGION_CONDITION_KEYS = frozenset({"aws:requestedregion", "ec2:region"})
 
 
 class AwsCredsError(RuntimeError):
@@ -368,7 +369,39 @@ def _hosted_zone_id(resource):
     return resource.split("hostedzone/", 1)[1].split("/")[0]
 
 
-def _action_reason(action, resources, *, hosted_zone_ids, pass_role_arns):
+def _condition_regions(condition):
+    """Region values from aws:RequestedRegion / ec2:Region. Missing → []."""
+    if not isinstance(condition, dict):
+        return []
+    found = []
+    for block in condition.values():
+        if not isinstance(block, dict):
+            continue
+        for key, value in block.items():
+            if str(key).lower() in _REGION_CONDITION_KEYS:
+                found.extend(str(part) for part in _as_list(value))
+    return found
+
+
+def _ec2_region_reason(condition, allowed_regions):
+    allowed = {str(region) for region in (allowed_regions or ())}
+    if not allowed:
+        return "EC2 region condition missing or off allowlist"
+    pinned = _condition_regions(condition)
+    if not pinned or not set(pinned) <= allowed:
+        return "EC2 region condition missing or off allowlist"
+    return None
+
+
+def _action_reason(
+    action,
+    resources,
+    *,
+    hosted_zone_ids,
+    pass_role_arns,
+    allowed_regions,
+    condition,
+):
     resources = resources or ["*"]
     if action == "*":
         return "Action * refused"
@@ -379,13 +412,13 @@ def _action_reason(action, resources, *, hosted_zone_ids, pass_role_arns):
     if action == "iam:PassRole":
         if any(res == "*" for res in resources):
             return "iam:PassRole on * refused"
-        if pass_role_arns and not set(resources) <= set(pass_role_arns):
+        if not pass_role_arns or not set(resources) <= set(pass_role_arns):
             return "iam:PassRole off the SSM instance-profile role"
         return None
     if action == "sts:GetCallerIdentity" or action in _IAM_SELF:
         return None
     if action.startswith("ec2:Describe") or action in _EC2_EXACT:
-        return None
+        return _ec2_region_reason(condition, allowed_regions)
     if (
         action in _SSM
         or action == "ssm:GetParameter*"
@@ -397,13 +430,12 @@ def _action_reason(action, resources, *, hosted_zone_ids, pass_role_arns):
     if action in _R53:
         if action == "route53:GetChange":
             return None
-        if any(res == "*" for res in resources):
+        if not hosted_zone_ids or any(res == "*" for res in resources):
             return "Route 53 resource off-zone"
-        if hosted_zone_ids:
-            for res in resources:
-                zone_id = _hosted_zone_id(res)
-                if zone_id not in hosted_zone_ids:
-                    return "Route 53 resource off-zone"
+        for res in resources:
+            zone_id = _hosted_zone_id(res)
+            if zone_id not in hosted_zone_ids:
+                return "Route 53 resource off-zone"
         return None
     return f"{action} is not on the Hub-user allowlist"
 
@@ -414,6 +446,7 @@ def evaluate_iam_scope(
     attached_policy_names=(),
     hosted_zone_ids=(),
     pass_role_arns=(),
+    allowed_regions=(),
 ):
     """Return refusal reasons (empty = pass). Does not file a Finding."""
     reasons = []
@@ -422,6 +455,7 @@ def evaluate_iam_scope(
             reasons.append("AdministratorAccess refused")
     hosted = set(hosted_zone_ids or ())
     roles = set(pass_role_arns or ())
+    regions = set(allowed_regions or ())
     for document in documents:
         for stmt in _statements(document):
             if not isinstance(stmt, dict):
@@ -439,6 +473,8 @@ def evaluate_iam_scope(
                     [str(res) for res in resources],
                     hosted_zone_ids=hosted,
                     pass_role_arns=roles,
+                    allowed_regions=regions,
+                    condition=stmt.get("Condition"),
                 )
                 if reason:
                     reasons.append(reason)
@@ -552,6 +588,7 @@ def refuse_iam_scope(
     ref="",
     hosted_zone_ids=(),
     pass_role_arns=(),
+    allowed_regions=(),
     file=True,
 ):
     """Judge documents (or inspect iam) and refuse a superset. Files aws-scope."""
@@ -567,6 +604,7 @@ def refuse_iam_scope(
         attached_policy_names=attached_policy_names,
         hosted_zone_ids=hosted_zone_ids,
         pass_role_arns=pass_role_arns,
+        allowed_regions=allowed_regions,
     )
     if not reasons:
         return
@@ -584,13 +622,17 @@ def observe_credentials(
     sts=None,
     hosted_zone_ids=(),
     pass_role_arns=(),
+    allowed_regions=None,
     ref="",
 ):
     """Throwaway explicit-key client: GetCallerIdentity + IAM allowlist.
 
     Not the product CloudProvider client. Callers (Settings connect) must
-    invoke this BEFORE vault.put.
+    invoke this BEFORE vault.put. Empty hosted_zone_ids / pass_role_arns
+    refuse Route 53 zone actions and PassRole (fail-closed, not skip).
     """
+    if allowed_regions is None:
+        allowed_regions = (region_name,)
     sts = sts or boto3_client(
         "sts",
         access_key_id=access_key_id,
@@ -615,6 +657,7 @@ def observe_credentials(
         ref=ref or str(getattr(settings, "AWS_CREDENTIALS_REF", "") or ""),
         hosted_zone_ids=hosted_zone_ids,
         pass_role_arns=pass_role_arns,
+        allowed_regions=allowed_regions,
     )
     return {
         "account_id": account_id,
