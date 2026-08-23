@@ -75,3 +75,17 @@ class OriginCertIssuer:
     def issue(self, zone, hostnames, *, validity_days, csr):
         """Return ``{"certificate": pem, "expires_at": datetime}``."""
         raise NotImplementedError
+
+
+class ImageRegistry:
+    """Push images and issue per-target pull-only credentials (D-073)."""
+
+    def push(self, tag, archive):
+        raise NotImplementedError
+
+    def pull_spec(self, tag, *, target):
+        """Return ``{url, username, password}`` pull-only for ``target``."""
+        raise NotImplementedError
+
+    def capabilities(self):
+        return set()

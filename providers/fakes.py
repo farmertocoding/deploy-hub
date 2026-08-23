@@ -2,7 +2,14 @@
 import itertools
 import os
 
-from .base import CloudProvider, DnsProvider, EdgeProtection, OriginCertIssuer, Pager
+from .base import (
+    CloudProvider,
+    DnsProvider,
+    EdgeProtection,
+    ImageRegistry,
+    OriginCertIssuer,
+    Pager,
+)
 
 _ids = itertools.count(1)
 
@@ -205,3 +212,78 @@ class FakeKms:
             return self._blobs[token]
         except KeyError as exc:
             raise RuntimeError("fake kms: unknown ciphertext") from exc
+
+
+class FakeImageRegistry(ImageRegistry):
+    """T1 registry: TLS + auth required; push cred is never a pull cred.
+
+    Construction refuses tls=False, auth=False, a non-https URL, or an
+    empty push password. A push-open Fake is not constructible.
+    """
+
+    _MUTATING = {"push"}
+    _PUSH_USER = "hub-push"
+    _PUSH_PASSWORD = "hub-push-secret-not-for-targets"
+
+    def __init__(
+        self,
+        *,
+        url="https://registry.test",
+        tls=True,
+        auth=True,
+        push_username=None,
+        push_password=None,
+    ):
+        url = str(url or "").strip()
+        if not tls or not url.startswith("https://"):
+            raise ValueError("FakeImageRegistry requires TLS (https)")
+        if push_username is None:
+            push_username = self._PUSH_USER
+        if push_password is None:
+            push_password = self._PUSH_PASSWORD
+        push_username = str(push_username)
+        push_password = str(push_password)
+        if not auth or not push_username or not push_password:
+            raise ValueError("FakeImageRegistry requires auth")
+        self.url = url
+        self.push_username = push_username
+        self.push_password = push_password
+        self.images = {}
+        self.calls = []
+
+    def capabilities(self):
+        return {"tls", "auth"}
+
+    def mutating_calls(self):
+        return [call for call in self.calls if call[0] in self._MUTATING]
+
+    def push(self, tag, archive):
+        self.calls.append(("push", tag))
+        self.images[tag] = archive
+        return {"url": self._image_url(tag)}
+
+    def pull_spec(self, tag, *, target):
+        self.calls.append(("pull_spec", tag, target))
+        ident = _registry_target_ident(target)
+        username = f"pull-only-{ident}"
+        password = f"pull-only-secret-{ident}"
+        if username == self.push_username or password == self.push_password:
+            raise RuntimeError("push cred must not equal pull cred")
+        return {
+            "url": self._image_url(tag),
+            "username": username,
+            "password": password,
+        }
+
+    def _image_url(self, tag):
+        host = self.url.split("://", 1)[-1].rstrip("/")
+        return f"{host}/deploy-hub/{tag}"
+
+
+def _registry_target_ident(target):
+    if target is None:
+        return "none"
+    pk = getattr(target, "pk", None)
+    if pk is not None:
+        return str(pk)
+    return str(target)
