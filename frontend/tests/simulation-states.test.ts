@@ -53,6 +53,10 @@ const REQUIRED_STATE_IDS = [
   "enroll-empty",
   "enroll-error",
   "enroll-degraded",
+  "partner-intake-empty",
+  "partner-intake-error",
+  "partner-intake-degraded",
+  "partner-site",
 ];
 
 function loadSeed() {

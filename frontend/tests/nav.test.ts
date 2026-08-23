@@ -58,7 +58,7 @@ test("advisors_are_tabs_not_top_level_pages", () => {
 
   // …and the demo pane's actual home is the Settings tab bar.
   assert.deepEqual(SETTINGS_TABS.map((t) => t.id),
-    ["security", "cloudflare", "aws", "developer", "vault"]);
+    ["security", "cloudflare", "aws", "partners", "developer", "vault"]);
 });
 
 test("every_list_screen_has_an_empty_state", () => {
