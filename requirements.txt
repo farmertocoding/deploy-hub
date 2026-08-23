@@ -24,3 +24,5 @@ PyYAML>=6
 boto3>=1.35,<2
 # Ed25519 on the intake verifier (vault already used this transitively).
 cryptography>=42,<51
+# Standard Webhooks reference verifier (T1 Fake sink tests; Hub signs itself).
+standardwebhooks>=1.0,<2

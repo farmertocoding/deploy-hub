@@ -299,8 +299,51 @@ class CloudflareDnsProvider(DnsProvider):
 
     def capabilities(self):
         # DnsZone.proxied_default documents itself as "surfaced by
-        # capabilities()" — this set is that surface.
-        return {"proxied"}
+        # capabilities()" — this set is that surface. custom_hostname is
+        # D-079: create/status/TXT live on this object, not a second client.
+        return {"proxied", "custom_hostname"}
+
+    def create_custom_hostname(self, hostname):
+        from .custom_hostname import (
+            normalize_custom_hostname,
+            refuse_partner_base_collision,
+        )
+
+        host = str(hostname or "").rstrip(".").lower()
+        refuse_partner_base_collision(host)
+        zone_id = self._zone_id(self.zone)
+        body = self._api(
+            "POST",
+            f"/zones/{zone_id}/custom_hostnames",
+            {"hostname": host, "ssl": {"method": "txt", "type": "dv"}},
+        )
+        return normalize_custom_hostname(body.get("result") or {"hostname": host})
+
+    def _custom_hostname_row(self, hostname):
+        host = str(hostname or "").rstrip(".").lower()
+        zone_id = self._zone_id(self.zone)
+        query = urlencode({"hostname": host})
+        body = self._api("GET", f"/zones/{zone_id}/custom_hostnames?{query}")
+        rows = body.get("result") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        for row in rows:
+            if str(row.get("hostname") or "").rstrip(".").lower() == host:
+                return row
+        raise CloudflareError(f"custom hostname {host!r} not found")
+
+    def custom_hostname_status(self, hostname):
+        return str(self._custom_hostname_row(hostname).get("status") or "").lower()
+
+    def custom_hostname_txt(self, hostname):
+        from .custom_hostname import ownership_from_record
+
+        return ownership_from_record(self._custom_hostname_row(hostname))
+
+    def serve_custom_hostname(self, hostname):
+        from .custom_hostname import caddy_route_for
+
+        return caddy_route_for(self, hostname)
 
     def _zone_id(self, zone):
         """The client exists for exactly one zone; a different one refuses."""

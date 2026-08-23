@@ -1,5 +1,7 @@
 """dns_provider_for(zone) and edge_protection_for(zone) — the ONLY Cloudflare
-client constructors (D-033, D-057).
+client constructors (D-033, D-057). CustomHostname create/status/TXT live on
+the DnsProvider this function returns (D-079); helpers must not construct a
+second client.
 
 Scope is enforced synchronously, before the client is usable (D-034 panel r2):
 
