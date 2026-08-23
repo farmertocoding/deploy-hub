@@ -491,34 +491,33 @@ def test_rate_limit_60_and_deploy_create_3_per_min():
     from core.partner_verify import evaluate_quotas
 
     now = timezone.now()
-    partner = _partner("q-rl", deploys_per_day=500, max_sites=10)
-    sites = _bind_sites(partner, 1)
-    site = sites[0]
-    deploy_path = f"/partner/v1/sites/{site.pk}/deployments"
-
-    _plant_nonces(partner, 60, now=now)
-    general = evaluate_quotas(partner, "GET", "/partner/v1/deployments/1", now=now)
+    general_partner = _partner("q-rl-g")
+    _plant_nonces(general_partner, 60, now=now)
+    general = evaluate_quotas(
+        general_partner, "GET", "/partner/v1/deployments/1", now=now,
+    )
     assert general.refused is True
     assert general.reason == "rate"
     assert general.status == 429
     _assert_rate_headers(general.headers, limit=60)
     assert int(general.headers["X-RateLimit-Remaining"]) == 0
 
+    burst_partner = _partner("q-rl-b", deploys_per_day=500, max_sites=10)
+    burst_site = _bind_sites(burst_partner, 1)[0]
+    deploy_path = f"/partner/v1/sites/{burst_site.pk}/deployments"
     recent = now - timedelta(seconds=10)
-    _plant_deploys(site, 3, created_at=recent)
-    burst = evaluate_quotas(partner, "POST", deploy_path, now=now)
+    _plant_deploys(burst_site, 3, created_at=recent)
+    burst = evaluate_quotas(burst_partner, "POST", deploy_path, now=now)
     assert burst.refused is True
     assert burst.reason == "rate"
     assert burst.status == 429
     _assert_rate_headers(burst.headers, limit=3)
 
-    other = _plain_site("q-rl-day", domain="q-rl-day.apps.invalid")
-    from core.models import PartnerSite
-
-    PartnerSite.objects.create(partner=partner, site=other, tenant_ref="day-site")
-    day_path = f"/partner/v1/sites/{other.pk}/deployments"
-    _plant_deploys(other, 100, created_at=now - timedelta(hours=3))
-    daily = evaluate_quotas(partner, "POST", day_path, now=now)
+    day_partner = _partner("q-rl-d", deploys_per_day=500, max_sites=10)
+    day_site = _bind_sites(day_partner, 1)[0]
+    day_path = f"/partner/v1/sites/{day_site.pk}/deployments"
+    _plant_deploys(day_site, 100, created_at=now - timedelta(hours=3))
+    daily = evaluate_quotas(day_partner, "POST", day_path, now=now)
     assert daily.refused is True
     assert daily.reason in {"quota", "rate"}
     assert daily.status in {403, 429}
@@ -534,8 +533,8 @@ def test_d084_numbers_match_partner_field_defaults():
     """
     from django.conf import settings
 
-    from core.models import Partner
     from core import partner_verify as pv
+    from core.models import Partner
 
     assert Partner._meta.get_field("max_sites").default == 5
     assert Partner._meta.get_field("deploys_per_day").default == 50

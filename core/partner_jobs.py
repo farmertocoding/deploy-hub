@@ -115,6 +115,8 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
     if not getattr(settings, "PARTNER_API_ENABLED", False):
         return None
 
+    from core.partner_verify import evaluate_quotas
+
     payload = _payload(job)
     _refuse_source(payload)
     digest = _require_template(payload)
@@ -129,6 +131,14 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
     if existing is not None:
         _probe_only(existing, digest, transport=transport, registry=registry)
         return existing
+
+    method = job.get("method") or "POST"
+    path = job.get("path") or "/partner/v1/sites"
+    decision = evaluate_quotas(
+        partner, method, path, now=now, body=job.get("body") or payload,
+    )
+    if decision.refused:
+        raise PartnerRefuse(decision.reason or "quota")
 
     result = _create(partner, job, payload, target, domain, digest)
     _ship(digest, target, transport=transport, registry=registry)
