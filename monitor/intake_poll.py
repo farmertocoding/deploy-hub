@@ -144,6 +144,7 @@ def _partner_for(job, now):
         try:
             result = reverify(
                 partner, method, path, body, headers, now=now,
+                remember_nonce=False,
             )
         except SignatureRejected:
             continue
@@ -153,13 +154,26 @@ def _partner_for(job, now):
 
 def _ack(client, job_id):
     if job_id is None or client is None:
-        return
+        return False
     ack = getattr(client, "ack", None)
     if not callable(ack):
-        return
+        return False
     try:
         ack(job_id)
     except IntakeClientError:
+        return False
+    return True
+
+
+def _persist_accepted_nonce(partner, result, now):
+    from core.partner_verify import ReplayRejected, _remember_nonce
+
+    nonce = getattr(result, "nonce", "") or ""
+    if partner is None or not nonce:
+        return
+    try:
+        _remember_nonce(partner, nonce, now)
+    except ReplayRejected:
         pass
 
 
@@ -193,7 +207,8 @@ def _process(client, items, now):
             continue
         if created is None:
             continue
-        _ack(client, job_id)
+        if _ack(client, job_id):
+            _persist_accepted_nonce(partner, result, now)
     return n
 
 

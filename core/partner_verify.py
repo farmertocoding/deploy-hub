@@ -32,11 +32,12 @@ class ReplayRejected(Exception):
 
 
 class VerifyResult:
-    def __init__(self, ok, status=202, response=None, reason=""):
+    def __init__(self, ok, status=202, response=None, reason="", nonce=""):
         self.ok = ok
         self.status = status
         self.response = {} if response is None else response
         self.reason = reason
+        self.nonce = nonce
 
 
 def load_shared_vectors():
@@ -157,7 +158,7 @@ def _verify_signature(partner, method, path, body, headers, now):
     raise SignatureRejected("invalid signature")
 
 
-def _remember_nonce(partner, nonce, now):
+def _remember_nonce(partner, nonce, now, *, persist=True):
     from datetime import timedelta
 
     from django.db import IntegrityError, transaction
@@ -167,6 +168,11 @@ def _remember_nonce(partner, nonce, now):
     clock = _clock(now)
     cutoff = clock - timedelta(seconds=NONCE_TTL_S)
     PartnerReplayNonce.objects.filter(partner=partner, seen_at__lt=cutoff).delete()
+    if not persist:
+        if PartnerReplayNonce.objects.filter(partner=partner, nonce=nonce).exists():
+            _file_replay(partner)
+            raise ReplayRejected("replayed nonce")
+        return
     try:
         with transaction.atomic():
             PartnerReplayNonce.objects.create(partner=partner, nonce=nonce)
@@ -190,8 +196,13 @@ def _quota_refuse(partner, method, path):
     return PartnerSite.objects.count() >= fleet_cap
 
 
-def reverify(partner, method, path, body, headers, *, now=None):
-    """Re-verify a signed partner request against Partner pubkey slots."""
+def reverify(partner, method, path, body, headers, *, now=None, remember_nonce=True):
+    """Re-verify a signed partner request against Partner pubkey slots.
+
+    `remember_nonce=False` still rejects an already-consumed nonce
+    (replay) but does not insert. The poller persists after materialize+ack
+    so operator-fixable refuses do not spend the nonce.
+    """
     from datetime import timedelta
 
     from core.models import PartnerIdempotencyKey
@@ -199,7 +210,7 @@ def reverify(partner, method, path, body, headers, *, now=None):
     nonce = _verify_signature(partner, method, path, body, headers, now)
     # Replay is Hub-authoritative even when the request also carries a
     # matching Idempotency-Key (byte-for-byte replay ≠ Stripe retry).
-    _remember_nonce(partner, nonce, now)
+    _remember_nonce(partner, nonce, now, persist=remember_nonce)
     idem_key = _header(headers, "Idempotency-Key")
     params = _params_hash(method, path, body)
     clock = _clock(now)
@@ -215,19 +226,26 @@ def reverify(partner, method, path, body, headers, *, now=None):
                 existing.delete()
                 existing = None
             elif existing.params_hash != params:
-                return VerifyResult(False, status=422, reason="idempotency")
+                return VerifyResult(
+                    False, status=422, reason="idempotency", nonce=nonce,
+                )
             else:
                 return VerifyResult(
                     True,
                     status=existing.status_code,
                     response=existing.response,
                     reason="idempotency-match",
+                    nonce=nonce,
                 )
 
     if _quota_refuse(partner, method, path):
-        result = VerifyResult(False, status=403, response={}, reason="quota")
+        result = VerifyResult(
+            False, status=403, response={}, reason="quota", nonce=nonce,
+        )
     else:
-        result = VerifyResult(True, status=202, response={"accepted": True})
+        result = VerifyResult(
+            True, status=202, response={"accepted": True}, nonce=nonce,
+        )
 
     if idem_key:
         PartnerIdempotencyKey.objects.create(
