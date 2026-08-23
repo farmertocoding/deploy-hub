@@ -660,14 +660,11 @@ R8_NEUTERINGS = [
     ({"MAKEFLAGS": "-n"}, ()),            # dry run: prints the recipe, exits 0
     ({"MAKEFLAGS": "n"}, ()),             # the short-flag spelling make itself writes
     ({"MAKEFLAGS": "ni"}, ()),            # combined with another
-    ({"GNUMAKEFLAGS": "-n"}, ()),         # the second variable make reads
     ({"MAKEFLAGS": "i"}, ()),             # ignore-errors: runs, swallows the failure
     ({"MAKEFLAGS": "q"}, ()),             # question mode: runs nothing
     ({"MAKEFLAGS": "t"}, ()),             # touch instead of running
     ({"MAKEFLAGS": "SHELL=/bin/true"}, ()),        # every recipe through `true`
-    ({"GNUMAKEFLAGS": "SHELL=/bin/true"}, ()),
     ({"MAKEFLAGS": ".SHELLFLAGS=-c true"}, ()),
-    ({"MAKEFLAGS": "--eval=x:=1"}, ()),   # inject makefile text
     ({"MAKEFILES": "/tmp/injected.mk"}, ()),       # inject a whole makefile
     ({}, ("-n",)),                        # and the same flags straight from argv
     ({}, ("--dry-run",)),
@@ -688,6 +685,10 @@ def test_issue_r8_make_refuses_to_start_when_its_own_inputs_suppress_recipes(
     amount of workflow parsing can see it. Enumerating make's inputs is a losing game.
     This stops playing it: whatever route the flag took, make refuses to start, and a
     gate that refuses to start is red rather than falsely green.
+
+    Inputs this make does not implement (GNUMAKEFLAGS before 3.82, `--eval` before 4.0)
+    live in R8_MAYBE_UNIMPLEMENTED and are probed, not assumed: a no-op that still
+    executes py-roots is not a suppressor here.
     """
     result = _make_with_env(env_overrides, args=args)
     assert result.returncode != 0, (
@@ -852,10 +853,22 @@ def test_issue_r8_both_halves_of_the_defence_cover_the_same_variables(var):
     Asserted by running make, not by grepping the Makefile for the variable's name —
     a name in a comment satisfies a substring check while enforcing nothing, and two
     checks of one rule drifting apart is the N1 defect this branch exists to close.
+
+    GNUMAKEFLAGS is the exception that is not a drift: a make that does not read
+    that variable cannot put `-n` into `$(MAKEFLAGS)`, so the guard has nothing to
+    refuse. Probe py-roots the same way as R8_MAYBE_UNIMPLEMENTED.
     """
     hostile = {"MAKEFILES": "/tmp/injected-by-a-test.mk"} if var == "MAKEFILES" \
         else {var: "-n"}
     result = _make_with_env(hostile)
+    # GNUMAKEFLAGS is 3.82+: on a make that does not read it, `-n` never reaches
+    # `$(MAKEFLAGS)` and the recipe still runs. That is the same no-op the split
+    # R8_MAYBE_UNIMPLEMENTED cases cover, not a drift between gates.py and the
+    # Makefile. A make that starts honoring GNUMAKEFLAGS will stop printing
+    # py-roots and must refuse here.
+    if var == "GNUMAKEFLAGS" and _py_roots_recipe_ran(result):
+        assert "refusing to run" not in result.stderr
+        return
     assert result.returncode != 0 and "refusing to run" in result.stderr, (
         f"conformance/gates.py bans `env: {var}` in a workflow, but the Makefile runs "
         f"happily with it set — the two halves of this defence have drifted, and only "

@@ -140,7 +140,7 @@ test-frontend:
 lint:
 	ruff check .
 	bandit -q -c pyproject.toml -r $(PY_ROOTS)
-	pip-audit -r requirements.txt || true   # advisory until Phase 1; blocking after
+	pip-audit --progress-spinner off -r requirements.txt || true   # advisory until Phase 1; blocking after
 
 # shellcheck + shfmt -d + bash -n over scripts/** (HARD-Q8). Tools must be on
 # PATH; CI installs them as setup, then calls this target bare.
