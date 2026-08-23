@@ -2,11 +2,15 @@
 
 Does not import intake. Consumes the shared vector file independently.
 Nonce cache TTL 10 min; Idempotency-Key 24 h; 5-minute timestamp window.
+U2 quotas re-read Partner via .values() so intake allow cannot override.
 """
 import base64
 import hashlib
 import json
+import re
 import time
+from datetime import datetime, timedelta
+from datetime import timezone as dt_tz
 from pathlib import Path
 
 from vault.ssh import verify_ed25519
@@ -14,12 +18,19 @@ from vault.ssh import verify_ed25519
 WINDOW_S = 300
 NONCE_TTL_S = 600
 IDEMPOTENCY_TTL_S = 86400
+RATE_GENERAL_PER_MIN = 60
+RATE_DEPLOY_CREATE_PER_MIN = 3
+RATE_DEPLOY_CREATE_PER_DAY = 100
+DEFAULT_FLEET_MAX_SITES = 12
 VECTORS_PATH = (
     Path(__file__).resolve().parent.parent
     / "conformance"
     / "fixtures"
     / "partner-signature-vectors.json"
 )
+_SITES_PATH = re.compile(r"^/partner/v1/sites/?$")
+_DEPLOY_PATH = re.compile(r"^/partner/v1/sites/([^/]+)/deployments/?$")
+_DOMAIN_PATH = re.compile(r"^/partner/v1/sites/([^/]+)/domains/?$")
 
 
 class SignatureRejected(Exception):
@@ -31,12 +42,21 @@ class ReplayRejected(Exception):
 
 
 class VerifyResult:
-    def __init__(self, ok, status=202, response=None, reason="", nonce=""):
+    def __init__(self, ok, status=202, response=None, reason="", nonce="", headers=None):
         self.ok = ok
         self.status = status
         self.response = {} if response is None else response
         self.reason = reason
         self.nonce = nonce
+        self.headers = {} if headers is None else headers
+
+
+class QuotaDecision:
+    def __init__(self, refused, reason="", status=403, headers=None):
+        self.refused = refused
+        self.reason = reason
+        self.status = status
+        self.headers = {} if headers is None else headers
 
 
 def load_shared_vectors():
@@ -174,19 +194,200 @@ def _remember_nonce(partner, nonce, now, *, persist=True):
         raise ReplayRejected("replayed nonce") from None
 
 
-def _quota_refuse(partner, method, path):
-    from django.conf import settings
+def _as_dt(now):
+    from django.utils import timezone
 
+    if now is None:
+        return timezone.now()
+    if hasattr(now, "year"):
+        return now
+    return datetime.fromtimestamp(int(now), tz=dt_tz.utc)
+
+
+def _json_object(body):
+    if isinstance(body, dict):
+        return body
+    if body in (None, "", b""):
+        return {}
+    if isinstance(body, (bytes, bytearray)):
+        body = body.decode("utf-8")
+    try:
+        parsed = json.loads(body)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _rate_headers(limit, used, reset_unix):
+    remaining = max(0, int(limit) - int(used))
+    return {
+        "X-RateLimit-Limit": str(int(limit)),
+        "X-RateLimit-Remaining": str(remaining),
+        "X-RateLimit-Reset": str(int(reset_unix)),
+    }
+
+
+def _partner_quota_row(partner_pk):
+    from core.models import Partner
+
+    return (
+        Partner.objects.filter(pk=partner_pk)
+        .values("max_sites", "deploys_per_day", "domains")
+        .first()
+    )
+
+
+def _file_quota_abuse(partner, reason):
+    from monitor.alerts import raise_alert
+
+    pk = partner.pk
+    slug = getattr(partner, "slug", "") or ""
+    raise_alert(
+        "budget-cap-hit",
+        "partner",
+        fingerprint="budget-cap-hit:partner",
+        source_engine="core.partner_verify",
+        title="Partner quota cap hit",
+        body=(
+            f"Partner {pk} ({slug}) exceeded a Hub-authoritative U2 quota "
+            f"({reason}). Intake allow does not override this refuse."
+        ),
+        fix_action=(
+            "Reduce partner usage or raise the finite quota on this Partner; "
+            "unbounded max_sites is out."
+        ),
+    )
+
+
+def _resolve_partner_site(partner, token):
     from core.models import PartnerSite
 
-    if str(method).upper() != "POST":
-        return False
-    if str(path).rstrip("/") != "/partner/v1/sites":
-        return False
-    if partner.partner_sites.count() >= int(partner.max_sites):
-        return True
-    fleet_cap = int(getattr(settings, "PARTNER_FLEET_MAX_SITES", 12) or 12)
-    return PartnerSite.objects.count() >= fleet_cap
+    qs = PartnerSite.objects.filter(partner=partner)
+    if str(token).isdigit():
+        row = qs.filter(site_id=int(token)).select_related("site").first()
+        if row is not None:
+            return row.site
+    row = qs.filter(tenant_ref=str(token)).select_related("site").first()
+    return None if row is None else row.site
+
+
+def _general_rate_used(partner, nonce, minute_start):
+    from core.models import PartnerReplayNonce
+
+    qs = PartnerReplayNonce.objects.filter(
+        partner=partner, seen_at__gte=minute_start,
+    )
+    if nonce:
+        qs = qs.exclude(nonce=nonce)
+    return qs.count()
+
+
+def evaluate_quotas(partner, method, path, *, now=None, body=None, nonce=""):
+    """Hub-authoritative U2 quotas. Re-reads Partner via .values(); intake cannot override."""
+    from django.conf import settings
+
+    from core.models import PartnerSite, Site
+    from deploys.models import Deployment
+
+    clock = _as_dt(now)
+    minute_start = clock - timedelta(seconds=60)
+    day_start = clock - timedelta(days=1)
+    reset_unix = int(clock.timestamp()) + 60
+    method = str(method or "").upper()
+    path = str(path or "")
+    general_used = _general_rate_used(partner, nonce, minute_start)
+    general_headers = _rate_headers(
+        RATE_GENERAL_PER_MIN, general_used, reset_unix,
+    )
+
+    def _refuse(reason, status, headers):
+        _file_quota_abuse(partner, reason)
+        return QuotaDecision(
+            True, reason=reason, status=status, headers=headers,
+        )
+
+    if general_used >= RATE_GENERAL_PER_MIN:
+        return _refuse("rate", 429, _rate_headers(
+            RATE_GENERAL_PER_MIN, general_used, reset_unix,
+        ))
+
+    row = _partner_quota_row(partner.pk)
+    if row is None:
+        return _refuse("quota", 403, general_headers)
+    max_sites = int(row["max_sites"] or 0)
+    deploys_per_day = int(row["deploys_per_day"] or 0)
+    domains = int(row["domains"] or 0)
+    if min(max_sites, deploys_per_day, domains) < 1:
+        return _refuse("quota", 403, general_headers)
+
+    payload = _json_object(body)
+    if method == "POST" and _SITES_PATH.match(path):
+        tenant_ref = str(payload.get("tenant_ref") or "").strip()
+        existing = False
+        if tenant_ref:
+            existing = PartnerSite.objects.filter(
+                partner=partner, tenant_ref=tenant_ref,
+            ).exists()
+        if not existing:
+            if PartnerSite.objects.filter(partner=partner).count() >= max_sites:
+                return _refuse("quota", 403, general_headers)
+            fleet_cap = int(
+                getattr(settings, "PARTNER_FLEET_MAX_SITES", DEFAULT_FLEET_MAX_SITES)
+                or DEFAULT_FLEET_MAX_SITES
+            )
+            if PartnerSite.objects.count() >= fleet_cap:
+                return _refuse("quota", 403, general_headers)
+
+    deploy_match = _DEPLOY_PATH.match(path)
+    if method == "POST" and deploy_match:
+        day_count = Deployment.objects.filter(
+            manifest__site__partner_site__partner=partner,
+            manifest__created_at__gte=day_start,
+        ).count()
+        if day_count >= deploys_per_day:
+            return _refuse("quota", 403, general_headers)
+        site = _resolve_partner_site(partner, deploy_match.group(1))
+        if site is not None:
+            per_min = Deployment.objects.filter(
+                manifest__site=site,
+                manifest__created_at__gte=minute_start,
+            ).count()
+            deploy_headers = _rate_headers(
+                RATE_DEPLOY_CREATE_PER_MIN, per_min, reset_unix,
+            )
+            if per_min >= RATE_DEPLOY_CREATE_PER_MIN:
+                return _refuse("rate", 429, deploy_headers)
+            per_day = Deployment.objects.filter(
+                manifest__site=site,
+                manifest__created_at__gte=day_start,
+            ).count()
+            if per_day >= RATE_DEPLOY_CREATE_PER_DAY:
+                return _refuse("rate", 429, _rate_headers(
+                    RATE_DEPLOY_CREATE_PER_DAY, per_day, reset_unix,
+                ))
+            return QuotaDecision(False, headers=deploy_headers)
+
+    domain_match = _DOMAIN_PATH.match(path)
+    if method == "POST" and domain_match:
+        names = {
+            (name or "").casefold()
+            for name in Site.objects.filter(partner_site__partner=partner)
+            .exclude(domain="")
+            .values_list("domain", flat=True)
+        }
+        extra = str(
+            payload.get("hostname") or payload.get("domain") or "",
+        ).strip().casefold()
+        if extra and extra not in names and len(names) >= domains:
+            return _refuse("quota", 403, general_headers)
+
+    return QuotaDecision(False, headers=general_headers)
+
+
+def _quota_refuse(partner, method, path, *, now=None, body=None, nonce=""):
+    return evaluate_quotas(
+        partner, method, path, now=now, body=body, nonce=nonce,
+    ).refused
 
 
 def _idempotency_cached(partner, idem_key, params, now, nonce=""):
@@ -267,13 +468,18 @@ def reverify(
         if cached is not None:
             return cached
 
-    if _quota_refuse(partner, method, path):
+    decision = evaluate_quotas(
+        partner, method, path, now=now, body=body, nonce=nonce,
+    )
+    if decision.refused:
         result = VerifyResult(
-            False, status=403, response={}, reason="quota", nonce=nonce,
+            False, status=decision.status, response={},
+            reason=decision.reason, nonce=nonce, headers=decision.headers,
         )
     else:
         result = VerifyResult(
             True, status=202, response={"accepted": True}, nonce=nonce,
+            headers=decision.headers,
         )
 
     if idem_key and persist_idempotency:
