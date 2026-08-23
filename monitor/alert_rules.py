@@ -325,6 +325,12 @@ RULES = (
         "D-058",
     ),
     _r(
+        "audit-ship-failed",
+        "p2",
+        "Off-host audit ship put failed; the local hash chain is intact",
+        "D-056 / phase-4-design-note.md §1.1 item 10",
+    ),
+    _r(
         "unproxied-cert-refusal",
         "p2",
         "Unproxied public site refused Hub-central DNS-01; named Finding "

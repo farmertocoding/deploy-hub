@@ -186,6 +186,10 @@ HUB_TEST_ZONE_SLUGS = [
 # Do not invent a live token env.
 HUB_TAILSCALE_API_TOKEN_REF = os.environ.get("HUB_TAILSCALE_API_TOKEN_REF", "")
 
+# --- Audit off-host ship (SLIP, C6). Skip unless bucket configured. ---
+# T1 fake lives in core/ with no AWS SDK. Live Object Lock is a Joseph interrupt.
+AUDIT_S3_BUCKET = os.environ.get("HUB_AUDIT_S3_BUCKET", "")
+
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
