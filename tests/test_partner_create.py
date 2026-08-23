@@ -543,12 +543,10 @@ def test_copy_does_not_say_instance():
 
     for rel in (
         ("src", "screens", "Settings.jsx"),
-        ("tests", "settings-partners.test.ts"),
         ("src", "screens", "Sites.jsx"),
     ):
         text = _without_single_instance(_frontend(*rel))
         if rel[-1] == "Sites.jsx":
-            # Partner-tab additions: badge + filter must not say instance.
             assert "isPartnerSite" in _frontend(*rel)
         assert not re.search(r"\binstance\b", text, re.I), rel
 

@@ -105,7 +105,8 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
         <button style={box} onClick={() => runner.click({ expected: confirmName })}>
           {row.label}</button>
         {state.phase === "steppingUp" && (
-          <T1Overlay label={row.label} cost={cost}
+          <T1Overlay label={row.label}
+            cost={row.id === "partner.create" ? undefined : cost}
             onTouch={async () => {
               const { status } = await performHardwareTouch();
               if (status === 200) runner.touch();

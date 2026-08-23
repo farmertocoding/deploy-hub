@@ -62,6 +62,25 @@ export function flattenSites(projects) {
     (p.sites || []).map((s) => ({ ...s, project: p.name })));
 }
 
+export function isPartnerSite(site) {
+  return Boolean(site?.partner || site?.partner_site);
+}
+
+export function PartnerBadge({ site }) {
+  if (!isPartnerSite(site)) return null;
+  return <span aria-label="partner site">◆ partner</span>;
+}
+
+export function jobCreateVisible(site) {
+  return !isPartnerSite(site) && Boolean(site?.job_create);
+}
+
+const SITE_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "mine", label: "Mine" },
+  { id: "partner", label: "Partner" },
+];
+
 export function ManifestLine({ site }) {
   if (site.latest_manifest_version == null)
     return <span style={{ color: "#8b949e" }}>no manifest yet</span>;
@@ -263,12 +282,16 @@ export function SiteStatus({
       <div style={{ color: "#8b949e" }}>project: {site.project}</div>
       <div><ManifestLine site={site} /></div>
       <div><SiteObserved site={site} /></div>
+      <div><PartnerBadge site={site} /></div>
       <CertState site={site} />
       <AttackState site={site} />
       <BackupPanel site={site} backups={backups} onTestNow={testNow} />
-      {(site.edge_owner || site.adopt) && (
+      {!isPartnerSite(site) && (site.edge_owner || site.adopt) && (
         <AdoptPlan site={site} liveComposePath={liveComposePath}
           onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />
+      )}
+      {jobCreateVisible(site) && (
+        <button style={box}>Create job</button>
       )}
       {actions.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -282,22 +305,38 @@ export function SiteStatus({
   );
 }
 
-export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }) {
+export function SitesView({
+  phase, sites, selectedId, onSelect, onError, onNav, filter: filterProp,
+}) {
+  const [filter, setFilter] = useState(filterProp || "all");
   if (phase === "loading") return <LoadingLine what="sites" />;
   if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
   if (!sites.length)
     return <EmptyState
       sentence="No sites yet — configure one from a scanned project on Home."
       button="Open Home" onAction={() => onNav("home")} />;
-  const selected = sites.find((s) => String(s.id) === String(selectedId));
+  const visible = sites.filter((s) => {
+    if (filter === "partner") return isPartnerSite(s);
+    if (filter === "mine") return !isPartnerSite(s);
+    return true;
+  });
+  const selected = visible.find((s) => String(s.id) === String(selectedId))
+    || sites.find((s) => String(s.id) === String(selectedId));
   return (
     <div style={{ padding: 16 }}>
-      {sites.map((s) => (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        {SITE_FILTERS.map((row) => (
+          <button key={row.id} style={{ ...box, opacity: filter === row.id ? 1 : 0.6 }}
+            onClick={() => setFilter(row.id)}>{row.label}</button>
+        ))}
+      </div>
+      {visible.map((s) => (
         <div key={s.id} style={{ ...box, marginBottom: 8, cursor: "pointer" }}
           role="button" tabIndex={0} onClick={() => onSelect(s.id)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.id); } }}>
           <strong>{s.name}</strong>{s.domain ? ` — ${s.domain}` : ""}{" "}
           <span style={{ color: "#8b949e" }}>({s.project})</span>{" "}
+          <PartnerBadge site={s} />{" "}
           <ManifestLine site={s} />
           <CertState site={s} />
           <AttackState site={s} />
@@ -321,6 +360,7 @@ export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }
 
 export default function Sites({ route, onNav }) {
   const [projects, setProjects] = useState(undefined);
+  const [partnerSiteIds, setPartnerSiteIds] = useState(() => new Set());
   const [error, setError] = useState("");
   const load = () => {
     setError("");
@@ -329,10 +369,21 @@ export default function Sites({ route, onNav }) {
       if (status === 200) setProjects(data);
       else setError(data.detail || `Could not load sites (HTTP ${status})`);
     });
+    api("v1/partners/").then(({ status, data }) => {
+      if (status !== 200) return;
+      const ids = new Set();
+      for (const partner of data.partners || []) {
+        for (const id of partner.site_ids || []) ids.add(id);
+      }
+      setPartnerSiteIds(ids);
+    });
   };
   useEffect(load, []);
   const phase = error ? "error" : projects === undefined ? "loading" : "live";
-  return <SitesView phase={phase} sites={flattenSites(projects)}
+  const sites = flattenSites(projects).map((s) => ({
+    ...s, partner: Boolean(s.partner || partnerSiteIds.has(s.id)),
+  }));
+  return <SitesView phase={phase} sites={sites}
     selectedId={route.id} onSelect={(id) => onNav("sites", id)}
     onError={{ text: error, retry: load }} onNav={onNav} />;
 }

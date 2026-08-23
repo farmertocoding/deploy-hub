@@ -22,4 +22,5 @@ ACTION_TIERS = (
     {"id": "ssh.rotate", "tier": "T1", "label": "Rotate SSH key"},
     {"id": "instance.create", "tier": "T1", "label": "Create target"},
     {"id": "instance.terminate", "tier": "T1", "label": "Terminate target"},
+    {"id": "partner.create", "tier": "T1", "label": "Create partner"},
 )

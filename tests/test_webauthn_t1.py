@@ -452,6 +452,7 @@ T1_HTTP = {
     "ssh.rotate": "/api/v1/targets/{pk}/ssh-rotate/",
     "instance.create": "/api/v1/instance/create/",
     "instance.terminate": "/api/v1/targets/{pk}/terminate/",
+    "partner.create": "/api/v1/partners/",
 }
 
 

@@ -262,6 +262,55 @@
     {
       "id": "enroll-degraded",
       "must_render": ["not connected", "HUB_AWS_CREDENTIALS_REF"]
+    },
+    {
+      "id": "partner-intake-empty",
+      "must_render": ["Create partner", "Fake", "No partners yet", "degraded"],
+      "intake": {
+        "status": "degraded", "mode": "fake", "configured": false
+      }
+    },
+    {
+      "id": "partner-intake-error",
+      "must_render": ["Intake error", "data as of", "Intake unreachable"],
+      "intake": {
+        "status": "error", "mode": "fake", "configured": false,
+        "as_of": "2026-08-24T02:03:04Z"
+      },
+      "finding": {
+        "id": 40, "source_engine": "intake", "severity": "p1",
+        "entity": "partner:fixture-partner",
+        "title": "Intake unreachable",
+        "body": "last successful intake probe is older than five minutes",
+        "fix_action": "Check HUB_INTAKE_URL; Fake intake stays degraded.",
+        "state": "open", "fingerprint": "partner-intake-unreachable",
+        "accepted_reason": ""
+      }
+    },
+    {
+      "id": "partner-intake-degraded",
+      "must_render": ["Fake", "degraded", "partner-site create will refuse", "fixture-partner"],
+      "partners": [
+        {
+          "id": 1, "slug": "fixture-partner", "name": "fixture-partner",
+          "destination_order": []
+        }
+      ],
+      "intake": {
+        "status": "degraded", "mode": "fake", "configured": false
+      }
+    },
+    {
+      "id": "partner-site",
+      "must_render": ["All", "Mine", "Partner", "◆ partner"],
+      "site": {
+        "id": 90, "name": "fixture-site",
+        "domain": "app.fixture-partner.test",
+        "project": "fixture-project",
+        "partner": true,
+        "latest_manifest_version": 1,
+        "manifest_current": true
+      }
     }
   ],
   "scripted_events": [
@@ -287,6 +336,10 @@
     {"t": 37, "state_id": "single-instance", "topic": "site.lab.status", "event": {"site": "lab.example.com", "instances": 1, "single_instance": true, "badge": "single-instance"}},
     {"t": 39, "state_id": "enroll-empty", "topic": "findings", "event": {"kind": "enroll", "state": "empty", "title": "No targets enrolled"}},
     {"t": 41, "state_id": "enroll-error", "topic": "findings", "event": {"kind": "enroll", "state": "error", "title": "Target create failed"}},
-    {"t": 43, "state_id": "enroll-degraded", "topic": "findings", "event": {"kind": "enroll", "state": "degraded", "title": "AWS is not connected"}}
+    {"t": 43, "state_id": "enroll-degraded", "topic": "findings", "event": {"kind": "enroll", "state": "degraded", "title": "AWS is not connected"}},
+    {"t": 45, "state_id": "partner-intake-empty", "topic": "findings", "event": {"kind": "partner-intake", "state": "empty", "title": "No partners yet"}},
+    {"t": 47, "state_id": "partner-intake-error", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 40, "severity": "p1", "state": "open", "entity": "partner:fixture-partner", "title": "Intake unreachable", "fingerprint": "partner-intake-unreachable"}},
+    {"t": 49, "state_id": "partner-intake-degraded", "topic": "findings", "event": {"kind": "partner-intake", "state": "degraded", "title": "Fake intake degraded"}},
+    {"t": 51, "state_id": "partner-site", "topic": "findings", "event": {"kind": "partner-site", "title": "partner site", "entity": "partner:fixture-partner"}}
   ]
 }

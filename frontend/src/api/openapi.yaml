@@ -444,6 +444,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/MapSnapshot'
           description: ''
+  /api/v1/partners/:
+    get:
+      operationId: v1_partners_retrieve
+      description: GET is the operator list (no secrets). POST is T1 partner.create.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerList'
+          description: ''
+    post:
+      operationId: v1_partners_create
+      description: GET is the operator list (no secrets). POST is T1 partner.create.
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PartnerCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PartnerCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerCreateResult'
+          description: ''
+  /api/v1/partners/{id}/:
+    get:
+      operationId: v1_partners_retrieve_2
+      description: GET never echoes hubk_ or whsec_.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerPublic'
+          description: ''
   /api/v1/projects/:
     get:
       operationId: v1_projects_list
@@ -1359,6 +1421,22 @@ components:
           type: string
       required:
       - confirm_name
+    IntakeStatus:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        mode:
+          $ref: '#/components/schemas/ModeEnum'
+        configured:
+          type: boolean
+        as_of:
+          type: string
+          nullable: true
+      required:
+      - configured
+      - mode
+      - status
     KindEnum:
       enum:
       - zone
@@ -1483,6 +1561,14 @@ components:
           type: boolean
       required:
       - authenticated
+    ModeEnum:
+      enum:
+      - fake
+      - configured
+      type: string
+      description: |-
+        * `fake` - fake
+        * `configured` - configured
     OriginCaPlant:
       type: object
       properties:
@@ -1499,6 +1585,79 @@ components:
           type: boolean
       required:
       - planted
+    PartnerCreate:
+      type: object
+      properties:
+        slug:
+          type: string
+          maxLength: 64
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          default: ''
+          maxLength: 128
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
+      - slug
+    PartnerCreateResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        name:
+          type: string
+        hubk:
+          type: string
+        whsec:
+          type: string
+      required:
+      - hubk
+      - id
+      - name
+      - slug
+      - whsec
+    PartnerList:
+      type: object
+      properties:
+        partners:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartnerPublic'
+        intake:
+          $ref: '#/components/schemas/IntakeStatus'
+      required:
+      - intake
+      - partners
+    PartnerPublic:
+      type: object
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        name:
+          type: string
+        destination_order:
+          type: array
+          items:
+            type: integer
+        suspended:
+          type: boolean
+        site_ids:
+          type: array
+          items:
+            type: integer
+      required:
+      - destination_order
+      - id
+      - name
+      - site_ids
+      - slug
+      - suspended
     PatchedAnswers:
       type: object
       properties:
@@ -1755,6 +1914,14 @@ components:
         * `acked` - Acked
         * `resolved` - Resolved
         * `accepted` - Accepted
+    StatusEnum:
+      enum:
+      - degraded
+      - error
+      type: string
+      description: |-
+        * `degraded` - degraded
+        * `error` - error
     TargetDelete:
       type: object
       properties:

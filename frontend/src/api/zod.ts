@@ -145,6 +145,48 @@ const MapGraph = z
 const MapSnapshot = z
   .object({ seq: z.number().int(), data: MapGraph })
   .passthrough();
+const PartnerPublic = z
+  .object({
+    id: z.number().int(),
+    slug: z.string(),
+    name: z.string(),
+    destination_order: z.array(z.number().int()),
+    suspended: z.boolean(),
+    site_ids: z.array(z.number().int()),
+  })
+  .passthrough();
+const StatusEnum = z.enum(["degraded", "error"]);
+const ModeEnum = z.enum(["fake", "configured"]);
+const IntakeStatus = z
+  .object({
+    status: StatusEnum,
+    mode: ModeEnum,
+    configured: z.boolean(),
+    as_of: z.string().nullish(),
+  })
+  .passthrough();
+const PartnerList = z
+  .object({ partners: z.array(PartnerPublic), intake: IntakeStatus })
+  .passthrough();
+const PartnerCreate = z
+  .object({
+    slug: z
+      .string()
+      .max(64)
+      .regex(/^[-a-zA-Z0-9_]+$/),
+    name: z.string().max(128).optional().default(""),
+    confirm_name: z.string(),
+  })
+  .passthrough();
+const PartnerCreateResult = z
+  .object({
+    id: z.number().int(),
+    slug: z.string(),
+    name: z.string(),
+    hubk: z.string(),
+    whsec: z.string(),
+  })
+  .passthrough();
 const CertRefusal = z
   .object({ detail: z.string(), finding_id: z.number().int() })
   .passthrough();
@@ -330,6 +372,13 @@ export const schemas = {
   MapEdge,
   MapGraph,
   MapSnapshot,
+  PartnerPublic,
+  StatusEnum,
+  ModeEnum,
+  IntakeStatus,
+  PartnerList,
+  PartnerCreate,
+  PartnerCreateResult,
   CertRefusal,
   AttackState,
   EdgeOwnerEnum,
