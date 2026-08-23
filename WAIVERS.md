@@ -107,12 +107,17 @@ WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials: HUB_TEST_CF_TOKEN is not se
 
 # Phase 3 exit (Task 19). Clause-scoped full-text ids (SCAN-M4 shape, D-035 /
 # D-040): the buildable clauses are marked on their split ids; these two sit
-# uncovered because a marker would claim the unbuilt clause. Adopt (Task 15)
-# slipped to Phase 3b (D-044). REL-P2 24 h and the D-022
-# checklist lines stay above. D-025 alpine PIPE-S4 is RETIRED (host-load).
-# UX-F8 and SEC-P5 stay RETIRED. Do not read a
+# uncovered because a marker would claim the unbuilt clause. REL-P2 24 h and
+# the D-022 checklist lines stay above. D-025 alpine PIPE-S4 is RETIRED
+# (host-load). UX-F8 and SEC-P5 stay RETIRED. Do not read a
 # MON-C7 or MAP-96 line here — both landed.
+# RETIRED 2026-08-23 (Phase 3b Task 9): PROV-J7-COMPOSE-AWARE-ADOPT
+# — tests/test_adopt_compose.py + tests/test_adopt_flow.py +
+# tests/acceptance/test_phase_3_5.py::test_compose_plan_is_one_v5_site
+# (T1 fakes; classify three fixture stacks to one V5 Site).
+# RETIRED 2026-08-23 (Phase 3b Task 9): PROV-E6-ADOPT-TEMP-SUBDOMAIN
+# — tests/test_adopt_flow.py + tests/test_adopt_reaper.py +
+# tests/acceptance/test_phase_3_5.py::test_temp_subdomain_on_site_zone_cleans_up
+# (T1 FakeDnsProvider; temp on Site.dns_zone; cleanup + 24 h reaper).
 WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemented: the full-text id names two clauses; SEC-B2-NO-TOKEN-ON-TARGET is proven by the target-bound surface scan (tests/test_no_token_exfiltration.py, unmarked here); Hub-central DNS-01 for unproxied sites is unbuilt and the honest interim is the named refusal (Finding + Sites-screen state). Retire when TLS-B2-HUB-DNS01-UNPROXIED (registered at phase 4; built in phase 4) is verified and the full-text markers go back on. (2026-08-23)
 WAIVED: UX-F5-ACTION-TIERS — T1 hardware-touch clause unimplemented: the full-text id names T1/T2/T3 friction; UX-F5-T2-T3-FRICTION is proven (frontend/src/actions.js + tests/acceptance/test_phase_3.py::test_rollback_is_one_click_and_never_step_up_gated); WebAuthn hardware touch for T1 is unbuilt (D-040). Retire when SEC-F5-T1-HARDWARE-TOUCH (phase 4) is verified and the full-text markers go back on. (2026-08-23)
-WAIVED: PROV-J7-COMPOSE-AWARE-ADOPT — uncovered: Task 15 adopt-existing-site slipped to Phase 3b (D-044 / panel ruling 5); five open spec holes remain in docs/phase-3-design-note.md §1.12 (compose-as-unit vs V5, compose source, temp-subdomain naming/zone, DB/volume pointer, Caddy-ownership record). Retire when Phase 3b ships compose-aware adopt with a marked test. (2026-08-23)
-WAIVED: PROV-E6-ADOPT-TEMP-SUBDOMAIN — uncovered: Task 15 slipped to Phase 3b with PROV-J7; temp-subdomain naming, which zone it lives in, and who cleans it up on an abandoned flip is design-note §1.12(c). Retire when Phase 3b answers that hole and a marked test proves the temp subdomain. (2026-08-23)
