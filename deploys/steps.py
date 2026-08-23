@@ -4,6 +4,7 @@ Reads Manifest.body only — never scanner. Builds run on the target Transport,
 never on the Hub docker daemon (§B1). Env files and vault markers stay out of
 the shipped context.
 """
+import base64
 import hashlib
 import io
 import json
@@ -62,25 +63,80 @@ def ensure_build(desired):
 
 
 def ensure_ship(desired):
-    """Probe the tag; docker load after put of an image archive only on miss."""
+    """Probe the tag; docker load on miss, or registry push then pull.
+
+    registry is None (default ship_mode load) is today's docker load.
+    A present ImageRegistry pushes the archive then the target pulls
+    with pull-only creds via a 0600 file — never password-on-argv.
+    """
     transport = desired["transport"]
-    body = desired["manifest_body"]
+    body = desired.get("manifest_body") or {}
     tag = image_tag(desired["git_sha"], body)
     if _image_present(transport, tag):
         return {"status": "skipped", "tag": tag}
 
+    registry = desired.get("registry")
+    if registry is None:
+        return _docker_load_image(desired, tag)
+    return _registry_ship(desired, tag, registry)
+
+
+def _docker_load_image(desired, tag):
+    transport = desired["transport"]
     user = ssh_user_from(desired)
     remote = desired.get("remote_context") or hub_join("build", tag, ssh_user=user)
     archive_path = f"{remote}.image.tar"
-    ensure_hub_dir(transport, user, desired.get("heartbeat"))
-    _run(transport, ["mkdir", "-p", str(Path(remote).parent)], desired.get("heartbeat"))
+    heartbeat = desired.get("heartbeat")
+    ensure_hub_dir(transport, user, heartbeat)
+    _run(transport, ["mkdir", "-p", str(Path(remote).parent)], heartbeat)
     transport.put(desired.get("image_archive", b""), archive_path)
     result = _run(
-        transport, ["docker", "load", "-i", archive_path], desired.get("heartbeat"),
+        transport, ["docker", "load", "-i", archive_path], heartbeat,
     )
     if not result.ok:
         raise RuntimeError(f"docker load failed: {result.stderr}")
     return {"status": "shipped", "tag": tag}
+
+
+def _registry_host(url):
+    text = str(url or "")
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    return text.split("/")[0].split("@")[-1]
+
+
+def _registry_ship(desired, tag, registry):
+    registry.push(tag, desired.get("image_archive", b""))
+    spec = registry.pull_spec(tag, target=desired.get("target"))
+    _registry_pull(desired, tag, spec)
+    return {"status": "shipped", "tag": tag}
+
+
+def _registry_pull(desired, tag, spec):
+    transport = desired["transport"]
+    user = ssh_user_from(desired)
+    heartbeat = desired.get("heartbeat")
+    url = spec["url"]
+    username = spec["username"]
+    password = spec["password"]
+    ensure_hub_dir(transport, user, heartbeat)
+    cred_dir = hub_join("registry-docker", tag, ssh_user=user)
+    _run(transport, ["mkdir", "-p", cred_dir], heartbeat)
+    auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+    payload = json.dumps(
+        {"auths": {_registry_host(url): {"auth": auth}}},
+        separators=(",", ":"),
+    )
+    transport.put(payload.encode(), f"{cred_dir}/config.json", mode=0o600)
+    result = _run(
+        transport, ["docker", "--config", cred_dir, "pull", url], heartbeat,
+    )
+    if not result.ok:
+        raise RuntimeError(f"docker pull failed: {result.stderr}")
+    if url != tag:
+        result = _run(transport, ["docker", "tag", url, tag], heartbeat)
+        if not result.ok:
+            raise RuntimeError(f"docker tag failed: {result.stderr}")
 
 
 def ensure_volume(desired):

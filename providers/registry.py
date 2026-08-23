@@ -285,3 +285,31 @@ def _file_scope_finding(zone, error, *, role="dns"):
         body=str(error),
         fix_action=fix,
     )
+
+
+def image_registry_for(desired=None):
+    """Return an ImageRegistry, or None so ensure_ship docker-loads.
+
+    Unconfigured (default ship_mode load) returns None — never an open
+    registry. A ship_mode=registry request is built in
+    providers.image_registry (fail-closed), not here.
+    """
+    desired = desired or {}
+    body = desired.get("manifest_body") or {}
+    raw = desired.get("ship_mode")
+    if raw is None:
+        raw = body.get("ship_mode")
+    mode = str(raw or "load").strip() or "load"
+    if mode == "load":
+        return None
+    from .image_registry import ImageRegistryError
+    from .image_registry import build as build_image_registry
+
+    if mode != "registry":
+        raise ScopeError(
+            f"unknown ship_mode {mode!r}; expected load or registry"
+        )
+    try:
+        return build_image_registry(desired)
+    except ImageRegistryError as error:
+        raise ScopeError(str(error)) from None

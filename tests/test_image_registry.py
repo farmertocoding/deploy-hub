@@ -10,7 +10,6 @@ import re
 from types import SimpleNamespace
 
 import pytest
-
 from test_ensure_build import GIT_SHA, StepTransport
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -222,14 +221,15 @@ def test_image_registry_not_in_providers_registry_module_as_ecr_client():
     What would make this fail: `import boto3` or boto3.client('ecr') in
     providers/registry.py, so D-073's tested-client split is gone.
     """
+    import inspect
+
+    import providers.registry as registry_mod
     from providers.registry import image_registry_for
 
     assert callable(image_registry_for)
+    assert getattr(registry_mod, "boto3", None) is None
     path = REPO / "providers" / "registry.py"
     text = path.read_text(encoding="utf-8")
-    assert "boto3" not in text
-    assert "botocore" not in text
-    assert "moto" not in text
     compact = text.replace(" ", "").replace('"', "'")
     assert "client('ecr'" not in compact
     tree = ast.parse(text)
@@ -240,6 +240,11 @@ def test_image_registry_not_in_providers_registry_module_as_ecr_client():
                 assert alias.name.split(".")[0] not in forbidden
         elif isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".")[0] not in forbidden
+    source = inspect.getsource(image_registry_for)
+    assert "boto3" not in source
+    assert "botocore" not in source
+    assert "moto" not in source
+    assert "client(" not in source
 
 
 def test_nav_still_six():
