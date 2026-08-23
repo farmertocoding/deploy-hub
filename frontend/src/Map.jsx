@@ -64,6 +64,25 @@ export function MapView({ graph, listView = false, onToggle }) {
   );
 }
 
+function FindingChips({ node, x, y }) {
+  // Optional topology chips: hash-router deep links, never a path the SPA
+  // does not mount. Severity is the label (not colour-only).
+  const items = node.findings || [];
+  if (!items.length) return null;
+  return (
+    <g data-kind="finding-chips">
+      {items.map((f, i) => (
+        <a key={f.id} href={`#/findings/${f.id}`}>
+          <text x={x + 8} y={y - 12 - i * 12} fill="#e3b341" fontSize="11"
+            data-finding-id={f.id}>
+            {String(f.severity || "").toUpperCase()}
+          </text>
+        </a>
+      ))}
+    </g>
+  );
+}
+
 function SvgGraph({ nodes, edges }) {
   const pos = layout(nodes);
   const width = Math.max(640, ...Object.values(pos).map((p) => (p.x || 0) + (p.w || 40) + 24));
@@ -97,6 +116,7 @@ function SvgGraph({ nodes, edges }) {
             <rect x={p.x - 16} y={p.y - 20} width={p.w} height={p.h}
               fill="none" stroke="#333" rx="6" />
             <NodeLabel node={n} x={p.x} y={p.y} />
+            <FindingChips node={n} x={p.x} y={p.y} />
           </g>
         );
       })}
@@ -106,6 +126,7 @@ function SvgGraph({ nodes, edges }) {
         return (
           <g key={n.id} data-kind={n.kind}>
             <NodeLabel node={n} x={p.x} y={p.y} />
+            <FindingChips node={n} x={p.x} y={p.y} />
             {chipFor[n.id] != null && (
               <text x={p.x} y={p.y + 16} fill="#8b949e" fontSize="11">
                 {chipFor[n.id]} containers
@@ -120,6 +141,7 @@ function SvgGraph({ nodes, edges }) {
         return (
           <g key={n.id} data-kind="container">
             <NodeLabel node={n} x={p.x} y={p.y} />
+            <FindingChips node={n} x={p.x} y={p.y} />
           </g>
         );
       })}

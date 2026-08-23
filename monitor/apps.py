@@ -14,24 +14,34 @@ class MonitorConfig(AppConfig):
 
         from core.models import NetworkZone, Site, SiteInstance, Target
 
-        from .map_graph import notify_graph_changed
+        from .map_graph import advise_topology, notify_graph_changed
 
-        # Collector/reconcile write cursors and payloads with update_fields;
-        # those are not topology. A full save (create, or save() with no
-        # update_fields) still publishes.
+        # Collector/reconcile write cursors with update_fields; those are not
+        # topology. collect_payload is the r3 T1 observation — re-evaluate
+        # without publishing map.graph (cursor stampede). A full save still
+        # publishes.
         _topology = {
             Target: {"host", "zone", "status", "lifecycle"},
             Site: {"name", "exposure", "primary_target", "domain"},
             SiteInstance: {"observed_state", "target", "site"},
             NetworkZone: {"name"},
         }
+        _advise = {
+            Target: {"collect_payload"},
+        }
 
         def _changed(sender, **kwargs):
             update_fields = kwargs.get("update_fields")
             relevant = _topology.get(sender)
-            if update_fields is not None and relevant is not None:
-                if not relevant.intersection(update_fields):
+            advise = _advise.get(sender, set())
+            if update_fields is not None:
+                fields = set(update_fields)
+                if relevant is not None and relevant.intersection(fields):
+                    notify_graph_changed()
                     return
+                if advise.intersection(fields):
+                    advise_topology()
+                return
             notify_graph_changed()
 
         for model in (NetworkZone, Target, Site, SiteInstance):
