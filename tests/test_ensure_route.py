@@ -328,3 +328,59 @@ def test_tls_load_files_merges_by_tag_and_restores_on_route_skip():
     assert not server_puts
     probes = [argv for kind, argv in transport.calls if kind == "probe"]
     assert any(any("/config/apps/tls" in str(part) for part in argv) for argv in probes)
+
+
+def _route_puts(transport):
+    """Host-Caddy route writes: JSON put + curl PUT to /servers/ or /id/."""
+    found = []
+    for kind, payload in transport.calls:
+        if kind == "put" and "caddy-site-" in str(payload):
+            found.append((kind, payload))
+        if kind == "run" and isinstance(payload, list) and "PUT" in payload:
+            if any(
+                "/servers/" in str(part) or "/id/" in str(part)
+                for part in payload
+            ) and not any("/config/apps/tls" in str(part) for part in payload):
+                found.append((kind, payload))
+    return found
+
+
+@pytest.mark.django_db
+def test_ensure_route_tls_records_zero_route_puts_when_edge_owner_is_site_caddy():
+    """ROUTE_TLS skips the host-Caddy PUT for site_caddy; host_caddy still PUTs.
+
+    What would make this fail: ensure_route_tls ignoring Site.edge_owner so a
+    later pipeline deploy still curls PUT /servers/site-{slug} for that domain.
+    """
+    from core.models import Project, Site
+    from deploys.steps import ensure_route_tls
+
+    project = Project.objects.create(name="edge-put", slug="edge-put")
+    owned = Site.objects.create(
+        project=project,
+        name="owned-caddy",
+        exposure=Site.Exposure.MESH_ONLY,
+        edge_owner=Site.EdgeOwner.SITE_CADDY,
+    )
+    host = Site.objects.create(
+        project=project,
+        name="host-caddy",
+        exposure=Site.Exposure.MESH_ONLY,
+        edge_owner=Site.EdgeOwner.HOST_CADDY,
+    )
+
+    owned_transport = RouteTransport()
+    owned_desired = _desired(owned_transport)
+    owned_desired["site"] = owned
+    owned_desired["site_slug"] = owned.name
+    ensure_route_tls(owned_desired)
+    assert _route_puts(owned_transport) == []
+    assert owned_transport.routes == {}
+
+    host_transport = RouteTransport()
+    host_desired = _desired(host_transport)
+    host_desired["site"] = host
+    host_desired["site_slug"] = host.name
+    ensure_route_tls(host_desired)
+    assert _route_puts(host_transport), "host_caddy ROUTE_TLS must still PUT the route"
+    assert f"site-{host.name}" in host_transport.routes

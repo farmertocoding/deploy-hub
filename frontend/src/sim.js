@@ -1505,6 +1505,92 @@ function findingsFixture(path) {
     : { status: 404, data: { detail: "Not found" } };
 }
 
+// §F3 first-run snapshots. Derived the same way GET /api/v1/first-run/ is:
+// Target / DnsAccount / origin_ca_key_ref / Project / first Site. No
+// unbound-public-Site fixture — that row is illegal (site_public_requires_dns_zone).
+const FIRST_RUN_EMPTY = {
+  owns_home: true,
+  items: [
+    { id: "enroll_target", applicable: true, done: false },
+    { id: "connect_cloudflare", applicable: true, done: false },
+    { id: "plant_origin_ca", applicable: false, done: false },
+    { id: "add_project", applicable: true, done: false },
+  ],
+};
+const FIRST_RUN_MID = {
+  owns_home: true,
+  items: [
+    { id: "enroll_target", applicable: true, done: true },
+    { id: "connect_cloudflare", applicable: true, done: false },
+    { id: "plant_origin_ca", applicable: false, done: false },
+    { id: "add_project", applicable: true, done: false },
+  ],
+};
+const FIRST_RUN_DONE = {
+  owns_home: false,
+  items: [
+    { id: "enroll_target", applicable: true, done: true },
+    { id: "connect_cloudflare", applicable: true, done: true },
+    { id: "plant_origin_ca", applicable: true, done: true },
+    { id: "add_project", applicable: true, done: true },
+  ],
+};
+
+function firstRunFixture(path, progress) {
+  if (path !== "v1/first-run/") return null;
+  return { status: 200, data: { seq: 1, data: progress } };
+}
+
+// Adopt simulation states (Task 8 / UX-F8 seed). Public sites are bound —
+// site_public_requires_dns_zone makes an unbound public Site illegal, so
+// there is no dns_zone: null fixture. cert_refusal is always emitted.
+function adoptSite(stage, extra = {}, adoptExtra = {}) {
+  return {
+    id: 11,
+    name: "shop",
+    domain: "shop.example.com",
+    latest_manifest_version: 1,
+    manifest_current: true,
+    cert_refusal: extra.cert_refusal !== undefined ? extra.cert_refusal : null,
+    edge_owner: extra.edge_owner || "site_caddy",
+    dns_zone: extra.dns_zone || "example.com",
+    exposure: extra.exposure || "public",
+    origin_ca_planted: extra.origin_ca_planted !== undefined
+      ? extra.origin_ca_planted : true,
+    adopt: {
+      stage,
+      temp_name: "",
+      classified: { web: "web", "site-owned edge": "caddy" },
+      volumes: ["pgdata"],
+      live_compose_path: null,
+      ...adoptExtra,
+    },
+  };
+}
+
+function adoptProjectsPayload(site) {
+  return [{
+    id: 11,
+    name: "adopt-shop",
+    slug: "adopt-shop",
+    scanned_at: "2026-08-23T00:00:00Z",
+    tiers: { blocker: 0, warning: 0, advice: 0, pending_sandbox: 0 },
+    sites: [site],
+  }];
+}
+
+function adoptStateFixture(site) {
+  return (path, body, method) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
+    if (firstRun) return firstRun;
+    if (path === "v1/projects/") return { status: 200, data: adoptProjectsPayload(site) };
+    if (/^v1\/sites\/\d+\/adopt\/$/.test(path) && method !== "GET") {
+      return { status: 202, data: { stage: site.adopt?.stage, slipped: true } };
+    }
+    return { status: 404, data: {} };
+  };
+}
+
 // The self-identified synthetic refusal, and the established pattern for one: `degraded`
 // answers the routes it does not cover with a `[sim]`-prefixed 503 rather than a sentence
 // invented here and attributed to the server. Same rule, different reason — this one is
@@ -1527,9 +1613,27 @@ const notCovered = (what) => ({
 export const SIM_FIXTURES = {
   // No projects at all — first-run experience.
   empty: (path) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_EMPTY);
+    if (firstRun) return firstRun;
     if (path === "v1/projects/") return { status: 200, data: [] };
     if (path === "v1/findings/") return { status: 200, data: { seq: 0, data: [] } };
     return { status: 404, data: {} };
+  },
+
+  // Target enrolled; CF / project still open. Plant is not applicable until a
+  // proxied public Site exists. Not an unbound public Site.
+  "mid-checklist": (path) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_MID);
+    if (firstRun) return firstRun;
+    if (path === "v1/projects/") return { status: 200, data: [] };
+    if (path === "v1/findings/") return { status: 200, data: { seq: 0, data: [] } };
+    return { status: 404, data: {} };
+  },
+
+  done: (path, body, method) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
+    if (firstRun) return firstRun;
+    return SIM_FIXTURES.live(path, body, method);
   },
 
   // THREE loading states, one per spinner, because there are three fetches in a chain
@@ -1548,6 +1652,8 @@ export const SIM_FIXTURES = {
   // Healthy data: a clean project that can materialize, a blocked one that cannot, and
   // one that can materialize only after the warnings are acknowledged.
   live: (path, body, method) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
+    if (firstRun) return firstRun;
     const findings = findingsFixture(path);
     if (findings) return findings;
     if (path === "v1/projects/")
@@ -1665,6 +1771,8 @@ export const SIM_FIXTURES = {
   // tree carrying the v3 it materialized against the previous one — R10-UX-F3: the
   // re-scan is what makes that manifest stale, and no manifest was created by it).
   degraded: (path, body, method) => {
+    const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
+    if (firstRun) return firstRun;
     if (path === "v1/projects/")
       return { status: 200, data: [UNSCANNED_PROJECT, RESCANNED_PROJECT] };
     if (path === "v1/projects/4/readiness/")
@@ -1689,6 +1797,21 @@ export const SIM_FIXTURES = {
 
   // The server is gone.
   error: () => ({ status: 0, data: { detail: "Cannot reach server — check your connection and retry." } }),
+
+  // Adopt stages. plan includes a populated cert_refusal so Sites CertState
+  // is reachable in this family; the others emit null like project_row_body.
+  plan: adoptStateFixture(adoptSite("plan", {
+    cert_refusal: {
+      detail: "shop.example.com is public with proxied=false.",
+      finding_id: 9,
+    },
+  })),
+  verify: adoptStateFixture(adoptSite("verify", {}, {
+    temp_name: "shop-adopt-abcd1234.example.com",
+  })),
+  flipped: adoptStateFixture(adoptSite("flip")),
+  abandoned: adoptStateFixture(adoptSite("abandoned")),
+  unplanted: adoptStateFixture(adoptSite("plan", { origin_ca_planted: false })),
 };
 
 SIM_FIXTURES.stale.reset = () => { staleRescanServed = false; };

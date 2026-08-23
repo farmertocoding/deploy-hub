@@ -255,7 +255,8 @@ def test_unproxied_refusal_is_a_finding_and_a_visible_site_state():
 
     row = Finding.objects.get()
     assert row.severity == Finding.Severity.P2
-    assert "Phase 3b" in row.fix_action
+    assert "phase 4" in row.fix_action.lower()
+    assert "3b" not in row.fix_action.lower()
     assert row.title and row.body and row.entity
 
     sites_src = (REPO / "frontend" / "src" / "screens" / "Sites.jsx").read_text(
@@ -926,12 +927,13 @@ def test_clause_scoped_full_text_ids_are_waived_not_marked():
     assert "hardware" in ux[0].lower() or "T1" in ux[0]
     assert "SEC-F5-T1-HARDWARE-TOUCH" in ux[0]
 
-    for rid in ADOPT_IDS:
-        lines = _waiver_lines(rid)
-        assert lines, f"{rid} must be waived — Task 15 slipped to Phase 3b"
-        assert "3b" in lines[0].lower() or "Phase 3b" in lines[0]
-
     text = _waivers()
+    for rid in ADOPT_IDS:
+        assert not any(line.startswith(f"WAIVED: {rid} ") for line in text.splitlines()), (
+            f"{rid} was retired by Phase 3b Task 9 on T1 fakes"
+        )
+        assert "RETIRED 2026-08-23 (Phase 3b Task 9)" in text
+        assert rid in text
     assert "UX-F8-SIMULATION-STATES" in text
     assert "RETIRED 2026-08-22 (Task 13)" in text
     assert "SEC-P5" in text

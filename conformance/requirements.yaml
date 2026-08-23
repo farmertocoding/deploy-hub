@@ -552,7 +552,7 @@ requirements:
   # Task 15 sits on the may-slip line (D-044); if it slips, this id needs a
   # waiver or a phase bump at exit — the D-020 precedent.
   - id: PROV-J7-COMPOSE-AWARE-ADOPT
-    phase: 3
+    phase: 3.5
     verify: test
     source: claude/project-inventory.md cross-cutting finding 3 (J7)
     text: The adopt-existing-site flow understands compose stacks with sidecar processes (worker, beat, scheduler, one-shot migrate) and site-owned edge containers, not just single containers.
@@ -907,7 +907,7 @@ requirements:
       edges and a list-view toggle; zone nodes are NetworkZone, never DnsZone,
       and status is never colour-only (D-041).
   - id: PROV-E6-ADOPT-TEMP-SUBDOMAIN
-    phase: 3
+    phase: 3.5
     verify: test
     source: plan-addendum-2026-07-30.md §E6
     text_hash: sha256:e3b4c27253b89708b191c62032aba493919e2dc40926e0c8c7dc3c341a498f86
@@ -931,3 +931,58 @@ requirements:
       test zone, Origin cert push, the P1 open/ack/repeat/recover cycle,
       grouped P2s, host-down suppression, the digest, map v1, dead-man and
       canary, with the receiver registration as a dated artifact.
+
+  # ── Phase 3.5 (docs/phase-3b-design-note.md §3, Task 0 / D-047…D-053).
+  # Adopt ids above bump to 3.5 (text:/text_hash: untouched). New ids are
+  # tier-less (no `tier:` key; QE I4). TLS-B2-HUB-DNS01-UNPROXIED stays
+  # phase 4. New ids sit `uncovered` until later 3b tasks land proofs.
+  - id: DNS-SITE-ZONE-BIND
+    phase: 3.5
+    verify: test
+    source: phase-3b-design-note.md §3
+    text_hash: sha256:9a3817da1102d505eab2f43e3c452e294d70e0b5e613960937be2c39e8d306dd
+    text: >
+      Public Site create binds Site.dns_zone to one matching-purpose eligible
+      zone (purpose=prod, or purpose=test under HUB_TEST_MODE plus a name on
+      HUB_TEST_ZONE_SLUGS). One eligible zone auto-binds; several require body
+      dns_zone; zero eligible is 409 with zero Project, Site, and Finding
+      rows. site-dns-unbound is illegal. Mesh-only may omit the FK. Site has
+      no tier (D-047, D-053).
+  - id: TLS-B2-ORIGIN-CA-PLANT
+    phase: 3.5
+    verify: test
+    source: phase-3b-design-note.md §3
+    text_hash: sha256:9a3817da1102d505eab2f43e3c452e294d70e0b5e613960937be2c39e8d306dd
+    text: >
+      Origin-CA plant is a Hub-local file read: POST body {path} only, and
+      path must resolve inside an Origin-CA subdir
+      (/etc/deploy-hub/origin-ca/ or /var/lib/deploy-hub/origin-ca/). Vault
+      shape is API_TOKEN / owner_type=dns_account / owner_id=ref. Key bytes
+      never enter the browser, the connect form, Findings, Manifest,
+      CheckRun, or any deploys/ payload. Test-plane plant stays
+      HUB_TEST_ORIGIN_CA_KEY; do not invent HUB_TEST_CF_TOKEN (D-047, D-053).
+  - id: UX-F3-FIRST-RUN-CHECKLIST
+    phase: 3.5
+    verify: test
+    source: phase-3b-design-note.md §3
+    text_hash: sha256:9a3817da1102d505eab2f43e3c452e294d70e0b5e613960937be2c39e8d306dd
+    text: >
+      The first-run checklist owns Home until applicable items are done:
+      enroll first target, connect Cloudflare (skip when the first site is
+      mesh_only), plant Origin-CA (skip for mesh-only / unproxied-until-
+      refused), then add a project (the POST that binds dns_zone and
+      primary_target). After that, Home is today's map + fleet (D-047).
+  - id: P3B-ADOPT-DEMO
+    phase: 3.5
+    verify: demo
+    source: phase-3b-design-note.md §4
+    demo:
+      - conformance/demos/phase-3.5.md
+    text_hash: sha256:09275704d3f15e7d434b38d17ff47a6a59cfe8b50e7103dc363291dd2592e138
+    text: >
+      The phase-3.5 exit demo is recorded under conformance/demos/phase-3.5.md
+      - connect Cloudflare, plant Origin-CA, POST /api/v1/projects/ binds
+      Site.dns_zone and primary_target, the F3 card leaves Home, occupied-
+      host adopt, temp subdomain (public) or mesh-only verify-without-temp,
+      verify-before-flip, live stays up until flip, abandon cleanup, volumes
+      registered and never docker volume rm (D-047).

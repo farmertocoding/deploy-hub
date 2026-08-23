@@ -1,0 +1,48 @@
+# J7 shape: web + Celery worker + beat + one-shot migrate + pointer db/cache.
+services:
+  web:
+    image: invoicing:prod
+    ports:
+      - "8080:8000"
+    volumes:
+      - media:/app/media
+    environment:
+      DATABASE_URL: postgres://adopt:super-secret-db-url@db:5432/app
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+  worker:
+    image: invoicing:prod
+    command: celery -A invoicing worker
+    depends_on:
+      - db
+      - redis
+  beat:
+    image: invoicing:prod
+    command: celery -A invoicing beat
+    depends_on:
+      - db
+      - redis
+  migrate:
+    image: invoicing:prod
+    command: python manage.py migrate --noinput
+    restart: "no"
+    depends_on:
+      - db
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: adopt
+      POSTGRES_PASSWORD: super-secret-db-url
+      DATABASE_URL: postgres://adopt:super-secret-db-url@db:5432/app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+    environment:
+      REDIS_URL: redis://redis:6379/0
+volumes:
+  pgdata:
+  media:

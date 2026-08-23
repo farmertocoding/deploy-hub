@@ -167,6 +167,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/CloudflareConnectResult'
           description: ''
+  /api/v1/dns-accounts/{account_id}/origin-ca-plant/:
+    post:
+      operationId: v1_dns_accounts_origin_ca_plant_create
+      parameters:
+      - in: path
+        name: account_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OriginCaPlant'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OriginCaPlantResult'
+          description: ''
   /api/v1/findings/:
     get:
       operationId: v1_findings_retrieve
@@ -268,6 +300,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/FindingDetailSnapshot'
           description: ''
+  /api/v1/first-run/:
+    get:
+      operationId: v1_first_run_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FirstRunSnapshot'
+          description: ''
   /api/v1/map/:
     get:
       operationId: v1_map_retrieve
@@ -294,6 +340,9 @@ paths:
         can answer honestly: does the latest manifest correspond to the CURRENT scan?
         (A true warnings-diff-since-last-manifest would need the prior report stored,
         which it isn't — noted in the F7 design decision rather than faked.)
+
+        POST creates Project + Site in one transaction and binds dns_zone /
+        primary_target from the eligible fleet (I-purpose / I-target).
       tags:
       - v1
       security:
@@ -306,6 +355,42 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProjectSummary'
+          description: ''
+    post:
+      operationId: v1_projects_create
+      description: |-
+        What the readiness screen renders its left column from (F7-lite).
+
+        tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+        projects grow. manifest_current answers the one freshness question the data model
+        can answer honestly: does the latest manifest correspond to the CURRENT scan?
+        (A true warnings-diff-since-last-manifest would need the prior report stored,
+        which it isn't — noted in the F7 design decision rather than faked.)
+
+        POST creates Project + Site in one transaction and binds dns_zone /
+        primary_target from the eligible fleet (I-purpose / I-target).
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSummary'
           description: ''
   /api/v1/projects/{project_id}/readiness/:
     get:
@@ -331,6 +416,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Readiness'
+          description: ''
+  /api/v1/sites/{site_id}/:
+    patch:
+      operationId: v1_sites_partial_update
+      description: Record the operator's Caddy-ownership decision. Never writes dns_zone.
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSiteEdgeOwner'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSiteEdgeOwner'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSiteEdgeOwner'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteEdgeOwner'
           description: ''
   /api/v1/sites/{site_id}/env/:
     get:
@@ -664,6 +781,14 @@ components:
       required:
       - id
       - name
+    EdgeOwnerEnum:
+      enum:
+      - host_caddy
+      - site_caddy
+      type: string
+      description: |-
+        * `host_caddy` - Host Caddy
+        * `site_caddy` - Site Caddy
     EnvApply:
       type: object
       properties:
@@ -694,6 +819,14 @@ components:
           description: name -> value. Values are write-only and stored in the vault.
       required:
       - env
+    ExposureEnum:
+      enum:
+      - public
+      - mesh_only
+      type: string
+      description: |-
+        * `public` - Public
+        * `mesh_only` - Mesh Only
     Finding:
       type: object
       properties:
@@ -759,6 +892,53 @@ components:
       required:
       - data
       - seq
+    FirstRunItem:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/IdEnum'
+        applicable:
+          type: boolean
+        done:
+          type: boolean
+      required:
+      - applicable
+      - done
+      - id
+    FirstRunProgress:
+      type: object
+      properties:
+        owns_home:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirstRunItem'
+      required:
+      - items
+      - owns_home
+    FirstRunSnapshot:
+      type: object
+      properties:
+        seq:
+          type: integer
+        data:
+          $ref: '#/components/schemas/FirstRunProgress'
+      required:
+      - data
+      - seq
+    IdEnum:
+      enum:
+      - enroll_target
+      - connect_cloudflare
+      - plant_origin_ca
+      - add_project
+      type: string
+      description: |-
+        * `enroll_target` - enroll_target
+        * `connect_cloudflare` - connect_cloudflare
+        * `plant_origin_ca` - plant_origin_ca
+        * `add_project` - add_project
     KindEnum:
       enum:
       - zone
@@ -865,6 +1045,22 @@ components:
         confirm_warnings:
           type: boolean
           default: false
+    OriginCaPlant:
+      type: object
+      properties:
+        path:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - path
+    OriginCaPlantResult:
+      type: object
+      properties:
+        planted:
+          type: boolean
+      required:
+      - planted
     PatchedAnswers:
       type: object
       properties:
@@ -884,6 +1080,12 @@ components:
             type: string
           writeOnly: true
           description: name -> value. Values are write-only and stored in the vault.
+    PatchedSiteEdgeOwner:
+      type: object
+      description: PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge).
+      properties:
+        edge_owner:
+          $ref: '#/components/schemas/EdgeOwnerEnum'
     PathEnum:
       enum:
       - public
@@ -892,6 +1094,40 @@ components:
       description: |-
         * `public` - public
         * `mesh` - mesh
+    ProjectCreate:
+      type: object
+      description: POST /api/v1/projects/ — Project + Site in one transaction (I-target).
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        git_url:
+          type: string
+          default: ''
+        git_ref:
+          type: string
+          default: main
+        local_path:
+          type: string
+          default: ''
+        domain:
+          type: string
+          default: ''
+        exposure:
+          allOf:
+          - $ref: '#/components/schemas/ExposureEnum'
+          default: public
+        proxied:
+          type: boolean
+          default: true
+        dns_zone:
+          type: integer
+          nullable: true
+        primary_target:
+          type: integer
+          nullable: true
+      required:
+      - name
     ProjectSummary:
       type: object
       properties:
@@ -1020,6 +1256,14 @@ components:
         * `p1` - P1
         * `p2` - P2
         * `p3` - P3
+    SiteEdgeOwner:
+      type: object
+      description: PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge).
+      properties:
+        edge_owner:
+          $ref: '#/components/schemas/EdgeOwnerEnum'
+      required:
+      - edge_owner
     SiteSummary:
       type: object
       properties:
@@ -1039,6 +1283,8 @@ components:
           allOf:
           - $ref: '#/components/schemas/CertRefusal'
           nullable: true
+        edge_owner:
+          $ref: '#/components/schemas/EdgeOwnerEnum'
       required:
       - domain
       - id

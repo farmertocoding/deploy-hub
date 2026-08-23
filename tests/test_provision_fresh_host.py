@@ -44,6 +44,43 @@ def test_occupied_80_refuses_with_explanation():
 
 
 @pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_occupied_80_refuses_and_names_adopt():
+    """Occupied 80 still refuses provision; copy points at adoption_plan / adopt.
+
+    What would make this fail: proceeding anyway, or a refuse that is a dead
+    end — no adoption_plan, no adopt flow, no Phase 3b.
+    """
+    from provision.service import provision_host
+
+    transport = _ss("LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\n")
+    result = provision_host(_target(), transport)
+    assert result.allowed is False
+    assert "80" in result.explanation
+    assert "occupied" in result.explanation.lower()
+    assert "adoption_plan" in result.explanation
+    assert "adopt flow" in result.explanation.lower()
+    assert "Phase 3b" in result.explanation
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
+def test_occupied_host_does_not_provision():
+    """Occupied 80 is not a fresh host: refuse, and do not provision.
+
+    What would make this fail: a mutating Transport call, writing
+    AppliedCatalogEntry, or treating occupied 80 as a provision path.
+    """
+    from catalog.models import AppliedCatalogEntry
+    from provision.service import provision_host
+
+    transport = _ss("LISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\n")
+    result = provision_host(_target(), transport)
+    assert result.allowed is False
+    assert transport.mutating_calls() == []
+    assert AppliedCatalogEntry.objects.count() == 0
+    assert all(kind == "probe" for kind, _ in transport.calls)
+
+
+@pytest.mark.req("PROV-E6-FRESH-HOST-GUARD")
 def test_occupied_443_refuses():
     """Port 443 occupied must refuse. :4430 / :8080 are not 443 / 80.
 

@@ -1,6 +1,9 @@
 """Wizard API (§4.5: serializers are the source of truth; the TS client + zod schemas
 are generated from them and `make check-generated` keeps the mirror honest)."""
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.exceptions import ValidationError
@@ -9,7 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.exception_handlers import django_validation_to_drf_detail
-from core.models import Project, Site
+from core.models import DnsZone, Project, Site, Target
+from core.validators import validate_domain
 
 from . import service
 from .materialize import MaterializeRefused, materialize, preflight, warnings_for
@@ -192,6 +196,11 @@ class SiteSummarySerializer(serializers.Serializer):
     latest_manifest_version = serializers.IntegerField(allow_null=True)
     manifest_current = serializers.BooleanField(allow_null=True)
     cert_refusal = CertRefusalSerializer(allow_null=True, required=False)
+    # Always emitted by project_row_body (default host_caddy). required=False
+    # so older sim list rows still parse; omit is not the live shape.
+    edge_owner = serializers.ChoiceField(
+        choices=Site.EdgeOwner.choices, required=False,
+    )
 
 
 class ProjectSummarySerializer(serializers.Serializer):
@@ -269,6 +278,7 @@ def project_row_body(project):
                 {"detail": refused.body or refused.title, "finding_id": refused.pk}
                 if refused else None
             ),
+            "edge_owner": site.edge_owner,
         })
     return ProjectSummarySerializer({
         "id": project.pk, "name": project.name, "slug": project.slug,
@@ -282,6 +292,110 @@ def project_row_body(project):
     }).data
 
 
+class ProjectCreateSerializer(serializers.Serializer):
+    """POST /api/v1/projects/ — Project + Site in one transaction (I-target)."""
+
+    name = serializers.CharField(max_length=128)
+    git_url = serializers.CharField(required=False, allow_blank=True, default="")
+    git_ref = serializers.CharField(required=False, allow_blank=True, default="main")
+    local_path = serializers.CharField(required=False, allow_blank=True, default="")
+    domain = serializers.CharField(required=False, allow_blank=True, default="")
+    exposure = serializers.ChoiceField(
+        choices=Site.Exposure.choices, required=False, default=Site.Exposure.PUBLIC,
+    )
+    proxied = serializers.BooleanField(required=False, default=True)
+    dns_zone = serializers.IntegerField(required=False, allow_null=True, default=None)
+    primary_target = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+    def validate(self, attrs):
+        git_url = (attrs.get("git_url") or "").strip()
+        local_path = (attrs.get("local_path") or "").strip()
+        if bool(git_url) == bool(local_path):
+            raise serializers.ValidationError(
+                {"non_field_errors": "provide git_url or local_path, not both"}
+            )
+        attrs["git_url"] = git_url
+        attrs["local_path"] = local_path
+        if not (attrs.get("git_ref") or "").strip():
+            attrs["git_ref"] = "main"
+        exposure = attrs.get("exposure") or Site.Exposure.PUBLIC
+        domain = (attrs.get("domain") or "").strip()
+        if exposure != Site.Exposure.MESH_ONLY and not domain:
+            raise serializers.ValidationError(
+                {"domain": "a public site requires a non-blank domain"}
+            )
+        if domain:
+            try:
+                domain = validate_domain(domain)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(
+                    django_validation_to_drf_detail(exc)
+                ) from exc
+        attrs["domain"] = domain
+        return attrs
+
+
+def _fleet_refuse(field, message):
+    """409 = well-formed body, fleet state cannot bind (I-target)."""
+    return Response(
+        {"errors": {field: [{"code": "conflict", "message": message, "hint": ""}]}},
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def eligible_dns_zones():
+    """purpose=prod, or purpose=test under the test-plane triple key (I-purpose)."""
+    from django.db.models import Q
+
+    prod = Q(purpose=DnsZone.Purpose.PROD)
+    if getattr(settings, "HUB_TEST_MODE", False):
+        slugs = list(getattr(settings, "HUB_TEST_ZONE_SLUGS", None) or [])
+        return DnsZone.objects.filter(
+            prod | Q(purpose=DnsZone.Purpose.TEST, name__in=slugs)
+        )
+    return DnsZone.objects.filter(prod)
+
+
+def _bind_dns_zone(exposure, requested_pk):
+    eligible = list(eligible_dns_zones())
+    if requested_pk is not None:
+        match = next((zone for zone in eligible if zone.pk == requested_pk), None)
+        if match is None:
+            return None, _fleet_refuse(
+                "dns_zone", "requested zone is not an eligible public zone",
+            )
+        return match, None
+    if exposure == Site.Exposure.MESH_ONLY:
+        return None, None
+    if len(eligible) == 1:
+        return eligible[0], None
+    if not eligible:
+        return None, _fleet_refuse(
+            "dns_zone", "no eligible DNS zone is connected",
+        )
+    return None, _fleet_refuse(
+        "dns_zone", "several eligible zones; dns_zone is required",
+    )
+
+
+def _bind_primary_target(requested_pk):
+    enrolled = list(Target.objects.all())
+    if requested_pk is not None:
+        match = next((row for row in enrolled if row.pk == requested_pk), None)
+        if match is None:
+            raise ValidationError(
+                {"primary_target": "primary_target must be an enrolled Target"}
+            )
+        return match, None
+    if len(enrolled) == 1:
+        return enrolled[0], None
+    if not enrolled:
+        return None, _fleet_refuse("primary_target", "no enrolled target")
+    return None, _fleet_refuse(
+        "primary_target", "several targets; primary_target is required",
+    )
+
+
 class ProjectListView(APIView):
     """What the readiness screen renders its left column from (F7-lite).
 
@@ -290,6 +404,9 @@ class ProjectListView(APIView):
     can answer honestly: does the latest manifest correspond to the CURRENT scan?
     (A true warnings-diff-since-last-manifest would need the prior report stored,
     which it isn't — noted in the F7 design decision rather than faked.)
+
+    POST creates Project + Site in one transaction and binds dns_zone /
+    primary_target from the eligible fleet (I-purpose / I-target).
     """
 
     @extend_schema(responses={200: ProjectSummarySerializer(many=True)})
@@ -298,6 +415,55 @@ class ProjectListView(APIView):
             project_row_body(project)
             for project in Project.objects.order_by("name").prefetch_related("sites")
         ])
+
+    @extend_schema(
+        request=ProjectCreateSerializer, responses={201: ProjectSummarySerializer},
+    )
+    def post(self, request):
+        ser = ProjectCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        zone, refuse = _bind_dns_zone(data["exposure"], data.get("dns_zone"))
+        if refuse is not None:
+            return refuse
+        target, refuse = _bind_primary_target(data.get("primary_target"))
+        if refuse is not None:
+            return refuse
+
+        slug = slugify(data["name"])
+        if not slug:
+            raise ValidationError({"name": "name must produce a slug"})
+        source_kind = (
+            Project.Source.LOCAL_PATH if data["local_path"] else Project.Source.GIT
+        )
+        try:
+            with transaction.atomic():
+                project = Project(
+                    name=data["name"],
+                    slug=slug,
+                    source_kind=source_kind,
+                    git_url=data["git_url"],
+                    git_ref=data["git_ref"],
+                    local_path=data["local_path"],
+                    created_by=request.user,
+                )
+                project.full_clean()
+                project.save()
+                site = Site(
+                    project=project,
+                    name=data["name"],
+                    domain=data["domain"],
+                    exposure=data["exposure"],
+                    proxied=data["proxied"],
+                    dns_zone=zone,
+                    primary_target=target,
+                    created_by=request.user,
+                )
+                site.full_clean()
+                site.save()
+        except DjangoValidationError as exc:
+            raise ValidationError(django_validation_to_drf_detail(exc)) from exc
+        return Response(project_row_body(project), status=status.HTTP_201_CREATED)
 
 
 class ReadinessView(APIView):
@@ -311,3 +477,39 @@ class ReadinessView(APIView):
     def get(self, request, project_id):
         project = get_object_or_404(Project, pk=project_id)
         return Response(readiness_body(project.scan_report, project.scanned_at))
+
+
+class SiteEdgeOwnerSerializer(serializers.Serializer):
+    """PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge)."""
+
+    edge_owner = serializers.ChoiceField(choices=Site.EdgeOwner.choices)
+
+    def to_internal_value(self, data):
+        extra = set(getattr(data, "keys", lambda: [])()) - {"edge_owner"}
+        if extra:
+            raise ValidationError({
+                field: "this endpoint accepts edge_owner only" for field in extra
+            })
+        return super().to_internal_value(data)
+
+
+class SiteEdgeOwnerView(APIView):
+    """Record the operator's Caddy-ownership decision. Never writes dns_zone."""
+
+    @extend_schema(
+        request=SiteEdgeOwnerSerializer,
+        responses={200: SiteEdgeOwnerSerializer},
+    )
+    def patch(self, request, site_id):
+        from provision.adopt import apply_edge_owner
+
+        site = get_object_or_404(Site, pk=site_id)
+        payload = SiteEdgeOwnerSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        apply_edge_owner(
+            site,
+            payload.validated_data["edge_owner"],
+            actor=request.user,
+        )
+        site.refresh_from_db()
+        return Response(SiteEdgeOwnerSerializer({"edge_owner": site.edge_owner}).data)

@@ -28,15 +28,26 @@ export async function connectCloudflare(token) {
   return api("v1/cloudflare/connect/", { token });
 }
 
+export async function plantOriginCa(accountId, path) {
+  return api(`v1/dns-accounts/${accountId}/origin-ca-plant/`, { path });
+}
+
 export function CloudflarePanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [accountId, setAccountId] = useState(null);
+  const [planted, setPlanted] = useState(false);
+  const [plantBusy, setPlantBusy] = useState(false);
   const {
     register, handleSubmit, setError, reset, clearErrors,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schemas.CloudflareConnect),
     defaultValues: { token: "" },
+  });
+  const plantForm = useForm({
+    resolver: zodResolver(schemas.OriginCaPlant),
+    defaultValues: { path: "" },
   });
 
   async function submit(values) {
@@ -48,12 +59,33 @@ export function CloudflarePanel() {
     setBusy(false);
     if (status === 201) {
       const parsed = schemas.CloudflareConnectResult.safeParse(data);
-      setResult(parsed.success ? parsed.data : data);
+      const body = parsed.success ? parsed.data : data;
+      setResult(body);
+      setAccountId(body.account?.id ?? null);
+      setPlanted(false);
       reset({ token: "" });
       return;
     }
     const field = Object.values(data.errors ?? {}).flat()[0];
     setError("token", {
+      type: field?.code ?? String(status),
+      message: field?.message ?? data.detail ?? `Unexpected ${status} response.`,
+    });
+  }
+
+  async function submitPlant(values) {
+    if (plantBusy || accountId == null) return;
+    setPlantBusy(true);
+    plantForm.clearErrors();
+    const { status, data } = await plantOriginCa(accountId, values.path);
+    setPlantBusy(false);
+    if (status === 200) {
+      const parsed = schemas.OriginCaPlantResult.safeParse(data);
+      setPlanted(parsed.success ? parsed.data.planted : Boolean(data.planted));
+      return;
+    }
+    const field = Object.values(data.errors ?? {}).flat()[0];
+    plantForm.setError("path", {
       type: field?.code ?? String(status),
       message: field?.message ?? data.detail ?? `Unexpected ${status} response.`,
     });
@@ -84,6 +116,27 @@ export function CloudflarePanel() {
         <div style={{ color: "#7ee787", marginTop: 8 }}>
           Connected {result.account?.label} — zone {result.zone?.name}
           {result.zone?.purpose ? ` (${result.zone.purpose})` : ""}.
+        </div>
+      )}
+      <h3 style={{ marginTop: 24 }}>Origin-CA plant</h3>
+      <p>Plant status: {planted ? "planted" : "not planted"}. Hub-local path
+        only — under <code>/etc/deploy-hub/origin-ca/</code> or
+        <code>/var/lib/deploy-hub/origin-ca/</code>. The Hub reads the file;
+        do not paste key bytes here.</p>
+      <form onSubmit={plantForm.handleSubmit(submitPlant)}
+        style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+          <small>path</small>
+          <input type="text" {...plantForm.register("path")} style={box}
+            autoComplete="off" aria-invalid={!!plantForm.formState.errors.path} />
+        </label>
+        <button style={{ padding: 8 }} disabled={plantForm.formState.isSubmitting || plantBusy}>
+          {plantBusy ? "Planting…" : "Plant"}
+        </button>
+      </form>
+      {plantForm.formState.errors.path && (
+        <div style={{ color: "#ff7b72", marginTop: 8 }}>
+          {plantForm.formState.errors.path.message}
         </div>
       )}
     </div>

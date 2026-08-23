@@ -38,6 +38,8 @@ const DnsZoneConnected = z
 const CloudflareConnectResult = z
   .object({ account: DnsAccountConnected, zone: DnsZoneConnected })
   .passthrough();
+const OriginCaPlant = z.object({ path: z.string().min(1) }).passthrough();
+const OriginCaPlantResult = z.object({ planted: z.boolean() }).passthrough();
 const SeverityEnum = z.enum(["p1", "p2", "p3"]);
 const StateEnum = z.enum(["open", "acked", "resolved", "accepted"]);
 const Finding = z
@@ -69,6 +71,21 @@ const Transition = z
     reason: z.string().max(256).optional().default(""),
   })
   .passthrough();
+const IdEnum = z.enum([
+  "enroll_target",
+  "connect_cloudflare",
+  "plant_origin_ca",
+  "add_project",
+]);
+const FirstRunItem = z
+  .object({ id: IdEnum, applicable: z.boolean(), done: z.boolean() })
+  .passthrough();
+const FirstRunProgress = z
+  .object({ owns_home: z.boolean(), items: z.array(FirstRunItem) })
+  .passthrough();
+const FirstRunSnapshot = z
+  .object({ seq: z.number().int(), data: FirstRunProgress })
+  .passthrough();
 const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
 const MapNode = z
   .object({
@@ -92,6 +109,7 @@ const MapSnapshot = z
 const CertRefusal = z
   .object({ detail: z.string(), finding_id: z.number().int() })
   .passthrough();
+const EdgeOwnerEnum = z.enum(["host_caddy", "site_caddy"]);
 const SiteSummary = z
   .object({
     id: z.number().int(),
@@ -100,6 +118,7 @@ const SiteSummary = z
     latest_manifest_version: z.number().int().nullable(),
     manifest_current: z.boolean().nullable(),
     cert_refusal: CertRefusal.nullish(),
+    edge_owner: EdgeOwnerEnum.optional(),
   })
   .passthrough();
 const ProjectSummary = z
@@ -110,6 +129,20 @@ const ProjectSummary = z
     scanned_at: z.string().datetime({ offset: true }).nullable(),
     tiers: z.record(z.number().int()),
     sites: z.array(SiteSummary),
+  })
+  .passthrough();
+const ExposureEnum = z.enum(["public", "mesh_only"]);
+const ProjectCreate = z
+  .object({
+    name: z.string().max(128),
+    git_url: z.string().optional().default(""),
+    git_ref: z.string().optional().default("main"),
+    local_path: z.string().optional().default(""),
+    domain: z.string().optional().default(""),
+    exposure: ExposureEnum.optional().default("public"),
+    proxied: z.boolean().optional().default(true),
+    dns_zone: z.number().int().nullish(),
+    primary_target: z.number().int().nullish(),
   })
   .passthrough();
 const Readiness = z
@@ -123,6 +156,11 @@ const Readiness = z
     pending_sandbox: z.array(z.object({}).partial().passthrough()),
   })
   .passthrough();
+const PatchedSiteEdgeOwner = z
+  .object({ edge_owner: EdgeOwnerEnum })
+  .partial()
+  .passthrough();
+const SiteEdgeOwner = z.object({ edge_owner: EdgeOwnerEnum }).passthrough();
 const EnvNames = z
   .object({ names: z.array(z.string()), config_stale: z.boolean() })
   .passthrough();
@@ -185,6 +223,8 @@ export const schemas = {
   PurposeEnum,
   DnsZoneConnected,
   CloudflareConnectResult,
+  OriginCaPlant,
+  OriginCaPlantResult,
   SeverityEnum,
   StateEnum,
   Finding,
@@ -192,6 +232,10 @@ export const schemas = {
   FindingDetailSnapshot,
   ActionEnum,
   Transition,
+  IdEnum,
+  FirstRunItem,
+  FirstRunProgress,
+  FirstRunSnapshot,
   KindEnum,
   MapNode,
   PathEnum,
@@ -199,9 +243,14 @@ export const schemas = {
   MapGraph,
   MapSnapshot,
   CertRefusal,
+  EdgeOwnerEnum,
   SiteSummary,
   ProjectSummary,
+  ExposureEnum,
+  ProjectCreate,
   Readiness,
+  PatchedSiteEdgeOwner,
+  SiteEdgeOwner,
   EnvNames,
   EnvApply,
   EnvWrite,

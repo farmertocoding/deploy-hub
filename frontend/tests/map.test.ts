@@ -133,5 +133,5 @@ test("home_fleet_map_subscribes_to_map_graph", async () => {
   assert.match(homeSrc, /<MapPanel width=\{width\} events=\{events\} \/>/);
   assert.match(homeSrc, /<FleetMap graph=\{graph\} events=\{events\} \/>/);
   const appSrc = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-  assert.match(appSrc, /<Home width=\{width\} events=\{events\} \/>/);
+  assert.match(appSrc, /<Home width=\{width\} events=\{events\} onNav=\{onNav\} \/>/);
 });

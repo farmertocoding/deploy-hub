@@ -37,6 +37,16 @@ export const ACTION_TIERS = [
     "label": "Toggle auto-mode"
   },
   {
+    "id": "site.adopt.start",
+    "tier": "T2",
+    "label": "Start adopt"
+  },
+  {
+    "id": "site.adopt.cancel",
+    "tier": "T2",
+    "label": "Cancel adopt"
+  },
+  {
     "id": "demo.launch",
     "tier": "T2",
     "label": "Launch demo job"

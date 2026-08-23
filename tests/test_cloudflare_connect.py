@@ -250,3 +250,29 @@ def test_failed_row_create_revokes_the_vaulted_secret(client, monkeypatch):
     assert DnsAccount.objects.count() == 1
     assert DnsZone.objects.count() == 1
     assert Secret.objects.filter(owner_type="dns_account").count() == 0
+
+
+def test_connect_stays_dns_token_only_and_ignores_an_origin_ca_key(client, monkeypatch):
+    """12b does not grow an Origin-CA paste. Extra key fields are not stored.
+
+    What would make this fail: a connect serializer field that vaults
+    origin_ca_key, or echoing those bytes in the 201 body.
+    """
+    from core.models import DnsAccount
+    from vault.models import Secret
+
+    _enrolled_client(client)
+    _http(monkeypatch)
+    marker = "t1-connect-must-not-vault-this-origin-ca-key"
+    response = client.post(
+        CONNECT,
+        {"token": TOKEN, "origin_ca_key": marker},
+        content_type="application/json",
+    )
+    assert response.status_code == 201, response.content
+    assert marker not in response.content.decode()
+    account = DnsAccount.objects.get()
+    assert account.dns_token_ref
+    assert account.origin_ca_key_ref == ""
+    assert Secret.objects.filter(owner_type="dns_account").count() == 1
+    assert Secret.objects.get(owner_id=account.dns_token_ref).kind == Secret.Kind.API_TOKEN

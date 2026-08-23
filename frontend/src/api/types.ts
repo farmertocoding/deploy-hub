@@ -143,6 +143,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dns-accounts/{account_id}/origin-ca-plant/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_dns_accounts_origin_ca_plant_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/findings/": {
         parameters: {
             query?: never;
@@ -191,6 +207,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/first-run/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_first_run_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/map/": {
         parameters: {
             query?: never;
@@ -223,10 +255,25 @@ export interface paths {
          *     can answer honestly: does the latest manifest correspond to the CURRENT scan?
          *     (A true warnings-diff-since-last-manifest would need the prior report stored,
          *     which it isn't — noted in the F7 design decision rather than faked.)
+         *
+         *     POST creates Project + Site in one transaction and binds dns_zone /
+         *     primary_target from the eligible fleet (I-purpose / I-target).
          */
         get: operations["v1_projects_list"];
         put?: never;
-        post?: never;
+        /**
+         * @description What the readiness screen renders its left column from (F7-lite).
+         *
+         *     tier COUNTS here, full check bodies from /readiness/ — the list stays cheap when
+         *     projects grow. manifest_current answers the one freshness question the data model
+         *     can answer honestly: does the latest manifest correspond to the CURRENT scan?
+         *     (A true warnings-diff-since-last-manifest would need the prior report stored,
+         *     which it isn't — noted in the F7 design decision rather than faked.)
+         *
+         *     POST creates Project + Site in one transaction and binds dns_zone /
+         *     primary_target from the eligible fleet (I-purpose / I-target).
+         */
+        post: operations["v1_projects_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -253,6 +300,23 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Record the operator's Caddy-ownership decision. Never writes dns_zone. */
+        patch: operations["v1_sites_partial_update"];
         trace?: never;
     };
     "/api/v1/sites/{site_id}/env/": {
@@ -374,6 +438,12 @@ export interface components {
             provider_zone_id?: string;
             purpose?: components["schemas"]["PurposeEnum"];
         };
+        /**
+         * @description * `host_caddy` - Host Caddy
+         *     * `site_caddy` - Site Caddy
+         * @enum {string}
+         */
+        EdgeOwnerEnum: "host_caddy" | "site_caddy";
         EnvApply: {
             deployment_id: number;
         };
@@ -387,6 +457,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * @description * `public` - Public
+         *     * `mesh_only` - Mesh Only
+         * @enum {string}
+         */
+        ExposureEnum: "public" | "mesh_only";
         Finding: {
             readonly id: number;
             source_engine: string;
@@ -411,6 +487,27 @@ export interface components {
             seq: number;
             data: components["schemas"]["Finding"][];
         };
+        FirstRunItem: {
+            id: components["schemas"]["IdEnum"];
+            applicable: boolean;
+            done: boolean;
+        };
+        FirstRunProgress: {
+            owns_home: boolean;
+            items: components["schemas"]["FirstRunItem"][];
+        };
+        FirstRunSnapshot: {
+            seq: number;
+            data: components["schemas"]["FirstRunProgress"];
+        };
+        /**
+         * @description * `enroll_target` - enroll_target
+         *     * `connect_cloudflare` - connect_cloudflare
+         *     * `plant_origin_ca` - plant_origin_ca
+         *     * `add_project` - add_project
+         * @enum {string}
+         */
+        IdEnum: "enroll_target" | "connect_cloudflare" | "plant_origin_ca" | "add_project";
         /**
          * @description * `zone` - zone
          *     * `host` - host
@@ -457,6 +554,12 @@ export interface components {
             /** @default false */
             confirm_warnings: boolean;
         };
+        OriginCaPlant: {
+            path: string;
+        };
+        OriginCaPlantResult: {
+            planted: boolean;
+        };
         PatchedAnswers: {
             /** @description question id -> answer. Partial sets are fine; the wizard saves as you go. */
             answers: {
@@ -469,12 +572,34 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge). */
+        PatchedSiteEdgeOwner: {
+            edge_owner?: components["schemas"]["EdgeOwnerEnum"];
+        };
         /**
          * @description * `public` - public
          *     * `mesh` - mesh
          * @enum {string}
          */
         PathEnum: "public" | "mesh";
+        /** @description POST /api/v1/projects/ — Project + Site in one transaction (I-target). */
+        ProjectCreate: {
+            name: string;
+            /** @default  */
+            git_url: string;
+            /** @default main */
+            git_ref: string;
+            /** @default  */
+            local_path: string;
+            /** @default  */
+            domain: string;
+            /** @default public */
+            exposure: components["schemas"]["ExposureEnum"];
+            /** @default true */
+            proxied: boolean;
+            dns_zone?: number | null;
+            primary_target?: number | null;
+        };
         ProjectSummary: {
             id: number;
             name: string;
@@ -537,6 +662,10 @@ export interface components {
          * @enum {string}
          */
         SeverityEnum: "p1" | "p2" | "p3";
+        /** @description PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge). */
+        SiteEdgeOwner: {
+            edge_owner: components["schemas"]["EdgeOwnerEnum"];
+        };
         SiteSummary: {
             id: number;
             name: string;
@@ -544,6 +673,7 @@ export interface components {
             latest_manifest_version: number | null;
             manifest_current: boolean | null;
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
+            edge_owner?: components["schemas"]["EdgeOwnerEnum"];
         };
         /**
          * @description * `open` - Open
@@ -760,6 +890,33 @@ export interface operations {
             };
         };
     };
+    v1_dns_accounts_origin_ca_plant_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OriginCaPlant"];
+                "application/x-www-form-urlencoded": components["schemas"]["OriginCaPlant"];
+                "multipart/form-data": components["schemas"]["OriginCaPlant"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OriginCaPlantResult"];
+                };
+            };
+        };
+    };
     v1_findings_retrieve: {
         parameters: {
             query?: {
@@ -842,6 +999,25 @@ export interface operations {
             };
         };
     };
+    v1_first_run_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstRunSnapshot"];
+                };
+            };
+        };
+    };
     v1_map_retrieve: {
         parameters: {
             query?: never;
@@ -880,6 +1056,31 @@ export interface operations {
             };
         };
     };
+    v1_projects_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["ProjectCreate"];
+                "multipart/form-data": components["schemas"]["ProjectCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"];
+                };
+            };
+        };
+    };
     v1_projects_readiness_retrieve: {
         parameters: {
             query?: never;
@@ -897,6 +1098,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    v1_sites_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedSiteEdgeOwner"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedSiteEdgeOwner"];
+                "multipart/form-data": components["schemas"]["PatchedSiteEdgeOwner"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteEdgeOwner"];
                 };
             };
         };
