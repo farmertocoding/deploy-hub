@@ -285,6 +285,57 @@ def test_results_have_refs_never_secret():
     assert "secret_access_key" not in json.dumps(drifted.results)
 
 
+def _ec2_run(region=None):
+    stmt = {
+        "Effect": "Allow",
+        "Action": "ec2:RunInstances",
+        "Resource": "*",
+    }
+    if region is not None:
+        stmt["Condition"] = {
+            "StringEquals": {"aws:RequestedRegion": region},
+        }
+    return {"Version": "2012-10-17", "Statement": [stmt]}
+
+
+@pytest.mark.req("AWS-IAM-ALLOWLIST")
+def test_daily_audit_uses_observe_region_not_empty_test_plane_list():
+    """A C4 EC2 user pinned to the audit region is clean in prod.
+
+    What would make this fail: forwarding HUB_TEST_AWS_REGIONS (prod default
+    []) as refuse_iam_scope allowed_regions so a valid RunInstances +
+    aws:RequestedRegion Hub user is a perpetual aws-scope P2. Construction
+    observe defaults allowed_regions to (region_name,); the Beat must too.
+    """
+    from core.models import CheckRun
+    from providers.aws_creds import FakeIam
+
+    prod = {"HUB_TEST_AWS_REGIONS": [], "HUB_TEST_MODE": False}
+    run = _audit(
+        iam=FakeIam(inline=[{"name": "c4-ec2", "document": _ec2_run("us-east-1")}]),
+        **prod,
+    )
+    assert run.kind == CheckRun.Kind.AWS_IAM_SCOPE
+    assert run.status == CheckRun.Status.SUCCEEDED
+    assert run.results.get("drift") in (None, "")
+    assert _findings().count() == 0
+
+    unbounded = _audit(
+        iam=FakeIam(inline=[{"name": "ec2-any", "document": _ec2_run()}]),
+        **prod,
+    )
+    assert unbounded.results.get("drift")
+    assert _findings().filter(fingerprint=f"aws-scope:{ACCOUNT}").exists()
+
+    _findings().delete()
+    off = _audit(
+        iam=FakeIam(inline=[{"name": "ec2-eu", "document": _ec2_run("eu-west-1")}]),
+        **prod,
+    )
+    assert off.results.get("drift")
+    assert _findings().filter(fingerprint=f"aws-scope:{ACCOUNT}").exists()
+
+
 def test_aws_iam_audit_tests_do_not_import_boto3():
     """This module never imports boto3/moto; the tested client is the helper.
 
