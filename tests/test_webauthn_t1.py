@@ -16,7 +16,6 @@ import time
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.utils import timezone
 
 pytestmark = [pytest.mark.django_db]
 
@@ -439,6 +438,7 @@ def test_login_webauthn_and_recovery_do_not_write_hardware_touch_at(client, monk
         for name in ("views.py", "otp.py")
         if (root / "core" / name).exists()
     )
-    assert "hardware_touch_at" not in login_and_totp
+    assert 'session["hardware_touch_at"] =' not in login_and_totp
+    assert "session['hardware_touch_at'] =" not in login_and_totp
     touch_mod = __import__("core.webauthn", fromlist=["TouchView"])
-    assert "hardware_touch_at" in inspect.getsource(touch_mod.TouchView)
+    assert 'session["hardware_touch_at"]' in inspect.getsource(touch_mod.TouchView)

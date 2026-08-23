@@ -1,8 +1,9 @@
-"""TOTP enrollment endpoints (§6.10 mandatory-2FA; WebAuthn joins in Phase 4).
+"""TOTP enrollment endpoints (§6.10). WebAuthn is primary; TOTP is Settings fallback.
 
 Flow: POST enroll → unconfirmed device + otpauth URI + QR SVG → user scans →
 POST confirm with a live code → device confirmed + one-time recovery codes
 (shown exactly once, stored as sha256 hashes in core.RecoveryCode — never plaintext).
+WebAuthn first-enroll also calls issue_recovery_codes(replace=False).
 """
 import hashlib
 import io
@@ -62,10 +63,7 @@ class ConfirmView(APIView):
 
     @extend_schema(request=ConfirmSerializer, responses={200: dict})
     def post(self, request):
-        from django.utils.crypto import get_random_string
         from django_otp.plugins.otp_totp.models import TOTPDevice
-
-        from .models import RecoveryCode
 
         ser = ConfirmSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -79,24 +77,35 @@ class ConfirmView(APIView):
         device.confirmed = True
         device.save(update_fields=["confirmed"])
 
-        # Recovery codes: shown once, usable once each (§6.10 resilience rules);
-        # only sha256 hashes are stored (round-1 finding: plaintext at rest).
-        RecoveryCode.objects.filter(user=request.user).delete()
-        # 16 chars over a 31-symbol alphabet ≈ 79 bits: enough that a leaked
-        # sha256 table can't be brute-forced offline (round-2 finding — 10 chars
-        # was ~50 bits, GPU-feasible).
-        codes = [get_random_string(16, "abcdefghjkmnpqrstuvwxyz23456789")
-                 for _ in range(RECOVERY_CODE_COUNT)]
-        RecoveryCode.objects.bulk_create(
-            [RecoveryCode(user=request.user, code_hash=hash_recovery_code(c))
-             for c in codes]
-        )
+        codes = issue_recovery_codes(request.user, replace=True)
         audit("totp_enrolled", source="api", actor=request.user, severity="security")
         return Response({"enrolled": True, "recovery_codes": codes})
 
 
 def hash_recovery_code(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def issue_recovery_codes(user, *, replace=True):
+    """Create hashed recovery codes. replace=False is a no-op if any already exist
+    so a second passkey does not rotate the once-shown list.
+    """
+    from django.utils.crypto import get_random_string
+
+    from .models import RecoveryCode
+
+    if not replace and RecoveryCode.objects.filter(user=user).exists():
+        return None
+    RecoveryCode.objects.filter(user=user).delete()
+    # 16 chars over a 31-symbol alphabet ≈ 79 bits: enough that a leaked
+    # sha256 table can't be brute-forced offline (round-2 finding — 10 chars
+    # was ~50 bits, GPU-feasible).
+    codes = [get_random_string(16, "abcdefghjkmnpqrstuvwxyz23456789")
+             for _ in range(RECOVERY_CODE_COUNT)]
+    RecoveryCode.objects.bulk_create(
+        [RecoveryCode(user=user, code_hash=hash_recovery_code(c)) for c in codes]
+    )
+    return codes
 
 
 def consume_recovery_code(user, raw):

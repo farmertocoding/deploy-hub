@@ -45,7 +45,10 @@ def test_me_hydrates_session_and_bootstraps_anonymous(client):
     TOTPDevice.objects.create(user=u, name="phone", confirmed=True)
     client.login(username="joseph", password="a-long-dev-password")
     r = client.get("/api/auth/me/")
-    assert r.json() == {"authenticated": True, "username": "joseph", "otp_enrolled": True}
+    body = r.json()
+    assert body["authenticated"] is True
+    assert body["username"] == "joseph"
+    assert body["otp_enrolled"] is True
 
 
 @pytest.mark.req("P0-LOGIN")

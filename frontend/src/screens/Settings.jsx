@@ -19,6 +19,7 @@ import { ConfirmDialog } from "../Tiers.jsx";
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
 export const SETTINGS_TABS = [
+  { id: "security", label: "Security" },
   { id: "cloudflare", label: "Cloudflare" },
   { id: "developer", label: "Developer" },
   { id: "vault", label: "Vault" },
@@ -143,8 +144,65 @@ export function CloudflarePanel() {
   );
 }
 
+export function SecurityPanel({ user }) {
+  const [qr, setQr] = useState(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [recovery, setRecovery] = useState(null);
+
+  async function startTotp() {
+    const { status, data } = await api("auth/totp/enroll/", {});
+    if (status === 201) setQr(data);
+    else setError(data.detail || "TOTP enrollment failed to start");
+  }
+  async function confirmTotp(e) {
+    e.preventDefault();
+    const { status, data } = await api("auth/totp/confirm/", { otp_code: code });
+    if (status === 200) setRecovery(data.recovery_codes);
+    else setError(data.detail || "Code did not verify");
+  }
+  async function addPasskey() {
+    const begin = await api("auth/webauthn/registration/begin/", {});
+    if (begin.status !== 200) {
+      setError(begin.data.detail || "Passkey enrollment failed to start");
+      return;
+    }
+    await api("auth/webauthn/registration/complete/", { name: "phone", id: "phone" });
+  }
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <h2>Security</h2>
+      <p>Passkeys are primary. TOTP is a fallback for login, never for T1.</p>
+      <p style={{ color: "#8b949e" }}>
+        Signed in as {user?.username}. T1 needs two passkeys
+        {user?.webauthn_count != null ? ` (enrolled: ${user.webauthn_count})` : ""}.
+      </p>
+      <button style={{ padding: 8, marginRight: 8 }} onClick={addPasskey}>
+        Add a passkey
+      </button>
+      <h3>Authenticator app (fallback)</h3>
+      {!qr ? (
+        <button style={{ padding: 8 }} onClick={startTotp}>Enroll TOTP</button>
+      ) : (
+        <form onSubmit={confirmTotp} style={{ display: "grid", gap: 8 }}>
+          <div style={{ background: "#fff", padding: 12, width: "fit-content" }}
+            dangerouslySetInnerHTML={{ __html: qr.qr_svg }} />
+          <input style={box} aria-label="6-digit code" placeholder="6-digit code"
+            value={code} onChange={(e) => setCode(e.target.value)} />
+          <button style={{ padding: 8 }}>Confirm TOTP</button>
+        </form>
+      )}
+      {recovery && (
+        <pre style={{ ...box, lineHeight: 1.8 }}>{recovery.join("\n")}</pre>
+      )}
+      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+    </div>
+  );
+}
+
 export default function Settings({ user, events }) {
-  const [tab, setTab] = useState("cloudflare");
+  const [tab, setTab] = useState("security");
   return (
     <div style={{ padding: 16 }}>
       <nav style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -153,6 +211,7 @@ export default function Settings({ user, events }) {
             onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </nav>
+      {tab === "security" && <SecurityPanel user={user} />}
       {tab === "cloudflare" && <CloudflarePanel />}
       {tab === "developer" && <DemoPanel user={user} events={events} />}
       {tab === "vault" && (

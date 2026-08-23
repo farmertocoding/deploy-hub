@@ -37,11 +37,32 @@ export function UndoToast({ label, seconds, onUndo }) {
   );
 }
 
+export function T1Overlay({ label, onTouch, onConfirm, onDismiss }) {
+  const [name, setName] = useState("");
+  return (
+    <div role="dialog" aria-label={`${label} step-up`}
+      style={{ ...box, marginTop: 8, borderColor: "#ff7b72", maxWidth: "100%" }}>
+      <p style={{ marginTop: 0 }}>
+        Type the name and touch a security key. TOTP cannot satisfy this.
+      </p>
+      <input aria-label="type the name" value={name} style={box}
+        placeholder="type the name"
+        onChange={(e) => setName(e.target.value)} />
+      <div style={{ marginTop: 8 }}>
+        <button style={{ ...box, marginRight: 8 }} onClick={onTouch}>
+          Touch security key</button>
+        <button style={{ ...box, marginRight: 8 }}
+          onClick={() => onConfirm({ name })}>Confirm — {label}</button>
+        <button style={box} onClick={onDismiss}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // One control per action, friction decided by the table row and nothing local:
 // T3 renders a single button that runs on click and offers UndoToast; T2 renders a
-// button that opens ConfirmDialog with the caller's `summary`; T1 renders a disabled
-// control carrying its refusal as visible text (disabledBox reasoning from
-// Readiness.jsx: an inline style overrides :disabled, so disabled must LOOK disabled).
+// button that opens ConfirmDialog with the caller's `summary`; T1 opens the
+// type-the-name + hardware-touch overlay (SEC-F5-T1-HARDWARE-TOUCH).
 export function ActionButton({ row, summary, onRun, onUndo }) {
   const [state, setState] = useState({ phase: "idle" });
   // The runner is one-shot (it owns the tier state machine for this control's
@@ -61,13 +82,20 @@ export function ActionButton({ row, summary, onRun, onUndo }) {
     onState: setState,
   }));
   const p = presentation(row);
-  if (p.stepUp === "deferred") {
+  if (p.stepUp === "required") {
     return (
-      <span>
-        <button style={{ ...box, color: "#6e7681", background: "#15181e",
-          borderColor: "#2a2e35", cursor: "not-allowed" }} disabled>{row.label}</button>
-        {" "}<small style={{ color: "#8b949e" }}>
-          requires step-up — lands in Phase 4</small>
+      <span style={{ marginRight: 8 }}>
+        <button style={box} onClick={() => runner.click({ expected: row.label })}>
+          {row.label}</button>
+        {state.phase === "steppingUp" && (
+          <T1Overlay label={row.label}
+            onTouch={() => runner.touch()}
+            onConfirm={(payload) => runner.confirmStepUp(payload)}
+            onDismiss={() => runner.dismiss()} />
+        )}
+        {state.phase === "refused" && (
+          <small style={{ color: "#ff7b72" }}> {state.reason}</small>
+        )}
       </span>
     );
   }

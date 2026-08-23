@@ -916,7 +916,7 @@ def test_clause_scoped_full_text_ids_are_waived_not_marked():
 
     markers = check.collect_markers(REPO)
     assert FULL_TEXT_SEC_B2 not in markers
-    assert FULL_TEXT_UX_F5 not in markers
+    assert FULL_TEXT_UX_F5 in markers
 
     sec = _waiver_lines(FULL_TEXT_SEC_B2)
     assert sec, f"{FULL_TEXT_SEC_B2} must have a clause-scoped WAIVED line"
@@ -924,9 +924,8 @@ def test_clause_scoped_full_text_ids_are_waived_not_marked():
     assert "TLS-B2-HUB-DNS01-UNPROXIED" in sec[0]
 
     ux = _waiver_lines(FULL_TEXT_UX_F5)
-    assert ux, f"{FULL_TEXT_UX_F5} must have a clause-scoped WAIVED line"
-    assert "hardware" in ux[0].lower() or "T1" in ux[0]
-    assert "SEC-F5-T1-HARDWARE-TOUCH" in ux[0]
+    assert not ux, f"{FULL_TEXT_UX_F5} waiver retires with the hardware clause"
+    assert "RETIRED 2026-08-23 (Phase 4 Task 2): UX-F5-ACTION-TIERS" in _waivers()
 
     text = _waivers()
     for rid in ADOPT_IDS:
