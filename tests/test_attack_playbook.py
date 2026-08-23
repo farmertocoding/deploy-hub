@@ -133,6 +133,15 @@ def _class_or_func_source(path, *, class_name=None, func_name=None):
     return ""
 
 
+def _attr_loads(source, name):
+    """True when `source` reads `.name` (docstrings mentioning the field do not count)."""
+    tree = ast.parse(source)
+    return any(
+        isinstance(node, ast.Attribute) and node.attr == name
+        for node in ast.walk(tree)
+    )
+
+
 def _package_imports_name(package, needle):
     hits = []
     root = REPO / package
@@ -345,8 +354,8 @@ def test_dns_client_never_loads_edge_token_ref(monkeypatch):
     ctor_src = _class_or_func_source(
         REPO / "providers" / "registry.py", func_name="dns_provider_for",
     )
-    assert "edge_token_ref" not in dns_src
-    assert "edge_token_ref" not in ctor_src
+    assert not _attr_loads(dns_src, "edge_token_ref")
+    assert not _attr_loads(ctor_src, "edge_token_ref")
 
     site = _world("l5-dns-wall", dns_token=DNS_TOKEN, edge_token=EDGE_TOKEN)
     zone = site.dns_zone
@@ -376,8 +385,8 @@ def test_edge_client_never_loads_dns_token_ref(monkeypatch):
     ctor_src = _class_or_func_source(
         REPO / "providers" / "registry.py", func_name="edge_protection_for",
     )
-    assert "dns_token_ref" not in edge_src
-    assert "dns_token_ref" not in ctor_src
+    assert not _attr_loads(edge_src, "dns_token_ref")
+    assert not _attr_loads(ctor_src, "dns_token_ref")
 
     site = _world("l5-edge-wall", dns_token=DNS_TOKEN, edge_token=EDGE_TOKEN)
     zone = site.dns_zone

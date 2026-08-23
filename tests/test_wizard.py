@@ -1325,10 +1325,10 @@ def test_issue_r11_a1_the_project_row_wire_output_is_unchanged(auth_client):
     assert row["sites"] == [
         {"id": first.pk, "name": "prod", "domain": "p.example.com",
          "latest_manifest_version": None, "manifest_current": None,
-         "cert_refusal": None, "edge_owner": "host_caddy"},
+         "cert_refusal": None, "attack_state": None, "edge_owner": "host_caddy"},
         {"id": first.pk + 1, "name": "staging", "domain": "",
          "latest_manifest_version": None, "manifest_current": None,
-         "cert_refusal": None, "edge_owner": "host_caddy"},
+         "cert_refusal": None, "attack_state": None, "edge_owner": "host_caddy"},
     ]
 
 

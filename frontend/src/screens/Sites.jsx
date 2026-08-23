@@ -102,6 +102,24 @@ export function CertState({ site }) {
   );
 }
 
+// Attack playbook as a SITE STATE, CertState twin (D-057 / C3): Under-Attack
+// is visible, and a missing edge ref is a degraded notify-only line, never
+// silent. Task 7 must not rewrite this component.
+export function AttackState({ site }) {
+  if (!site.attack_state) return null;
+  const degraded = site.attack_state.mode === "notify_only";
+  const label = degraded
+    ? `⚠ Attack playbook notify-only: ${safeText(site.attack_state.detail)}`
+    : `⛔ Under attack: ${safeText(site.attack_state.detail)}`;
+  return (
+    <p style={{ color: degraded ? "#e3b341" : "#ff7b72", margin: "4px 0" }}>
+      {label}{" "}
+      <a href={routeHash("findings", site.attack_state.finding_id)}
+        style={{ color: "#79c0ff" }}>View finding</a>
+    </p>
+  );
+}
+
 // Adopt plan on the site detail: edge_owner is a Site column (D-052), shown
 // here and never prompted per run. Start/cancel are T2 because the start
 // confirm names the flip + decommission. No /srv/sites walk — the path field
@@ -180,6 +198,7 @@ export function SiteStatus({ site, actions = [], onRun = () => {}, onUndo = () =
       <div><ManifestLine site={site} /></div>
       <div><SiteObserved site={site} /></div>
       <CertState site={site} />
+      <AttackState site={site} />
       {(site.edge_owner || site.adopt) && (
         <AdoptPlan site={site} liveComposePath={liveComposePath}
           onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />
@@ -214,6 +233,7 @@ export function SitesView({ phase, sites, selectedId, onSelect, onError, onNav }
           <span style={{ color: "#8b949e" }}>({s.project})</span>{" "}
           <ManifestLine site={s} />
           <CertState site={s} />
+          <AttackState site={s} />
         </div>
       ))}
       {selected && (

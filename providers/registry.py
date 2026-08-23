@@ -1,4 +1,5 @@
-"""dns_provider_for(zone) — the ONLY DNS-client construction path (D-033).
+"""dns_provider_for(zone) and edge_protection_for(zone) — the ONLY Cloudflare
+client constructors (D-033, D-057).
 
 Scope is enforced synchronously, before the client is usable (D-034 panel r2):
 
@@ -34,6 +35,7 @@ from core.test_mode import assert_test_zone
 from . import cloudflare
 from .cloudflare import (
     CloudflareDnsProvider,
+    CloudflareEdge,
     CloudflareError,
     refuse_global_api_key,
 )
@@ -105,10 +107,12 @@ def _purpose_wall(zone):
         )
 
 
-def _load_token(ref):
+def _load_token(ref, *, reason="dns scope verification"):
     """Resolve a vault owner-id ref (the Target.ssh_key_ref pattern) to the
     newest dns_account api_token secret, returning (secret_pk, token_bytes).
-    The pk feeds the verification-cache key so rotation re-probes."""
+    The pk feeds the verification-cache key so rotation re-probes. The caller
+    chooses which DnsAccount ref to pass — this helper never reads
+    dns_token_ref or edge_token_ref itself (D-057)."""
     from vault import service as vault_service
     from vault.models import Secret
 
@@ -121,7 +125,7 @@ def _load_token(ref):
     )
     if secret is None:
         raise ScopeError(f"no api_token secret in the vault for ref {ref!r}")
-    return secret.pk, vault_service.get(secret, reason="dns scope verification")
+    return secret.pk, vault_service.get(secret, reason=reason)
 
 
 def _verify_scope(token, zone):
@@ -194,7 +198,49 @@ def _load_origin_ca_key(ref):
     return secret.pk, vault_service.get(secret, reason="origin ca issue")
 
 
-def _file_scope_finding(zone, error):
+def edge_protection_for(zone, *, now=time.monotonic, ttl_s=VERIFY_TTL_S):
+    """Build the product EdgeProtection client for a DnsZone, or None.
+
+    Absent edge_token_ref returns None so the playbook can degrade to
+    notify-only (C3). A present ref is fail-closed like dns_provider_for:
+    Bearer-only, active token, one-zone probe. Never loads the DNS token ref.
+    """
+    if zone is None:
+        return None
+    account = zone.account
+    ref = account.edge_token_ref
+    if not ref:
+        return None
+    _purpose_wall(zone)
+    if account.provider != "cloudflare":
+        raise ScopeError(
+            f"no edge protection adapter for provider {account.provider!r}"
+        )
+    secret_pk, raw = _load_token(ref, reason="edge scope verification")
+    try:
+        token = refuse_global_api_key(raw)
+    except CloudflareError as error:
+        raise ScopeError(str(error)) from None
+
+    key = ("edge", ref, secret_pk, zone.pk)
+    stamp = _verified.get(key)
+    if stamp is None or now() - stamp >= ttl_s:
+        _verified.pop(key, None)
+        try:
+            _verify_scope(token, zone)
+        except (ScopeError, CloudflareError) as error:
+            _file_scope_finding(zone, error, role="edge")
+            if isinstance(error, ScopeError):
+                raise
+            raise ScopeError(str(error)) from None
+        _verified[key] = now()
+
+    return CloudflareEdge(
+        zone, token=token, on_auth_error=lambda: _verified.pop(key, None),
+    )
+
+
+def _file_scope_finding(zone, error, *, role="dns"):
     """A refused construction is operator-visible, not just a raise.
 
     Goes through raise_alert so classify() + finding() give the refusal the
@@ -202,19 +248,29 @@ def _file_scope_finding(zone, error):
     ``cf-token-scope`` (the table row for construction refusal and the
     daily-audit drift). The fingerprint stays the Task-1 identity
     ``cf-scope:{account_id}:{zone.name}`` — not ``cf-token-scope:{pk}:{role}``,
-    which is the daily-audit row.
+    which is the daily-audit row. Edge construction uses a distinct
+    ``cf-scope:{account_id}:edge:{zone.name}`` so it cannot clobber DNS.
     """
     from monitor.alerts import raise_alert
 
+    if role == "dns":
+        fingerprint = f"cf-scope:{zone.account_id}:{zone.name}"
+        fix = (
+            "Issue a single-zone scoped DNS token and update the "
+            "DnsAccount dns_token_ref"
+        )
+    else:
+        fingerprint = f"cf-scope:{zone.account_id}:{role}:{zone.name}"
+        fix = (
+            "Issue a single-zone scoped edge token and update the "
+            "DnsAccount edge_token_ref"
+        )
     raise_alert(
         "cf-token-scope",
         f"dns_zone:{zone.name}",
-        fingerprint=f"cf-scope:{zone.account_id}:{zone.name}",
+        fingerprint=fingerprint,
         source_engine="dns_scope",
         title=f"Cloudflare scope verification failed for {zone.name}",
         body=str(error),
-        fix_action=(
-            "Issue a single-zone scoped DNS token and update the "
-            "DnsAccount dns_token_ref"
-        ),
+        fix_action=fix,
     )

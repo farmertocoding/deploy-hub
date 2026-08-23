@@ -189,6 +189,12 @@ class CertRefusalSerializer(serializers.Serializer):
     finding_id = serializers.IntegerField()
 
 
+class AttackStateSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    finding_id = serializers.IntegerField()
+    mode = serializers.CharField()
+
+
 class SiteSummarySerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
@@ -196,6 +202,7 @@ class SiteSummarySerializer(serializers.Serializer):
     latest_manifest_version = serializers.IntegerField(allow_null=True)
     manifest_current = serializers.BooleanField(allow_null=True)
     cert_refusal = CertRefusalSerializer(allow_null=True, required=False)
+    attack_state = AttackStateSerializer(allow_null=True, required=False)
     # Always emitted by project_row_body (default host_caddy). required=False
     # so older sim list rows still parse; omit is not the live shape.
     edge_owner = serializers.ChoiceField(
@@ -224,6 +231,39 @@ def _open_cert_refusals(sites):
         for row in Finding.objects.filter(
             fingerprint__in=fingerprints, state=Finding.State.OPEN,
         )
+    }
+
+
+def _open_attack_states(sites):
+    """Un-resolved `attack-playbook-engaged:{zone.pk}` Findings, keyed by fp."""
+    from core.models import Finding
+
+    fingerprints = [
+        f"attack-playbook-engaged:{site.dns_zone_id}"
+        for site in sites if site.dns_zone_id
+    ]
+    if not fingerprints:
+        return {}
+    return {
+        row.fingerprint: row
+        for row in Finding.objects.filter(fingerprint__in=fingerprints)
+        .exclude(state=Finding.State.RESOLVED)
+    }
+
+
+def _attack_state_payload(site, attacks):
+    if not site.dns_zone_id:
+        return None
+    row = attacks.get(f"attack-playbook-engaged:{site.dns_zone_id}")
+    if row is None:
+        return None
+    mode = (
+        "notify_only" if "notify-only" in (row.body or "").lower() else "under_attack"
+    )
+    return {
+        "detail": row.body or row.title,
+        "finding_id": row.pk,
+        "mode": mode,
     }
 
 
@@ -264,6 +304,7 @@ def project_row_body(project):
     current_hash = report_hash(report) if report else None
     site_rows = sorted(project.sites.all(), key=lambda s: s.pk)
     refusals = _open_cert_refusals(site_rows)
+    attacks = _open_attack_states(site_rows)
     sites = []
     for site in site_rows:
         latest = site.manifests.order_by("-version").first()
@@ -278,6 +319,7 @@ def project_row_body(project):
                 {"detail": refused.body or refused.title, "finding_id": refused.pk}
                 if refused else None
             ),
+            "attack_state": _attack_state_payload(site, attacks),
             "edge_owner": site.edge_owner,
         })
     return ProjectSummarySerializer({
