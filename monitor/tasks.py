@@ -209,3 +209,16 @@ def run_retention_janitor(*, now=None):
     from monitor.retention import sweep
 
     return sweep(now=now)
+
+
+@shared_task(ignore_result=True)
+def poll_intake_outbox(**kwargs):
+    """Beat `poll-intake-outbox` (10 s, queue probes). No secret args."""
+    import random
+    import time
+
+    from monitor.intake_poll import poll
+
+    if kwargs.get("sleep") is None and kwargs.get("jitter") is None:
+        time.sleep(random.uniform(0, 2))  # nosec B311
+    return poll(**kwargs)

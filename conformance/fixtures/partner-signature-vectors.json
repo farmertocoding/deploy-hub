@@ -1,0 +1,109 @@
+{
+  "canonical": "{method}\\n{path}\\n{hex(sha256(body))}\\n{timestamp}\\n{nonce}",
+  "cases": {
+    "expired": {
+      "body": "{\"tenant_ref\":\"t-vector\",\"subdomain\":\"vec\"}",
+      "headers": {
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-expired-0001aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "vD3YfpMTCyPUz9M5VZXh0hGlw/hE5sYMID1qXj3cPISTBKQ61Jko3JytycVQU0LzPtjwIGvwC8DnzrNIMrnhCQ==",
+        "X-Partner-Timestamp": "1699996400"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites"
+    },
+    "idempotency-match": {
+      "body": "{\"tenant_ref\":\"t-idem\",\"subdomain\":\"idem\"}",
+      "headers": {
+        "Idempotency-Key": "idem-shared-1",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-idem-match-1aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "epWmW/h73oc84Lf/HhTqJUAfhgYa8aHix+cv4FXkM/aPvYtyxvbUpkvn+5lkWefFfjQxFpl+wZ/6m0Q0LPGLCw==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites",
+      "retry_headers": {
+        "Idempotency-Key": "idem-shared-1",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-idem-match-2aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "qlN/+UfiZXLvEpLhgcQSsH3BUcrcyUinTOrhZXTO6Q28Uz3qA1ctKTFnXK0PkRIDC4Oy9Tic5YkSy0hupuorAA==",
+        "X-Partner-Timestamp": "1700000000"
+      }
+    },
+    "idempotency-mismatch": {
+      "body": "{\"tenant_ref\":\"t-idem\",\"subdomain\":\"idem\"}",
+      "headers": {
+        "Idempotency-Key": "idem-shared-2",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-idem-mis-1aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "GlBcrsR6M9WlLMiaPpbcpFWnaDSMzB7UwIgc+TX/mN5+Ai4Wuk+Yla+KGbELN3sLotZuwOrBRdXd6YoCkZScCQ==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites",
+      "retry_body": "{\"tenant_ref\":\"t-idem-OTHER\",\"subdomain\":\"idem\"}",
+      "retry_headers": {
+        "Idempotency-Key": "idem-shared-2",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-idem-mis-2aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "lDuQ/2EHAzlWfKUHcz5G3/b6fyxOYDVi1CbeZbVbnbcwlp54iKenkQ/EZ6S+vi1iTopg1ZmpA16Rr3qE3MaKBw==",
+        "X-Partner-Timestamp": "1700000000"
+      }
+    },
+    "mutated-body": {
+      "body": "{\"tenant_ref\":\"MUTATED\",\"subdomain\":\"vec\"}",
+      "headers": {
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-mutated-0001aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "36QucGhY1UIuq+9cpvnmlZqVVM8FmQ0ct18tK8kpcUIN7HsqJQvENXVErjVdCMPQ5/BPd5TlpiXwTjNa7q/+Cw==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites",
+      "signed_body": "{\"tenant_ref\":\"t-vector\",\"subdomain\":\"vec\"}"
+    },
+    "quota-exceeded": {
+      "body": "{\"tenant_ref\":\"t-quota\",\"subdomain\":\"quota\"}",
+      "headers": {
+        "Idempotency-Key": "idem-quota-1",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-quota-0001aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "hJHAkQVsb7D9ldJQqxYLPYIoeDioTY4gZypvBLRXwEQnDIGVBedLIsBvqpe5QELqgagvpZxbRDiJbBHLGpQHCw==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites"
+    },
+    "replayed": {
+      "body": "{\"tenant_ref\":\"t-vector\",\"subdomain\":\"vec\"}",
+      "headers": {
+        "Idempotency-Key": "idem-valid-1",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-valid-0001aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "h/zSCbD5MJ8PC0zBGVVKDrXgQN2uSGYHxJAVdv/YALuGCIyRThT1NVd1dffU95uPHWCdq39FL/KlgXzJhpwtAQ==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites"
+    },
+    "valid": {
+      "body": "{\"tenant_ref\":\"t-vector\",\"subdomain\":\"vec\"}",
+      "headers": {
+        "Idempotency-Key": "idem-valid-1",
+        "X-Partner-Key-Id": "hubk_test_fixture",
+        "X-Partner-Nonce": "n-valid-0001aaaaaaaaaaaaaaaa",
+        "X-Partner-Signature": "h/zSCbD5MJ8PC0zBGVVKDrXgQN2uSGYHxJAVdv/YALuGCIyRThT1NVd1dffU95uPHWCdq39FL/KlgXzJhpwtAQ==",
+        "X-Partner-Timestamp": "1700000000"
+      },
+      "method": "POST",
+      "path": "/partner/v1/sites"
+    }
+  },
+  "idempotency_ttl_s": 86400,
+  "key_id": "hubk_test_fixture",
+  "nonce_ttl_s": 600,
+  "now": 1700000000,
+  "public_key_raw_b64": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "window_s": 300
+}
