@@ -126,6 +126,7 @@ class RotateTransport(FakeTransport):
         self.put_snapshots = []
         self.old_ref = None
         self.fail_new_login = False
+        self.fail_cat = False
 
     def probe(self, argv, *, timeout=60):
         if not isinstance(argv, (list, tuple)):
@@ -133,6 +134,10 @@ class RotateTransport(FakeTransport):
         argv = list(argv)
         self.calls.append(("probe", argv))
         if argv[:1] == ["cat"]:
+            if self.fail_cat:
+                return CommandResult(
+                    argv, exit_code=1, stdout="", stderr="Permission denied",
+                )
             path = argv[-1] if len(argv) > 1 else self.auth_path
             return CommandResult(argv, stdout=_as_text(self.files.get(path, b"")))
         if argv == ["true"]:
@@ -179,8 +184,12 @@ def _factory(transport):
     return make
 
 
-def _world(*, fail_new_login=False, sticky_old=False):
+def _world(*, fail_new_login=False, sticky_old=False, fail_cat=False, product_ref=False):
     target = _target()
+    if product_ref:
+        owner_id = f"target-{target.pk}-ssh-{uuid.uuid4().hex[:8]}"
+        target.ssh_key_ref = owner_id
+        target.save(update_fields=["ssh_key_ref"])
     old, pem, pub, line = _plant_old_key(target)
     initial = line + OPERATOR_LINE
     transport = RotateTransport(initial=initial)
@@ -189,6 +198,7 @@ def _world(*, fail_new_login=False, sticky_old=False):
     transport.old_ref = target.ssh_key_ref
     transport.active_ref = target.ssh_key_ref
     transport.fail_new_login = fail_new_login
+    transport.fail_cat = fail_cat
     return target, transport, old, pem, pub
 
 
@@ -474,3 +484,126 @@ def test_host_key_mismatch_files_finding(monkeypatch):
     assert row.title
     assert row.body
     assert row.fix_action
+
+
+def test_stale_kept_old_secret_is_not_the_next_new_key():
+    """After stale, a kept old Secret with target-{pk}-ssh-* must not be resumed
+    as the next rotation's new key (Important 1).
+
+    What would make this fail: _pending_secrets treating the recovery row as
+    pending, so the next Beat/HTTP drops the good key and restores the old blob.
+    """
+    from provision.ssh_rotate import rotate_ssh
+
+    target, transport, old, _, old_pub = _world(sticky_old=True, product_ref=True)
+    assert target.ssh_key_ref.startswith(f"target-{target.pk}-ssh-")
+    old_blob = _blob(old_pub)
+    first = rotate_ssh(target, transport, make_transport=_factory(transport))
+    assert first["status"] == "stale"
+    target.refresh_from_db()
+    good_ref = target.ssh_key_ref
+    assert good_ref.startswith(f"target-{target.pk}-ssh-")
+    assert good_ref != old.owner_id
+    assert Secret.objects.filter(pk=old.pk).exists()
+    good = Secret.objects.get(
+        kind=Secret.Kind.SSH_PRIVATE_KEY, owner_id=good_ref,
+    )
+    good_blob = _blob(_public_line(vault_service.get(good, reason="ssh-rotate-assert")))
+    assert good_blob in transport._auth_text()
+
+    transport.calls.clear()
+    second = rotate_ssh(target, transport, make_transport=_factory(transport))
+    target.refresh_from_db()
+    assert target.ssh_key_ref == good_ref
+    assert Secret.objects.filter(pk=old.pk).exists()
+    assert Secret.objects.filter(pk=good.pk).exists()
+    text = transport._auth_text()
+    assert good_blob in text
+    assert old_blob in text
+    assert transport.mutating_calls() == []
+    assert second["status"] in {"skipped", "stale"}
+    assert second.get("new_ref") == good_ref
+
+
+def test_inspect_failure_does_not_clobber_authorized_keys():
+    """A non-ok cat of authorized_keys must not put a single-key file (D-064).
+
+    What would make this fail: treating failed/empty inspect as an empty file
+    and writing only the new pubkey, wiping the real keys the probe never saw.
+    """
+    from core.models import Finding
+    from provision.ssh_rotate import rotate_ssh
+
+    target, transport, old, _, old_pub = _world(fail_cat=True)
+    before = transport._auth_text()
+    assert _blob(old_pub) in before
+    assert OPERATOR_LINE.strip() in before
+    secrets_before = set(
+        Secret.objects.filter(kind=Secret.Kind.SSH_PRIVATE_KEY).values_list("pk", flat=True)
+    )
+    result = rotate_ssh(target, transport, make_transport=_factory(transport))
+    assert result["status"] == "incomplete"
+    target.refresh_from_db()
+    assert target.ssh_key_ref == old.owner_id
+    assert Secret.objects.filter(pk=old.pk).exists()
+    assert transport.put_snapshots == []
+    assert transport.mutating_calls() == []
+    assert transport._auth_text() == before
+    secrets_after = set(
+        Secret.objects.filter(kind=Secret.Kind.SSH_PRIVATE_KEY).values_list("pk", flat=True)
+    )
+    assert secrets_after == secrets_before
+    row = Finding.objects.get(fingerprint=f"ssh-rotation-incomplete:{target.pk}")
+    assert row.severity == Finding.Severity.P1
+
+
+def test_rotate_all_rotates_ready_ssh_targets():
+    """Beat rotate_all must call rotate_ssh for READY SSH targets and persist
+    CheckRun.Kind.SSH_ROTATE with pk-only results (Important 3).
+
+    What would make this fail: a SUCCEEDED CheckRun that never touched a
+    target, or rotating a non-READY control, or storing key material.
+    """
+    from core.models import CheckRun
+    from provision.ssh_rotate import rotate_all
+
+    worlds = {}
+    for _ in range(2):
+        target, transport, old, _, _ = _world()
+        worlds[target.pk] = (target, transport, old)
+    control = _target(owner_id="vault-ssh-control")
+    _plant_old_key(control)
+    control.status = Target.Status.PENDING
+    control.save(update_fields=["status"])
+
+    seen = []
+
+    def factory(target):
+        seen.append(target.pk)
+        if target.pk not in worlds:
+            raise AssertionError(
+                f"rotate_all must not open a transport for non-READY {target.pk}"
+            )
+        transport = worlds[target.pk][1]
+        transport.active_ref = target.ssh_key_ref
+        return transport
+
+    run = rotate_all(transport_for=factory)
+    assert run.kind == CheckRun.Kind.SSH_ROTATE
+    assert run.status == CheckRun.Status.SUCCEEDED
+    assert set(run.results) == {"schema_version", "rotated", "skipped", "failed"}
+    assert run.results["schema_version"] == 1
+    assert set(run.results["rotated"]) == set(worlds)
+    assert control.pk not in run.results["rotated"]
+    assert control.pk not in run.results["skipped"]
+    assert control.pk not in run.results["failed"]
+    assert control.pk not in seen
+    control.refresh_from_db()
+    assert control.ssh_key_ref == "vault-ssh-control"
+    for pk, (target, transport, old) in worlds.items():
+        target.refresh_from_db()
+        assert target.ssh_key_ref != old.owner_id
+        assert transport.mutating_calls()
+    blob = json.dumps(run.results)
+    for marker in PRIVATE_MARKERS:
+        assert marker not in blob
