@@ -7,7 +7,6 @@ tests/ do not import boto3/moto.
 """
 from __future__ import annotations
 
-import ast
 import inspect
 import json
 import os
@@ -266,12 +265,8 @@ def test_instance_create_is_t1():
     assert "request.data.get" not in source
     assert "confirm_name" in source
 
-    from core.urls import urlpatterns as auth_urls
-
-    auth_src = inspect.getsource(auth_urls.__class__) if False else ""
     core_urls = (REPO / "core" / "urls.py").read_text(encoding="utf-8")
     assert "instance/create" not in core_urls
-    del auth_src
 
 
 @pytest.mark.req("AWS-INSTANCE-T1")
@@ -320,7 +315,6 @@ def test_instance_create_requires_type_the_name(client, monkeypatch):
         return real_enroll(**kwargs)
 
     monkeypatch.setattr("provision.aws_enroll.enroll_aws_target", patched)
-    monkeypatch.setattr("core.views.enroll_aws_target", patched)
 
     body, _zone_row = _create_body(confirm_name="wrong-host")
     wrong = client.post(
@@ -348,10 +342,10 @@ def test_totp_does_not_satisfy_instance_create(client):
     What would make this fail: TOTP writing hardware_touch_at, or create
     treating an OTP session as a recent touch.
     """
+    from django_otp.oath import TOTP
     from django_otp.plugins.otp_totp.models import TOTPDevice
 
     from core.models import Target
-    from django_otp.oath import TOTP
 
     user = User.objects.create_user("joseph", password="a-long-dev-password")
     device = TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
@@ -584,25 +578,19 @@ def test_cost_visible_on_overlay_before_confirm():
         encoding="utf-8"
     )
     assert "function T1Overlay" in tiers
-    overlay = None
-    tree = ast.parse(tiers)
-    # JSX is not Python; pin the source contract instead.
-    del tree, overlay
     assert re.search(r"function T1Overlay\(\s*\{[^}]*cost", tiers, re.S)
-    lower = tiers.lower()
-    cents = lower.find("cents")
-    per_hour = lower.find("per hour")
-    confirm = tiers.find("Confirm —")
-    assert cents >= 0 or per_hour >= 0
-    shown = cents if cents >= 0 else per_hour
-    assert 0 <= shown < confirm, "cost must be visible before Confirm"
+    start = tiers.find("export function T1Overlay")
+    end = tiers.find("export function ActionButton")
+    overlay = tiers[start:end]
+    assert "costText" in overlay or "costLine" in overlay
+    assert "five cents per hour" in tiers
+    assert overlay.find("costText") < overlay.find("Confirm —"), (
+        "cost must be visible before Confirm"
+    )
     assert "$" in tiers or "0.05" in tiers
 
     assert "instance.create" in targets
     assert re.search(r"cost=\{", targets)
-    # Delete target on the list must omit cost.
-    delete_block = targets[targets.find("target.delete"):]
-    # The delete ActionButton is after the empty-state create control.
     assert "target.delete" in targets
 
 

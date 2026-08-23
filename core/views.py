@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audit import audit
-from .models import Target
+from .models import NetworkZone, Target
 from .otp import consume_recovery_code
 from .permissions import RequireRecentTouch
 
@@ -197,3 +197,92 @@ class SshRotateView(APIView):
 
         rotate_ssh(target, SshTransport(target), force=True)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class InstanceCreateSerializer(serializers.Serializer):
+    confirm_name = serializers.CharField()
+    host = serializers.CharField()
+    zone = serializers.SlugField()
+    instance_type = serializers.CharField(required=False, default="t3.micro")
+
+
+class InstanceCreateCostSerializer(serializers.Serializer):
+    cost = serializers.FloatField()
+    cost_display = serializers.CharField()
+
+
+class InstanceCreateResultSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    host = serializers.CharField()
+    kind = serializers.CharField()
+
+
+class InstanceCreateView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-name, then enroll."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), RequireRecentTouch()]
+
+    @extend_schema(responses={200: InstanceCreateCostSerializer})
+    def get(self, request):
+        from provision.aws_enroll import _cloud_provider, _estimate_or_refuse
+
+        instance_type = request.query_params.get("instance_type") or "t3.micro"
+        spec = {"instance_type": instance_type, "size": instance_type}
+        try:
+            provider = _cloud_provider()
+            cost = _estimate_or_refuse(provider, spec)
+        except Exception:
+            return Response(
+                {"detail": "unconfigured hourly cost estimate"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        display = f"${float(cost):.2f}/h"
+        ser = InstanceCreateCostSerializer(
+            {"cost": float(cost), "cost_display": display}
+        )
+        return Response(ser.data)
+
+    @extend_schema(
+        request=InstanceCreateSerializer,
+        responses={201: InstanceCreateResultSerializer},
+    )
+    def post(self, request):
+        ser = InstanceCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        host = ser.validated_data["host"]
+        if ser.validated_data["confirm_name"] != host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        zone = get_object_or_404(NetworkZone, slug=ser.validated_data["zone"])
+        from provision import aws_enroll as aws_enroll_mod
+
+        try:
+            target = aws_enroll_mod.enroll_aws_target(
+                host=host,
+                name=host,
+                zone=zone,
+                instance_type=ser.validated_data.get("instance_type") or "t3.micro",
+            )
+        except aws_enroll_mod.EnrollError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "instance.create",
+            source="api",
+            actor=request.user,
+            obj=target,
+            severity="security",
+        )
+        body = InstanceCreateResultSerializer(
+            {"id": target.pk, "host": target.host, "kind": target.kind}
+        )
+        return Response(body.data, status=status.HTTP_201_CREATED)

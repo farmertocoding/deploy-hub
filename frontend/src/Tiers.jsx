@@ -38,14 +38,30 @@ export function UndoToast({ label, seconds, onUndo }) {
   );
 }
 
-export function T1Overlay({ label, onTouch, onConfirm, onDismiss }) {
+function costLine(cost) {
+  if (cost == null || cost === "") return "";
+  const symbol = typeof cost === "number" ? `$${cost.toFixed(2)}/h` : String(cost);
+  const n = typeof cost === "number"
+    ? cost
+    : Number(String(cost).replace(/[^0-9.]/g, ""));
+  if (n === 0.05 || symbol.includes("0.05")) {
+    return `${symbol} — five cents per hour`;
+  }
+  return symbol;
+}
+
+export function T1Overlay({ label, cost, onTouch, onConfirm, onDismiss }) {
   const [name, setName] = useState("");
+  const costText = costLine(cost);
   return (
     <div role="dialog" aria-label={`${label} step-up`}
       style={{ ...box, marginTop: 8, borderColor: "#ff7b72", maxWidth: "100%" }}>
       <p style={{ marginTop: 0 }}>
         Type the name and touch a security key. TOTP cannot satisfy this.
       </p>
+      {costText ? (
+        <p>Estimated hourly cost {costText}.</p>
+      ) : null}
       <input aria-label="type the name" value={name} style={box}
         placeholder="type the name"
         onChange={(e) => setName(e.target.value)} />
@@ -64,7 +80,7 @@ export function T1Overlay({ label, onTouch, onConfirm, onDismiss }) {
 // T3 renders a single button that runs on click and offers UndoToast; T2 renders a
 // button that opens ConfirmDialog with the caller's `summary`; T1 opens the
 // type-the-name + hardware-touch overlay (SEC-F5-T1-HARDWARE-TOUCH).
-export function ActionButton({ row, summary, confirmName, onRun, onUndo }) {
+export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo }) {
   const [state, setState] = useState({ phase: "idle" });
   // The runner is one-shot (it owns the tier state machine for this control's
   // lifetime) but its callbacks read THROUGH this ref, refreshed every render —
@@ -89,7 +105,7 @@ export function ActionButton({ row, summary, confirmName, onRun, onUndo }) {
         <button style={box} onClick={() => runner.click({ expected: confirmName })}>
           {row.label}</button>
         {state.phase === "steppingUp" && (
-          <T1Overlay label={row.label}
+          <T1Overlay label={row.label} cost={cost}
             onTouch={async () => {
               const { status } = await performHardwareTouch();
               if (status === 200) runner.touch();

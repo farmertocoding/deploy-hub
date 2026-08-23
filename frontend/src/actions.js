@@ -87,7 +87,7 @@ export function makeTierRunner({ row, onRun, onUndo, onState = () => {},
               reason: "Requires hardware touch and type-the-name." });
         return;
       }
-      run(state.args);
+      run({ ...state.args, name });
     },
     confirm() {
       if (state.phase !== "confirming") return;

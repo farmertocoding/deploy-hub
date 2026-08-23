@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView
 
-from core.views import SshRotateView, TargetDeleteView
+from core.views import InstanceCreateView, SshRotateView, TargetDeleteView
 
 urlpatterns = [
     # §4.5: the schema is generated from serializers; the TS client + zod schemas
@@ -12,6 +12,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("realtime.urls")),
     path("api/auth/", include("core.urls")),
+    path("api/v1/instance/create/", InstanceCreateView.as_view(),
+         name="instance-create"),
     path("api/v1/targets/<int:pk>/delete/", TargetDeleteView.as_view(),
          name="target-delete"),
     path("api/v1/targets/<int:pk>/ssh-rotate/", SshRotateView.as_view(),

@@ -43,7 +43,7 @@ const AwsConnectResult = z
   .object({ account_id_last4: z.string(), region: z.string() })
   .passthrough();
 const CloudflareConnect = z.object({ token: z.string().min(1) }).passthrough();
-const ProviderEnum = z.literal("cloudflare");
+const ProviderEnum = z.enum(["cloudflare", "route53"]);
 const DnsAccountConnected = z
   .object({
     id: z.number().int(),
@@ -110,6 +110,20 @@ const FirstRunProgress = z
   .passthrough();
 const FirstRunSnapshot = z
   .object({ seq: z.number().int(), data: FirstRunProgress })
+  .passthrough();
+const InstanceCreateCost = z
+  .object({ cost: z.number(), cost_display: z.string() })
+  .passthrough();
+const InstanceCreate = z
+  .object({
+    confirm_name: z.string(),
+    host: z.string(),
+    zone: z.string().regex(/^[-a-zA-Z0-9_]+$/),
+    instance_type: z.string().optional().default("t3.micro"),
+  })
+  .passthrough();
+const InstanceCreateResult = z
+  .object({ id: z.number().int(), host: z.string(), kind: z.string() })
   .passthrough();
 const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
 const MapNode = z
@@ -306,6 +320,9 @@ export const schemas = {
   FirstRunItem,
   FirstRunProgress,
   FirstRunSnapshot,
+  InstanceCreateCost,
+  InstanceCreate,
+  InstanceCreateResult,
   KindEnum,
   MapNode,
   PathEnum,
