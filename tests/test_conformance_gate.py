@@ -2272,8 +2272,11 @@ def test_part_q9_t3_is_tier_t3():
 def test_p55_partner_demo_names_phase_5_5_md():
     """P55-PARTNER-DEMO is verify: demo naming conformance/demos/phase-5.5.md.
 
-    What would make this fail: a missing demo: key, pointing at phase-5.md,
-    or a non-empty stub (Task 0 forbids creating the file).
+    What would make this fail: a missing demo: key (fallback would still
+    look at phase-5.5.md, but the registry would not name the record),
+    pointing at phase-5.md, or a missing / whitespace-only record.
+    Task 0 forbade creating the file so a filler could not verify; Task 11
+    landed the honest T1 record, so the pin is now exists-and-non-empty.
     """
     reg = _live_registry()
     assert "P55-PARTNER-DEMO" in reg, "P55-PARTNER-DEMO is not in the registry"
@@ -2286,9 +2289,11 @@ def test_p55_partner_demo_names_phase_5_5_md():
         f"P55-PARTNER-DEMO must name conformance/demos/phase-5.5.md: "
         f"{demo.get('demo')}")
     path = REPO / "conformance" / "demos" / "phase-5.5.md"
-    assert not path.exists(), (
-        "conformance/demos/phase-5.5.md must stay absent in Task 0 — "
-        "a non-empty stub would verify P55-PARTNER-DEMO"
+    assert path.is_file(), (
+        "conformance/demos/phase-5.5.md must exist — P55-PARTNER-DEMO is verify: demo"
+    )
+    assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
+        "a whitespace-only demo is not a record"
     )
 
 
