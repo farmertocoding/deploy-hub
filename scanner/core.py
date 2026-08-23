@@ -27,13 +27,13 @@ silently missing `core.secret-scan`.
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Bumped to 2 on 2026-08-16, when D-012 left Phase 1 (Joseph's cap decision,
-# `claude/decision-2026-08-16-round-6-cap.md`): a stored report's MEANING changed —
-# checks no longer carry an `acceptance` contract and the manifest draft no longer
-# carries `declared_test_material`. R8-2 is the finding that says a meaning change
-# without a version bump lets pre-change rows through the gate on the new code's
-# reading of the old fields, so the bump lands with the change that earned it and
-# `wizard.materialize.preflight` refuses anything that does not match.
+# Bumped to 2 on 2026-08-16, when D-012 left Phase 1 (Joseph's cap decision): a
+# stored report's MEANING changed — `acceptance` and `declared_test_material` left
+# the schema. Phase 4 Task 3 re-lands those fields as OPTIONAL (omitted when
+# None / empty, the same as_dict rule as `refused_paths`). SCHEMA_VERSION stays 2:
+# a parked-era v2 row has no `acceptance`, so the restored grant route cannot
+# open a blocker it does not name (fail-closed, R8-2's safe direction). v1 is
+# still refused by preflight before any check is read.
 SCHEMA_VERSION = 2
 
 # Report tiers (§5.3). `pending_sandbox` marks an executing check honestly deferred.
@@ -68,15 +68,21 @@ class CheckResult:
     detail: str = ""
     fix_hint: str = ""      # §6.6 voice: what / why it matters / exact fix
     execution: str = "static"
-    # D-012 out of Phase 1 (2026-08-16): the `acceptance` field is GONE, not left
-    # defaulting to None. It carried the confirm ids whose `True` cleared a blocker
-    # this check had downgraded on the scanned repo's own say-so, and there is no
-    # such downgrade and no such gate this phase. A dataclass field written by
-    # nothing and read by nothing is R7-15's finding — the next reader assumes a
-    # dead field on a security record is load-bearing — and here it would be worse
-    # than dead: `wizard.materialize` used to open a blocker for it, so leaving the
-    # field would leave the shape of a bypass lying in the report.
+    # Round 7 (R7-1) / Phase 4 Task 3 re-land. The smallest structured contract
+    # that lets the wizard gate on a check without parsing its prose:
+    # `{"questions": [confirm id, …], "blocking_only_declared": bool}`.
     #
+    #   questions                 the confirm ids whose `True` accepts every
+    #                             declaration this check labelled findings under
+    #   blocking_only_declared    True when accepting them all leaves NOTHING
+    #                             blocking; False when a real blocker (a [proof]
+    #                             line, a .env file, an undeclared heuristic) is
+    #                             also present, and then no answer clears it
+    #
+    # A check with nothing to accept leaves this None and `as_dict` OMITS the
+    # key — a repo that declares nothing serializes as it did before the field
+    # existed. Scan-time tier does not drop; the wizard owns the grant (D-012r).
+    acceptance: dict = None
     # R12-A1: the repo-relative POSIX paths this check tells the operator were NOT READ.
     # Machine-readable, next to the sentence that says it in words — because the
     # sentence is for a person and the guard in `scan` needs a fact.
@@ -103,6 +109,8 @@ class CheckResult:
         out = {"id": self.id, "tier": self.tier, "title": self.title,
                "detail": self.detail, "fix_hint": self.fix_hint,
                "execution": self.execution}
+        if self.acceptance is not None:
+            out["acceptance"] = self.acceptance
         if self.refused_paths:
             out["refused_paths"] = list(self.refused_paths)
         return out
@@ -435,18 +443,17 @@ def scan(root):
     }
     core_suite = []
     if mods:
+        from . import declarations
         from .modules.fallbacks import common_checks
 
-        # D-012 out of Phase 1 (2026-08-16, Joseph's cap decision). `scan` used to load
-        # `deployhub.yaml` here, thread the parsed declarations into the suite, extend
-        # `questions` with a confirm per accepted declaration and draft a
-        # `declared_test_material` key into the manifest. All three are gone: the file
-        # is not parsed by any live path this phase, nothing downgrades anything, and
-        # the only trace of the file in a report is the `core.declaration-file` presence
-        # notice the suite emits so a repo carrying one is told it is not honored.
-        # `scanner/declarations.py` stays on master, parked and unit-tested, and returns
-        # as its own phase behind a written threat model.
-        #
+        # D-012 re-land (Phase 4 Task 3 / D-055 / C1). ONE READ of deployhub.yaml
+        # (R7-13): two reads of a file the scanned repo owns can disagree inside
+        # one scan, and the halves that disagree are the labelled bucket and the
+        # confirm that is supposed to authorize it. scan() loads, threads the
+        # Declarations into the suite, extends questions via confirm_questions
+        # (R7-14), and drafts declared_test_material. The scanner does not drop
+        # tier; wizard acceptance is the grant (D-012r).
+        declared = declarations.load(root)
         # R10-A3: the matched modules are asked what they have already refused BEFORE
         # the core suite composes its refusal line, so that line can leave those files
         # to the module that names them better. Asked here rather than collected from
@@ -455,7 +462,14 @@ def scan(root):
         # report's stable check ordering rests on.
         refused_by_module = [module_refused_paths(m, root) for m in mods]
         refused_elsewhere = [p for paths in refused_by_module for p in paths]
-        core_suite = common_checks(root, refused_elsewhere)   # over the SCAN root, once
+        core_suite = common_checks(
+            root, declared=declared, refused_elsewhere=refused_elsewhere)
+        questions.extend(declarations.confirm_questions(declared))
+        if declared.accepted:
+            # The DRAFT list — what the repo asked for. What gets frozen is the
+            # answer-derived list built by wizard.materialize (R7-A §5).
+            manifest["declared_test_material"] = [
+                {"path": d.path, "reason": d.reason} for d in declared.accepted]
     core_pos = {c.id: i for i, c in enumerate(core_suite)}
 
     for m in mods:

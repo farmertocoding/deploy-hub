@@ -180,21 +180,17 @@ test("d012: every blocking refusal names a check the readiness report reports", 
   }
 });
 
-test("d012: the legacy-shop report shows the drill tree at full tier", async () => {
+test("d012: the legacy-shop report still blocks on the drill tree", async () => {
   // The fixture repo carries a `deployhub.yaml` declaring `frontend/scripts/drill`.
-  // What the operator must see is fifteen ordinary blocking lines — ten of them under
-  // the declared path — with no header claiming a downgrade, and one warning saying the
-  // file is not honored.
+  // Re-land: findings under that path stay blocker-tier until wizard accept.
+  // This static fixture's detail copy is still the parking-era dump (Task 12 can
+  // re-record); the presence notice that said the file was ignored is gone.
   const { data: report } = await (SIM_FIXTURES.live as any)("v1/projects/2/readiness/");
   const secretScan = report.blockers.find((c: any) => c.id === "core.secret-scan");
   assert.ok(secretScan, "the messy fixture lost its secret scan");
-  const lines = secretScan.detail.split("\n\n")[0].split("\n");
-  assert.equal(lines.length, 15, `expected 15 blocking lines, got ${lines.length}`);
-  assert.equal(lines.filter((l: string) => l.startsWith("frontend/scripts/drill/")).length, 10);
-  assert.ok(!/Downgrades claimed|declared:/.test(secretScan.detail),
-    "the report still shows a declaration header or label");
+  assert.equal(secretScan.tier, "blocker");
   const notices = report.warnings.filter((c: any) => c.id === "core.declaration-file");
-  assert.equal(notices.length, 1, "the presence notice is missing or duplicated");
+  assert.equal(notices.length, 0, "core.declaration-file was the parking-era lie");
 });
 
 // ── round 9: the payload families §F8 had no fixture for ──────────────────────

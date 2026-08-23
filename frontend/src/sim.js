@@ -27,14 +27,11 @@
 // a live-format Stripe key committed to it (/tmp/cleanrepo-rescanned), which is the
 // report `?sim=stale` converges on.
 //
-// D-012 LEFT PHASE 1 (2026-08-16), and these fixtures are what that looks like on a
-// screen. The `qa-drills` project and the `?sim=accepted` state are gone with the
-// mechanism they existed to show: there is no declaration confirm, no acceptance
-// contract on any check, and no blocker an answer clears. legacy-shop still carries a
-// `deployhub.yaml` over a drill tree — that is the point — so its report now shows the
-// ten drill lines as ordinary blocking findings among fifteen, with no declaration
-// header and no third bucket, plus one `core.declaration-file` warning telling the repo
-// its file is not honored this phase.
+// D-012 RE-LAND (Phase 4 Task 3): the live scan labels declared heuristic lines and
+// still reports them at blocker until wizard accept. This fixture's id/tier list must
+// match that scan: no core.declaration-file presence notice (the file is honored).
+// Detail copy here is still the parking-era dump; Task 12 can re-record. Drift
+// compares id+tier only.
 //
 // ROUND 9 added the three payload families §F8 had no fixture for at all, each one a
 // screen a reviewer previously could not reach (finding numbers are round-9 queue items):
@@ -507,7 +504,7 @@ const MESSY_PROJECT = {
   "scanned_at": "2026-08-09T09:30:00Z",
   "tiers": {
     "blocker": 3,
-    "warning": 3,
+    "warning": 2,
     "advice": 1,
     "pending_sandbox": 3
   },
@@ -533,7 +530,7 @@ const MESSY_REPORT = {
   ],
   "summary": {
     "blocker": 3,
-    "warning": 3,
+    "warning": 2,
     "advice": 1,
     "ok": 15,
     "pending_sandbox": 3
@@ -565,14 +562,6 @@ const MESSY_REPORT = {
     }
   ],
   "warnings": [
-    {
-      "id": "core.declaration-file",
-      "tier": "warning",
-      "title": "deployhub.yaml is present but declarations are disabled",
-      "detail": "This repo carries a deployhub.yaml. The declared-test-material mechanism it belongs to is deferred to its own phase, so this scan did not parse the file and no claim in it changed anything: every finding under a declared path is reported at its full tier, exactly as it would be if the file were not here. The file is otherwise ignored — and it is scanned like any other file in the tree, so a credential written into it is a finding of its own.",
-      "fix_hint": "Nothing to do for the deploy: no result above was downgraded. Read this as a correction to what the repo expects — if a tree was declared in deployhub.yaml in the belief that its findings would stop blocking, they are blocking, and either the findings or that expectation needs attention. Leaving the file in place is fine; it will be honored again when the mechanism returns with the threat model it is waiting on.",
-      "execution": "static"
-    },
     {
       "id": "django.secret-dev-fallback",
       "tier": "warning",
@@ -720,10 +709,6 @@ const MESSY_WIZARD = {
     }
   ],
   "warnings": [
-    {
-      "id": "core.declaration-file",
-      "title": "deployhub.yaml is present but declarations are disabled"
-    },
     {
       "id": "django.secret-dev-fallback",
       "title": "Dev-fallback secret committed (prod provably rejects it)"

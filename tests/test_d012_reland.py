@@ -13,9 +13,9 @@ import sys
 import textwrap
 
 import pytest
+from dns_fixtures import default_dns_zone
 
 from core.models import Project, Site
-from dns_fixtures import default_dns_zone
 from scanner import core as scanner_core
 from scanner import declarations
 from wizard import service

@@ -26,11 +26,12 @@ from django.db import transaction
 from core.audit import audit
 from deploys.models import MANIFEST_SCHEMA_VERSION, Manifest
 from scanner import core as scanner_core
+from scanner import declarations
 from vault import service as vault_service
 from vault.models import Secret
 
 from .models import WizardAnswer
-from .questions import missing_required, question_map
+from .questions import DECLARATION_PREFIX, missing_required, question_map
 
 
 class MaterializeRefused(Exception):
@@ -106,20 +107,37 @@ def preflight(site):
         return problems   # the rest of this report is not safely readable
 
     known = question_map(project)
+    answers = _plain_answers(site)
 
-    # A blocker-tier check blocks, full stop. Round 7 gave this walk one exit — a
-    # declaration whose confirms were all answered `True` stopped counting — and D-012
-    # leaving Phase 1 takes it back out: there is no acceptance, so there is no answer
-    # that clears a blocker, and the detail no longer has to explain an exception it
-    # cannot produce.
-    blockers = [{"id": check["id"], "title": check["title"]}
-                for check in report.get("checks", [])
-                if check.get("tier") == "blocker"]
+    blockers = []
+    for check in report.get("checks", []):
+        if check.get("tier") != "blocker":
+            continue
+        pending = _pending_acceptance(check, answers)
+        if pending == []:
+            # Every declaration whose findings are the whole of this check's blocking
+            # case has been accepted. This is the ONLY route by which an answer clears a
+            # blocker, and it exists because D-012's downgrade has to be somebody's act.
+            continue
+        item = {"id": check["id"], "title": check["title"]}
+        if pending:
+            # §3: name what is being waited on. "Fix them and re-scan" is the wrong
+            # instruction for this one — there is nothing in the repo to fix and the
+            # re-scan produces the identical report forever.
+            item["awaiting_acceptance"] = [
+                {"id": qid, "prompt": known[qid].prompt if qid in known else qid}
+                for qid in pending]
+        blockers.append(item)
     if blockers:
+        extra = ""
+        if any("awaiting_acceptance" in b for b in blockers):
+            extra = (" — except where a declaration is awaiting acceptance, which "
+                     "you clear by answering its confirm in this wizard, not by "
+                     "changing the repo")
         problems.append({
             "code": "blockers_present",
             "detail": "the readiness report has blockers; these must be fixed and the "
-                      "project re-scanned",
+                      "project re-scanned" + extra,
             "items": blockers,
         })
 
@@ -142,7 +160,7 @@ def preflight(site):
     answered = set(
         WizardAnswer.objects.filter(site=site).values_list("question_id", flat=True)
     )
-    missing = missing_required(answered)
+    missing = missing_required(project, answered)
     if missing:
         problems.append({
             "code": "answers_missing",
@@ -152,6 +170,41 @@ def preflight(site):
         })
 
     return problems
+
+
+def _plain_answers(site):
+    """{question_id: value} for the non-secret answers. A confirm is never a secret."""
+    return dict(WizardAnswer.objects.filter(site=site, is_secret=False)
+                .values_list("question_id", "value"))
+
+
+def _pending_acceptance(check, answers):
+    """Which confirms this blocker is waiting on, or None when no answer can clear it.
+
+    Round 7 (R7-1), §3. Three outcomes, and the difference between the last two is the
+    entire security property:
+
+        None    acceptance is not on the table — either the check published no
+                `acceptance` contract at all, or it published
+                `blocking_only_declared: False`, meaning a real blocker — a `[proof]`
+                line, a `.env` file, an undeclared heuristic line — shares it. THE
+                BLOCKER STANDS HOWEVER THE OPERATOR ANSWERS.
+        [ids]   the blocker stands, and these confirms are what would clear it.
+        []      every one of them is answered True; the check stops blocking.
+
+    `is not True` rather than a truthy test, deliberately: `coerce_answer` already
+    turned the wire value into a real bool for a `kind="bool"` question, so anything
+    else reaching here is a value this gate does not understand, and the safe reading
+    of a value it does not understand is "not accepted".
+    """
+    acceptance = check.get("acceptance") or {}
+    questions = acceptance.get("questions") or []
+    # An empty `questions` list with `blocking_only_declared: True` would mean "clears
+    # itself, ask nobody". The scanner never emits that shape; it is refused here too,
+    # because the failure mode is a blocker that disappears with no answer behind it.
+    if not questions or acceptance.get("blocking_only_declared") is not True:
+        return None
+    return [qid for qid in questions if answers.get(qid) is not True]
 
 
 def warnings_for(site):
@@ -167,9 +220,12 @@ def materialize(site, *, actor=None, confirm_warnings=False):
     # telling the operator what to re-enter would leave a site that won't start and
     # no visible reason (the exact failure the original test pinned). The refusal is
     # composed from what THIS call scrubbed, plus everything preflight still sees.
-    from .service import scrub_downgraded_answers
+    from .service import scrub_downgraded_answers, scrub_orphaned_declaration_answers
 
     scrubbed = scrub_downgraded_answers(site)
+    # Hygiene only, and it changes no outcome here: a confirm whose declaration changed
+    # has a different id, so the gate below has already stopped seeing it.
+    scrub_orphaned_declaration_answers(site)
     problems = []
     if scrubbed:
         known = question_map(site.project)
@@ -309,6 +365,10 @@ def _apply_answers(body, site, answers, known, *, actor=None):
             site.domain = answer.value
         elif qid == "site.exposure":
             body["exposure"] = answer.value
+        elif qid.startswith(DECLARATION_PREFIX):
+            # Recorded by `_record_declarations` below, against the path and reason it
+            # answers — not as a bare id -> bool under `module_answers`.
+            continue
         elif _env_name(qid):
             name = _env_name(qid)
             env_names.append(name)
@@ -319,11 +379,39 @@ def _apply_answers(body, site, answers, known, *, actor=None):
             # and silently discarding it is the failure mode this branch exists for.
             body.setdefault("module_answers", {})[qid] = answer.value
 
+    _record_declarations(body, {a.question_id: a.value for a in answers
+                                if not a.is_secret})
     body["env_names"] = sorted(set(env_names))
     body["site"] = {"id": site.pk, "name": site.name, "domain": site.domain}
     if site.domain:
         site.save(update_fields=["domain"])
     return env_values
+
+
+def _record_declarations(body, answers):
+    """Rebuild `declared_test_material` from the ANSWERS (round 7, R7-A §5).
+
+    The scan draft carries what the REPO ASKED FOR, and freezing it verbatim was the
+    audit half of the R7-1 veto: the manifest asserted an acceptance for every
+    declaration in the file, including ones the operator had refused. The key is
+    rebuilt here, where the answers are, and the refusals are rebuilt beside it.
+    """
+    draft = body.pop("declared_test_material", None)
+    if not draft:
+        return
+    accepted, refused = [], []
+    for entry in draft:
+        path, reason = entry.get("path"), entry.get("reason", "")
+        if not path:
+            continue
+        qid = declarations.confirm_question_id(path, reason)
+        record = {"path": path, "reason": reason,
+                  "question_id": qid, "accepted": answers.get(qid) is True}
+        (accepted if record["accepted"] else refused).append(record)
+    if accepted:
+        body["declared_test_material"] = accepted
+    if refused:
+        body["declared_test_material_refused"] = refused
 
 
 def _env_name(question_id):

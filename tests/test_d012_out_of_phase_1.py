@@ -1,23 +1,10 @@
-"""D-012 leaves Phase 1 — the regressions that keep it out (spec-d012-out-of-phase-1.md §6).
+"""D-012 re-land companions — schema skew, residue, and inverted parking pins.
 
-Joseph's cap decision (2026-08-16, `claude/decision-2026-08-16-round-6-cap.md`, Option A
-of the round-6 cap design note): Phase 1 ships the scanner and the wizard with NO
-declared-test-material mechanism. `deployhub.yaml` downgrades nothing, raises no confirm,
-and puts no acceptance contract on any check. `scanner/declarations.py` stays on master,
-parked and unit-tested, for the future phase that re-introduces it behind a written
-threat model.
-
-Every test here is a REGRESSION, not a description: each one was written against the
-pre-change tree and observed failing there, and each names the thing that would have to
-come back for it to fail again. The three properties they defend, in the order the
-design note puts them:
-
-  * nothing downgrades anything — a heuristic finding under a declared path reports at
-    the tier it would report at with no declaration in the tree at all;
-  * honest, not silent — a repo that carries the file is TOLD the file is not honored,
-    once, at warning tier, and a repo that does not carry it sees a byte-identical
-    report to the one it saw before any of this existed;
-  * a stored report whose meaning changed cannot reach materialization (R8-2).
+Live-path E2E of the five attacks lives in tests/test_d012_reland.py. This file
+kept the parking-era names the design note cites (the two no-import tests,
+inverted) plus the regressions that still hold after re-land: scan-time tier
+does not drop, a v1 report cannot materialize, a slot-style leftover True
+grants nothing.
 """
 import copy
 import json
@@ -87,14 +74,9 @@ def _codes(problems):
 # ── §6.1 full-tier regression ─────────────────────────────────────────────────
 
 def test_d012_a_declared_tree_reports_at_full_tier(tmp_path):
-    """The whole mechanism, absent. Two deliberate credentials sit under a tree the
-    repo declares as test material with a valid, well-formed `deployhub.yaml`, and the
-    report says exactly what it says for the identical tree with no declaration in it:
-    two `[heuristic]` blocking lines, no third bucket, no label, no downgrade.
-
-    The declaration file is not parsed at all this phase, so nothing in the report can
-    be derived from its contents — which is the property the label assertion pins.
-    """
+    """Scan-time tier does not drop (D-012r). Two deliberate credentials sit under
+    a tree the repo declares as test material: labelled, still blocker. The grant
+    is the wizard, not this scan."""
     files = dict(_drill_files())
     files["deployhub.yaml"] = DECLARATION
     report = scanner_core.scan(_tree(tmp_path, files))
@@ -103,66 +85,57 @@ def test_d012_a_declared_tree_reports_at_full_tier(tmp_path):
     assert secret["tier"] == "blocker", secret["detail"]
     for rel in ("frontend/scripts/drill/qa/03_regressions.mjs:1",
                 "frontend/scripts/drill/redteam/01_rbac_money.mjs:1"):
-        assert f"{rel}: [heuristic] hardcoded" in secret["detail"], secret["detail"]
-    assert "declared" not in secret["detail"], secret["detail"]
-    assert "Downgrades claimed" not in secret["detail"], secret["detail"]
-    assert DRILL_REASON not in secret["detail"], (
-        "the repo's own words reached the report, so the file was parsed after all")
+        assert f"{rel}: [heuristic, declared:" in secret["detail"], secret["detail"]
+    assert "Downgrades claimed" in secret["detail"], secret["detail"]
+    assert DRILL_REASON in secret["detail"]
 
 
 def test_d012_no_check_anywhere_carries_an_acceptance_contract(tmp_path):
-    """`acceptance` was the structured half of the gate: the ids whose `True` cleared a
-    blocker. With no gate there is nothing to publish, and a leftover contract on a
-    stored report is precisely what `preflight` used to open a blocker for."""
+    """Re-land: only core.secret-scan publishes the contract, and only when a
+    declaration labelled something. Other checks stay silent so as_dict omits
+    the key on a repo that declares nothing."""
     files = dict(_drill_files())
     files["deployhub.yaml"] = DECLARATION
     report = scanner_core.scan(_tree(tmp_path, files))
 
+    secret = _check(report, "core.secret-scan")
+    assert secret["acceptance"]["blocking_only_declared"] is True
     for check in report["checks"]:
-        assert "acceptance" not in check, check
-    assert "declared_test_material" not in report["manifest_draft"]
+        if check["id"] != "core.secret-scan":
+            assert "acceptance" not in check, check
+    assert report["manifest_draft"]["declared_test_material"] == [
+        {"path": "frontend/scripts/drill", "reason": DRILL_REASON}]
 
 
 @pytest.mark.django_db
 def test_d012_the_wizard_asks_no_declaration_confirm(tmp_path):
-    """The operator's half, gone with the operator's decision. A confirm nobody can
-    answer wrongly is not a safeguard; the design note's ruling is that the question
-    should not be asked at all until the mechanism returns with a threat model."""
+    """INVERTED: the wizard asks the content-keyed confirm, and it is required.
+    Name kept; the parked assertion was the defect D-012r closed."""
     files = dict(_drill_files())
     files["deployhub.yaml"] = DECLARATION
     report = scanner_core.scan(_tree(tmp_path, files))
 
-    assert not [q for q in report["wizard_questions"]
-                if q["id"].startswith("scanner.test_material.")], (
-        report["wizard_questions"])
+    confirms = [q for q in report["wizard_questions"]
+                if q["id"].startswith("scanner.test_material.")]
+    assert len(confirms) == 1, report["wizard_questions"]
+    assert confirms[0]["kind"] == "bool"
+    assert confirms[0]["default"] is None
 
     site = _site(report)
-    assert not [q for q in question_set(site.project)
-                if q.id.startswith("scanner.test_material.")]
-    # And nothing new is required of the operator: `site.domain` and nothing else.
-    assert missing_required(set()) == ["site.domain"]
+    assert [q.id for q in question_set(site.project)
+            if q.id.startswith("scanner.test_material.")] == [confirms[0]["id"]]
+    assert missing_required(site.project, {"site.domain"}) == [confirms[0]["id"]]
 
-
-# ── §6.2 presence notice ──────────────────────────────────────────────────────
 
 def test_d012_a_present_declaration_file_produces_exactly_one_notice(tmp_path):
-    """Honest, not silent. Ignoring a file whose entire purpose is to be a reviewable
-    claim would be this design's own sin inverted: the repo would go on believing its
-    drill tree was declared while the scanner had stopped reading the claim.
-
-    One line, warning tier, and it says the three things a reader needs — the mechanism
-    is deferred, findings under a declared path report at full tier, and the file is
-    otherwise ignored (and scanned like any other file)."""
+    """The parking-era presence notice is gone: the file is honored, so a warning
+    that said it was not would be a lie. No core.declaration-file line."""
     files = dict(_drill_files())
     files["deployhub.yaml"] = DECLARATION
     report = scanner_core.scan(_tree(tmp_path, files))
 
     notices = [c for c in report["checks"] if c["id"] == "core.declaration-file"]
-    assert len(notices) == 1, report["checks"]
-    notice = notices[0]
-    assert notice["tier"] == "warning", notice
-    assert "deployhub.yaml" in notice["title"]
-    assert notice["detail"] and notice["fix_hint"]
+    assert notices == []
 
 
 def test_d012_without_the_file_the_report_is_byte_identical(tmp_path):
@@ -271,9 +244,10 @@ def test_d012_stored_confirm_answers_are_inert_residue(tmp_path, client, django_
         _drill_files(), **{"deployhub.yaml": DECLARATION}), name="residue"))
     site = _site(report, name="residue")
     service.set_answers(site, {"site.domain": "app.example.com"})
+    # Slot-style leftover from the first (index, slug) key. Not a live confirm.
     WizardAnswer.objects.create(
         site=site,
-        question_id="scanner.test_material.frontend-scripts-drill--a38574e34e643d90",
+        question_id="scanner.test_material.1.frontend-scripts-drill",
         value=True, is_secret=False)
 
     # A confirmed second factor is not decoration: EnrollmentRequiredMiddleware
@@ -287,9 +261,12 @@ def test_d012_stored_confirm_answers_are_inert_residue(tmp_path, client, django_
 
     state = client.get(f"/api/v1/sites/{site.pk}/wizard/")
     assert state.status_code == 200, state.content
-    assert not [q for q in state.json()["questions"]
-                if q["id"].startswith("scanner.test_material.")]
-    # The residue row is reported back as an answer to nothing, and renders as such.
+    live_confirms = [q for q in state.json()["questions"]
+                     if q["id"].startswith("scanner.test_material.")]
+    assert live_confirms, "re-land must surface the content-keyed confirm"
+    assert all(q["id"] != "scanner.test_material.1.frontend-scripts-drill"
+               for q in live_confirms)
+    # The slot-style leftover grants nothing; the live confirm is unanswered.
     assert state.json()["can_materialize"] is False
 
     patched = client.patch(
@@ -324,7 +301,7 @@ def test_d012_a_residue_row_cannot_be_re_submitted(tmp_path):
     with pytest.raises(ValidationError):
         service.set_answers(
             site,
-            {"scanner.test_material.frontend-scripts-drill--a38574e34e643d90": True})
+            {"scanner.test_material.1.frontend-scripts-drill": True})
 
 
 # ── §7 the parked module is parked ────────────────────────────────────────────

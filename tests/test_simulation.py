@@ -392,7 +392,7 @@ def test_issue_r9_q2_the_drift_check_can_see_a_rename(tmp_path):
     shown = dict(live)
     shown["core.secrets"] = shown.pop("core.secret-scan")        # the rename
     shown["django.debug-hardcoded"] = "warning"                  # the tier change
-    shown["core.declaration-file"] = "warning"                   # unchanged, must pass
+    shown["django.secret-dev-fallback"] = shown["django.secret-dev-fallback"]
 
     lines = drift_lines(shown, live, "the scan of the messy fixture")
 
