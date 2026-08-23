@@ -22,3 +22,5 @@ PyYAML>=6
 # Explicit AWS keys into boto3.client (D-066). botocore is transitive.
 # moto stays requirements-dev; no LocalStack.
 boto3>=1.35,<2
+# Ed25519 on the intake verifier (vault already used this transitively).
+cryptography>=42,<51
