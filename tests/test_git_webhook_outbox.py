@@ -11,6 +11,7 @@ import re
 
 import pytest
 from django.conf import settings
+from django.test import override_settings
 from django.urls import get_resolver
 
 from core.models import AuditEvent, Project, Site
@@ -236,6 +237,37 @@ def test_git_push_uses_same_poller_as_partner_job(monkeypatch):
                 assert alias.name.split(".")[0] != "intake"
         elif isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".")[0] != "intake"
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_in_same_batch_runs_before_skip_ack_partner_jobs(monkeypatch):
+    """A git-push behind skip-ack partner-jobs in the fetched batch still enqueues.
+
+    What would make this fail: processing strictly in list order and returning
+    before the git-push, or a second fetch.
+    """
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-drain")
+    client = FakeIntakeClient()
+    for i in range(3):
+        client.items.append({
+            "id": f"job-skip-{i}", "type": "partner-job", "action": "site.create",
+        })
+    client.plant_git_push(GIT_URL, "main", NEW_SHA, job_id="job-git-drain")
+    _boom_ls_remote(monkeypatch)
+    with override_settings(PARTNER_API_ENABLED=False):
+        result = poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert result["ok"] is True
+    assert client.fetch_calls == 1
+    assert "job-git-drain" in client.acked
+    assert queued == [
+        Deployment.objects.exclude(status=Deployment.Status.SUCCEEDED)
+        .get(manifest__site=site).pk
+    ]
+    for i in range(3):
+        assert f"job-skip-{i}" not in client.acked
 
 
 @pytest.mark.req("PART-M2-GIT-WEBHOOK")

@@ -143,6 +143,94 @@ def test_unreachable_over_5_min_files_partner_intake_unreachable():
 
 
 @pytest.mark.req("PART-HUB-POLL")
+def test_configured_never_up_files_p1_after_5_min():
+    """Configured INTAKE_URL that never succeeds pages P1 after 5 min.
+
+    What would make this fail: N=3 consecutive_failures filing this P1,
+    requiring a prior last_success_at, moving first_failure_at, or paging
+    empty INTAKE_URL after five minutes.
+    """
+    from core.models import CheckRun, Finding
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    t0 = timezone.now()
+    with override_settings(INTAKE_URL=""):
+        for now in (t0, t0 + timedelta(minutes=5)):
+            result = poll(now=now, jitter=0, sleep=lambda _s: None)
+            assert result["status"] == CheckRun.Status.SKIPPED
+        assert CheckRun.objects.filter(kind=CheckRun.Kind.INTAKE_POLL).count() == 0
+        assert not Finding.objects.filter(
+            fingerprint="partner-intake-unreachable",
+        ).exists()
+        assert not Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+
+    client = FakeIntakeClient(fail=True)
+    with override_settings(INTAKE_URL="http://intake.test"):
+        for _ in range(3):
+            poll(client=client, now=t0, jitter=0, sleep=lambda _s: None)
+        assert Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+        assert not Finding.objects.filter(
+            fingerprint="partner-intake-unreachable",
+        ).exists()
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        first = (latest.results or {}).get("first_failure_at")
+        assert first
+        poll(
+            client=client, now=t0 + timedelta(minutes=4),
+            jitter=0, sleep=lambda _s: None,
+        )
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        assert (latest.results or {}).get("first_failure_at") == first
+        assert not Finding.objects.filter(
+            fingerprint="partner-intake-unreachable",
+        ).exists()
+        poll(
+            client=client, now=t0 + timedelta(minutes=5),
+            jitter=0, sleep=lambda _s: None,
+        )
+    row = Finding.objects.get(fingerprint="partner-intake-unreachable")
+    assert row.severity == "p1"
+    assert not Finding.objects.filter(
+        fingerprint="partner-intake-unreachable:intake",
+    ).exists()
+
+
+@pytest.mark.req("PART-HUB-POLL")
+def test_poison_outbox_item_does_not_kill_beat_or_arm_c12():
+    """A non-dict outbox row must not raise out of poll or increment fetch failures.
+
+    What would make this fail: job.get on a str, wrapping fetch so Beat
+    lives but C12 never arms, or counting the poison as consecutive_failures.
+    """
+    from core.models import CheckRun, Finding
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    client = FakeIntakeClient(items=["poison", {"id": "later", "type": "partner-job"}])
+    now = timezone.now()
+    with override_settings(INTAKE_URL="http://intake.test", PARTNER_API_ENABLED=False):
+        result = poll(client=client, now=now, jitter=0, sleep=lambda _s: None)
+        assert result["ok"] is True
+        assert result["status"] == "succeeded"
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        assert int((latest.results or {}).get("consecutive_failures") or 0) == 0
+        assert not Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+        client.fail = True
+        for _ in range(3):
+            poll(client=client, now=now, jitter=0, sleep=lambda _s: None)
+    p2 = Finding.objects.get(fingerprint="hub-outbox-poll-failing")
+    assert p2.severity == "p2"
+    assert not Finding.objects.filter(
+        fingerprint="hub-outbox-poll-failing:intake",
+    ).exists()
+
+
+@pytest.mark.req("PART-HUB-POLL")
 def test_intake_client_for_is_fail_closed():
     """Constructor refuses empty/non-http URLs and never imports intake.
 

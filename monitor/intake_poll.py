@@ -42,7 +42,10 @@ class FakeIntakeClient:
 
     def ack(self, job_id):
         self.acked.append(job_id)
-        self.items = [item for item in self.items if item.get("id") != job_id]
+        self.items = [
+            item for item in self.items
+            if not (isinstance(item, dict) and item.get("id") == job_id)
+        ]
 
     def plant_git_push(self, git_url, ref, sha, *, job_id=None):
         """Hub-side T1 plant. Does not import intake. No webhook secret."""
@@ -259,43 +262,60 @@ def _refuse_unknown(job):
     )
 
 
+def _iter_jobs_git_first(items):
+    git_push, other = [], []
+    for job in items:
+        if isinstance(job, dict) and (job.get("type") or "") == TYPE_GIT_PUSH:
+            git_push.append(job)
+        else:
+            other.append(job)
+    return git_push + other
+
+
 def _process(client, items, now):
+    from core.audit import audit
     from core.partner_jobs import PartnerNotFound, PartnerRefuse, materialize
     from core.partner_verify import ReplayRejected, SignatureRejected
 
     n = 0
     enabled = bool(getattr(settings, "PARTNER_API_ENABLED", False))
-    for job in items:
-        job_id = job.get("id")
-        job_type = job.get("type") or TYPE_PARTNER_JOB
-        if job_type == TYPE_GIT_PUSH:
-            n += int(bool(_handle_git_push(job, now)))
-            _ack(client, job_id)
-            continue
-        if job_type != TYPE_PARTNER_JOB:
-            _refuse_unknown(job)
-            _ack(client, job_id)
-            continue
-        if not enabled:
-            continue
+    for job in _iter_jobs_git_first(items):
         try:
+            if not isinstance(job, dict):
+                audit("outbox-item-refused", source="celery", severity="warning",
+                      type=type(job).__name__)
+                continue
+            job_id = job.get("id")
+            job_type = job.get("type") or TYPE_PARTNER_JOB
+            if job_type == TYPE_GIT_PUSH:
+                n += int(bool(_handle_git_push(job, now)))
+                _ack(client, job_id)
+                continue
+            if job_type != TYPE_PARTNER_JOB:
+                _refuse_unknown(job)
+                _ack(client, job_id)
+                continue
+            if not enabled:
+                continue
             partner, result = _partner_for(job, now)
             if partner is None or result is None or not result.ok:
                 continue
             n += 1
             created = materialize(partner, job)
+            if created is None:
+                continue
+            if _ack(client, job_id):
+                _persist_accepted_nonce(partner, result, now)
+                _persist_accepted_idempotency(partner, job, result)
         except ReplayRejected:
-            _ack(client, job_id)
+            if isinstance(job, dict):
+                _ack(client, job.get("id"))
             continue
-        except SignatureRejected:
+        except (SignatureRejected, PartnerRefuse, PartnerNotFound):
             continue
-        except (PartnerRefuse, PartnerNotFound):
+        except Exception:
+            audit("outbox-item-refused", source="celery", severity="warning")
             continue
-        if created is None:
-            continue
-        if _ack(client, job_id):
-            _persist_accepted_nonce(partner, result, now)
-            _persist_accepted_idempotency(partner, job, result)
     return n
 
 
@@ -359,12 +379,18 @@ def _record_failure(now):
     prev = (latest.results if latest is not None else {}) or {}
     consecutive = int(prev.get("consecutive_failures") or 0) + 1
     last_success_at = prev.get("last_success_at")
+    first_failure_at = prev.get("first_failure_at")
+    last_stamp = _parse_iso(last_success_at)
+    if last_stamp is None and not first_failure_at:
+        first_failure_at = _iso(now)
+    first_stamp = _parse_iso(first_failure_at)
     _upsert(
         CheckRun.Status.FAILED,
         {
             "schema_version": RESULTS_SCHEMA_VERSION,
             "consecutive_failures": consecutive,
             "last_success_at": last_success_at,
+            "first_failure_at": first_failure_at,
         },
         now,
     )
@@ -381,8 +407,13 @@ def _record_failure(now):
             ),
             fix_action="Check INTAKE_URL and the intake process.",
         )
-    stamp = _parse_iso(last_success_at)
-    if stamp is not None and now - stamp >= UNREACHABLE_AFTER:
+    last_aged = last_stamp is not None and now - last_stamp >= UNREACHABLE_AFTER
+    first_aged = (
+        last_stamp is None
+        and first_stamp is not None
+        and now - first_stamp >= UNREACHABLE_AFTER
+    )
+    if last_aged or first_aged:
         raise_alert(
             "partner-intake-unreachable",
             "intake",
