@@ -110,7 +110,7 @@ def _mint_whsec():
 
 
 def _intake_payload():
-    from core.models import CheckRun, Finding
+    from core.models import CheckRun
 
     url = str(getattr(settings, "INTAKE_URL", "") or "").strip()
     error = Finding.objects.filter(

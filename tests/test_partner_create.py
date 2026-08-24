@@ -647,8 +647,9 @@ def test_intake_as_of_is_last_success_not_now(client):
     """
     from datetime import timedelta
 
-    from core.models import CheckRun
     from django.utils import timezone
+
+    from core.models import CheckRun
     from monitor.alerts import raise_alert
 
     _t1_user(client)
@@ -688,8 +689,9 @@ def test_intake_as_of_is_null_when_never_succeeded(client):
     What would make this fail: falling back to timezone.now() or
     first_failure_at when last_success_at is missing.
     """
-    from core.models import CheckRun
     from django.utils import timezone
+
+    from core.models import CheckRun
     from monitor.alerts import raise_alert
 
     _t1_user(client)
