@@ -14,13 +14,21 @@ from dns_fixtures import default_dns_zone
 from core.models import Project, Site
 from deploys.models import Manifest
 from scanner import core as scanner_core
+from scanner import declarations
 from vault import service as vault_service
 from vault.models import Secret
 from wizard import questions as wizard_questions
 from wizard import service
-from wizard.materialize import MaterializeRefused, _apply_answers, materialize, preflight
+from wizard.materialize import (
+    MaterializeRefused,
+    _apply_answers,
+    _plain_answers,
+    _record_declarations,
+    materialize,
+    preflight,
+)
 from wizard.models import WizardAnswer
-from wizard.questions import question_map, question_set
+from wizard.questions import DECLARATION_PREFIX, question_map, question_set
 
 pytestmark = pytest.mark.django_db
 
@@ -450,6 +458,210 @@ def test_issue_r9_sec_1_a_skipped_row_does_not_end_the_overlay(site, project):
     _apply_answers(body, site, answers, known)
 
     assert body["module_answers"] == {"django.db": "postgres"}
+
+
+AWAITING_REPO_INSTRUCTION = (
+    " — except where a declaration is awaiting acceptance, which "
+    "you clear by answering its confirm in this wizard, not by "
+    "changing the repo"
+)
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_plain_answers_are_scoped_to_the_site(project, site):
+    """Dropping `site=site` mixes two sites' answers into one dict.
+
+    What would make this fail: `_plain_answers` filtering only on is_secret.
+    """
+    other = Site.objects.create(
+        project=project, name="other-prod", dns_zone=default_dns_zone())
+    service.set_answers(site, {"django.db": "postgres"})
+    service.set_answers(other, {"django.db": "sqlite"})
+    assert _plain_answers(site)["django.db"] == "postgres"
+    assert _plain_answers(other)["django.db"] == "sqlite"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_plain_answers_omit_secret_rows(answered_site):
+    """Dropping `is_secret=False` puts the env-secret qid into the plain map.
+
+    What would make this fail: `_plain_answers` keeping secret rows.
+    """
+    plain = _plain_answers(answered_site)
+    assert "django.env.DATABASE_PASSWORD" not in plain
+    assert SECRET_VALUE not in plain.values()
+    assert plain["django.db"] == "postgres"
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_a_declaration_row_does_not_end_the_overlay(site, project):
+    """`continue` on DECLARATION_PREFIX must not become `break`.
+
+    What would make this fail: a known declaration row first, then django.db
+    never reaching module_answers.
+    """
+    decl = f"{DECLARATION_PREFIX}example--deadbeef"
+    questions = list(project.scan_report["wizard_questions"]) + [
+        {"id": decl, "prompt": "Confirm drill", "kind": "bool",
+         "default": None, "choices": []},
+    ]
+    project.scan_report = make_report(questions=questions)
+    project.save()
+    known = question_map(project)
+    answers = [
+        WizardAnswer(site=site, question_id=decl, value="true", is_secret=False),
+        WizardAnswer(site=site, question_id="django.db", value="postgres",
+                     is_secret=False),
+    ]
+    body = {}
+    _apply_answers(body, site, answers, known)
+    assert body["module_answers"] == {"django.db": "postgres"}
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_record_declarations_skips_empty_path_and_keeps_later_entries():
+    """Empty-path `continue` must not become `break`.
+
+    What would make this fail: the first draft row has no path, so a break
+    never records the later claim.
+    """
+    qid = declarations.confirm_question_id("keep/me", "why")
+    body = {"declared_test_material": [
+        {"path": ""},
+        {"path": "keep/me", "reason": "why"},
+    ]}
+    _record_declarations(body, {qid: True})
+    assert body["declared_test_material"] == [{
+        "path": "keep/me", "reason": "why",
+        "question_id": qid, "accepted": True,
+    }]
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_missing_reason_defaults_to_empty_string_not_a_placeholder():
+    """`entry.get("reason", "")` is the id input; None or 'XXXX' mint a
+    different confirm id, so the operator's True would not match.
+
+    What would make this fail: a draft row with no reason key hashing as
+    None or a placeholder instead of "".
+    """
+    qid = declarations.confirm_question_id("p", "")
+    assert qid != declarations.confirm_question_id("p", None)
+    assert qid != declarations.confirm_question_id("p", "XXXX")
+    body = {"declared_test_material": [{"path": "p"}]}
+    _record_declarations(body, {qid: True})
+    row = body["declared_test_material"][0]
+    assert row["reason"] == ""
+    assert row["question_id"] == qid
+    assert row["accepted"] is True
+
+
+@pytest.mark.req("WIZ-V5-ONE-MANIFEST")
+def test_refused_declarations_use_the_refused_key():
+    """Refusals land on `declared_test_material_refused`, the list, that
+    exact key.
+
+    What would make this fail: writing None, an XX-wrapped key, or the
+    uppercase key so a GET reader cannot see the refusal.
+    """
+    qid = declarations.confirm_question_id("keep/me", "why")
+    body = {"declared_test_material": [
+        {"path": "keep/me", "reason": "why"},
+    ]}
+    _record_declarations(body, {})
+    assert "declared_test_material" not in body
+    assert body["declared_test_material_refused"] == [{
+        "path": "keep/me", "reason": "why",
+        "question_id": qid, "accepted": False,
+    }]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_preflight_keeps_scanning_after_a_non_blocker(project, site):
+    """Non-blocker `continue` must not become `break`.
+
+    What would make this fail: a warning first, so a break never lists the
+    blocker after it.
+    """
+    qid = declarations.confirm_question_id("drill", "qa")
+    project.scan_report = make_report(
+        checks=[
+            {"id": "w1", "tier": "warning", "title": "warn"},
+            {"id": "core.secret-scan", "tier": "blocker", "title": "secrets",
+             "acceptance": {"blocking_only_declared": True,
+                            "questions": [qid]}},
+        ],
+        questions=list(project.scan_report["wizard_questions"]) + [
+            {"id": qid, "prompt": "Confirm drill", "kind": "bool",
+             "default": None, "choices": []},
+        ],
+    )
+    project.save()
+    codes = {p["code"] for p in preflight(site)}
+    assert "blockers_present" in codes
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_preflight_keeps_scanning_after_an_accepted_blocker(project, site):
+    """Accepted-blocker `continue` must not become `break`.
+
+    What would make this fail: the first blocker is fully accepted, so a
+    break never lists the second still-pending blocker.
+    """
+    qid_a = declarations.confirm_question_id("a", "one")
+    qid_b = declarations.confirm_question_id("b", "two")
+    project.scan_report = make_report(
+        checks=[
+            {"id": "block-a", "tier": "blocker", "title": "A",
+             "acceptance": {"blocking_only_declared": True,
+                            "questions": [qid_a]}},
+            {"id": "block-b", "tier": "blocker", "title": "B",
+             "acceptance": {"blocking_only_declared": True,
+                            "questions": [qid_b]}},
+        ],
+        questions=list(project.scan_report["wizard_questions"]) + [
+            {"id": qid_a, "prompt": "Confirm A", "kind": "bool",
+             "default": None, "choices": []},
+            {"id": qid_b, "prompt": "Confirm B", "kind": "bool",
+             "default": None, "choices": []},
+        ],
+    )
+    project.save()
+    service.set_answers(site, {qid_a: True})
+    problem = next(p for p in preflight(site) if p["code"] == "blockers_present")
+    assert [item["id"] for item in problem["items"]] == ["block-b"]
+
+
+@pytest.mark.req("WIZ-MATERIALIZE-REFUSAL-NAMES-CAUSE")
+def test_awaiting_acceptance_names_prompt_and_the_repo_instruction(project, site):
+    """The awaiting list uses key `prompt`; known ids use the question
+    prompt; unknown ids use the id; the blockers_present detail carries
+    the repo-instruction extra verbatim.
+
+    What would make this fail: XX-wrapping or uppercasing those strings,
+    inverting in/not-in known, or looking up a mutated key on the blocker.
+    """
+    known_qid = declarations.confirm_question_id("drill", "qa")
+    unknown_qid = f"{DECLARATION_PREFIX}ghost--abcd"
+    project.scan_report = make_report(
+        checks=[{
+            "id": "core.secret-scan", "tier": "blocker", "title": "secrets",
+            "acceptance": {"blocking_only_declared": True,
+                           "questions": [known_qid, unknown_qid]},
+        }],
+        questions=list(project.scan_report["wizard_questions"]) + [
+            {"id": known_qid, "prompt": "Confirm drill", "kind": "bool",
+             "default": None, "choices": []},
+        ],
+    )
+    project.save()
+    problem = next(p for p in preflight(site) if p["code"] == "blockers_present")
+    assert AWAITING_REPO_INSTRUCTION in problem["detail"]
+    awaiting = problem["items"][0]["awaiting_acceptance"]
+    assert awaiting == [
+        {"id": known_qid, "prompt": "Confirm drill"},
+        {"id": unknown_qid, "prompt": unknown_qid},
+    ]
 
 
 @pytest.mark.req("WIZ-V5-ONE-MANIFEST")
