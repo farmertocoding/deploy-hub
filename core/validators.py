@@ -23,6 +23,10 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> str | None:
     """Return a reason string if this address must not be reached, else None."""
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        # IPv6 is_link_local is fe80::/10; the CGNAT net is version==4 only.
+        # Classify the embedded v4 (webhook egress has no clone-off-Hub exception).
+        return _is_blocked_ip(ip.ipv4_mapped)
     if ip.is_loopback:
         return "loopback address"
     if ip.is_link_local:

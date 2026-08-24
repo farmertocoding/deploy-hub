@@ -21,6 +21,8 @@ _WHSEC = "whsec_" + base64.b64encode(b"t1-partner-webhook-secret-32b!!").decode(
 # (203.0.113.0/24) is is_private on Python 3.13 and would fail closed as B10.
 PUBLIC_A = (2, 1, 6, "", ("140.82.121.4", 0))
 METADATA_A = (2, 1, 6, "", ("169.254.169.254", 0))
+MAPPED_METADATA_AAAA = (10, 1, 6, "", ("::ffff:169.254.169.254", 0, 0, 0))
+MAPPED_CGNAT_AAAA = (10, 1, 6, "", ("::ffff:100.64.0.1", 0, 0, 0))
 
 
 @pytest.fixture(autouse=True)
@@ -143,6 +145,61 @@ def test_delivery_re_resolves_and_refuses_rebind_to_metadata(monkeypatch):
         deliver_partner_webhook(partner, _event(), sink=sink)
     assert exc.value.code == "blocked_address"
     assert sink.mutating_calls() == []
+
+
+@pytest.mark.req("PART-WEBHOOKS")
+def test_ipv4_mapped_metadata_and_cgnat_literal_refuses():
+    """IPv4-mapped IPv6 literals must unwrap; metadata and CGNAT are blocked.
+
+    What would make this fail: classifying the v6 wrapper only so
+    ::ffff:169.254.169.254 (link-local, not private) or ::ffff:100.64.0.1
+    (CGNAT check is v4-only) became a webhook destination.
+    """
+    from core.validators import validate_webhook_url
+
+    for url in (
+        "https://[::ffff:169.254.169.254]/events",
+        "https://[::ffff:100.64.0.1]/events",
+    ):
+        with pytest.raises(ValidationError) as exc:
+            validate_webhook_url(url, resolve=False)
+        assert exc.value.code == "blocked_address", url
+
+
+@pytest.mark.req("PART-WEBHOOKS")
+def test_delivery_refuses_resolve_to_ipv4_mapped_metadata_and_cgnat(monkeypatch):
+    """Re-resolve that yields IPv4-mapped metadata/CGNAT must not POST.
+
+    What would make this fail: B10 on the v6 form only, so getaddrinfo
+    returning ::ffff:169.254.169.254 still POSTed (git clone-off-Hub
+    exception must not apply).
+    """
+    from core.partner_webhooks import (
+        FakeWebhookSink,
+        deliver_partner_webhook,
+        reset_delivery_state,
+    )
+    from core.validators import validate_webhook_url
+
+    for slug, info in (
+        ("wh-mapped-meta", MAPPED_METADATA_AAAA),
+        ("wh-mapped-cgnat", MAPPED_CGNAT_AAAA),
+    ):
+        reset_delivery_state()
+        url = "https://hooks.partner.example/events"
+        _public_dns(monkeypatch)
+        assert validate_webhook_url(url) == url
+
+        partner = _partner(slug=slug, url=url)
+        sink = FakeWebhookSink()
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda *a, info=info, **kw: [info],
+        )
+        with pytest.raises(ValidationError) as exc:
+            deliver_partner_webhook(partner, _event(f"msg_{slug}"), sink=sink)
+        assert exc.value.code == "blocked_address"
+        assert sink.mutating_calls() == []
 
 
 @pytest.mark.req("PART-WEBHOOKS")
