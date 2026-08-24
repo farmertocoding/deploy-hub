@@ -123,4 +123,8 @@ also_copy = [
     "conformance", "manage.py",
     # the acceptance tier scans this fixture repo from disk
     "sample-node-site",
+    # tests/conftest.py execs scripts_dev/exhaust.py from disk; not a PY_ROOT
+    # (no __init__.py). Omit this and a cold mutants/ rebuild fails stats
+    # collection, leaving every mutant not-checked.
+    "scripts_dev",
 ]

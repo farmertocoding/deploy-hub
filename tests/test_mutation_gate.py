@@ -116,6 +116,20 @@ def test_the_sandbox_copy_covers_every_python_package_in_the_tree():
     assert py_roots <= also_copy, py_roots - also_copy
 
 
+def test_the_sandbox_copy_includes_scripts_dev_exhaust_conftest_loads():
+    """conftest execs scripts_dev/exhaust.py from disk (not a PY_ROOT). If also_copy
+    omits scripts_dev, a cold mutants/ rebuild fails stats collection and every
+    mutant stays not-checked.
+
+    What would make this fail: listing only packages-with-__init__ so exhaust.py
+    is absent from the sandbox after a cache discard.
+    """
+    also_copy = set(_mutmut_config()["also_copy"])
+    conftest = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert "scripts_dev" in conftest and "exhaust.py" in conftest
+    assert "scripts_dev" in also_copy
+
+
 def test_the_mutation_gate_is_phony_and_is_reached_through_review_round():
     """Spec §7.3. Being `.PHONY` and being a `review-round` prerequisite is what puts
     this gate behind the Makefile's self-defense preamble — the preamble refuses
