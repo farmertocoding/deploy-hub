@@ -87,6 +87,8 @@ pytest_add_cli_args_test_selection = [
     "tests/test_cli_render.py",
     "tests/test_d012_out_of_phase_1.py",
     "tests/test_d012_reland.py",
+    # Task 4: test_scale_ready_scan.py imports wizard.materialize (mutated).
+    "tests/test_scale_ready_scan.py",
     "tests/test_scanner_core.py",
     "tests/test_scanner_core_hardening.py",
     "tests/test_scanner_declarations.py",
