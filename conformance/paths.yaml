@@ -118,3 +118,12 @@ sensitive:
   - core/partner_verify.py
   - core/partner_templates.py
   - core/partner_jobs.py
+  # Phase 6 (Task 0): the custody set the phase's tasks will land code
+  # into, claimed before the first line of code. scanner/modules/**
+  # and wizard/materialize.py already listed. Do not claim
+  # monitor/tasks.py wholesale. Do not broaden to scaling/** or
+  # frontend/** (D-086 / C10).
+  - scaling/pressure.py
+  - scaling/evaluator.py
+  - scaling/constants.py
+  - monitor/host_metrics.py

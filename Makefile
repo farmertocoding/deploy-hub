@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 conformance-5.5 review-round generate-client check-generated \
+	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 conformance-5.5 conformance-6 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -154,10 +154,12 @@ scripts-lint:
 
 # Review-round gate: phase 5 without live-only reqs — tier:t3 (Multipass)
 # and tier:t2 (docker) both stay out so review-round grades the T1 report
-# honestly (D-071 / D-080). conformance-5.5 is the Phase 5.5 exit gate
-# and is not a review-round or nightly-gates prereq. conformance-3 stays
-# all-tiers Phase 3 (nightly). conformance-4 stays phase 4 minus live.
-# Do not add an all-tiers 5 or 5.5 target.
+# honestly (D-071 / D-080 / D-091). conformance-5.5 is the Phase 5.5
+# exit gate and is not a review-round or nightly-gates prereq.
+# conformance-6 is the Phase 6 exit gate and is not a review-round or
+# nightly-gates prereq. conformance-3 stays all-tiers Phase 3 (nightly).
+# conformance-4 stays phase 4 minus live. Do not add an all-tiers 5,
+# 5.5, or 6 target.
 conformance:
 	python conformance/check.py --phase 5 --exclude-tier t2 --exclude-tier t3
 
@@ -186,6 +188,12 @@ conformance-5:
 # all-tiers 5.5 target. Do not add t4.
 conformance-5.5:
 	python conformance/check.py --phase 5.5 --exclude-tier t2 --exclude-tier t3
+
+# Phase 6 gate: --phase 6 minus live. Not a review-round or
+# nightly-gates prereq (D-091). Do not add an all-tiers 6 target.
+# Do not add t4. Everyday `conformance` stays phase 5.
+conformance-6:
+	python conformance/check.py --phase 6 --exclude-tier t2 --exclude-tier t3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #

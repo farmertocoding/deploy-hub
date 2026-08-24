@@ -60,3 +60,7 @@
 /core/partner_verify.py @farmertocoding
 /core/partner_templates.py @farmertocoding
 /core/partner_jobs.py @farmertocoding
+/scaling/pressure.py @farmertocoding
+/scaling/evaluator.py @farmertocoding
+/scaling/constants.py @farmertocoding
+/monitor/host_metrics.py @farmertocoding

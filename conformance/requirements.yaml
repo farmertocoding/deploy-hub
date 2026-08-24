@@ -1313,3 +1313,69 @@ requirements:
     text_hash: sha256:cd5a677fd2adc268ac6b04e6099d487da6d8291b79479857a51efcd7d2071718
     text: >
       nightly live partner-path (named partner + test-zone template deploy + live webhook + live kill switch) runs only behind the existing test-plane wall; absent config is skipped-only.
+
+  # ── Phase 6 (docs/phase-6-design-note.md §3, Task 0 / D-086…D-095).
+  # New MUST ids are tier-less (no `tier:` key). New ids sit `uncovered`
+  # until later tasks land proofs. P6-SCALER-DEMO names
+  # conformance/demos/phase-6.md; do not stub that file here (missing
+  # is uncovered; a non-empty stub would verify). Do not bump PART-K /
+  # U1. Do not hang full-text auto-mode / AMI / ScalePolicy / live
+  # provision on any T1 test.
+  - id: SCALE-SUSTAINED-PROPOSE
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      five consecutive distinct UTC minutes of HostMetric samples in a 300s Hub-clock window over the same axis (mem_pct>85 or load1>cores) file Finding kind scale-out-proposal fingerprint scale-out-proposal:{site.pk} whose body includes the cost estimate and the sentence propose-mode does not launch; disk-only heat does not file.
+  - id: SCALE-SPIKE-NO-PROPOSE
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      a single sample over threshold among five, a missing minute, mixed axes, or samples older than the window do not file scale-out-proposal.
+  - id: SCALE-NEVER-ATTACK
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      evaluate_site calls refuse_if_attack first; when the attack playbook is engaged no scale-out-proposal is filed and an OPEN or ACKED proposal for that site is system-resolved.
+  - id: SCALE-NEVER-PARTNER
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      a PartnerSite never receives scale-out-proposal even on sustained pressure and a quiet attack playbook; binding PartnerSite after file system-resolves an OPEN proposal.
+  - id: SCALE-PROPOSE-NO-PROVISION
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      propose-mode evaluate_site never creates a Target, never calls enroll_aws_target or InstanceCreateView, and scaling/ plus monitor/tasks.py plus monitor/host_metrics.py do not import provision.aws_enroll or providers.ec2.
+  - id: SCALE-READY-PREREQ
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      core.scale-ready is warning not blocker; Site.scale_ready defaults False; missing check or warning is False even if confirm_warnings; a failing or mesh_only site is ineligible; a passing public site can be proposed.
+  - id: UX-P6-SINGLE-INSTANCE
+    phase: 6
+    verify: test
+    source: phase-6-design-note.md §3
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      Sites payload emits scale_ready and does not alias single_instance to not scale_ready; SiteObserved paints single-instance-only iff scale_ready is false and is shown on list rows; F8 REQUIRED_STATE_IDS includes single-instance-only and scale-out-proposal; NAV stays six; copy never says instance except single-instance and single-instance-only; the proposal Finding has no Approve or Launch control.
+  - id: P6-SCALER-DEMO
+    phase: 6
+    verify: demo
+    source: phase-6-design-note.md §3
+    demo:
+      - conformance/demos/phase-6.md
+    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    text: >
+      demo record names the MUST path in design note §4; no live provision, no auto mode, no AMI, no ScalePolicy table.
