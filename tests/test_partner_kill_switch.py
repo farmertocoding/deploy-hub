@@ -6,6 +6,7 @@ site_takedown is T2 and the route returns 410. Function-level req markers only.
 """
 from __future__ import annotations
 
+import ast
 import inspect
 import itertools
 import json
@@ -555,33 +556,47 @@ def test_suspend_run_twice_zero_mutating_calls(client, monkeypatch):
     assert transport.mutating_calls() == []
 
 
+def _string_constants(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.add(node.value)
+    return found
+
+
 def test_partner_router_still_does_not_map_to_operator_ids():
     """K6: the partner router must not call ACTION_TIERS T1/T2 operator ids.
 
     What would make this fail: intake or partner_jobs mapping to suspend,
     kill-switch, takedown, destination_rank, or the older internal ids.
+    Gate is AST string constants plus PARTNER_ROUTER keys/values, so a
+    BooleanField attribute partner.suspended does not trip partner.suspend.
     """
     from core.actions import ACTION_TIERS
+    from core.partner_jobs import PARTNER_ROUTER
 
-    operator_ids = [
+    operator_ids = {
         "target.delete", "key.export", "kek.rotate", "ssh.rotate",
         "instance.create", "instance.terminate", "dns.change", "site.auto_mode",
         "partner.create", "partner.suspend", "partner.api_kill_switch",
         "partner.site_takedown", "partner.destination_rank",
-    ]
+    }
     t1_t2 = {row["id"] for row in ACTION_TIERS if row["tier"] in {"T1", "T2"}}
-    assert set(operator_ids) <= t1_t2 | set(operator_ids)
+    banned = t1_t2 | operator_ids
+    mapped = set(PARTNER_ROUTER.values()) | set(PARTNER_ROUTER.keys())
+    overlap = mapped & banned
+    assert not overlap, f"partner router maps to internal ids: {sorted(overlap)}"
+    assert "partner.suspend" in banned
 
-    blobs = []
-    for py in (REPO / "intake").rglob("*.py"):
-        blobs.append(py.read_text(encoding="utf-8"))
+    paths = list((REPO / "intake").rglob("*.py"))
     for rel in ("core/partner_jobs.py", "core/partner_templates.py"):
         path = REPO / rel
         if path.exists():
-            blobs.append(path.read_text(encoding="utf-8"))
-    blob = "\n".join(blobs)
-    for action_id in operator_ids:
-        assert action_id not in blob, action_id
+            paths.append(path)
+    for path in paths:
+        found = _string_constants(path) & banned
+        assert not found, f"{path.name} names internal ACTION_TIERS ids: {sorted(found)}"
 
 
 @pytest.mark.req("UX-P55-PARTNERS")
