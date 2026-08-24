@@ -45,6 +45,30 @@ def _uptime(entity, kind, age, *, state="up"):
     )
 
 
+def _target(slug="retain-host"):
+    from core.models import NetworkZone, Target
+
+    zone = NetworkZone.objects.create(name=slug, slug=slug)
+    return Target.objects.create(
+        zone=zone,
+        kind=Target.Kind.SSH,
+        host=f"{slug}.example",
+        ssh_user="deploy",
+        ssh_key_ref="vault-owner-1",
+        host_key_fingerprint="SHA256:test",
+        lifecycle=Target.Lifecycle.PERMANENT,
+        status=Target.Status.READY,
+    )
+
+
+def _host_metric(target, age, **fields):
+    from core.models import HostMetric
+
+    payload = {"cpu": None, "ram": 10.0, "disk": 20.0, "load": 0.1, "cores": 2}
+    payload.update(fields)
+    return HostMetric.objects.create(target=target, ts=NOW - age, **payload)
+
+
 def _step(slug, age, *, log_text="deploy log body\n"):
     site = _site(slug)
     manifest = Manifest.objects.create(site=site, version=1, body={})
@@ -188,3 +212,39 @@ def test_janitor_is_batched_and_idempotent():
     second = sweep(now=NOW, batch_size=2)
     assert second["TrafficStat"]["deleted"] == 0
     assert second["TrafficStat"]["batches"] == 0
+
+
+@pytest.mark.req("MON-C7-RETENTION")
+def test_host_metric_raw_older_than_14d_is_deleted():
+    """HostMetric raw rows older than 14 d are batched-deleted; newer rows stay.
+
+    Hourly rollup 1 y stays a pinned horizon without a rollup table: there is
+    no granularity column, so every row older than 14 d is raw and goes.
+
+    What would make this fail: the stub that returns {deleted: 0} without a
+    DELETE, a 13 d 23 h row disappearing, one unbounded queryset.delete(), or
+    inventing an hourly grain that this wave does not have.
+    """
+    from core.models import HostMetric
+    from monitor.retention import HORIZONS, sweep
+
+    assert HORIZONS["HostMetric"]["raw"] == timedelta(days=14)
+    assert HORIZONS["HostMetric"]["hourly"] == timedelta(days=365)
+    assert "granularity" not in {f.name for f in HostMetric._meta.get_fields()}
+
+    target = _target("hm-retain")
+    stale = [_host_metric(target, timedelta(days=14, minutes=10 + i)) for i in range(5)]
+    keep = _host_metric(target, timedelta(days=13, hours=23))
+    just_over = _host_metric(target, timedelta(days=14, minutes=1))
+
+    first = sweep(now=NOW, batch_size=2)
+    assert first["HostMetric"]["deleted"] == 6
+    assert first["HostMetric"]["batches"] == 3
+    assert not HostMetric.objects.filter(pk__in=[row.pk for row in stale]).exists()
+    assert not HostMetric.objects.filter(pk=just_over.pk).exists()
+    assert HostMetric.objects.filter(pk=keep.pk).exists()
+
+    second = sweep(now=NOW, batch_size=2)
+    assert second["HostMetric"]["deleted"] == 0
+    assert second["HostMetric"]["batches"] == 0
+    assert HostMetric.objects.filter(pk=keep.pk).exists()
