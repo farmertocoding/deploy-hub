@@ -1497,6 +1497,138 @@ def _check_exposure_auth(texts):
     )
 
 
+# C13: assignment-shaped, not comments/README. FileSystemStorage is not a pass.
+_SCALE_DOC_NAMES = {"readme", "changelog", "changes", "history", "authors", "license"}
+_LOCAL_STATE_FILE_RE = re.compile(
+    r"(?i)(?:\.sqlite3-wal|\.sqlite3|\.parquet|\.duckdb|-wal)$")
+_SQLITE_ENGINE_RE = re.compile(
+    r"(?ix)"
+    r"(?:\bENGINE\s*=\s*['\"][^'\"]*sqlite"
+    r"|['\"]ENGINE['\"]\s*:\s*['\"][^'\"]*sqlite"
+    r"|\bDATABASE_URL\s*=\s*['\"]?[^'\"\s]*sqlite"
+    r"|['\"]DATABASE_URL['\"]\s*:\s*['\"][^'\"]*sqlite)")
+_LOCMEM_RE = re.compile(
+    r"(?ix)"
+    r"(?:\bSESSION_ENGINE\s*=\s*['\"][^'\"]*locmem"
+    r"|['\"]SESSION_ENGINE['\"]\s*:\s*['\"][^'\"]*locmem"
+    r"|django\.contrib\.sessions\.backends\.locmem)")
+_CELERY_IMPORT_RE = re.compile(r"(?m)^\s*(?:from|import)\s+celery\b")
+_CELERY_DEP_NAMES = {
+    "pyproject.toml", "pipfile", "setup.cfg", "setup.py",
+}
+_BROKER_LOCAL_RE = re.compile(
+    r"(?ix)"
+    r"(?:\b(?:CELERY_BROKER_URL|CELERY_RESULT_BACKEND|BROKER_URL|broker_url)"
+    r"\s*=\s*['\"][^'\"]*(?:localhost|127\.0\.0\.1)"
+    r"|['\"](?:CELERY_BROKER_URL|CELERY_RESULT_BACKEND|BROKER_URL|broker_url)"
+    r"['\"]\s*:\s*['\"][^'\"]*(?:localhost|127\.0\.0\.1)"
+    r"|\bbroker\s*=\s*['\"][^'\"]*(?:localhost|127\.0\.0\.1)"
+    r"|(?:rediss?|amqps?|amqp)://[^\s'\"]*(?:localhost|127\.0\.0\.1))")
+_DJANGO_SETTINGS_ASSIGN_RE = re.compile(
+    r"\b(?:INSTALLED_APPS|DATABASES|DJANGO_SETTINGS_MODULE)\s*=")
+_MEDIA_LOCAL_RE = re.compile(
+    r"(?ix)"
+    r"(?:\b(?:MEDIA_ROOT|DEFAULT_FILE_STORAGE|STORAGES)\s*="
+    r"|['\"](?:MEDIA_ROOT|DEFAULT_FILE_STORAGE|STORAGES)['\"]\s*:)")
+_OBJECT_STORAGE_RE = re.compile(
+    r"(?ix)"
+    r"(?:django-storages|storages\.backends\.s3|S3Boto3Storage|S3BotoStorage"
+    r"|AWS_STORAGE_BUCKET_NAME|AWS_S3_|GS_BUCKET_NAME|AzureStorage)")
+
+
+def _scale_doc_file(path):
+    stem = path.stem.lower()
+    return stem in _SCALE_DOC_NAMES or stem.startswith("readme")
+
+
+def _scale_code_text(text):
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _is_django_settings_file(path, text):
+    if path.name == "settings.py":
+        return True
+    if path.suffix == ".py" and "settings" in {p.lower() for p in path.parts}:
+        return True
+    return bool(_DJANGO_SETTINGS_ASSIGN_RE.search(_scale_code_text(text)))
+
+
+def _check_scale_ready(root, texts, paths):
+    """Always-on `core.scale-ready` (C13). warning | ok, never blocker.
+
+    Reuses the suite `texts`/`paths`. Does not walk again and does not read
+    escaped symlink targets (those stay on `core.secret-scan` / the refusal line).
+    Declarations do not downgrade this id.
+    """
+    findings = []
+    root = Path(root)
+
+    def rel(path):
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return path.name
+
+    for path in paths:
+        if _LOCAL_STATE_FILE_RE.search(path.name):
+            findings.append(f"local-state file: {rel(path)}")
+
+    celery_used = False
+    broker_local = False
+    django_settings = False
+    media_local = False
+    object_storage = False
+
+    for path, text in texts:
+        body = _scale_code_text(text)
+        if _is_django_settings_file(path, text):
+            django_settings = True
+        if _OBJECT_STORAGE_RE.search(body):
+            object_storage = True
+        if _scale_doc_file(path):
+            continue
+        if _SQLITE_ENGINE_RE.search(body):
+            findings.append(f"sqlite ENGINE or DATABASE_URL in {rel(path)}")
+        if _LOCMEM_RE.search(body):
+            findings.append(f"SESSION_ENGINE locmem in {rel(path)}")
+        if _CELERY_IMPORT_RE.search(body):
+            celery_used = True
+        name = path.name.lower()
+        if name.startswith("requirements") or name in _CELERY_DEP_NAMES:
+            if re.search(r"(?i)\bcelery\b", body):
+                celery_used = True
+        if _BROKER_LOCAL_RE.search(body):
+            broker_local = True
+        if _MEDIA_LOCAL_RE.search(body):
+            media_local = True
+
+    if celery_used and broker_local:
+        findings.append("Celery broker URL points at localhost")
+    if django_settings and media_local and not object_storage:
+        findings.append(
+            "Django media uses local disk without django-storages or S3-shaped storage")
+
+    if findings:
+        return core.CheckResult(
+            id="core.scale-ready", tier="warning",
+            title="Not scale-ready",
+            detail="\n".join(findings),
+            fix_hint="Use a shared database, shared sessions, a non-localhost "
+                     "broker, and object-storage media. This marks the site "
+                     "single-instance-only; it does not block deploy.",
+        )
+    return core.CheckResult(
+        id="core.scale-ready", tier="ok",
+        title="Scale-ready",
+    )
+
+
 def common_checks(root, declared=None, refused_elsewhere=()):
     """The common-core static check suite (id prefix `core.`), composed into every
     scan report by `scanner.core.scan` (D-010) and called directly by tests.
@@ -1536,6 +1668,8 @@ def common_checks(root, declared=None, refused_elsewhere=()):
         _check_healthz(texts),
         _check_digest_pins(root, texts),
         _check_exposure_auth(texts),
+        # Always-on eighth (C13). core.symlinked-files stays conditional, last.
+        _check_scale_ready(root, texts, paths),
     ]
     # APPENDED LAST, and only when something was refused — a report from an ordinary
     # repo with no escaping symlink is byte-identical to the one it produced before

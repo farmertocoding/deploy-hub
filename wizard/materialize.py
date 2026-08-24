@@ -268,6 +268,15 @@ def materialize(site, *, actor=None, confirm_warnings=False):
     env_values = _apply_answers(body, locked, answers, question_map(project),
                                 actor=actor)
 
+    # C13 / D-090: copy from the stored report. True iff the check is present and
+    # tier is ok. confirm_warnings does not set True. Missing id → False.
+    scale_check = next(
+        (c for c in (report.get("checks") or []) if c.get("id") == "core.scale-ready"),
+        None,
+    )
+    locked.scale_ready = scale_check is not None and scale_check.get("tier") == "ok"
+    locked.save(update_fields=["scale_ready"])
+
     # Round-1 F1 (security, high): env VALUES never enter the manifest body — not
     # even the plain-classified ones, because classification is a heuristic and one
     # miss would freeze a live credential into an append-only JSON row returned by

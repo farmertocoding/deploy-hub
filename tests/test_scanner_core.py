@@ -13,9 +13,11 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # (D-010 / SPEC-django-common-checks.md §1.3): a module may supersede a core result
 # only by emitting the same id, never by omitting it. Adding a check to
 # `common_checks` must be a conscious edit here too.
+# Eight always-on ids; `core.symlinked-files` stays conditional (appended only
+# when the walk refused a path).
 FROZEN_CORE_IDS = frozenset({
     "core.secret-scan", "core.lockfile", "core.gitignore", "core.tests-exist",
-    "core.healthz", "core.digest-pins", "core.exposure-auth",
+    "core.healthz", "core.digest-pins", "core.exposure-auth", "core.scale-ready",
 })
 
 
@@ -197,7 +199,7 @@ MODULE_FIXTURES = {
 
 def test_every_registered_module_scan_carries_the_full_core_suite(tmp_path):
     """The invariant (D-010): every scan report with >=1 matched module carries all
-    seven `core.*` ids, each exactly once. Inapplicability is expressed by
+    eight always-on `core.*` ids, each exactly once. Inapplicability is expressed by
     supersession (a module emitting the SAME id), never by absence."""
     import scanner.modules  # noqa: F401 — importing registers the modules
 

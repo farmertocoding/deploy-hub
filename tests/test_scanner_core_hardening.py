@@ -994,7 +994,7 @@ def test_issue_r7_2_the_skipped_list_is_capped_and_counted(monkeypatch, tmp_path
 def test_issue_r7_2_the_walk_still_serves_every_other_check(monkeypatch, tmp_path):
     """Blast radius. `_iter_files` is shared by `core.lockfile`, `core.gitignore` and
     `core.tests-exist`; the skip list had to reach one caller without changing the shape
-    of any of the others. The suite is the same seven checks, and the ones that do not
+    of any of the others. The suite is the same eight always-on checks, and the ones that do not
     ask about skipping are unmoved by it."""
     files = {"package.json": '{"name": "app"}\n', "package-lock.json": "{}\n",
              ".gitignore": ".env\nnode_modules\n", "tests/test_app.py": "def test(): pass\n",

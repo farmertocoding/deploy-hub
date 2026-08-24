@@ -536,7 +536,7 @@ def test_uv_asgi_scan_carries_the_core_suite_with_one_honest_warning():
     assert core_tiers == {
         "core.secret-scan": "ok", "core.lockfile": "ok", "core.gitignore": "ok",
         "core.tests-exist": "ok", "core.healthz": "ok", "core.digest-pins": "ok",
-        "core.exposure-auth": "warning",
+        "core.exposure-auth": "warning", "core.scale-ready": "ok",
     }
     assert "SESSION_COOKIE_SECURE" in (
         (UV_ASGI / "config" / "settings" / "prod.py").read_text(encoding="utf-8")), (
@@ -554,7 +554,7 @@ def test_legacy_bad_scan_surfaces_the_core_findings():
         "core.secret-scan": "blocker", "core.lockfile": "ok",
         "core.gitignore": "warning", "core.tests-exist": "advice",
         "core.healthz": "advice", "core.digest-pins": "warning",
-        "core.exposure-auth": "warning",
+        "core.exposure-auth": "warning", "core.scale-ready": "warning",
     }
     assert "python:3.11-slim" in checks["core.digest-pins"]["detail"]
     # `core.secret-scan` read `ok` here until D-010 follow-up item 5, on a fixture whose
@@ -580,6 +580,7 @@ def test_pip_wsgi_scan_is_clean_apart_from_the_auth_warning():
     assert {i for i in checks if i.startswith("core.")} == {
         "core.secret-scan", "core.lockfile", "core.gitignore", "core.tests-exist",
         "core.healthz", "core.digest-pins", "core.exposure-auth",
+        "core.scale-ready",
     }
     assert checks["core.healthz"]["tier"] == "advice"
 
