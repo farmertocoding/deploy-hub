@@ -21,8 +21,10 @@ Settings Partners can **add / reorder / remove** destinations, then T2
    `destination_order`). Add from candidates not already in the draft;
    Up / Down / Remove. Rank posts **the draft**, not the stored list.
 3. Confirm `summary` is the K5 honesty sentence **iff the draft includes
-   `kind=ssh`**, else “Default: dedicated cloud first.” Empty-order copy
-   stays “partner-site create will refuse.”
+   `kind=ssh`** (looked up from stored destinations ∪ candidate_targets,
+   including tunnel=false ssh). Else “Default: dedicated cloud first.”
+   Empty-order copy stays “partner-site create will refuse.” Rank POST
+   body is the draft ids, never a re-save of stored empty `[]`.
 4. Own-server without tunnel still 400 + Finding on POST (existing).
    Picker may list those targets; save still refuses.
 

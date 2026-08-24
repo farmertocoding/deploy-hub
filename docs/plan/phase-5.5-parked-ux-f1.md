@@ -67,19 +67,46 @@ def test_partners_list_includes_ready_candidate_targets(client):
         zone=zone, host="pending.cand.test", kind=Target.Kind.AWS_EC2,
         status=Target.Status.PENDING,
     )
+    errored = Target.objects.create(
+        zone=zone, host="error.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.ERROR,
+    )
+    gone = Target.objects.create(
+        zone=zone, host="gone.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.DECOMMISSIONED,
+    )
+    open_ssh = Target.objects.create(
+        zone=zone, host="open.cand.test", kind=Target.Kind.SSH,
+        status=Target.Status.READY, collect_payload={"tunnel": False},
+    )
+    from core.models import Partner
+    empty = Partner.objects.create(slug="cand-empty", name="cand-empty")
+    assert empty.destination_order == []
     response = client.get(CREATE_URL)
     assert response.status_code == 200
-    cands = response.json()["candidate_targets"]
+    body = response.json()
+    dumped = _blob(body)
+    assert "hubk_" not in dumped
+    assert "whsec_" not in dumped
+    assert "ssh_key_ref" not in dumped
+    cands = body["candidate_targets"]
     ids = {row["id"] for row in cands}
     assert ready.pk in ids
     assert ssh.pk in ids
     assert pending.pk not in ids
+    assert errored.pk not in ids
+    assert gone.pk not in ids
     ssh_row = next(row for row in cands if row["id"] == ssh.pk)
     assert ssh_row["host"] == "home.cand.test"
     assert ssh_row["kind"] == Target.Kind.SSH
     assert ssh_row["tunnel"] is True
+    assert set(ssh_row) == {"id", "host", "kind", "tunnel"}
     cloud_row = next(row for row in cands if row["id"] == ready.pk)
     assert cloud_row["tunnel"] is False
+    open_row = next(row for row in cands if row["id"] == open_ssh.pk)
+    assert open_row["tunnel"] is False
+    listed = next(row for row in body["partners"] if row["slug"] == "cand-empty")
+    assert listed["destination_order"] == []
 ```
 
 - [ ] **Step 2: Run to verify RED**
@@ -107,9 +134,11 @@ def _candidate_targets():
     return out
 ```
 
-GET list includes `"candidate_targets": _candidate_targets()`. Do not add a new URL. Do not change rank POST.
+GET list includes `"candidate_targets": _candidate_targets()`. Do not add a new URL. Do not change `PartnerDestinationRankView`. Helper stays `status=Target.Status.READY` and `payload.get("tunnel") is True`. GET must not insert a CheckRun.
 
-- [ ] **Step 4:** `pytest tests/test_partner_create.py -q` PASS.
+If spectacular/OpenAPI drifts, run `make generate-client` and commit generated client files (D-002). Do not edit `REVIEW_CHECKLIST.md`.
+
+- [ ] **Step 4:** `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_partner_create.py tests/test_partner_isolation.py::test_empty_destination_order_refuses_create tests/test_partner_kill_switch.py::test_destination_rank_http_pin_and_own_server_honesty_sentence -q` PASS. Rank path still `PartnerDestinationRankView`; ssh-without-tunnel POST still 400 + Finding.
 
 - [ ] **Step 5: Commit**
 
@@ -151,7 +180,7 @@ test("rank_draft_helpers_add_reorder_remove", () => {
   assert.deepEqual(removeDestination([1, 2], 1), [2]);
 });
 
-test("ranker_posts_draft_order_not_stored_empty", () => {
+test("ranker_posts_draft_order_not_stored_empty", async () => {
   const CANDS = [
     { id: 7, host: "cloud.rank.test", kind: "aws_ec2", tunnel: false },
     { id: 8, host: "home.rank.test", kind: "ssh", tunnel: true },
@@ -169,11 +198,34 @@ test("ranker_posts_draft_order_not_stored_empty", () => {
   assert.match(text, /Add destination/);
   assert.doesNotMatch(text, /\bConnected\b/);
   assert.doesNotMatch(text, /\binstance\b/i);
-  const draftDest = [
-    { id: 7, kind: "aws_ec2" },
-    { id: 8, kind: "ssh" },
-  ];
-  assert.match(rankSummary({ destinations: draftDest }), /abuse takedowns/);
+
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+  const calls: Array<{ url: string; body: any }> = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    calls.push({ url, body: opts?.body ? JSON.parse(opts.body) : undefined });
+    return { status: 200, json: async () => ({ id: 1, slug: "fixture-partner",
+      destination_order: [7, 8], destinations: CANDS }) };
+  };
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(PartnersPanel, {
+      partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+        destinations: [], suspended: false }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+      candidateTargets: CANDS,
+      rankDrafts: { 1: [7, 8] },
+    }));
+  });
+  const rankBtn = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.destination_rank");
+  assert.ok(rankBtn);
+  assert.match(String(rankBtn.props.summary), /abuse takedowns/);
+  await rankBtn.props.onRun();
+  const posted = calls.find((c) => String(c.url).includes("destination-rank"));
+  assert.ok(posted, "Rank must POST destination-rank");
+  assert.deepEqual(posted.body.destination_order, [7, 8]);
+  act(() => { tree.unmount(); });
 });
 ```
 
@@ -219,9 +271,9 @@ async function runRank(partner) {
 }
 ```
 
-Honesty uses draft destinations (lookup kind from `destinations` ∪ `candidateTargets`). UI: for each draft id, show host + Up + Down + Remove. `<select aria-label="Add destination">` of candidates not in draft + button “Add destination”. Empty copy unchanged. No checkbox/switch. No 7th NAV.
+Honesty / ActionButton `summary` uses draft destinations (lookup `kind` from `destinations` ∪ `candidateTargets`), including when stored `destinations` is empty. ssh-without-tunnel in the draft still counts as `kind=ssh` (honesty); POST still 400. UI: for each draft id, show host + Up + Down + Remove. `<select aria-label="Add destination">` of candidates not in draft + button “Add destination”. Empty copy unchanged. No checkbox/switch. No 7th NAV. Skip live `partnersList()` fetch when `partners` prop is injected. Default `candidateTargets`/`rankDrafts` so F8 `partner-destination-order-confirm` still mounts.
 
-- [ ] **Step 4:** node tests + `pytest tests/test_partner_kill_switch.py::test_destination_rank_own_server_is_t2_with_honesty_sentence tests/test_partner_create.py -q` PASS.
+- [ ] **Step 4:** `cd frontend && node --import tsx --test tests/settings-partners.test.ts tests/simulation-states.test.ts` plus pytest honesty/create neighbors PASS. Rank stays T2 ConfirmDialog.
 
 - [ ] **Step 5: Commit**
 
