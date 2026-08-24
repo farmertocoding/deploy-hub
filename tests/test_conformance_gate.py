@@ -2368,6 +2368,183 @@ def test_no_all_tiers_5_5_target():
             f"{recipe}")
 
 
+# ── Phase 6 Task 0: due set, tier-less MUST, conformance-6 minus live ──
+
+PHASE_6_MUST_IDS = {
+    "SCALE-SUSTAINED-PROPOSE",
+    "SCALE-SPIKE-NO-PROPOSE",
+    "SCALE-NEVER-ATTACK",
+    "SCALE-NEVER-PARTNER",
+    "SCALE-PROPOSE-NO-PROVISION",
+    "SCALE-READY-PREREQ",
+    "UX-P6-SINGLE-INSTANCE",
+    "P6-SCALER-DEMO",
+}
+PHASE_6_TEST_IDS = PHASE_6_MUST_IDS - {"P6-SCALER-DEMO"}
+
+
+def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
+    """Every design-note §3 MUST id exists at phase 6 with no tier key, and
+    check.py grades a phase-6 req as due at `--phase 6`.
+
+    What would make this fail: a missing/rephased id, a `tier:` on a MUST
+    id so exclude-tier drops it, P6-SCALER-DEMO not naming
+    conformance/demos/phase-6.md, or argparse/schema refusing 6.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_6_MUST_IDS - set(reg))
+    assert missing == [], f"phase-6 §3 MUST ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_6_MUST_IDS if reg[rid]["phase"] != 6)
+    assert wrong_phase == [], (
+        f"phase-6 §3 MUST ids not registered at phase 6: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+    tagged = sorted(rid for rid in PHASE_6_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"§3 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+    for rid in sorted(PHASE_6_MUST_IDS):
+        assert reg[rid]["source"] == "phase-6-design-note.md §3", (
+            f"{rid} source must be phase-6-design-note.md §3, "
+            f"got {reg[rid].get('source')!r}")
+
+    for rid in sorted(PHASE_6_TEST_IDS):
+        assert reg[rid]["verify"] == "test", (
+            f"{rid} must be verify: test, got {reg[rid]['verify']}")
+
+    demo = reg["P6-SCALER-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-6.md" in demo_paths, (
+        f"P6-SCALER-DEMO must name conformance/demos/phase-6.md: "
+        f"{demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path / "at6",
+        reqs=[_req("FIX-P6-DUE", phase=6)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P6-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=6)
+    assert res.returncode == 0, (
+        f"--phase 6 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 6
+    assert header["requirements"]["FIX-P6-DUE"]["due"] is True
+    assert status_of(root, "FIX-P6-DUE") == "verified"
+
+    root5 = write_repo(
+        tmp_path / "at5",
+        reqs=[_req("FIX-P5-DUE", phase=5), _req("FIX-P6-SKIP", phase=6)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P5-DUE", name="test_a")
+                   + "\n\n"
+                   + MARKED_TEST.format(rid="FIX-P6-SKIP", name="test_b")},
+        outcomes={
+            "tests/test_fixture.py::test_a": "passed",
+            "tests/test_fixture.py::test_b": "passed",
+        },
+    )
+    res5 = run_check(root5, phase=5)
+    assert res5.returncode == 0, (
+        f"an uncovered phase-6 req failed the --phase 5 gate:\n"
+        f"{res5.stdout}")
+    assert matrix(root5)["requirements"]["FIX-P6-SKIP"]["due"] is False
+    assert matrix(root5)["requirements"]["FIX-P5-DUE"]["due"] is True
+
+
+def test_new_phase_6_must_ids_have_no_tier():
+    """New Phase 6 MUST ids are tier-less (no `tier:` key; D-091 / C10).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so
+    exclude-tier drops a MUST id, or an explicit `tier: t1` (absence is
+    the contract).
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_6_MUST_IDS - set(reg))
+    assert missing == [], f"phase-6 MUST ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_6_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-6 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+def test_p6_scaler_demo_names_phase_6_md_and_file_is_absent():
+    """P6-SCALER-DEMO is verify: demo naming conformance/demos/phase-6.md
+    and that file is absent.
+
+    What would make this fail: a missing demo: key, pointing at
+    phase-5.5.md, or a non-empty stub (Task 0 forbids creating the
+    file — a stub would verify P6-SCALER-DEMO).
+    """
+    reg = _live_registry()
+    assert "P6-SCALER-DEMO" in reg, "P6-SCALER-DEMO is not in the registry"
+    demo = reg["P6-SCALER-DEMO"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-6.md" in demo_paths, (
+        f"P6-SCALER-DEMO must name conformance/demos/phase-6.md: "
+        f"{demo.get('demo')}")
+    path = REPO / "conformance" / "demos" / "phase-6.md"
+    assert not path.exists(), (
+        "conformance/demos/phase-6.md must stay absent in Task 0 — "
+        "a non-empty stub would verify P6-SCALER-DEMO"
+    )
+
+
+def test_p55_partner_demo_still_phase_5_5():
+    """P55-PARTNER-DEMO stays phase 5.5 naming conformance/demos/phase-5.5.md.
+
+    What would make this fail: bumping it to 6 so conformance-5.5 no
+    longer grades the partner demo, or retargeting the record.
+    """
+    reg = _live_registry()
+    assert "P55-PARTNER-DEMO" in reg, "P55-PARTNER-DEMO is not in the registry"
+    demo = reg["P55-PARTNER-DEMO"]
+    assert demo["phase"] == 5.5, demo
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-5.5.md" in demo_paths, (
+        f"P55-PARTNER-DEMO must still name conformance/demos/phase-5.5.md: "
+        f"{demo.get('demo')}")
+
+
+def test_no_all_tiers_6_target():
+    """No Makefile target grades --phase 6 without excluding live tiers.
+
+    What would make this fail: conformance-6-all-tiers, or any recipe
+    that is `--phase 6` without `--exclude-tier t2` and `t3` (D-091).
+    """
+    targets = gates.makefile_targets(REPO)
+    for forbidden in (
+        "conformance-6-all-tiers",
+        "conformance-6-all",
+        "all-tiers-6",
+        "conformance-all-tiers-6",
+    ):
+        assert forbidden not in targets, (
+            f"all-tiers 6 target {forbidden!r} must not exist (D-091)")
+    phase6 = re.compile(r"--phase[ \t]+6(?:[ \t]|$)")
+    for name in sorted(targets):
+        recipe = gates.recipe(REPO, name)
+        if not recipe or not phase6.search(recipe):
+            continue
+        assert "--exclude-tier t2" in recipe, (
+            f"{name} grades phase 6 without omitting t2 (no all-tiers 6):\n"
+            f"{recipe}")
+        assert "--exclude-tier t3" in recipe, (
+            f"{name} grades phase 6 without omitting t3 (no all-tiers 6):\n"
+            f"{recipe}")
+
+
 def test_part_k_text_and_text_hash_untouched():
     """PART-K text: / text_hash: stay the 4f30c7a freeze (D-075 / Task 0).
 
