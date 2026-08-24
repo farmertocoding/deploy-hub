@@ -17,7 +17,7 @@ import {
   createPartner,
   partnersList,
   intakeLine,
-  addDestination, moveDestination, removeDestination, rankSummary,
+  addDestination, moveDestination, removeDestination,
 } from "../src/screens/Settings.jsx";
 import { ActionButton, ConfirmDialog, T1Overlay } from "../src/Tiers.jsx";
 import { makeTierRunner, tierFor } from "../src/actions.js";
@@ -479,5 +479,47 @@ test("ranker_posts_empty_draft_not_stored_order", async () => {
   assert.ok(posted, "Rank must POST destination-rank");
   assert.deepEqual(posted.body.destination_order, []);
   act(() => { tree.unmount(); });
+});
+
+test("ranker_open_ssh_draft_is_honesty_and_picker_is_not_a_toggle", async () => {
+  const CANDS = [
+    { id: 7, host: "cloud.rank.test", kind: "aws_ec2", tunnel: false },
+    { id: 8, host: "open.rank.test", kind: "ssh", tunnel: false },
+  ];
+  const markup = render(PartnersPanel, {
+    partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+      destinations: [], suspended: false }],
+    intake: { status: "degraded", mode: "fake", configured: false },
+    candidateTargets: CANDS,
+    rankDrafts: { 1: [8] },
+  });
+  assert.doesNotMatch(markup, /type="checkbox"/);
+  assert.doesNotMatch(markup, /role="switch"/);
+
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(PartnersPanel, {
+      partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+        destinations: [], suspended: false }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+      candidateTargets: CANDS,
+      rankDrafts: { 1: [8] },
+    }));
+  });
+  const rankBtn = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.destination_rank");
+  assert.ok(rankBtn);
+  assert.match(String(rankBtn.props.summary), /abuse takedowns/);
+  act(() => { tree.unmount(); });
+});
+
+test("rank_summary_helper_is_gone", async () => {
+  const src = await import("node:fs/promises");
+  const text = await src.readFile(
+    new URL("../src/screens/Settings.jsx", import.meta.url), "utf8",
+  );
+  assert.doesNotMatch(text, /export function rankSummary/);
 });
 

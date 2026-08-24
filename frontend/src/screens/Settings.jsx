@@ -73,13 +73,6 @@ export async function rankPartnerDestination(partnerId, destinationOrder) {
 export const OWN_SERVER_HONESTY =
   "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of";
 
-export function rankSummary(partner) {
-  const dest = partner?.destinations || [];
-  const includesSsh = dest.some((d) => d.kind === "ssh");
-  if (includesSsh) return OWN_SERVER_HONESTY;
-  return "Default: dedicated cloud first.";
-}
-
 export function addDestination(order, targetId) {
   const id = Number(targetId);
   if (!id || (order || []).includes(id)) return list(order);
