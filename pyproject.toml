@@ -127,4 +127,11 @@ also_copy = [
     # (no __init__.py). Omit this and a cold mutants/ rebuild fails stats
     # collection, leaving every mutant not-checked.
     "scripts_dev",
+    # tests/acceptance/test_phase_4.py reads product screens and actions from
+    # disk. Copy src+tests only — not the whole frontend tree (node_modules).
+    "frontend/src",
+    "frontend/tests",
+    "WAIVERS.md",
+    "docker-compose.yml",
+    "Makefile",
 ]

@@ -128,6 +128,13 @@ def test_the_sandbox_copy_includes_scripts_dev_exhaust_conftest_loads():
     conftest = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
     assert "scripts_dev" in conftest and "exhaust.py" in conftest
     assert "scripts_dev" in also_copy
+    phase4 = (REPO / "tests" / "acceptance" / "test_phase_4.py").read_text(encoding="utf-8")
+    assert "frontend" in phase4 and "Home.jsx" in phase4
+    assert "frontend/src" in also_copy
+    assert "frontend/tests" in also_copy
+    assert "WAIVERS.md" in also_copy
+    assert "docker-compose.yml" in also_copy
+    assert "Makefile" in also_copy
 
 
 def test_the_mutation_gate_is_phony_and_is_reached_through_review_round():
