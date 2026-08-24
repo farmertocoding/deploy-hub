@@ -17,6 +17,9 @@ class PartnerDeployStore:
     def create_queued(self, site, body):
         raise NotImplementedError
 
+    def count_since(self, partner, since, site=None):
+        raise NotImplementedError
+
 
 def register_store(store):
     global _store

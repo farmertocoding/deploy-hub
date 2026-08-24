@@ -190,3 +190,25 @@ def test_ready_wires_partner_deploy_store(monkeypatch):
     django_apps.get_app_config("deploys").ready()
     assert isinstance(port.store(), DjangoPartnerDeployStore)
 
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_core_stays_free_of_deploys():
+    """core is the shared kernel: a deploys dependency here becomes a deploys
+    dependency in every app (core/models.py L5). Function-level imports count.
+
+    What would make this fail: core/partner_verify.py (or any core module)
+    `from deploys.models import Deployment`, or moving that import into a
+    helper still under core/.
+    """
+    assert "deploys" not in _direct_imports("core"), (
+        "core imports deploys (function-level counts)"
+    )
+
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_core_deploys_detector_actually_detects():
+    """The test above passes trivially if _direct_imports cannot see deploys."""
+    assert "deploys" in _direct_imports("wizard")
+    assert _reaches("wizard", "deploys") is not None
+    # Legal M2 path: do not assert _reaches("core", "deploys") is None.
+

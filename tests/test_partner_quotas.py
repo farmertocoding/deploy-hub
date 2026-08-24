@@ -744,3 +744,21 @@ def test_d084_numbers_match_partner_field_defaults():
     assert "budget-cap-hit:partner" in src
     assert "HUB_TEST_PARTNER_TOKEN" not in src
     _assert_no_live_marks()
+
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_unwired_evaluate_quotas_deploy_create_fails_loud(monkeypatch):
+    """Unwired store must not fail-open as count 0 on partner deploy-create.
+
+    What would make this fail: except Exception: day_count = 0, or a
+    zeroing stand-in when _store is None.
+    """
+    import core.partner_deploys as port
+    from core.partner_verify import evaluate_quotas
+    from django.apps import apps as django_apps
+
+    partner = _partner("q-unwired")
+    monkeypatch.setattr(port, "_store", None)
+    with pytest.raises(RuntimeError, match="not wired"):
+        evaluate_quotas(partner, "POST", "/partner/v1/sites/x/deployments")
+    django_apps.get_app_config("deploys").ready()

@@ -33,3 +33,11 @@ class DjangoPartnerDeployStore(PartnerDeployStore):
             manifest=manifest, status=Deployment.Status.QUEUED,
         )
         return manifest, deployment
+
+    def count_since(self, partner, since, site=None):
+        qs = Deployment.objects.filter(manifest__created_at__gte=since)
+        if site is not None:
+            qs = qs.filter(manifest__site=site)
+        else:
+            qs = qs.filter(manifest__site__partner_site__partner=partner)
+        return qs.count()

@@ -287,7 +287,6 @@ def evaluate_quotas(partner, method, path, *, now=None, body=None, nonce=""):
     from django.conf import settings
 
     from core.models import PartnerSite, Site
-    from deploys.models import Deployment
 
     clock = _as_dt(now)
     minute_start = clock - timedelta(seconds=60)
@@ -341,27 +340,21 @@ def evaluate_quotas(partner, method, path, *, now=None, body=None, nonce=""):
 
     deploy_match = _DEPLOY_PATH.match(path)
     if method == "POST" and deploy_match:
-        day_count = Deployment.objects.filter(
-            manifest__site__partner_site__partner=partner,
-            manifest__created_at__gte=day_start,
-        ).count()
+        from core.partner_deploys import store
+
+        ledger = store()
+        day_count = ledger.count_since(partner, day_start)
         if day_count >= deploys_per_day:
             return _refuse("quota", 403, general_headers)
         site = _resolve_partner_site(partner, deploy_match.group(1))
         if site is not None:
-            per_min = Deployment.objects.filter(
-                manifest__site=site,
-                manifest__created_at__gte=minute_start,
-            ).count()
+            per_min = ledger.count_since(partner, minute_start, site=site)
             deploy_headers = _rate_headers(
                 RATE_DEPLOY_CREATE_PER_MIN, per_min, reset_unix,
             )
             if per_min >= RATE_DEPLOY_CREATE_PER_MIN:
                 return _refuse("rate", 429, deploy_headers)
-            per_day = Deployment.objects.filter(
-                manifest__site=site,
-                manifest__created_at__gte=day_start,
-            ).count()
+            per_day = ledger.count_since(partner, day_start, site=site)
             if per_day >= RATE_DEPLOY_CREATE_PER_DAY:
                 return _refuse("rate", 429, _rate_headers(
                     RATE_DEPLOY_CREATE_PER_DAY, per_day, reset_unix,
