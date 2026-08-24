@@ -267,6 +267,7 @@ class Site(models.Model):
     )
     warmup_timeout_s = models.PositiveIntegerField(default=60)
     config_stale = models.BooleanField(default=False)
+    scale_ready = models.BooleanField(default=False)
     primary_target = models.ForeignKey(
         "Target", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="primary_for_sites",
@@ -789,6 +790,28 @@ class AlertDelivery(models.Model):
 
     def __str__(self):
         return f"{self.channel}:{self.finding_id} ok={self.ok}"
+
+
+class HostMetric(models.Model):
+    """Per-target host samples. ts is Hub persist clock (design note §2 / C3)."""
+
+    target = models.ForeignKey(
+        Target, on_delete=models.CASCADE, related_name="host_metrics",
+    )
+    ts = models.DateTimeField(db_index=True)
+    cpu = models.FloatField(null=True)
+    ram = models.FloatField(null=True)
+    disk = models.FloatField(null=True)
+    load = models.FloatField(null=True)
+    cores = models.PositiveIntegerField(null=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["target", "-ts"]),
+        ]
+
+    def __str__(self):
+        return f"{self.target_id}@{self.ts}"
 
 
 class UptimeEvent(models.Model):

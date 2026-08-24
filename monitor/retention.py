@@ -74,13 +74,14 @@ def _delete_batched(qs, batch_size):
     return {"deleted": deleted, "batches": batches}
 
 
-def _sweep_host_metric(_now, _batch_size):
-    """HostMetric was named in §C7 but never landed as a table (Task 1).
+def _sweep_host_metric(now, batch_size):
+    from core.models import HostMetric
 
-    The horizon stays pinned so a later model cannot pick a different number.
-    No schema is invented here — batched DELETEs begin when the table exists.
-    """
-    return {"deleted": 0, "batches": 0}
+    horizon = HORIZONS["HostMetric"]["raw"]
+    return _delete_batched(
+        HostMetric.objects.filter(ts__lt=now - horizon),
+        batch_size,
+    )
 
 
 def _sweep_uptime(now, batch_size):
