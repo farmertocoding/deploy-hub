@@ -57,16 +57,28 @@ class FakeIntakeClient:
         return job
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise IntakeClientError(f"intake redirect refused ({code})")
+
+
 class HttpIntakeClient:
+    """Hub poller HTTP client. Redirects off; Location is never followed."""
+
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
+        self._opener = urllib.request.build_opener(_NoRedirect)
 
     def fetch(self, limit=BATCH_CAP):
         url = f"{self.base_url}/internal/outbox"
         req = urllib.request.Request(url, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            # nosec B310 — scheme is http or https via intake_client_for;
+            # redirects are refused above.
+            with self._opener.open(req, timeout=5) as resp:  # nosec B310
                 payload = json.loads(resp.read().decode("utf-8"))
+        except IntakeClientError:
+            raise
         except (OSError, ValueError, urllib.error.URLError) as exc:
             raise IntakeClientError("fetch failed") from exc
         if isinstance(payload, list):
@@ -82,7 +94,11 @@ class HttpIntakeClient:
         body = json.dumps({"id": job_id}).encode("utf-8")
         req = urllib.request.Request(url, data=body, method="POST")
         try:
-            urllib.request.urlopen(req, timeout=5)  # nosec B310
+            # nosec B310 — scheme is http or https via intake_client_for;
+            # redirects are refused above.
+            self._opener.open(req, timeout=5)  # nosec B310
+        except IntakeClientError:
+            raise
         except (OSError, urllib.error.URLError) as exc:
             raise IntakeClientError("ack failed") from exc
 
@@ -153,6 +169,8 @@ def _partner_for(job, now):
     if not _header(headers, "X-Partner-Signature"):
         return None, None
     for partner in Partner.objects.order_by("pk").iterator():
+        if partner.suspended:
+            continue
         if not (partner.pubkey_current or partner.pubkey_previous):
             continue
         try:

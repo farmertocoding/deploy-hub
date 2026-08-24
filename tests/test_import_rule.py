@@ -21,9 +21,14 @@ INTAKE_FORBIDDEN = (
     "vault", "core", "deploys", "celery", "hub", "django",
     "boto3", "botocore", "azure", "cloudflare", "CloudFlare",
     "flask", "fastapi", "starlette", "rest_framework",
+    "cryptography.fernet",
+    "cryptography.hazmat.primitives.ciphers",
 )
 INTAKE_FORBIDDEN_RE = re.compile(
-    r"^\s*(?:from|import)\s+(" + "|".join(INTAKE_FORBIDDEN) + r")\b", re.M,
+    r"^\s*(?:from|import)\s+("
+    + "|".join(re.escape(name) for name in INTAKE_FORBIDDEN)
+    + r")\b",
+    re.M,
 )
 INTAKE_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+intake\b", re.M)
 HUB_PRODUCT = ("monitor", "core", "hub", "deploys")
@@ -129,6 +134,8 @@ def test_intake_does_not_import_vault_core_deploys_celery_hub_django_cloud_sdks(
     """
     root = REPO / "intake"
     assert root.is_dir(), "intake/ process tree is missing"
+    assert "cryptography.fernet" in INTAKE_FORBIDDEN
+    assert "cryptography.hazmat.primitives.ciphers" in INTAKE_FORBIDDEN
     violations = []
     for py in root.rglob("*.py"):
         if INTAKE_FORBIDDEN_RE.search(py.read_text(encoding="utf-8")):

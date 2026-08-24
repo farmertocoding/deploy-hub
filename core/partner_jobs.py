@@ -114,6 +114,8 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
     """Turn a validated partner-job into an ordinary Deployment + PartnerSite."""
     if not getattr(settings, "PARTNER_API_ENABLED", False):
         return None
+    if getattr(partner, "suspended"):
+        raise PartnerRefuse("suspended")
 
     from core.partner_verify import evaluate_quotas
 

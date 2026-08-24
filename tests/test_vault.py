@@ -7,6 +7,7 @@ perform the swap and watch it fail.
 """
 import os
 import pathlib
+import re
 import stat
 import types
 
@@ -360,14 +361,31 @@ def test_aead_primitives_used_only_under_vault():
     there are two implementations of the same guarantee and only one is tested."""
     repo = pathlib.Path(__file__).resolve().parent.parent
     apps = ["core", "catalog", "scanner", "provision", "deploys", "reconcile",
-            "providers", "monitor", "scaling", "realtime", "hub", "wizard"]
+            "providers", "monitor", "scaling", "realtime", "hub", "wizard",
+            "intake"]
     assert "wizard" in apps, "wizard/ must stay crypto-free; AESGCM belongs under vault/"
+    assert "intake" in apps, (
+        "intake/ may verify Ed25519; AESGCM/Fernet/KEK belong under vault/"
+    )
+    intake_ed25519_ok = re.compile(
+        r"cryptography\.hazmat\.primitives\.(asymmetric\.ed25519|serialization)\b"
+    )
+    intake_aead_needles = ("AESGCM", "Fernet", "FakeKEK", "LocalKeyfileKEK")
     offenders = []
     for app in apps:
         for py in (repo / app).rglob("*.py"):
             text = py.read_text(encoding="utf-8")
-            if "AESGCM" in text or "cryptography.hazmat" in text:
-                offenders.append(str(py.relative_to(repo)))
+            rel = str(py.relative_to(repo))
+            if app == "intake":
+                if any(needle in text for needle in intake_aead_needles):
+                    offenders.append(rel)
+                    continue
+                for line in text.splitlines():
+                    if "cryptography.hazmat" in line and not intake_ed25519_ok.search(line):
+                        offenders.append(rel)
+                        break
+            elif "AESGCM" in text or "cryptography.hazmat" in text:
+                offenders.append(rel)
     assert offenders == [], f"crypto primitives outside vault/: {offenders}"
 
 

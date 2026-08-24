@@ -732,3 +732,44 @@ def test_materialize_run_twice_zero_mutating_calls():
     for path in HUB_MODULES:
         if path.is_file():
             _assert_no_intake_import(path)
+
+
+@pytest.mark.req("PART-KILL-SWITCH")
+@override_settings(PARTNER_API_ENABLED=True)
+def test_suspended_partner_with_valid_pubkey_does_not_materialize():
+    """Suspended partner still holding a valid pubkey must not create a Deployment.
+
+    What would make this fail: relying only on cleared pubkey slots so a
+    reaper path that sets suspended=True without revoke still materializes.
+    """
+    from core.partner_jobs import PartnerRefuse, materialize
+    from deploys.models import Deployment
+    from monitor.intake_poll import FakeIntakeClient, _partner_for, poll
+
+    vectors = _vectors()
+    zone = _zone("susp-zone")
+    box = _target(zone, "susp.lan")
+    partner = _partner(
+        "susp-p", [box],
+        pubkey_current=vectors["public_key_raw_b64"],
+        suspended=True,
+    )
+    assert partner.suspended is True
+    assert partner.pubkey_current
+    assert partner.pubkey_previous == ""
+
+    job = _intake_shaped_job(vectors, job_id="job-susp-t")
+    bound, result = _partner_for(job, vectors["now"])
+    assert bound is None
+    assert result is None
+
+    with pytest.raises(PartnerRefuse) as exc:
+        materialize(partner, job)
+    assert exc.value.reason == "suspended"
+    assert Deployment.objects.count() == 0
+
+    client = FakeIntakeClient(items=[job])
+    poll(client=client, now=vectors["now"], jitter=0, sleep=lambda _s: None)
+    assert Deployment.objects.count() == 0
+    assert client.acked == []
+    assert client.items == [job]

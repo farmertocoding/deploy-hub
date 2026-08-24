@@ -183,3 +183,71 @@ def test_intake_client_for_is_fail_closed():
     for banned in BANNED_ENV:
         assert banned not in base
         assert banned not in src
+
+
+@pytest.mark.req("PART-HUB-POLL")
+def test_http_intake_client_refuses_redirect_to_metadata(monkeypatch):
+    """A 302 Location to 169.254.169.254 is not followed; fetch/ack fail closed.
+
+    What would make this fail: urllib.request.urlopen following redirects so a
+    mis-set INTAKE_URL bounces onto cloud metadata (webhook _NoRedirect class).
+    """
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from monitor.intake_poll import HttpIntakeClient, IntakeClientError
+
+    hits = []
+    metadata = "http://169.254.169.254/latest/meta-data/"
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            return
+
+        def _redirect(self):
+            hits.append((self.command, self.path))
+            self.send_response(302)
+            self.send_header("Location", metadata)
+            self.end_headers()
+
+        def do_GET(self):
+            self._redirect()
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            if n:
+                self.rfile.read(n)
+            self._redirect()
+
+    seen = []
+    orig = socket.create_connection
+
+    def guarded(address, *args, **kwargs):
+        host = address[0]
+        if isinstance(host, (bytes, bytearray)):
+            host = host.decode()
+        seen.append(host)
+        if host in {"169.254.169.254", "::ffff:169.254.169.254"}:
+            raise OSError("metadata must not be contacted")
+        return orig(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", guarded)
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = HttpIntakeClient(f"http://127.0.0.1:{httpd.server_address[1]}")
+        with pytest.raises(IntakeClientError):
+            client.fetch()
+        with pytest.raises(IntakeClientError):
+            client.ack("job-redirect")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert "169.254.169.254" not in seen
+    assert "::ffff:169.254.169.254" not in seen
+    assert ("GET", "/internal/outbox") in hits
+    assert ("POST", "/internal/ack") in hits
