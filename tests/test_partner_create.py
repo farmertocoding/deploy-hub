@@ -636,3 +636,87 @@ def test_f8_seed_is_partnersite_never_site_tier_partner():
     assert "fixture-partner" in dumped
     assert "partner-intake-unreachable" in dumped
     assert "partner:fixture-partner" in dumped
+
+
+@pytest.mark.req("UX-P55-PARTNERS")
+def test_intake_as_of_is_last_success_not_now(client):
+    """as_of is last_success_at from INTAKE_POLL, never timezone.now().
+
+    What would make this fail: stamping now() on the error path, using
+    first_failure_at, or omitting as_of when last_success_at exists.
+    """
+    from datetime import timedelta
+
+    from core.models import CheckRun
+    from django.utils import timezone
+    from monitor.alerts import raise_alert
+
+    _t1_user(client)
+    raise_alert(
+        "partner-intake-unreachable",
+        "intake",
+        fingerprint="partner-intake-unreachable",
+        source_engine="monitor.intake_poll",
+        title="Partner intake unreachable",
+        body="fixture",
+        fix_action="fixture",
+    )
+    stamp = (timezone.now() - timedelta(minutes=6)).isoformat()
+    CheckRun.objects.create(
+        kind=CheckRun.Kind.INTAKE_POLL,
+        status=CheckRun.Status.FAILED,
+        results={"schema_version": 1, "last_success_at": stamp,
+                 "consecutive_failures": 3},
+        started=timezone.now(),
+        finished=timezone.now(),
+    )
+    before = timezone.now()
+    response = client.get(CREATE_URL)
+    after = timezone.now()
+    assert response.status_code == 200
+    intake = response.json()["intake"]
+    assert intake["status"] == "error"
+    assert intake["as_of"] == stamp
+    assert intake["as_of"] != before.isoformat()
+    assert intake["as_of"] != after.isoformat()
+
+
+@pytest.mark.req("UX-P55-PARTNERS")
+def test_intake_as_of_is_null_when_never_succeeded(client):
+    """Never-success as_of is null even when intake status is error.
+
+    What would make this fail: falling back to timezone.now() or
+    first_failure_at when last_success_at is missing.
+    """
+    from core.models import CheckRun
+    from django.utils import timezone
+    from monitor.alerts import raise_alert
+
+    _t1_user(client)
+    raise_alert(
+        "partner-intake-unreachable",
+        "intake",
+        fingerprint="partner-intake-unreachable",
+        source_engine="monitor.intake_poll",
+        title="Partner intake unreachable",
+        body="fixture",
+        fix_action="fixture",
+    )
+    CheckRun.objects.create(
+        kind=CheckRun.Kind.INTAKE_POLL,
+        status=CheckRun.Status.FAILED,
+        results={"schema_version": 1, "first_failure_at": timezone.now().isoformat(),
+                 "consecutive_failures": 3},
+        started=timezone.now(),
+        finished=timezone.now(),
+    )
+    before = timezone.now()
+    response = client.get(CREATE_URL)
+    after = timezone.now()
+    assert response.status_code == 200
+    intake = response.json()["intake"]
+    assert intake["status"] == "error"
+    assert intake["as_of"] is None
+    assert intake["as_of"] != before.isoformat()
+    assert intake["as_of"] != after.isoformat()
+

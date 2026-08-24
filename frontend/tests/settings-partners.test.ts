@@ -374,3 +374,24 @@ test("intake_line_names_fake_and_never_connected", () => {
   assert.match(error, /data as of/);
   assert.doesNotMatch(error, /\bConnected\b/);
 });
+
+test("suspended_partner_row_names_suspended_in_words", () => {
+  const live = visibleText(render(PartnersPanel, {
+    partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+      suspended: false }],
+    intake: { status: "degraded", mode: "fake", configured: false },
+  }));
+  assert.match(live, /fixture-partner/);
+  assert.doesNotMatch(live, /Suspended/);
+
+  const stopped = visibleText(render(PartnersPanel, {
+    partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+      suspended: true }],
+    intake: { status: "degraded", mode: "fake", configured: false },
+  }));
+  assert.match(stopped, /fixture-partner/);
+  assert.match(stopped, /Suspended/);
+  assert.doesNotMatch(stopped, /\bConnected\b/);
+  assert.doesNotMatch(stopped, /\binstance\b/i);
+});
+

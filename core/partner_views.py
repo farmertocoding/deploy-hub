@@ -13,7 +13,6 @@ import secrets
 from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -111,15 +110,25 @@ def _mint_whsec():
 
 
 def _intake_payload():
+    from core.models import CheckRun, Finding
+
     url = str(getattr(settings, "INTAKE_URL", "") or "").strip()
     error = Finding.objects.filter(
         fingerprint="partner-intake-unreachable",
     ).exclude(state=Finding.State.RESOLVED).exists()
+    latest = (
+        CheckRun.objects.filter(kind=CheckRun.Kind.INTAKE_POLL)
+        .order_by("-pk")
+        .first()
+    )
+    last_success = None
+    if latest is not None:
+        last_success = ((latest.results or {}).get("last_success_at") or None)
     return {
         "status": "error" if error else "degraded",
         "mode": "fake" if not url else "configured",
         "configured": bool(url),
-        "as_of": timezone.now().isoformat() if error else None,
+        "as_of": last_success,
     }
 
 

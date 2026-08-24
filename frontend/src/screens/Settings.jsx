@@ -192,6 +192,7 @@ export function PartnersPanel({
       {partners.map((p) => (
         <div key={p.id} style={{ ...box, marginBottom: 8 }}>
           <strong>{p.slug}</strong>
+          {p.suspended ? <span> Suspended</span> : null}
           <div>
             {(p.destination_order || []).length === 0
               ? "Destination order is empty — partner-site create will refuse. Default: dedicated cloud first."
