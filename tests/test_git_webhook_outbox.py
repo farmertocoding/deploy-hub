@@ -22,6 +22,7 @@ pytestmark = pytest.mark.django_db
 REPO = pathlib.Path(__file__).resolve().parent.parent
 OLD_SHA = "aaa111old"
 NEW_SHA = "bbb222new"
+EVIL_SHA = "ccc333evil"
 GIT_URL = "https://github.com/o/r.git"
 
 INTAKE_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+intake\b", re.M)
@@ -95,10 +96,25 @@ def _boom_ls_remote(monkeypatch):
     monkeypatch.setattr(git_poller, "git_ls_remote", boom)
 
 
+def _inject_ls_remote(monkeypatch, heads=None):
+    """T1 git host. enqueue_git_push must consult this, not the planted sha."""
+    from deploys import poller as git_poller
+
+    mapping = dict(heads or {(GIT_URL, "main"): NEW_SHA})
+    calls = []
+
+    def fake(url, ref):
+        calls.append((url, ref))
+        return mapping.get((url, ref), "")
+
+    monkeypatch.setattr(git_poller, "git_ls_remote", fake)
+    return calls
+
+
 def _poll(client, monkeypatch, **kwargs):
     from monitor.intake_poll import poll
 
-    _boom_ls_remote(monkeypatch)
+    _inject_ls_remote(monkeypatch)
     return poll(client=client, jitter=0, sleep=lambda _s: None, **kwargs)
 
 
@@ -160,10 +176,10 @@ def _route_strings(patterns=None, prefix=""):
 def test_git_push_outbox_enqueues_deploy(monkeypatch):
     """A Fake-planted git-push hint becomes a queued Deployment via git enqueue.
 
-    What would make this fail: ignoring type git-push, calling git ls-remote
-    from the Hub, or writing the sha onto Manifest v1 in place.
+    What would make this fail: ignoring type git-push, consulting a
+    non-matching Project url, or writing the sha onto Manifest v1 in place.
     """
-    from monitor.intake_poll import FakeIntakeClient
+    from monitor.intake_poll import FakeIntakeClient, poll
 
     queued = _patch_delay(monkeypatch)
     site = _git_site(slug="git-push-enq")
@@ -173,10 +189,13 @@ def test_git_push_outbox_enqueues_deploy(monkeypatch):
     )
     client = FakeIntakeClient()
     client.plant_git_push(GIT_URL, "main", NEW_SHA, job_id="git-1")
+    calls = _inject_ls_remote(monkeypatch)
 
-    result = _poll(client, monkeypatch)
+    result = poll(client=client, jitter=0, sleep=lambda _s: None)
 
     assert result["ok"] is True
+    assert (GIT_URL, "main") in calls
+    assert ("https://github.com/o/other.git", "main") not in calls
     assert queued == [
         Deployment.objects.exclude(status=Deployment.Status.SUCCEEDED)
         .get(manifest__site=site)
@@ -207,7 +226,7 @@ def test_git_push_uses_same_poller_as_partner_job(monkeypatch):
     client.items.append({"id": "job-partner", "type": "partner-job", "action": "site.create"})
     client.plant_git_push(GIT_URL, "main", NEW_SHA, job_id="job-git")
 
-    _boom_ls_remote(monkeypatch)
+    _inject_ls_remote(monkeypatch)
     result = poll(client=client, jitter=0, sleep=lambda _s: None)
 
     assert result["ok"] is True
@@ -256,7 +275,7 @@ def test_git_push_in_same_batch_runs_before_skip_ack_partner_jobs(monkeypatch):
             "id": f"job-skip-{i}", "type": "partner-job", "action": "site.create",
         })
     client.plant_git_push(GIT_URL, "main", NEW_SHA, job_id="job-git-drain")
-    _boom_ls_remote(monkeypatch)
+    _inject_ls_remote(monkeypatch)
     with override_settings(PARTNER_API_ENABLED=False):
         result = poll(client=client, jitter=0, sleep=lambda _s: None)
     assert result["ok"] is True
@@ -280,7 +299,7 @@ def test_git_url_goes_through_validate_git_url(monkeypatch):
     from django.core.exceptions import ValidationError
 
     from deploys import poller as git_poller
-    from monitor.intake_poll import FakeIntakeClient
+    from monitor.intake_poll import FakeIntakeClient, poll
 
     queued = _patch_delay(monkeypatch)
     seen = []
@@ -295,12 +314,15 @@ def test_git_url_goes_through_validate_git_url(monkeypatch):
 
     monkeypatch.setattr(validators, "validate_git_url", spy)
 
+    _git_site(slug="unmatched-src")
+    calls = _inject_ls_remote(monkeypatch)
     client = FakeIntakeClient()
     planted = "https://evil.example.test/o/r.git"
     client.plant_git_push(planted, "main", NEW_SHA, job_id="git-validate")
-    _poll(client, monkeypatch)
+    poll(client=client, jitter=0, sleep=lambda _s: None)
     assert seen, "planted git_url never reached validate_git_url"
-    assert any(row["url"] == planted for row in seen)
+    assert any(row == {"url": planted, "resolve": False} for row in seen)
+    assert (planted, "main") not in calls
     assert queued == []
     assert not Deployment.objects.filter(status=Deployment.Status.QUEUED).exists()
 
@@ -398,7 +420,7 @@ def test_unknown_outbox_type_refuses(monkeypatch):
     What would make this fail: treating github-webhook as git-push because it
     carries git_url/sha, or dropping the item with no audit row.
     """
-    from monitor.intake_poll import FakeIntakeClient
+    from monitor.intake_poll import FakeIntakeClient, poll
 
     queued = _patch_delay(monkeypatch)
     site = _git_site(slug="unknown-type")
@@ -409,7 +431,8 @@ def test_unknown_outbox_type_refuses(monkeypatch):
         "ref": "main",
         "sha": NEW_SHA,
     }])
-    _poll(client, monkeypatch)
+    _boom_ls_remote(monkeypatch)
+    poll(client=client, jitter=0, sleep=lambda _s: None)
     assert queued == []
     assert Deployment.objects.filter(manifest__site=site).count() == 1
     row = AuditEvent.objects.get(action="outbox-type-refused")
@@ -466,3 +489,129 @@ def test_git_push_run_twice_zero_mutating_calls(monkeypatch):
     assert enqueues == [NEW_SHA]
     assert queued == queued[:1]
     assert Deployment.objects.filter(manifest__site=site).count() == after
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_planted_sha_is_not_the_head(monkeypatch):
+    """A planted historical SHA must not become Manifest.git_sha.
+
+    What would make this fail: enqueue_git_push substituting the planted
+    sha as ls_remote, or never calling git_ls_remote for a matching Project.
+    """
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-wakeup")
+    calls = _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): NEW_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-evil")
+    result = poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert result["ok"] is True
+    assert (GIT_URL, "main") in calls
+    created = Deployment.objects.get(pk=queued[0])
+    assert created.manifest.site_id == site.pk
+    assert created.manifest.body["git_sha"] == NEW_SHA
+    assert created.manifest.body["git_sha"] != EVIL_SHA
+    assert created.manifest.version == 2
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_wake_up_when_remote_unchanged_does_not_enqueue(monkeypatch):
+    """Wake-up with git-host sha already deployed creates no new Deployment.
+
+    What would make this fail: using the planted sha as a new head when
+    ls_remote still returns the last deployed sha.
+    """
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-same-head")
+    _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): OLD_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-same")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert queued == []
+    assert Deployment.objects.filter(manifest__site=site).count() == 1
+    assert not Deployment.objects.filter(
+        manifest__site=site, manifest__body__git_sha=EVIL_SHA,
+    ).exists()
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_empty_ls_remote_does_not_use_planted_sha(monkeypatch):
+    """Empty git host is fail-closed. Do not return used(...) or planted sha.
+
+    What would make this fail: lookup `return used(...) or sha` so a timeout
+    or missing ref rolls AUTO back to EVIL_SHA.
+    """
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-empty-head")
+    calls = _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): ""})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-empty")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert (GIT_URL, "main") in calls
+    assert queued == []
+    assert Deployment.objects.filter(manifest__site=site).count() == 1
+    bodies = list(
+        Deployment.objects.filter(manifest__site=site)
+        .values_list("manifest__body", flat=True)
+    )
+    assert all((body or {}).get("git_sha") != EVIL_SHA for body in bodies)
+    assert "git-empty" in client.acked
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_confirm_does_not_auto_deploy(monkeypatch):
+    """CONFIRM git-push records deploy-confirm-required with the git-host sha.
+
+    What would make this fail: treating confirm like AUTO, enqueueing from
+    the planted sha, or adding a new confirm overlay.
+    """
+    from core.models import AuditEvent, Site
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-confirm")
+    site.deploy_policy = Site.DeployPolicy.CONFIRM
+    site.save(update_fields=["deploy_policy"])
+    _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): NEW_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-confirm")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert queued == []
+    assert Deployment.objects.filter(manifest__site=site).count() == 1
+    row = AuditEvent.objects.get(action="deploy-confirm-required")
+    blob = str(row.detail)
+    assert NEW_SHA in blob
+    assert EVIL_SHA not in blob
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_windowed_outside_does_not_delay(monkeypatch):
+    """WINDOWED git-push outside the cron waits; git-host sha, not the plant.
+
+    What would make this fail: special-casing CONFIRM then _enqueue for
+    everyone else, or delaying run_deploy from a 10 s hint.
+    """
+    from core.models import AuditEvent, Site
+    from deploys import poller as git_poller
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-windowed")
+    site.deploy_policy = Site.DeployPolicy.WINDOWED
+    site.deploy_window_cron = "0 9 * * 1-5"
+    site.save(update_fields=["deploy_policy", "deploy_window_cron"])
+    monkeypatch.setattr(git_poller, "cron_in_window", lambda cron, now: False)
+    _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): NEW_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-window")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert queued == []
+    row = AuditEvent.objects.get(action="deploy-waiting")
+    blob = str(row.detail)
+    assert NEW_SHA in blob
+    assert EVIL_SHA not in blob
