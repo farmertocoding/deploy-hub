@@ -731,9 +731,10 @@ def test_partners_list_includes_ready_candidate_targets(client):
     pending target, dumping collect_payload / ssh_key_ref onto the list,
     or omitting tunnel so the picker cannot see ssh-without-tunnel.
     """
+    from rest_framework.test import APIRequestFactory
+
     from core.models import NetworkZone, Partner, Target
     from core.partner_views import PartnerListCreateView
-    from rest_framework.test import APIRequestFactory
 
     _t1_user(client)
     zone = NetworkZone.objects.create(name="cand-z", slug="cand-z")
