@@ -217,7 +217,7 @@ export function PartnersPanel({
   }
 
   async function runRank(partner) {
-    const order = drafts[partner.id] || partner.destination_order || [];
+    const order = drafts[partner.id] ?? partner.destination_order ?? [];
     await rankPartnerDestination(partner.id, order);
     await refreshList();
   }

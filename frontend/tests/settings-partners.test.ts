@@ -452,3 +452,32 @@ test("ranker_posts_draft_order_not_stored_empty", async () => {
   act(() => { tree.unmount(); });
 });
 
+test("ranker_posts_empty_draft_not_stored_order", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+  const calls: Array<{ url: string; body: any }> = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    calls.push({ url, body: opts?.body ? JSON.parse(opts.body) : undefined });
+    return { status: 200, json: async () => ({ id: 1, slug: "fixture-partner",
+      destination_order: [], destinations: [] }) };
+  };
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(PartnersPanel, {
+      partners: [{ id: 1, slug: "fixture-partner", destination_order: [7],
+        destinations: [{ id: 7, host: "cloud.rank.test", kind: "aws_ec2" }],
+        suspended: false }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+      candidateTargets: [{ id: 7, host: "cloud.rank.test", kind: "aws_ec2", tunnel: false }],
+      rankDrafts: { 1: [] },
+    }));
+  });
+  const rankBtn = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.destination_rank");
+  await rankBtn.props.onRun();
+  const posted = calls.find((c) => String(c.url).includes("destination-rank"));
+  assert.ok(posted, "Rank must POST destination-rank");
+  assert.deepEqual(posted.body.destination_order, []);
+  act(() => { tree.unmount(); });
+});
+
