@@ -14,9 +14,15 @@ Settings Partners can **add / reorder / remove** destinations, then T2
 `partner.destination_rank` POSTs that list through the existing
 `POST /api/v1/partners/<pk>/destination-rank/` path.
 
-1. GET `/api/v1/partners/` grows `candidate_targets`: READY `Target` rows
-   `{id, host, kind, tunnel}` (`tunnel` = `collect_payload.tunnel is True`).
-   No `Site.tier` / `Target.tier`. No new route. No Hub `/api/partner/*`.
+1. GET `/api/v1/partners/` grows `candidate_targets` on the **list
+   envelope only**: READY `Target` rows `{id, host, kind, tunnel}`
+   (`tunnel` = `collect_payload.tunnel is True`; four explicit keys, never
+   `{**payload}` / `ModelSerializer(Target)`). Do **not** put
+   `candidate_targets` on `PartnerPublic` / `PartnerDetailView`. List GET
+   stays `IsAuthenticated` without `RequireRecentTouch`. No `Site.tier` /
+   `Target.tier`. No new route. No Hub `/api/partner/*`. GET must not echo
+   `collect_payload` / `ssh_key_ref` / `host_key_fingerprint` / `hubk_` /
+   `whsec_` / `log_chunk`.
 2. PartnersPanel keeps a per-partner **draft** order (starts as stored
    `destination_order`). Add from candidates not already in the draft;
    Up / Down / Remove. Rank posts **the draft**, not the stored list.

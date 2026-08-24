@@ -49,9 +49,12 @@ def test_partners_list_includes_ready_candidate_targets(client):
     """GET /api/v1/partners/ lists READY targets for the rank picker.
 
     What would make this fail: omitting candidate_targets, including a
-    pending target, or omitting tunnel so the picker cannot see ssh-without-tunnel.
+    pending target, dumping collect_payload / ssh_key_ref onto the list,
+    or omitting tunnel so the picker cannot see ssh-without-tunnel.
     """
-    from core.models import NetworkZone, Target
+    from core.models import NetworkZone, Partner, Target
+    from core.partner_views import PartnerListCreateView
+    from rest_framework.test import APIRequestFactory
 
     _t1_user(client)
     zone = NetworkZone.objects.create(name="cand-z", slug="cand-z")
@@ -61,7 +64,15 @@ def test_partners_list_includes_ready_candidate_targets(client):
     )
     ssh = Target.objects.create(
         zone=zone, host="home.cand.test", kind=Target.Kind.SSH,
-        status=Target.Status.READY, collect_payload={"tunnel": True},
+        status=Target.Status.READY,
+        ssh_key_ref="planted-ssh-key-ref-ux-f1",
+        host_key_fingerprint="SHA256:planted-host-key-fp-ux-f1",
+        collect_payload={
+            "tunnel": True,
+            "hubk_test_leak": "nope",
+            "whsec_leak": "nope",
+            "log_chunk": {"bytes": "secret-bytes"},
+        },
     )
     pending = Target.objects.create(
         zone=zone, host="pending.cand.test", kind=Target.Kind.AWS_EC2,
@@ -79,9 +90,11 @@ def test_partners_list_includes_ready_candidate_targets(client):
         zone=zone, host="open.cand.test", kind=Target.Kind.SSH,
         status=Target.Status.READY, collect_payload={"tunnel": False},
     )
-    from core.models import Partner
     empty = Partner.objects.create(slug="cand-empty", name="cand-empty")
     assert empty.destination_order == []
+    view = PartnerListCreateView()
+    view.request = APIRequestFactory().get(CREATE_URL)
+    assert [type(p).__name__ for p in view.get_permissions()] == ["IsAuthenticated"]
     response = client.get(CREATE_URL)
     assert response.status_code == 200
     body = response.json()
@@ -89,6 +102,13 @@ def test_partners_list_includes_ready_candidate_targets(client):
     assert "hubk_" not in dumped
     assert "whsec_" not in dumped
     assert "ssh_key_ref" not in dumped
+    assert "host_key_fingerprint" not in dumped
+    assert "secret-bytes" not in dumped
+    assert "log_chunk" not in dumped
+    assert "hubk_test_leak" not in dumped
+    assert "whsec_leak" not in dumped
+    assert "planted-ssh-key-ref-ux-f1" not in dumped
+    assert "SHA256:planted-host-key-fp-ux-f1" not in dumped
     cands = body["candidate_targets"]
     ids = {row["id"] for row in cands}
     assert ready.pk in ids
@@ -96,17 +116,22 @@ def test_partners_list_includes_ready_candidate_targets(client):
     assert pending.pk not in ids
     assert errored.pk not in ids
     assert gone.pk not in ids
+    for row in cands:
+        assert set(row) == {"id", "host", "kind", "tunnel"}
     ssh_row = next(row for row in cands if row["id"] == ssh.pk)
     assert ssh_row["host"] == "home.cand.test"
     assert ssh_row["kind"] == Target.Kind.SSH
     assert ssh_row["tunnel"] is True
-    assert set(ssh_row) == {"id", "host", "kind", "tunnel"}
     cloud_row = next(row for row in cands if row["id"] == ready.pk)
     assert cloud_row["tunnel"] is False
     open_row = next(row for row in cands if row["id"] == open_ssh.pk)
     assert open_row["tunnel"] is False
     listed = next(row for row in body["partners"] if row["slug"] == "cand-empty")
     assert listed["destination_order"] == []
+    assert "candidate_targets" not in listed
+    detail = client.get(f"{CREATE_URL}{empty.pk}/")
+    assert detail.status_code == 200
+    assert "candidate_targets" not in detail.json()
 ```
 
 - [ ] **Step 2: Run to verify RED**
@@ -134,7 +159,7 @@ def _candidate_targets():
     return out
 ```
 
-GET list includes `"candidate_targets": _candidate_targets()`. Do not add a new URL. Do not change `PartnerDestinationRankView`. Helper stays `status=Target.Status.READY` and `payload.get("tunnel") is True`. GET must not insert a CheckRun.
+GET list includes `"candidate_targets": _candidate_targets()` on the **list envelope** (`PartnerListSerializer`), never on `PartnerPublic` / `PartnerDetailView`. Do not add a new URL. Do not change `PartnerDestinationRankView`. Helper stays four explicit keys (`id`, `host`, `kind`, `tunnel`); `status=Target.Status.READY`; `payload.get("tunnel") is True`. Do **not** `{**payload}` and do **not** `ModelSerializer(Target)`. Keep `PartnerListCreateView.get_permissions` GET/HEAD/OPTIONS → `[IsAuthenticated()]`. Do not put `RequireRecentTouch` back on GET (`_t1_user` is not that pin). GET must not insert a CheckRun.
 
 If spectacular/OpenAPI drifts, run `make generate-client` and commit generated client files (D-002). Do not edit `REVIEW_CHECKLIST.md`.
 
