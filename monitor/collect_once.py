@@ -44,7 +44,12 @@ def _metrics():
         disk_pct = round(100.0 * du.used / du.total, 2) if du.total else None
     except OSError:
         pass
-    return {"load1": load1, "mem_pct": mem_pct, "disk_pct": disk_pct}
+    return {
+        "load1": load1,
+        "mem_pct": mem_pct,
+        "disk_pct": disk_pct,
+        "cores": os.cpu_count(),
+    }
 
 
 def _containers():

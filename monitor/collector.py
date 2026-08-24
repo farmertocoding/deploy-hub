@@ -58,7 +58,7 @@ def collect(target, transport, *, now=None, sleep=None, tick_started=None, monot
     payload["schema_version"] = SCHEMA_VERSION
     if now is not None:
         payload["ts"] = now.isoformat() if hasattr(now, "isoformat") else str(now)
-    _persist_collect(target, payload)
+    _persist_collect(target, payload, now=now)
     return payload
 
 
@@ -76,7 +76,7 @@ def _stored_inode(target):
     return int(raw)
 
 
-def _persist_collect(target, payload):
+def _persist_collect(target, payload, *, now=None):
     """Remember inode/offset and the JSON so the reconciler can ride this minute."""
     chunk = payload.get("log_chunk") or {}
     try:
@@ -104,3 +104,17 @@ def _persist_collect(target, payload):
     target.save(update_fields=[
         "collect_log_inode", "collect_log_offset", "collect_payload", "collect_at",
     ])
+    try:
+        from monitor.host_metrics import persist_sample
+
+        persist_sample(target, payload, now=now)
+    except Exception as exc:
+        from core.audit import audit
+
+        audit(
+            "host-metric-persist-failed",
+            target,
+            source="system",
+            severity="warning",
+            error=type(exc).__name__,
+        )
