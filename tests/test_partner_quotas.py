@@ -671,6 +671,41 @@ def test_rate_limit_60_and_deploy_create_3_per_min():
 
 
 @pytest.mark.req("PART-U2-QUOTAS")
+def test_rate_429_does_not_file_budget_cap_hit_partner():
+    """Rate floors refuse 429 without the quota-abuse spend-cap P1.
+
+    What would make this fail: _refuse("rate") calling _file_quota_abuse, or
+    dropping the 429 / X-RateLimit-* refuse itself.
+    """
+    from datetime import timedelta
+
+    from core.models import Finding
+    from core.partner_verify import evaluate_quotas
+
+    now = timezone.now()
+    general_partner = _partner("q-rl-no-p1")
+    _plant_nonces(general_partner, 60, now=now)
+    general = evaluate_quotas(
+        general_partner, "GET", "/partner/v1/deployments/1", now=now,
+    )
+    assert general.refused is True
+    assert general.reason == "rate"
+    assert general.status == 429
+    _assert_rate_headers(general.headers, limit=60)
+    assert not Finding.objects.filter(fingerprint="budget-cap-hit:partner").exists()
+
+    burst_partner = _partner("q-rl-burst-no-p1", deploys_per_day=500, max_sites=10)
+    burst_site = _bind_sites(burst_partner, 1)[0]
+    deploy_path = f"/partner/v1/sites/{burst_site.pk}/deployments"
+    _plant_deploys(burst_site, 3, created_at=now - timedelta(seconds=10))
+    burst = evaluate_quotas(burst_partner, "POST", deploy_path, now=now)
+    assert burst.refused is True
+    assert burst.reason == "rate"
+    assert burst.status == 429
+    assert not Finding.objects.filter(fingerprint="budget-cap-hit:partner").exists()
+
+
+@pytest.mark.req("PART-U2-QUOTAS")
 def test_d084_numbers_match_partner_field_defaults():
     """D-084 numbers are the Partner field defaults, fleet 12, and Hub rate floors.
 

@@ -301,7 +301,8 @@ def evaluate_quotas(partner, method, path, *, now=None, body=None, nonce=""):
     )
 
     def _refuse(reason, status, headers):
-        _file_quota_abuse(partner, reason)
+        if reason != "rate":
+            _file_quota_abuse(partner, reason)
         return QuotaDecision(
             True, reason=reason, status=status, headers=headers,
         )
