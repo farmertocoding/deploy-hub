@@ -2473,13 +2473,14 @@ def test_new_phase_6_must_ids_have_no_tier():
         f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
 
 
-def test_p6_scaler_demo_names_phase_6_md_and_file_is_absent():
-    """P6-SCALER-DEMO is verify: demo naming conformance/demos/phase-6.md
-    and that file is absent.
+def test_p6_scaler_demo_names_phase_6_md():
+    """P6-SCALER-DEMO is verify: demo naming conformance/demos/phase-6.md.
 
-    What would make this fail: a missing demo: key, pointing at
-    phase-5.5.md, or a non-empty stub (Task 0 forbids creating the
-    file — a stub would verify P6-SCALER-DEMO).
+    What would make this fail: a missing demo: key (fallback would still
+    look at phase-6.md, but the registry would not name the record),
+    pointing at phase-5.5.md, or a missing / whitespace-only record.
+    Task 0 forbade creating the file so a filler could not verify; Task 6
+    landed the honest T1 record, so the pin is now exists-and-non-empty.
     """
     reg = _live_registry()
     assert "P6-SCALER-DEMO" in reg, "P6-SCALER-DEMO is not in the registry"
@@ -2492,9 +2493,11 @@ def test_p6_scaler_demo_names_phase_6_md_and_file_is_absent():
         f"P6-SCALER-DEMO must name conformance/demos/phase-6.md: "
         f"{demo.get('demo')}")
     path = REPO / "conformance" / "demos" / "phase-6.md"
-    assert not path.exists(), (
-        "conformance/demos/phase-6.md must stay absent in Task 0 — "
-        "a non-empty stub would verify P6-SCALER-DEMO"
+    assert path.is_file(), (
+        "conformance/demos/phase-6.md must exist — P6-SCALER-DEMO is verify: demo"
+    )
+    assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
+        "a whitespace-only demo is not a record"
     )
 
 

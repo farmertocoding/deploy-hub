@@ -98,7 +98,7 @@ def _evaluate_eligible(site, *, now):
         "propose-mode does not launch."
     )
     return raise_alert(
-        KIND,
+        "scale-out-proposal",
         entity,
         fingerprint=fingerprint,
         title=TITLE,
