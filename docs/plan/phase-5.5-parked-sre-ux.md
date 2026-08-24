@@ -56,54 +56,88 @@ Task 1 then 2 then 3. Do not parallelize: Task 3’s `as_of` test assumes Task 1
 def test_configured_never_up_files_p1_after_5_min():
     """Configured INTAKE_URL that never succeeds pages P1 after 5 min.
 
-    What would make this fail: requiring a prior last_success_at, filing at
-    the first failure, or paging empty INTAKE_URL.
+    What would make this fail: N=3 consecutive_failures filing this P1,
+    requiring a prior last_success_at, moving first_failure_at, or paging
+    empty INTAKE_URL after five minutes.
     """
-    from core.models import Finding
+    from core.models import CheckRun, Finding
     from monitor.intake_poll import FakeIntakeClient, poll
 
-    client = FakeIntakeClient(fail=True)
     t0 = timezone.now()
-    with override_settings(INTAKE_URL="http://intake.test"):
-        poll(client=client, now=t0, jitter=0, sleep=lambda _s: None)
+    with override_settings(INTAKE_URL=""):
+        for now in (t0, t0 + timedelta(minutes=5)):
+            result = poll(now=now, jitter=0, sleep=lambda _s: None)
+            assert result["status"] == CheckRun.Status.SKIPPED
+        assert CheckRun.objects.filter(kind=CheckRun.Kind.INTAKE_POLL).count() == 0
         assert not Finding.objects.filter(
             fingerprint="partner-intake-unreachable",
         ).exists()
+        assert not Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+
+    client = FakeIntakeClient(fail=True)
+    with override_settings(INTAKE_URL="http://intake.test"):
+        for _ in range(3):
+            poll(client=client, now=t0, jitter=0, sleep=lambda _s: None)
+        assert Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+        assert not Finding.objects.filter(
+            fingerprint="partner-intake-unreachable",
+        ).exists()
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        first = (latest.results or {}).get("first_failure_at")
+        assert first
         poll(
-            client=client,
-            now=t0 + timedelta(minutes=4),
+            client=client, now=t0 + timedelta(minutes=4),
             jitter=0, sleep=lambda _s: None,
         )
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        assert (latest.results or {}).get("first_failure_at") == first
         assert not Finding.objects.filter(
             fingerprint="partner-intake-unreachable",
         ).exists()
         poll(
-            client=client,
-            now=t0 + timedelta(minutes=5),
+            client=client, now=t0 + timedelta(minutes=5),
             jitter=0, sleep=lambda _s: None,
         )
     row = Finding.objects.get(fingerprint="partner-intake-unreachable")
     assert row.severity == "p1"
+    assert not Finding.objects.filter(
+        fingerprint="partner-intake-unreachable:intake",
+    ).exists()
 
 
 @pytest.mark.req("PART-HUB-POLL")
 def test_poison_outbox_item_does_not_kill_beat_or_arm_c12():
     """A non-dict outbox row must not raise out of poll or increment fetch failures.
 
-    What would make this fail: job.get on a str, _process outside the
-    per-job wrap so Beat dies, or counting the poison as consecutive_failures.
+    What would make this fail: job.get on a str, wrapping fetch so Beat
+    lives but C12 never arms, or counting the poison as consecutive_failures.
     """
     from core.models import CheckRun, Finding
     from monitor.intake_poll import FakeIntakeClient, poll
 
     client = FakeIntakeClient(items=["poison", {"id": "later", "type": "partner-job"}])
+    now = timezone.now()
     with override_settings(INTAKE_URL="http://intake.test", PARTNER_API_ENABLED=False):
-        result = poll(client=client, jitter=0, sleep=lambda _s: None)
-    assert result["ok"] is True
-    assert result["status"] == "succeeded"
-    latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
-    assert int((latest.results or {}).get("consecutive_failures") or 0) == 0
-    assert not Finding.objects.filter(fingerprint="hub-outbox-poll-failing").exists()
+        result = poll(client=client, now=now, jitter=0, sleep=lambda _s: None)
+        assert result["ok"] is True
+        assert result["status"] == "succeeded"
+        latest = CheckRun.objects.get(kind=CheckRun.Kind.INTAKE_POLL)
+        assert int((latest.results or {}).get("consecutive_failures") or 0) == 0
+        assert not Finding.objects.filter(
+            fingerprint="hub-outbox-poll-failing",
+        ).exists()
+        client.fail = True
+        for _ in range(3):
+            poll(client=client, now=now, jitter=0, sleep=lambda _s: None)
+    p2 = Finding.objects.get(fingerprint="hub-outbox-poll-failing")
+    assert p2.severity == "p2"
+    assert not Finding.objects.filter(
+        fingerprint="hub-outbox-poll-failing:intake",
+    ).exists()
 ```
 
 In `tests/test_git_webhook_outbox.py`, add (reuse `_git_site`, `_patch_delay`, `_boom_ls_remote`, `GIT_URL`, `NEW_SHA` already in that file):
@@ -147,7 +181,7 @@ Keep `test_empty_intake_url_skips_and_does_not_file_p1` and
 
 Run: `pytest tests/test_intake_poll.py::test_configured_never_up_files_p1_after_5_min tests/test_intake_poll.py::test_poison_outbox_item_does_not_kill_beat_or_arm_c12 tests/test_git_webhook_outbox.py::test_git_push_in_same_batch_runs_before_skip_ack_partner_jobs -q`
 
-Expected: FAIL because never-up does not file P1; poison may raise or succeed depending on current `job.get` (str has no `.get` → AttributeError out of `poll`); drain test may already pass if flag-off `continue` already walks the list — if it PASSES, that is honest: keep the git-first partition anyway so a later `return` cannot skip the tail. If the drain test is green on HEAD, still add it as a pin.
+Expected: never-up FAIL (no `first_failure_at` / no P1 at +5 min, or P1 already at N=3 if someone keys P1 off consecutive_failures — the t0×3 tick must not file P1). Poison is pytest ERROR on HEAD (`str` has no `.get`) then, after wrap-only, would miss the trailing N=3 P2 pin. Drain test is a pin: **PASS on HEAD** (`if not enabled: continue` already walks the list). Keep git-first anyway so a later `return` cannot skip the tail. Do not invent a RED that requires an early `return`.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -159,7 +193,9 @@ In `_record_failure`:
 - File P1 when `now - last_success_at >= UNREACHABLE_AFTER` **or** (no parsable `last_success_at` and `now - first_failure_at >= UNREACHABLE_AFTER`).
 - Empty URL never reaches this function.
 
-In `_record_success`: set `consecutive_failures=0`, `last_success_at=_iso(now)`, and omit / clear `first_failure_at`.
+In `_record_success`: set `consecutive_failures=0`, `last_success_at=_iso(now)`, and omit / clear `first_failure_at`. `first_failure_at` must not move once set.
+
+Harden `FakeIntakeClient.ack` so remaining non-dicts are skipped (`isinstance(item, dict) and item.get("id") == job_id`), not `item.get` on a str.
 
 In `_process`:
 
@@ -269,6 +305,8 @@ def test_rate_429_does_not_file_budget_cap_hit_partner():
     What would make this fail: _refuse("rate") calling _file_quota_abuse, or
     dropping the 429 / X-RateLimit-* refuse itself.
     """
+    from datetime import timedelta
+
     from core.models import Finding
     from core.partner_verify import evaluate_quotas
 
@@ -359,15 +397,25 @@ In `tests/test_partner_create.py`:
 def test_intake_as_of_is_last_success_not_now(client):
     """as_of is last_success_at from INTAKE_POLL, never timezone.now().
 
-    What would make this fail: stamping now() on error, or omitting as_of
-    when a last_success_at exists on the CheckRun.
+    What would make this fail: stamping now() on the error path, using
+    first_failure_at, or omitting as_of when last_success_at exists.
     """
     from datetime import timedelta
 
     from core.models import CheckRun
     from django.utils import timezone
+    from monitor.alerts import raise_alert
 
     _t1_user(client)
+    raise_alert(
+        "partner-intake-unreachable",
+        "intake",
+        fingerprint="partner-intake-unreachable",
+        source_engine="monitor.intake_poll",
+        title="Partner intake unreachable",
+        body="fixture",
+        fix_action="fixture",
+    )
     stamp = (timezone.now() - timedelta(minutes=6)).isoformat()
     CheckRun.objects.create(
         kind=CheckRun.Kind.INTAKE_POLL,
@@ -381,10 +429,51 @@ def test_intake_as_of_is_last_success_not_now(client):
     response = client.get(CREATE_URL)
     after = timezone.now()
     assert response.status_code == 200
-    as_of = response.json()["intake"]["as_of"]
-    assert as_of == stamp
-    assert as_of != before.isoformat()
-    assert as_of != after.isoformat()
+    intake = response.json()["intake"]
+    assert intake["status"] == "error"
+    assert intake["as_of"] == stamp
+    assert intake["as_of"] != before.isoformat()
+    assert intake["as_of"] != after.isoformat()
+
+
+@pytest.mark.req("UX-P55-PARTNERS")
+def test_intake_as_of_is_null_when_never_succeeded(client):
+    """Never-success as_of is null even when intake status is error.
+
+    What would make this fail: falling back to timezone.now() or
+    first_failure_at when last_success_at is missing.
+    """
+    from core.models import CheckRun
+    from django.utils import timezone
+    from monitor.alerts import raise_alert
+
+    _t1_user(client)
+    raise_alert(
+        "partner-intake-unreachable",
+        "intake",
+        fingerprint="partner-intake-unreachable",
+        source_engine="monitor.intake_poll",
+        title="Partner intake unreachable",
+        body="fixture",
+        fix_action="fixture",
+    )
+    CheckRun.objects.create(
+        kind=CheckRun.Kind.INTAKE_POLL,
+        status=CheckRun.Status.FAILED,
+        results={"schema_version": 1, "first_failure_at": timezone.now().isoformat(),
+                 "consecutive_failures": 3},
+        started=timezone.now(),
+        finished=timezone.now(),
+    )
+    before = timezone.now()
+    response = client.get(CREATE_URL)
+    after = timezone.now()
+    assert response.status_code == 200
+    intake = response.json()["intake"]
+    assert intake["status"] == "error"
+    assert intake["as_of"] is None
+    assert intake["as_of"] != before.isoformat()
+    assert intake["as_of"] != after.isoformat()
 ```
 
 In `frontend/tests/settings-partners.test.ts`:
@@ -413,9 +502,9 @@ test("suspended_partner_row_names_suspended_in_words", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pytest tests/test_partner_create.py::test_intake_as_of_is_last_success_not_now -q`
+Run: `pytest tests/test_partner_create.py::test_intake_as_of_is_last_success_not_now tests/test_partner_create.py::test_intake_as_of_is_null_when_never_succeeded -q`
 
-Expected: FAIL (`as_of` is now or null, not the CheckRun stamp).
+Expected: first test FAIL because HEAD stamps `timezone.now()` on the error path (or ignores CheckRun). Second test FAIL if `as_of` is now() / `first_failure_at` instead of null.
 
 Run: `node --import tsx --test frontend/tests/settings-partners.test.ts`
 
@@ -449,7 +538,7 @@ def _intake_payload():
     }
 ```
 
-Do not call `timezone.now()` for `as_of`. Finding import stays if already used; `CheckRun` is in `core.models`.
+Do not call `timezone.now()` for `as_of`. Do not copy `first_failure_at` into `as_of`. Finding import stays if already used; `CheckRun` is in `core.models`.
 
 `PartnersPanel` row: after `<strong>{p.slug}</strong>`, if `p.suspended` render a sibling with the word `Suspended` (text, not color-only). Keep suspend ActionButton. Do not add a picker. Do not say Connect / Connected / instance.
 

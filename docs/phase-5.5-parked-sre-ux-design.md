@@ -15,29 +15,38 @@ MUST-panel SRE F1–F3 and UX F2–F3
    succeeds must file P1 `partner-intake-unreachable` after 5 minutes of
    configured failures, not only after a success-then-gap. Persist
    `first_failure_at` on the single `INTAKE_POLL` CheckRun when
-   `last_success_at` is missing. Empty `INTAKE_URL` still skip-persists
-   and never files P1/P2. N=3 fetch failures still file P2
-   `hub-outbox-poll-failing` independently. C6’s “last successful probe
-   > 5 min” clock is read as “no successful probe in 5 min while
-   configured.”
+   `last_success_at` is missing; the stamp is set once and does not move
+   on later fails. Empty `INTAKE_URL` still skip-persists and never files
+   P1/P2 (including at `now=t0+5min`). N=3 fetch failures at one timestamp
+   file P2 `hub-outbox-poll-failing` only — not P1. P1 is
+   `now - first_failure_at >= UNREACHABLE_AFTER` when `last_success_at` is
+   missing (`fingerprint=` explicit). Do not implement N=3 → P1. C6’s
+   “last successful probe > 5 min” clock is read as “no successful probe
+   in 5 min while configured.”
 2. **SRE F2 — poison jobs do not kill Beat.** `_process` must not raise
    out of `poll()`: `isinstance(job, dict)` else audit + continue;
    wrap each job so an unexpected item cannot skip `_record_success` /
    `_record_failure`. Per-job errors do **not** increment
    `consecutive_failures` (C12 is fetch death, not a bad outbox row).
-   Within the fetched batch, process `git-push` before skip-acked
+   After a poison success tick, N=3 fetch failures must still file P2
+   (`poll()` fetch `except` → `_record_failure`; do not `_record_failure`
+   from `_process`). `FakeIntakeClient.ack` must skip non-dicts when
+   filtering. Within the fetched batch, process `git-push` before skip-acked
    partner-jobs. Do not ack flag-off / quota / isolation refuses.
    Do not change `BATCH_CAP`, do not add a second fetch, do not treat
    planted SHA as `ls_remote` (Security F2 / D-085 still deferred).
+   The in-batch git-first drain test is a pin (already green on HEAD).
 3. **SRE F3 — rate 429 is not the spend-cap P1.** `evaluate_quotas`
    files `budget-cap-hit:partner` only for quota 403 (`reason=="quota"`).
    Rate 429 (`reason=="rate"`) still refuses with `X-RateLimit-*` and
    does not upsert that P1. No new C12 kind. D-084 fingerprint stays
    for quota-abuse.
 4. **UX F2 — `as_of` is last confirmed poll.** `_intake_payload()["as_of"]`
-   is `INTAKE_POLL.results["last_success_at"]`, never `timezone.now()`.
-   Null if there has never been a success. Error/degraded chrome still
-   uses that stamp for `data as of HH:MM:SS`.
+   is `INTAKE_POLL.results["last_success_at"]`, never `timezone.now()` and
+   never `first_failure_at`. Null if there has never been a success,
+   including `status=error` from an open `partner-intake-unreachable`
+   Finding. Error/degraded chrome uses that stamp for `data as of HH:MM:SS`
+   and omits the clause when null.
 5. **UX F3 — Suspended is named.** PartnersPanel shows the word
    `Suspended` (not color-only) when `PartnerPublic.suspended` is true.
    Overlay copy stays stop/detach/revoke. No 7th NAV, no picker (UX F1
