@@ -222,3 +222,12 @@ def poll_intake_outbox(**kwargs):
     if kwargs.get("sleep") is None and kwargs.get("jitter") is None:
         time.sleep(random.uniform(0, 2))  # nosec B311
     return poll(**kwargs)
+
+
+@shared_task(ignore_result=True)
+def evaluate_scale_proposals():
+    """Beat `evaluate-scale-proposals` (60 s, queue probes). Body is evaluate_all() only."""
+    from scaling.evaluator import evaluate_all
+
+    return evaluate_all()
+

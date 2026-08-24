@@ -342,11 +342,11 @@ def test_attack_engaged_does_not_propose():
     What would make this fail: skipping refuse_if_attack so attack-shaped
     load still opens a proposal.
     """
-    from scaling.evaluator import evaluate_site
     from test_attack_playbook import _attack_shaped
 
     from monitor.attack_playbook import run
     from providers.fakes import FakeEdgeProtection
+    from scaling.evaluator import evaluate_site
 
     site = _ready_site("atk-engage")
     _plant(site.primary_target, _minutes(), ram=90.0)
@@ -363,12 +363,12 @@ def test_open_proposal_resolves_when_attack_engages():
     What would make this fail: leaving an OPEN proposal in place after
     AttackRefuse, or filing a consolation Finding.
     """
-    from scaling.evaluator import evaluate_site
     from test_attack_playbook import _attack_shaped
 
     from core.models import AuditEvent
     from monitor.attack_playbook import run
     from providers.fakes import FakeEdgeProtection
+    from scaling.evaluator import evaluate_site
 
     site = _ready_site("atk-retract")
     _plant(site.primary_target, _minutes(), ram=90.0)
@@ -395,10 +395,9 @@ def test_partner_site_does_not_propose():
     What would make this fail: only gating on the attack playbook so partner
     overflow still proposes.
     """
-    from scaling.evaluator import evaluate_site
-
     from core.models import Partner, PartnerSite
     from scaling.attack_gate import refuse_if_attack
+    from scaling.evaluator import evaluate_site
 
     control = _ready_site("part-ctl")
     assert refuse_if_attack(control) is None
@@ -417,10 +416,9 @@ def test_partner_bind_after_file_resolves_open_proposal():
     What would make this fail: leaving the proposal OPEN after partner bind,
     or requiring the attack playbook to retract.
     """
-    from scaling.evaluator import evaluate_site
-
     from core.models import AuditEvent, Partner, PartnerSite
     from scaling.attack_gate import refuse_if_attack
+    from scaling.evaluator import evaluate_site
 
     control = _ready_site("bind-ctl")
     assert refuse_if_attack(control) is None
@@ -463,8 +461,9 @@ def test_scale_ready_false_five_hot_does_not_propose():
     What would make this fail: omitting the scale_ready gate so every public
     site with a primary_target can be proposed.
     """
-    from scaling.evaluator import evaluate_site
     from test_attack_playbook import _world
+
+    from scaling.evaluator import evaluate_site
 
     site = _world("not-ready")
     assert site.scale_ready is False
@@ -479,9 +478,8 @@ def test_mesh_only_five_hot_does_not_propose():
 
     What would make this fail: treating mesh_only like public overflow.
     """
-    from scaling.evaluator import evaluate_site
-
     from core.models import Site
+    from scaling.evaluator import evaluate_site
 
     site = _ready_site("mesh-hot")
     site.exposure = Site.Exposure.MESH_ONLY
@@ -587,9 +585,8 @@ def test_streak_break_resolves_open_proposal():
     What would make this fail: leaving OPEN forever once filed, with no close
     path when pressure is no longer sustained.
     """
-    from scaling.evaluator import evaluate_site
-
     from core.models import AuditEvent
+    from scaling.evaluator import evaluate_site
 
     site = _ready_site("streak-break")
     _plant(site.primary_target, _minutes(), ram=90.0)
@@ -680,31 +677,29 @@ def test_evaluate_scale_proposals_does_not_write_checkrun():
     from core.models import CheckRun
     from monitor.tasks import evaluate_scale_proposals
 
+    tasks_src = (REPO / "monitor" / "tasks.py").read_text(encoding="utf-8")
+    task_fn = next(
+        node
+        for node in ast.parse(tasks_src).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "evaluate_scale_proposals"
+    )
+    scoped = [task_fn]
     for path in (
-        REPO / "monitor" / "tasks.py",
         REPO / "scaling" / "evaluator.py",
         REPO / "scaling" / "pressure.py",
         REPO / "scaling" / "constants.py",
     ):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        scoped.append(ast.parse(path.read_text(encoding="utf-8")))
+    for tree in scoped:
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and node.id == "CheckRun":
-                pytest.fail(f"{path.relative_to(REPO)} names CheckRun")
+                pytest.fail("evaluator path names CheckRun")
             if isinstance(node, ast.Attribute) and node.attr == "CheckRun":
-                pytest.fail(f"{path.relative_to(REPO)} attributes CheckRun")
+                pytest.fail("evaluator path attributes CheckRun")
     before = CheckRun.objects.count()
     evaluate_scale_proposals()
     assert CheckRun.objects.count() == before
-    src = ast.get_source_segment(
-        (REPO / "monitor" / "tasks.py").read_text(encoding="utf-8"),
-        next(
-            node
-            for node in ast.parse(
-                (REPO / "monitor" / "tasks.py").read_text(encoding="utf-8")
-            ).body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "evaluate_scale_proposals"
-        ),
-    )
+    src = ast.get_source_segment(tasks_src, task_fn)
     assert src is not None
     assert "evaluate_all()" in src

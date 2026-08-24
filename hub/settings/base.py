@@ -263,6 +263,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.collect_all",
         "schedule": 60.0,
     },
+    "evaluate-scale-proposals": {
+        "task": "monitor.tasks.evaluate_scale_proposals",
+        "schedule": 60.0,
+    },
     "detect-missed-drills": {
         "task": "monitor.tasks.detect_missed_drills",
         "schedule": 3600.0,
