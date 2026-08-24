@@ -23,6 +23,16 @@ PUBLIC_A = (2, 1, 6, "", ("140.82.121.4", 0))
 METADATA_A = (2, 1, 6, "", ("169.254.169.254", 0))
 
 
+@pytest.fixture(autouse=True)
+def _reset_webhook_delivery_state():
+    """In-process (pk, webhook-id) survives DB rollback; SQLite reuses PKs."""
+    from core.partner_webhooks import reset_delivery_state
+
+    reset_delivery_state()
+    yield
+    reset_delivery_state()
+
+
 def _public_dns(monkeypatch):
     monkeypatch.setattr(
         socket, "getaddrinfo",
@@ -111,9 +121,14 @@ def test_delivery_re_resolves_and_refuses_rebind_to_metadata(monkeypatch):
     What would make this fail: inheriting git's clone-off-Hub TOCTOU
     exception so a name that later points at 169.254.169.254 is POSTed.
     """
-    from core.partner_webhooks import FakeWebhookSink, deliver_partner_webhook
+    from core.partner_webhooks import (
+        FakeWebhookSink,
+        deliver_partner_webhook,
+        reset_delivery_state,
+    )
     from core.validators import validate_webhook_url
 
+    reset_delivery_state()
     url = "https://hooks.partner.example/events"
     _public_dns(monkeypatch)
     assert validate_webhook_url(url) == url
@@ -139,8 +154,13 @@ def test_standard_webhooks_signature_verifies_with_reference_lib(monkeypatch):
     """
     from standardwebhooks.webhooks import Webhook
 
-    from core.partner_webhooks import FakeWebhookSink, deliver_partner_webhook
+    from core.partner_webhooks import (
+        FakeWebhookSink,
+        deliver_partner_webhook,
+        reset_delivery_state,
+    )
 
+    reset_delivery_state()
     _public_dns(monkeypatch)
     partner = _partner(slug="wh-sign", url="https://hooks.partner.example/events")
     sink = FakeWebhookSink()
@@ -163,8 +183,13 @@ def test_whsec_not_on_intake_and_not_in_detail(monkeypatch):
     process, or echoing it into an audit/Finding/CheckRun row.
     """
     from core.models import AuditEvent, CheckRun, Finding
-    from core.partner_webhooks import FakeWebhookSink, deliver_partner_webhook
+    from core.partner_webhooks import (
+        FakeWebhookSink,
+        deliver_partner_webhook,
+        reset_delivery_state,
+    )
 
+    reset_delivery_state()
     for py in (REPO / "intake").rglob("*.py"):
         text = py.read_text(encoding="utf-8")
         assert "whsec_" not in text, py
