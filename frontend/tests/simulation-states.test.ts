@@ -60,6 +60,8 @@ const REQUIRED_STATE_IDS = [
   "partner-site",
   "partner-kill-switch-overlay",
   "partner-destination-order-confirm",
+  "single-instance-only",
+  "scale-out-proposal",
 ];
 
 function loadSeed() {
@@ -183,6 +185,15 @@ const RENDER: Record<string, (state: any) => string> = {
       }],
       intake: { status: "degraded", mode: "fake", configured: false },
     }),
+  "single-instance-only": (s) => render(SitesView, {
+    phase: "live", sites: [s.site], onSelect: () => {}, onNav: () => {},
+  }),
+  "scale-out-proposal": (s) =>
+    render(FindingsView, {
+      phase: "live", findings: [findingFrom(s)], onNav: () => {},
+    }) + render(FindingDetail, {
+      finding: findingFrom(s), onBack: () => {},
+    }),
 };
 
 test("every_new_state_renders_in_simulation_mode", () => {
@@ -279,6 +290,63 @@ test("every_new_state_renders_in_simulation_mode", () => {
   assert.match(rankConfirm, /IP-reputation/);
   assert.doesNotMatch(rankConfirm, /\bConnected\b/);
   assert.doesNotMatch(rankConfirm, /\binstance\b/i);
+
+  const singleState = states.find((s) => s.id === "single-instance");
+  assert.doesNotMatch(JSON.stringify(singleState), /single-instance-only/);
+  const singleText = visibleText(RENDER["single-instance"](singleState));
+  assert.match(singleText, /single-instance/);
+  assert.doesNotMatch(singleText, /single-instance-only/);
+
+  const onlyState = states.find((s) => s.id === "single-instance-only");
+  const onlyText = visibleText(RENDER["single-instance-only"](onlyState));
+  assert.match(onlyText, /single-instance-only/);
+  assert.doesNotMatch(
+    onlyText.replace(/single-instance-only/g, ""),
+    /single-instance/,
+  );
+
+  const proposalState = states.find((s) => s.id === "scale-out-proposal");
+  const proposalMarkup = RENDER["scale-out-proposal"](proposalState);
+  const proposal = visibleText(proposalMarkup);
+  const proposalStripped = proposal
+    .replace(/single-instance-only/g, "")
+    .replace(/single-instance/g, "");
+  assert.doesNotMatch(proposalStripped, /\binstance\b/i);
+  assert.doesNotMatch(proposal, /\bApprove\b/);
+  assert.doesNotMatch(proposal, /\bLaunch\b/);
+  assert.doesNotMatch(proposal, /Create target/);
+  assert.doesNotMatch(proposal, /\$0\.05/);
+  assert.match(proposal, /Scale-out proposal awaiting approval \(propose mode\)/);
+  assert.match(proposal, /0\.0416/);
+  assert.match(proposal, /t3\.medium/);
+  assert.match(proposal, /Ack is not launch\. Propose-mode does not launch\./);
+});
+
+test("site_observed_paints_single_instance_only_iff_scale_ready_false", () => {
+  const omitted = visibleText(render(SiteObserved, { site: { name: "x" } }));
+  assert.doesNotMatch(omitted, /single-instance-only/);
+  const readyTrue = visibleText(render(SiteObserved, {
+    site: { name: "x", scale_ready: true },
+  }));
+  assert.doesNotMatch(readyTrue, /single-instance-only/);
+  const readyFalse = visibleText(render(SiteObserved, {
+    site: { name: "x", scale_ready: false },
+  }));
+  assert.match(readyFalse, /single-instance-only/);
+  assert.doesNotMatch(
+    readyFalse.replace(/single-instance-only/g, ""),
+    /single-instance/,
+  );
+  const oneCopy = visibleText(render(SiteObserved, {
+    site: { name: "x", single_instance: true },
+  }));
+  assert.match(oneCopy, /single-instance/);
+  assert.doesNotMatch(oneCopy, /single-instance-only/);
+  const both = visibleText(render(SiteObserved, {
+    site: { name: "x", scale_ready: false, single_instance: true },
+  }));
+  assert.match(both, /single-instance-only/);
+  assert.match(both, /single-instance/);
 });
 
 test("live_create_failure_and_cost_only_from_get_200", async () => {
