@@ -753,9 +753,10 @@ def test_unwired_evaluate_quotas_deploy_create_fails_loud(monkeypatch):
     What would make this fail: except Exception: day_count = 0, or a
     zeroing stand-in when _store is None.
     """
+    from django.apps import apps as django_apps
+
     import core.partner_deploys as port
     from core.partner_verify import evaluate_quotas
-    from django.apps import apps as django_apps
 
     partner = _partner("q-unwired")
     monkeypatch.setattr(port, "_store", None)

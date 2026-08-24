@@ -181,6 +181,7 @@ def test_ready_wires_partner_deploy_store(monkeypatch):
     returning a zeroing stand-in when _store is None.
     """
     from django.apps import apps as django_apps
+
     import core.partner_deploys as port
     from deploys.partner_ledger import DjangoPartnerDeployStore
 
