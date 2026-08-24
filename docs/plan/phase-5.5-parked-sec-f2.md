@@ -16,7 +16,10 @@
 - Do not invent `HUB_TEST_*` tokens. Do not stub `named-partner.md`. HMAC uneabled. MCP OUT. No public git-webhook route. No intake secret.
 - Function-level `@pytest.mark.req("PART-M2-GIT-WEBHOOK")` on new tests. No new registry ids. Do not edit `REVIEW_CHECKLIST.md` or `conformance/requirements.yaml`.
 - `monitor/intake_poll.py` must not `import intake`. T1 tests never hit the network (`git_ls_remote` injected).
-- Git-push still runs when `PARTNER_API_ENABLED` is False. Do not ack flag-off partner-jobs.
+- Git-push still runs when `PARTNER_API_ENABLED` is False. Do not ack flag-off partner-jobs. Do not nack git-push when ls-remote is empty.
+- Do not edit `monitor/intake_poll.py` / `monitor/tasks.py` / `hub/settings/base.py`. `BATCH_CAP` 20; one fetch; keep `poll-git-heads`. Empty `INTAKE_URL` skip persist stays a neighbor, not this diff.
+- No `ls_remote=` kwarg on `enqueue_git_push`. Tests patch `deploys.poller.git_ls_remote`.
+- Lookup never returns planted `sha` when `used()` is empty. No new confirm overlay.
 - TDD: watch RED then GREEN. Long "why" HEREDOC commits; no amend. Work on `p55-sec-f2`, never on `master`.
 
 ## File map
@@ -61,7 +64,16 @@ def _inject_ls_remote(monkeypatch, heads=None):
     return calls
 ```
 
-Change `_poll` to call `_inject_ls_remote` instead of `_boom_ls_remote`.
+Change `_poll` to call `_inject_ls_remote` instead of `_boom_ls_remote`. `_poll` still returns the `poll()` result only (do not change its return to `calls`). Tests that need `calls` call `_inject_ls_remote` themselves, then `poll()` — do not `_poll` after a local inject (that would rebind the fake).
+
+Rewrite **every enqueue path** off boom:
+
+- `test_git_push_outbox_enqueues_deploy` — local `calls = _inject_ls_remote(...)` then `poll()`; plant may stay `NEW_SHA`; assert `(GIT_URL, "main") in calls` and `("https://github.com/o/other.git", "main") not in calls`; `git_sha == NEW_SHA` from the **inject**.
+- `test_git_push_uses_same_poller_as_partner_job` — `_inject_ls_remote` not boom; keep `BATCH_CAP == 20`, `fetch_calls == 1`, Beat `poll-intake-outbox` 10.0, no git-webhook Beat name, flag-off partner-job unacked.
+- `test_git_push_in_same_batch_runs_before_skip_ack_partner_jobs` — inject; keep `PARTNER_API_ENABLED=False`, git-push acked, skip ids not acked, `fetch_calls == 1`.
+- `test_git_push_run_twice_zero_mutating_calls` — `_poll` inject is enough (same planted/injected `NEW_SHA`).
+
+Keep `_boom_ls_remote` **only** on `test_unknown_outbox_type_refuses`.
 
 Add:
 
@@ -106,46 +118,98 @@ def test_git_push_wake_up_when_remote_unchanged_does_not_enqueue(monkeypatch):
     poll(client=client, jitter=0, sleep=lambda _s: None)
     assert queued == []
     assert Deployment.objects.filter(manifest__site=site).count() == 1
+    assert not Deployment.objects.filter(
+        manifest__site=site, manifest__body__git_sha=EVIL_SHA,
+    ).exists()
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_empty_ls_remote_does_not_use_planted_sha(monkeypatch):
+    """Empty git host is fail-closed. Do not return used(...) or planted sha.
+
+    What would make this fail: lookup `return used(...) or sha` so a timeout
+    or missing ref rolls AUTO back to EVIL_SHA.
+    """
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-empty-head")
+    calls = _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): ""})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-empty")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert (GIT_URL, "main") in calls
+    assert queued == []
+    assert Deployment.objects.filter(manifest__site=site).count() == 1
+    bodies = list(
+        Deployment.objects.filter(manifest__site=site)
+        .values_list("manifest__body", flat=True)
+    )
+    assert all((body or {}).get("git_sha") != EVIL_SHA for body in bodies)
+    assert "git-empty" in client.acked
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_confirm_does_not_auto_deploy(monkeypatch):
+    """CONFIRM git-push records deploy-confirm-required with the git-host sha.
+
+    What would make this fail: treating confirm like AUTO, enqueueing from
+    the planted sha, or adding a new confirm overlay.
+    """
+    from core.models import AuditEvent, Site
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-confirm")
+    site.deploy_policy = Site.DeployPolicy.CONFIRM
+    site.save(update_fields=["deploy_policy"])
+    _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): NEW_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-confirm")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert queued == []
+    assert Deployment.objects.filter(manifest__site=site).count() == 1
+    row = AuditEvent.objects.get(action="deploy-confirm-required")
+    blob = str(row.detail)
+    assert NEW_SHA in blob
+    assert EVIL_SHA not in blob
 ```
 
-Rewrite `test_git_push_outbox_enqueues_deploy` docstring: Hub **does** consult `git_ls_remote` (injected). Assert `git_ls_remote` was called with `(GIT_URL, "main")` and the other repo was not. Keep `created.manifest.body["git_sha"] == NEW_SHA` **from the injected head**, not because the plant was `NEW_SHA` (plant `NEW_SHA` is still fine here if the inject returns the same; the evil test is the tooth).
+Tighten `test_git_url_goes_through_validate_git_url`: after inject + non-matching `_git_site`, plant an unmatched URL; assert a seen validate row `{url: planted, resolve: False}`; `(planted, "main") not in calls`. Blocked `127.0.0.1` half stays.
 
-Keep `test_git_url_goes_through_validate_git_url`, public-route 404s, no-secret, run-twice, drain pin. Run-twice still plants `NEW_SHA` and injects head `NEW_SHA`.
+Keep public-route 404s and no-secret. Do not add frontend files.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py::test_git_push_planted_sha_is_not_the_head tests/test_git_webhook_outbox.py::test_git_push_wake_up_when_remote_unchanged_does_not_enqueue -q`
+Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py::test_git_push_planted_sha_is_not_the_head tests/test_git_webhook_outbox.py::test_git_push_wake_up_when_remote_unchanged_does_not_enqueue tests/test_git_webhook_outbox.py::test_git_push_empty_ls_remote_does_not_use_planted_sha tests/test_git_webhook_outbox.py::test_git_push_confirm_does_not_auto_deploy -q`
 
-Expected: FAIL — planted `EVIL_SHA` is today's `ls_remote` return, so first test gets `git_sha == EVIL_SHA`; second test enqueues `EVIL_SHA`.
+Expected: FAIL — planted `EVIL_SHA` is today's `ls_remote` return (first/second/empty); CONFIRM currently AUTO-enqueues `EVIL_SHA` with no `deploy-confirm-required` git-host sha.
 
 - [ ] **Step 3: Minimal implementation**
 
 In `deploys/poller.py` `enqueue_git_push`:
 
 ```python
-def enqueue_git_push(git_url, ref, sha, *, now=None, in_window=None, ls_remote=None):
+def enqueue_git_push(git_url, ref, sha, *, now=None, in_window=None):
     """Wake the git poller for matching Projects. Planted sha is not the head."""
     validate_git_url(git_url, resolve=False)
     hint_url, hint_ref = git_url, ref
-    used = git_ls_remote if ls_remote is None else ls_remote
 
     def lookup(url, remote_ref):
         if url == hint_url and remote_ref == hint_ref:
-            return used(url, remote_ref)
+            return git_ls_remote(url, remote_ref)
         return ""
 
     poll(ls_remote=lookup, now=now, in_window=in_window)
 ```
 
-Do **not** `return sha` from `lookup`. Do not call `used` for non-matching Project urls. Keep `validate_git_url` before `poll`. Do not change `git_ls_remote` argv isolation. Do not import `intake`.
-
-Optional kwarg `ls_remote=` is for tests that call `enqueue_git_push` directly; Fake-poller tests patch `git_ls_remote`.
+Do **not** `return sha` / `return git_ls_remote(...) or sha` from `lookup`. Do not call `git_ls_remote` for non-matching Project urls. Keep `validate_git_url(..., resolve=False)` before `poll`. Do not change `git_ls_remote` argv isolation. Do not import `intake`. Do not add `ls_remote=`. Keep the `sha` argument (call site unchanged) but never use it as the head.
 
 - [ ] **Step 4: Run**
 
-Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py tests/test_git_poller.py -q`
+Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py tests/test_git_poller.py tests/test_deploy_policy.py tests/test_intake_poll.py::test_empty_intake_url_skips_and_does_not_file_p1 -q`
 
-Expected: PASS. Neighbors: no Hub inbound, six K3 families, no intake secret, drain pin, flag-off git-push still acked.
+Expected: PASS. Neighbors: no Hub inbound, six K3 families, no intake secret, drain pin, flag-off git-push still acked, confirm/windowed on `poll()` still hold, empty URL skip persist.
 
 - [ ] **Step 5: Commit**
 

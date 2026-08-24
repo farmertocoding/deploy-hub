@@ -25,9 +25,17 @@ same Hub poller**. The plant remains an untrusted hint (`git_url` through
    Other git-sourced sites get `""` and are not woken.
 3. Pass that lookup into existing `poll()` so confirm / windowed / same-sha
    / AUTO still belong to the poller. The lookup **returns the git-host
-   sha**, never the planted `sha`.
+   sha**, never the planted `sha`. If `git_ls_remote` returns empty, do not
+   enqueue and do **not** `return used(...) or sha`.
 4. Keep processing git-push when `PARTNER_API_ENABLED` is False (operator
-   git is not the partner kill-switch).
+   git is not the partner kill-switch). Ack the git-push job even when
+   ls-remote is empty (periodic `poll_git` is the retry). Do not nack.
+5. Plant `validate_git_url(..., resolve=False)` only. Unmatched planted
+   URLs are never `git_ls_remote` targets. Matching Project URL may
+   resolve inside `git_ls_remote`.
+6. CONFIRM sites: no `run_deploy.delay`, no new Deployment, existing
+   `deploy-confirm-required` audit uses the **git-host** sha. No new
+   confirm overlay / Settings chrome.
 
 Do not add a public GitHub/Gitea/webhook route. Do not add an intake
 secret. Do not treat planted SHA as `ls_remote`. Do not fleet-poll every
@@ -40,6 +48,8 @@ secret. Do not treat planted SHA as `ls_remote`. Do not fleet-poll every
   internet in T1 (tests inject `git_ls_remote`).
 - UX F1 destination picker; Architect F1 `core → deploys`; `0013` reopen.
 - Changing `BATCH_CAP` or a second outbox fetch.
+- Editing `monitor/intake_poll.py` / `monitor/tasks.py` / `hub/settings/base.py`.
+- Optional `ls_remote=` kwarg on `enqueue_git_push` (tests patch `git_ls_remote`).
 
 ## Exit
 
