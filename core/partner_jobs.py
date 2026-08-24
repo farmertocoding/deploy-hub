@@ -88,12 +88,9 @@ def get_partner_site(partner, site_id):
 
 
 def get_partner_deployment(partner, deployment_id):
-    from deploys.models import Deployment
+    from core.partner_deploys import store
 
-    dep = Deployment.objects.filter(
-        pk=deployment_id,
-        manifest__site__partner_site__partner=partner,
-    ).first()
+    dep = store().get_deployment(partner, deployment_id)
     if dep is None:
         raise PartnerNotFound()
     return dep
@@ -298,18 +295,15 @@ def _refuse_partner_base(domain):
 
 
 def _existing_deployment(partner, job_id):
-    from deploys.models import Deployment
+    from core.partner_deploys import store
 
     if not job_id:
         return None
-    qs = Deployment.objects.filter(
-        manifest__site__partner_site__partner=partner,
-    ).select_related("manifest", "manifest__site")
-    for dep in qs:
-        if (dep.manifest.body or {}).get("partner_job_id") == job_id:
-            site = dep.manifest.site
-            return MaterializeResult(site, site.partner_site, dep.manifest, dep)
-    return None
+    dep = store().find_by_job_id(partner, job_id)
+    if dep is None:
+        return None
+    site = dep.manifest.site
+    return MaterializeResult(site, site.partner_site, dep.manifest, dep)
 
 
 def _probe_only(result, digest, *, transport, registry):
@@ -330,7 +324,6 @@ def _require_quota(partner, method, path, *, now=None, body=None):
 
 def _create(partner, job, payload, target, domain, digest, *, now=None):
     from core.models import PartnerSite, Project, Site
-    from deploys.models import Deployment, Manifest
 
     tenant_ref = str(payload.get("tenant_ref") or "").strip() or "default"
     binding = (
@@ -372,12 +365,11 @@ def _create(partner, job, payload, target, domain, digest, *, now=None):
         )
     else:
         site = binding.site
-    last = site.manifests.order_by("-version").values_list("version", flat=True).first()
-    version = (last or 0) + 1
-    manifest = Manifest.objects.create(
-        site=site,
-        version=version,
-        body={
+    from core.partner_deploys import store
+
+    manifest, deployment = store().create_queued(
+        site,
+        {
             "schema_version": 1,
             "runtime": "static",
             "image_digest": digest,
@@ -385,9 +377,6 @@ def _create(partner, job, payload, target, domain, digest, *, now=None):
             "partner_job_id": job.get("id"),
             "ship_mode": "load",
         },
-    )
-    deployment = Deployment.objects.create(
-        manifest=manifest, status=Deployment.Status.QUEUED,
     )
     return MaterializeResult(site, binding, manifest, deployment)
 

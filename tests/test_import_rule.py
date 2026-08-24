@@ -156,3 +156,37 @@ def test_hub_product_modules_do_not_import_intake():
             if INTAKE_IMPORT_RE.search(py.read_text(encoding="utf-8")):
                 violations.append(str(py.relative_to(REPO)))
     assert violations == [], f"Hub product imports intake: {violations}"
+
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_partner_jobs_does_not_import_deploys():
+    """r2 materialize home must not import deploys, even lazily.
+
+    What would make this fail: get_partner_deployment / _existing_deployment /
+    _create doing `from deploys.models import Deployment` at function level
+    so Django still loads while the kernel docstring is a lie.
+    """
+    src = (REPO / "core" / "partner_jobs.py").read_text(encoding="utf-8")
+    assert re.search(r"^\s*(?:from|import)\s+deploys\b", src, re.M) is None, (
+        "core/partner_jobs.py imports deploys"
+    )
+
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_ready_wires_partner_deploy_store(monkeypatch):
+    """DeploysConfig.ready() registers the ORM ledger. Unwired fails loud.
+
+    What would make this fail: register_store only from tests/conftest.py,
+    a ready() that stops registering or skips when DEBUG, or store()
+    returning a zeroing stand-in when _store is None.
+    """
+    from django.apps import apps as django_apps
+    import core.partner_deploys as port
+    from deploys.partner_ledger import DjangoPartnerDeployStore
+
+    monkeypatch.setattr(port, "_store", None)
+    with pytest.raises(RuntimeError, match="not wired"):
+        port.store()
+    django_apps.get_app_config("deploys").ready()
+    assert isinstance(port.store(), DjangoPartnerDeployStore)
+
