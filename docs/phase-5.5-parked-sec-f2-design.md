@@ -36,6 +36,9 @@ same Hub poller**. The plant remains an untrusted hint (`git_url` through
 6. CONFIRM sites: no `run_deploy.delay`, no new Deployment, existing
    `deploy-confirm-required` audit uses the **git-host** sha. No new
    confirm overlay / Settings chrome.
+7. WINDOWED sites outside the cron: existing `deploy-waiting` path, no
+   `run_deploy.delay`, git-host sha in the audit. `enqueue_git_push`
+   only calls `poll()` after validate — it does not `_enqueue` itself.
 
 Do not add a public GitHub/Gitea/webhook route. Do not add an intake
 secret. Do not treat planted SHA as `ls_remote`. Do not fleet-poll every

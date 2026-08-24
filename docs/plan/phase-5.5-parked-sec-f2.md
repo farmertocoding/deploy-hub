@@ -173,6 +173,34 @@ def test_git_push_confirm_does_not_auto_deploy(monkeypatch):
     blob = str(row.detail)
     assert NEW_SHA in blob
     assert EVIL_SHA not in blob
+
+
+@pytest.mark.req("PART-M2-GIT-WEBHOOK")
+def test_git_push_windowed_outside_does_not_delay(monkeypatch):
+    """WINDOWED git-push outside the cron waits; git-host sha, not the plant.
+
+    What would make this fail: special-casing CONFIRM then _enqueue for
+    everyone else, or delaying run_deploy from a 10 s hint.
+    """
+    from core.models import AuditEvent, Site
+    from deploys import poller as git_poller
+    from monitor.intake_poll import FakeIntakeClient, poll
+
+    queued = _patch_delay(monkeypatch)
+    site = _git_site(slug="git-windowed")
+    site.deploy_policy = Site.DeployPolicy.WINDOWED
+    site.deploy_window_cron = "0 9 * * 1-5"
+    site.save(update_fields=["deploy_policy", "deploy_window_cron"])
+    monkeypatch.setattr(git_poller, "cron_in_window", lambda cron, now: False)
+    _inject_ls_remote(monkeypatch, heads={(GIT_URL, "main"): NEW_SHA})
+    client = FakeIntakeClient()
+    client.plant_git_push(GIT_URL, "main", EVIL_SHA, job_id="git-window")
+    poll(client=client, jitter=0, sleep=lambda _s: None)
+    assert queued == []
+    row = AuditEvent.objects.get(action="deploy-waiting")
+    blob = str(row.detail)
+    assert NEW_SHA in blob
+    assert EVIL_SHA not in blob
 ```
 
 Tighten `test_git_url_goes_through_validate_git_url`: after inject + non-matching `_git_site`, plant an unmatched URL; assert a seen validate row `{url: planted, resolve: False}`; `(planted, "main") not in calls`. Blocked `127.0.0.1` half stays.
@@ -181,9 +209,9 @@ Keep public-route 404s and no-secret. Do not add frontend files.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py::test_git_push_planted_sha_is_not_the_head tests/test_git_webhook_outbox.py::test_git_push_wake_up_when_remote_unchanged_does_not_enqueue tests/test_git_webhook_outbox.py::test_git_push_empty_ls_remote_does_not_use_planted_sha tests/test_git_webhook_outbox.py::test_git_push_confirm_does_not_auto_deploy -q`
+Run: `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_git_webhook_outbox.py::test_git_push_planted_sha_is_not_the_head tests/test_git_webhook_outbox.py::test_git_push_wake_up_when_remote_unchanged_does_not_enqueue tests/test_git_webhook_outbox.py::test_git_push_empty_ls_remote_does_not_use_planted_sha tests/test_git_webhook_outbox.py::test_git_push_confirm_does_not_auto_deploy tests/test_git_webhook_outbox.py::test_git_push_windowed_outside_does_not_delay -q`
 
-Expected: FAIL — planted `EVIL_SHA` is today's `ls_remote` return (first/second/empty); CONFIRM currently AUTO-enqueues `EVIL_SHA` with no `deploy-confirm-required` git-host sha.
+Expected: FAIL — planted `EVIL_SHA` is today's `ls_remote` return (first/second/empty); CONFIRM currently AUTO-enqueues `EVIL_SHA` with no `deploy-confirm-required` git-host sha; WINDOWED currently waits/delays on the planted sha.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -203,7 +231,7 @@ def enqueue_git_push(git_url, ref, sha, *, now=None, in_window=None):
     poll(ls_remote=lookup, now=now, in_window=in_window)
 ```
 
-Do **not** `return sha` / `return git_ls_remote(...) or sha` from `lookup`. Do not call `git_ls_remote` for non-matching Project urls. Keep `validate_git_url(..., resolve=False)` before `poll`. Do not change `git_ls_remote` argv isolation. Do not import `intake`. Do not add `ls_remote=`. Keep the `sha` argument (call site unchanged) but never use it as the head.
+Do **not** `return sha` / `return git_ls_remote(...) or sha` from `lookup`. Do not call `git_ls_remote` for non-matching Project urls. Keep `validate_git_url(..., resolve=False)` before `poll`. `enqueue_git_push`'s only product call after validate is `poll(...)` — do not `_enqueue` / `run_deploy.delay` in the wrapper. Do not change `git_ls_remote` argv isolation. Do not import `intake`. Do not add `ls_remote=`. Keep the `sha` argument (call site unchanged) but never use it as the head.
 
 - [ ] **Step 4: Run**
 
