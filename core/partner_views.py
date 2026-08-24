@@ -63,6 +63,13 @@ class PartnerDestinationSerializer(serializers.Serializer):
     kind = serializers.CharField()
 
 
+class CandidateTargetSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    host = serializers.CharField()
+    kind = serializers.CharField()
+    tunnel = serializers.BooleanField()
+
+
 class PartnerPublicSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     slug = serializers.CharField()
@@ -81,6 +88,7 @@ class PartnerListSerializer(serializers.Serializer):
     partners = PartnerPublicSerializer(many=True)
     intake = IntakeStatusSerializer()
     api_enabled = serializers.BooleanField()
+    candidate_targets = CandidateTargetSerializer(many=True)
 
 
 class ConfirmNameSerializer(serializers.Serializer):
@@ -130,6 +138,20 @@ def _intake_payload():
         "configured": bool(url),
         "as_of": last_success,
     }
+
+
+def _candidate_targets():
+    from core.models import Target
+    out = []
+    for row in Target.objects.filter(status=Target.Status.READY).order_by("pk"):
+        payload = row.collect_payload or {}
+        out.append({
+            "id": row.pk,
+            "host": row.host,
+            "kind": row.kind,
+            "tunnel": payload.get("tunnel") is True,
+        })
+    return out
 
 
 def partner_api_enabled():
@@ -264,6 +286,7 @@ class PartnerListCreateView(APIView):
                     "partners": partners,
                     "intake": _intake_payload(),
                     "api_enabled": partner_api_enabled(),
+                    "candidate_targets": _candidate_targets(),
                 }
             ).data
         )

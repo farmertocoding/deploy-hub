@@ -1249,6 +1249,22 @@ components:
       - id
       - kind
       - schedule
+    CandidateTarget:
+      type: object
+      properties:
+        id:
+          type: integer
+        host:
+          type: string
+        kind:
+          type: string
+        tunnel:
+          type: boolean
+      required:
+      - host
+      - id
+      - kind
+      - tunnel
     CertRefusal:
       type: object
       properties:
@@ -1779,8 +1795,13 @@ components:
           $ref: '#/components/schemas/IntakeStatus'
         api_enabled:
           type: boolean
+        candidate_targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateTarget'
       required:
       - api_enabled
+      - candidate_targets
       - intake
       - partners
     PartnerPublic:

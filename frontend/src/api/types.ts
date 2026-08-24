@@ -686,6 +686,12 @@ export interface components {
             schedule: string;
             dumps: components["schemas"]["BackupDump"][];
         };
+        CandidateTarget: {
+            id: number;
+            host: string;
+            kind: string;
+            tunnel: boolean;
+        };
         CertRefusal: {
             detail: string;
             finding_id: number;
@@ -912,6 +918,7 @@ export interface components {
             partners: components["schemas"]["PartnerPublic"][];
             intake: components["schemas"]["IntakeStatus"];
             api_enabled: boolean;
+            candidate_targets: components["schemas"]["CandidateTarget"][];
         };
         PartnerPublic: {
             id: number;

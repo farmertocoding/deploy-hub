@@ -722,3 +722,93 @@ def test_intake_as_of_is_null_when_never_succeeded(client):
     assert intake["as_of"] != before.isoformat()
     assert intake["as_of"] != after.isoformat()
 
+
+@pytest.mark.req("UX-P55-PARTNERS")
+def test_partners_list_includes_ready_candidate_targets(client):
+    """GET /api/v1/partners/ lists READY targets for the rank picker.
+
+    What would make this fail: omitting candidate_targets, including a
+    pending target, dumping collect_payload / ssh_key_ref onto the list,
+    or omitting tunnel so the picker cannot see ssh-without-tunnel.
+    """
+    from core.models import NetworkZone, Partner, Target
+    from core.partner_views import PartnerListCreateView
+    from rest_framework.test import APIRequestFactory
+
+    _t1_user(client)
+    zone = NetworkZone.objects.create(name="cand-z", slug="cand-z")
+    ready = Target.objects.create(
+        zone=zone, host="cloud.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.READY,
+    )
+    ssh = Target.objects.create(
+        zone=zone, host="home.cand.test", kind=Target.Kind.SSH,
+        status=Target.Status.READY,
+        ssh_key_ref="planted-ssh-key-ref-ux-f1",
+        host_key_fingerprint="SHA256:planted-host-key-fp-ux-f1",
+        collect_payload={
+            "tunnel": True,
+            "hubk_test_leak": "nope",
+            "whsec_leak": "nope",
+            "log_chunk": {"bytes": "secret-bytes"},
+        },
+    )
+    pending = Target.objects.create(
+        zone=zone, host="pending.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.PENDING,
+    )
+    errored = Target.objects.create(
+        zone=zone, host="error.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.ERROR,
+    )
+    gone = Target.objects.create(
+        zone=zone, host="gone.cand.test", kind=Target.Kind.AWS_EC2,
+        status=Target.Status.DECOMMISSIONED,
+    )
+    open_ssh = Target.objects.create(
+        zone=zone, host="open.cand.test", kind=Target.Kind.SSH,
+        status=Target.Status.READY, collect_payload={"tunnel": False},
+    )
+    empty = Partner.objects.create(slug="cand-empty", name="cand-empty")
+    assert empty.destination_order == []
+    view = PartnerListCreateView()
+    view.request = APIRequestFactory().get(CREATE_URL)
+    assert [type(p).__name__ for p in view.get_permissions()] == ["IsAuthenticated"]
+    response = client.get(CREATE_URL)
+    assert response.status_code == 200
+    body = response.json()
+    dumped = _blob(body)
+    assert "hubk_" not in dumped
+    assert "whsec_" not in dumped
+    assert "ssh_key_ref" not in dumped
+    assert "host_key_fingerprint" not in dumped
+    assert "secret-bytes" not in dumped
+    assert "log_chunk" not in dumped
+    assert "hubk_test_leak" not in dumped
+    assert "whsec_leak" not in dumped
+    assert "planted-ssh-key-ref-ux-f1" not in dumped
+    assert "SHA256:planted-host-key-fp-ux-f1" not in dumped
+    cands = body["candidate_targets"]
+    ids = {row["id"] for row in cands}
+    assert ready.pk in ids
+    assert ssh.pk in ids
+    assert pending.pk not in ids
+    assert errored.pk not in ids
+    assert gone.pk not in ids
+    for row in cands:
+        assert set(row) == {"id", "host", "kind", "tunnel"}
+    ssh_row = next(row for row in cands if row["id"] == ssh.pk)
+    assert ssh_row["host"] == "home.cand.test"
+    assert ssh_row["kind"] == Target.Kind.SSH
+    assert ssh_row["tunnel"] is True
+    cloud_row = next(row for row in cands if row["id"] == ready.pk)
+    assert cloud_row["tunnel"] is False
+    open_row = next(row for row in cands if row["id"] == open_ssh.pk)
+    assert open_row["tunnel"] is False
+    listed = next(row for row in body["partners"] if row["slug"] == "cand-empty")
+    assert listed["destination_order"] == []
+    assert "candidate_targets" not in listed
+    detail = client.get(f"{CREATE_URL}{empty.pk}/")
+    assert detail.status_code == 200
+    assert "candidate_targets" not in detail.json()
+

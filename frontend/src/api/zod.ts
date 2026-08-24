@@ -170,11 +170,20 @@ const IntakeStatus = z
     as_of: z.string().nullish(),
   })
   .passthrough();
+const CandidateTarget = z
+  .object({
+    id: z.number().int(),
+    host: z.string(),
+    kind: z.string(),
+    tunnel: z.boolean(),
+  })
+  .passthrough();
 const PartnerList = z
   .object({
     partners: z.array(PartnerPublic),
     intake: IntakeStatus,
     api_enabled: z.boolean(),
+    candidate_targets: z.array(CandidateTarget),
   })
   .passthrough();
 const PartnerCreate = z
@@ -390,6 +399,7 @@ export const schemas = {
   StatusEnum,
   ModeEnum,
   IntakeStatus,
+  CandidateTarget,
   PartnerList,
   PartnerCreate,
   PartnerCreateResult,
