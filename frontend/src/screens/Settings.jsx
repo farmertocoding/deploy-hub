@@ -80,6 +80,34 @@ export function rankSummary(partner) {
   return "Default: dedicated cloud first.";
 }
 
+export function addDestination(order, targetId) {
+  const id = Number(targetId);
+  if (!id || (order || []).includes(id)) return list(order);
+  return [...list(order), id];
+}
+export function moveDestination(order, targetId, dir) {
+  const next = list(order);
+  const i = next.indexOf(Number(targetId));
+  const j = i + Number(dir);
+  if (i < 0 || j < 0 || j >= next.length) return next;
+  const copy = next.slice();
+  const [row] = copy.splice(i, 1);
+  copy.splice(j, 0, row);
+  return copy;
+}
+export function removeDestination(order, targetId) {
+  return list(order).filter((id) => id !== Number(targetId));
+}
+function list(order) { return Array.isArray(order) ? order.slice() : []; }
+
+function destLookup(partner, candidates) {
+  const byId = new Map();
+  for (const row of [...(partner?.destinations || []), ...(candidates || [])]) {
+    if (row?.id != null) byId.set(Number(row.id), row);
+  }
+  return byId;
+}
+
 export function intakeLine(intake) {
   const stamp = intake?.as_of
     ? ` · data as of ${new Date(intake.as_of).toLocaleTimeString([], { hour12: false })}`
@@ -117,6 +145,8 @@ export function PartnersPanel({
   intake: intakeProp,
   minted: mintedProp,
   apiEnabled: apiEnabledProp,
+  candidateTargets: candidateTargetsProp,
+  rankDrafts: rankDraftsProp,
 }) {
   const [partners, setPartners] = useState(partnersProp ?? []);
   const [intake, setIntake] = useState(
@@ -124,16 +154,35 @@ export function PartnersPanel({
   );
   const [minted, setMinted] = useState(mintedProp ?? null);
   const [apiEnabled, setApiEnabled] = useState(Boolean(apiEnabledProp));
+  const [candidateTargets, setCandidateTargets] = useState(candidateTargetsProp ?? []);
+  const [drafts, setDrafts] = useState(() => {
+    if (rankDraftsProp !== undefined) return { ...rankDraftsProp };
+    const out = {};
+    for (const p of partnersProp ?? []) {
+      out[p.id] = list(p.destination_order);
+    }
+    return out;
+  });
+  const [addPick, setAddPick] = useState({});
 
   useEffect(() => {
     if (partnersProp !== undefined) return undefined;
     partnersList().then(({ status, data }) => {
       if (status === 200) {
-        setPartners(data.partners || []);
+        const rows = data.partners || [];
+        setPartners(rows);
         setIntake(data.intake || {
           status: "degraded", mode: "fake", configured: false,
         });
         setApiEnabled(Boolean(data.api_enabled));
+        setCandidateTargets(data.candidate_targets || []);
+        setDrafts((prev) => {
+          const next = { ...prev };
+          for (const row of rows) {
+            if (next[row.id] === undefined) next[row.id] = list(row.destination_order);
+          }
+          return next;
+        });
       }
     });
     return undefined;
@@ -145,6 +194,7 @@ export function PartnersPanel({
       setPartners(listed.data.partners || []);
       setIntake(listed.data.intake || intake);
       setApiEnabled(Boolean(listed.data.api_enabled));
+      setCandidateTargets(listed.data.candidate_targets || []);
     }
   }
 
@@ -167,7 +217,8 @@ export function PartnersPanel({
   }
 
   async function runRank(partner) {
-    await rankPartnerDestination(partner.id, partner.destination_order || []);
+    const order = drafts[partner.id] || partner.destination_order || [];
+    await rankPartnerDestination(partner.id, order);
     await refreshList();
   }
 
@@ -189,14 +240,61 @@ export function PartnersPanel({
       {empty && (
         <p>No partners yet — create a partner to mint Hub keys.</p>
       )}
-      {partners.map((p) => (
+      {partners.map((p) => {
+        const order = drafts[p.id] ?? list(p.destination_order);
+        const byId = destLookup(p, candidateTargets);
+        const inDraft = new Set(order.map(Number));
+        const available = (candidateTargets || []).filter(
+          (c) => !inDraft.has(Number(c.id)),
+        );
+        const includesSsh = order.some((id) => byId.get(Number(id))?.kind === "ssh");
+        return (
         <div key={p.id} style={{ ...box, marginBottom: 8 }}>
           <strong>{p.slug}</strong>
           {p.suspended ? <span> Suspended</span> : null}
           <div>
-            {(p.destination_order || []).length === 0
+            {order.length === 0
               ? "Destination order is empty — partner-site create will refuse. Default: dedicated cloud first."
-              : `Destination order: ${(p.destination_order || []).join(", ")}. Default: dedicated cloud first.`}
+              : "Default: dedicated cloud first."}
+          </div>
+          {order.map((id) => (
+            <div key={id}>
+              {byId.get(Number(id))?.host || id}
+              {" "}
+              <button type="button" style={box}
+                onClick={() => setDrafts((d) => ({
+                  ...d,
+                  [p.id]: moveDestination(d[p.id] ?? list(p.destination_order), id, -1),
+                }))}>Up</button>
+              <button type="button" style={box}
+                onClick={() => setDrafts((d) => ({
+                  ...d,
+                  [p.id]: moveDestination(d[p.id] ?? list(p.destination_order), id, 1),
+                }))}>Down</button>
+              <button type="button" style={box}
+                onClick={() => setDrafts((d) => ({
+                  ...d,
+                  [p.id]: removeDestination(d[p.id] ?? list(p.destination_order), id),
+                }))}>Remove</button>
+            </div>
+          ))}
+          <div>
+            <select aria-label="Add destination" style={box}
+              value={addPick[p.id] ?? ""}
+              onChange={(e) => setAddPick((s) => ({ ...s, [p.id]: e.target.value }))}>
+              <option value="" />
+              {available.map((c) => (
+                <option key={c.id} value={c.id}>{c.host}</option>
+              ))}
+            </select>
+            <button type="button" style={box}
+              onClick={() => {
+                setDrafts((d) => ({
+                  ...d,
+                  [p.id]: addDestination(d[p.id] ?? list(p.destination_order), addPick[p.id]),
+                }));
+                setAddPick((s) => ({ ...s, [p.id]: "" }));
+              }}>Add destination</button>
           </div>
           <ActionButton row={tierFor("partner.suspend")}
             confirmName={p.slug}
@@ -204,13 +302,14 @@ export function PartnersPanel({
             onRun={(args) => runSuspend(p, args)} />
           {/* Suspend partner — stop containers / detach routes / revoke key. */}
           <ActionButton row={tierFor("partner.destination_rank")}
-            summary={(p.destinations || []).some((d) => d.kind === "ssh")
+            summary={includesSsh
               ? "abuse takedowns and IP-reputation damage land on hardware and residential/office connections you cannot dispose of"
               : "Default: dedicated cloud first."}
             onRun={() => runRank(p)} />
           {/* Own-server kind === "ssh" confirm is the K5 honesty sentence once. */}
         </div>
-      ))}
+        );
+      })}
       {!minted && (
         <ActionButton row={tierFor("partner.create")}
           onRun={runCreate} />

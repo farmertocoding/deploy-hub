@@ -17,6 +17,7 @@ import {
   createPartner,
   partnersList,
   intakeLine,
+  addDestination, moveDestination, removeDestination, rankSummary,
 } from "../src/screens/Settings.jsx";
 import { ActionButton, ConfirmDialog, T1Overlay } from "../src/Tiers.jsx";
 import { makeTierRunner, tierFor } from "../src/actions.js";
@@ -393,5 +394,61 @@ test("suspended_partner_row_names_suspended_in_words", () => {
   assert.match(stopped, /Suspended/);
   assert.doesNotMatch(stopped, /\bConnected\b/);
   assert.doesNotMatch(stopped, /\binstance\b/i);
+});
+
+test("rank_draft_helpers_add_reorder_remove", () => {
+  assert.deepEqual(addDestination([], 2), [2]);
+  assert.deepEqual(addDestination([2], 2), [2]);
+  assert.deepEqual(moveDestination([1, 2, 3], 3, -1), [1, 3, 2]);
+  assert.deepEqual(moveDestination([1, 2], 1, -1), [1, 2]);
+  assert.deepEqual(removeDestination([1, 2], 1), [2]);
+});
+
+test("ranker_posts_draft_order_not_stored_empty", async () => {
+  const CANDS = [
+    { id: 7, host: "cloud.rank.test", kind: "aws_ec2", tunnel: false },
+    { id: 8, host: "home.rank.test", kind: "ssh", tunnel: true },
+  ];
+  const markup = render(PartnersPanel, {
+    partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+      destinations: [], suspended: false }],
+    intake: { status: "degraded", mode: "fake", configured: false },
+    candidateTargets: CANDS,
+    rankDrafts: { 1: [7, 8] },
+  });
+  const text = visibleText(markup);
+  assert.match(text, /cloud.rank.test/);
+  assert.match(text, /home.rank.test/);
+  assert.match(text, /Add destination/);
+  assert.doesNotMatch(text, /\bConnected\b/);
+  assert.doesNotMatch(text, /\binstance\b/i);
+
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const { act, create } = await import("react-test-renderer");
+  const calls: Array<{ url: string; body: any }> = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    calls.push({ url, body: opts?.body ? JSON.parse(opts.body) : undefined });
+    return { status: 200, json: async () => ({ id: 1, slug: "fixture-partner",
+      destination_order: [7, 8], destinations: CANDS }) };
+  };
+  let tree: any;
+  act(() => {
+    tree = create(React.createElement(PartnersPanel, {
+      partners: [{ id: 1, slug: "fixture-partner", destination_order: [],
+        destinations: [], suspended: false }],
+      intake: { status: "degraded", mode: "fake", configured: false },
+      candidateTargets: CANDS,
+      rankDrafts: { 1: [7, 8] },
+    }));
+  });
+  const rankBtn = tree.root.findAllByType(ActionButton)
+    .find((n: any) => n.props.row.id === "partner.destination_rank");
+  assert.ok(rankBtn);
+  assert.match(String(rankBtn.props.summary), /abuse takedowns/);
+  await rankBtn.props.onRun();
+  const posted = calls.find((c) => String(c.url).includes("destination-rank"));
+  assert.ok(posted, "Rank must POST destination-rank");
+  assert.deepEqual(posted.body.destination_order, [7, 8]);
+  act(() => { tree.unmount(); });
 });
 
