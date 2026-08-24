@@ -18,6 +18,7 @@
 - Do not reopen `0013`. Do not add `0014`. Do not edit `core/models.py`.
 - Function-level `@pytest.mark.req("ARCH-D4-IMPORT-RULE")` on new import-rule tests. No new registry ids. Do not edit `REVIEW_CHECKLIST.md` or `conformance/requirements.yaml`. Do not claim `deploys/**` or `core/partner_deploys.py` on `paths.yaml` (peer of `core/events.py`).
 - Do not move `core/partner_jobs.py` into `deploys/`. Do not add PartnerSite counters. Do not add a fallback `from deploys.models import …` inside core. `monitor/intake_poll.py` still calls `core.partner_jobs.materialize`. Isolation is still Partner + PartnerSite + `destination_order`. Intake wall unchanged (`import intake` still forbidden from Hub product).
+- Do not register the store from `tests/conftest.py`. Do not skip `DeploysConfig.ready()` when `DEBUG`. INSTALLED_APPS stays `"deploys"` (not a dotted `DeploysConfig` path). Do not add a Beat / CheckRun / extra poller to wire the store. Do not change `_reaches` itself. Do not delete `monitor → deploys` (M2 / retention). Kernel tooth is `"deploys" not in _direct_imports("core")`, **not** `_reaches("core", "deploys") is None`.
 - The wired store is Django ORM. Tests keep planting `Manifest` / `Deployment` via `deploys.models`. Do not ship an in-memory Fake that would hide IDOR / quota misses.
 - TDD: watch RED then GREEN. Long "why" HEREDOC commits; no amend. Work on `p55-arch-f1`, never on `master`. Never push. Never merge.
 
@@ -26,6 +27,7 @@
 | File | Tasks |
 |---|---|
 | `tests/test_import_rule.py` | Task 1, Task 2 |
+| `tests/test_partner_quotas.py` | Task 2 (`test_unwired_evaluate_quotas_deploy_create_fails_loud`) |
 | `core/partner_deploys.py` | Task 1 (new); Task 2 adds `count_since` |
 | `deploys/partner_ledger.py` | Task 1 (new); Task 2 adds `count_since` |
 | `deploys/apps.py` | Task 1 |
@@ -64,13 +66,32 @@ def test_partner_jobs_does_not_import_deploys():
     assert re.search(r"^\s*(?:from|import)\s+deploys\b", src, re.M) is None, (
         "core/partner_jobs.py imports deploys"
     )
+
+
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_ready_wires_partner_deploy_store(monkeypatch):
+    """DeploysConfig.ready() registers the ORM ledger. Unwired fails loud.
+
+    What would make this fail: register_store only from tests/conftest.py,
+    a ready() that stops registering or skips when DEBUG, or store()
+    returning a zeroing stand-in when _store is None.
+    """
+    from django.apps import apps as django_apps
+    import core.partner_deploys as port
+    from deploys.partner_ledger import DjangoPartnerDeployStore
+
+    monkeypatch.setattr(port, "_store", None)
+    with pytest.raises(RuntimeError, match="not wired"):
+        port.store()
+    django_apps.get_app_config("deploys").ready()
+    assert isinstance(port.store(), DjangoPartnerDeployStore)
 ```
 
 - [ ] **Step 2: Run to verify RED**
 
-`/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_partner_jobs_does_not_import_deploys -q`
+`/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_partner_jobs_does_not_import_deploys tests/test_import_rule.py::test_ready_wires_partner_deploy_store -q`
 
-Expected: FAIL (`core/partner_jobs.py imports deploys`). `_direct_imports` already sees the three indented `from deploys.models import …` lines; this test names the r2 home before Task 2's package walk.
+Expected: FAIL (`core/partner_jobs.py imports deploys`) and ImportError / no `DeploysConfig.ready` until the port exists. `_direct_imports` already sees the three indented `from deploys.models import …` lines; this test names the r2 home before Task 2's package walk.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -213,7 +234,7 @@ In `_create`, after `site` / `binding` exist, replace Manifest/Deployment constr
 
 Do not move `_create`'s Project / Site / PartnerSite / `_require_quota` block. Do not change `materialize()` signature. Do not edit `monitor/intake_poll.py`. Do not implement `count_since` yet.
 
-- [ ] **Step 4:** `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_partner_jobs_does_not_import_deploys tests/test_partner_isolation.py::test_partner_a_404s_on_partner_b_ids tests/test_partner_isolation.py::test_digest_pinned_fixture_template_deploys tests/test_partner_isolation.py::test_materialize_run_twice_zero_mutating_calls tests/test_partner_isolation.py::test_flag_off_does_not_create_deployment -q` PASS.
+- [ ] **Step 4:** `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_partner_jobs_does_not_import_deploys tests/test_import_rule.py::test_ready_wires_partner_deploy_store tests/test_partner_isolation.py::test_partner_a_404s_on_partner_b_ids tests/test_partner_isolation.py::test_digest_pinned_fixture_template_deploys tests/test_partner_isolation.py::test_materialize_run_twice_zero_mutating_calls tests/test_partner_isolation.py::test_flag_off_does_not_create_deployment -q` PASS.
 
 `get_partner_deployment` still 404s on the other partner's Deployment. Digest-pinned fixture still QUEUED. Same `partner_job_id` still one Deployment (D6). Flag-off still creates nothing.
 
@@ -234,11 +255,11 @@ EOF
 
 ---
 
-### Task 2: Quota counts + kernel `_reaches("core", "deploys")` gate
+### Task 2: Quota counts + kernel `"deploys" not in _direct_imports("core")` gate
 
 **Files:**
 - Modify: `core/partner_deploys.py`, `deploys/partner_ledger.py`, `core/partner_verify.py`
-- Test: `tests/test_import_rule.py`
+- Test: `tests/test_import_rule.py`, `tests/test_partner_quotas.py`
 
 **Interfaces:**
 - Consumes: Task 1 store; `evaluate_quotas` deploy-create branch
@@ -258,21 +279,47 @@ def test_core_stays_free_of_deploys():
     `from deploys.models import Deployment`, or moving that import into a
     helper still under core/.
     """
-    path = _reaches("core", "deploys")
-    assert path is None, "core reaches deploys via: " + " -> ".join(path or [])
+    assert "deploys" not in _direct_imports("core"), (
+        "core imports deploys (function-level counts)"
+    )
 
 
 @pytest.mark.req("ARCH-D4-IMPORT-RULE")
 def test_core_deploys_detector_actually_detects():
-    """The test above passes trivially if the graph walk cannot see deploys."""
+    """The test above passes trivially if _direct_imports cannot see deploys."""
+    assert "deploys" in _direct_imports("wizard")
     assert _reaches("wizard", "deploys") is not None
+    # Legal M2 path: do not assert _reaches("core", "deploys") is None.
+
+
+```
+
+Also append to `tests/test_partner_quotas.py` (uses `_partner`; django_db already):
+
+```python
+@pytest.mark.req("ARCH-D4-IMPORT-RULE")
+def test_unwired_evaluate_quotas_deploy_create_fails_loud(monkeypatch):
+    """Unwired store must not fail-open as count 0 on partner deploy-create.
+
+    What would make this fail: except Exception: day_count = 0, or a
+    zeroing stand-in when _store is None.
+    """
+    import core.partner_deploys as port
+    from core.partner_verify import evaluate_quotas
+    from django.apps import apps as django_apps
+
+    partner = _partner("q-unwired")
+    monkeypatch.setattr(port, "_store", None)
+    with pytest.raises(RuntimeError, match="not wired"):
+        evaluate_quotas(partner, "POST", "/partner/v1/sites/x/deployments")
+    django_apps.get_app_config("deploys").ready()
 ```
 
 - [ ] **Step 2: Run to verify RED**
 
-`/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_core_stays_free_of_deploys tests/test_import_rule.py::test_core_deploys_detector_actually_detects -q`
+`/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py::test_core_stays_free_of_deploys tests/test_import_rule.py::test_core_deploys_detector_actually_detects tests/test_partner_quotas.py::test_unwired_evaluate_quotas_deploy_create_fails_loud -q`
 
-Expected: `test_core_stays_free_of_deploys` FAIL (`core reaches deploys via: core -> deploys`) from `core/partner_verify.py`'s function-level `from deploys.models import Deployment`. `test_core_deploys_detector_actually_detects` already PASS (wizard is allowed to import deploys). After Task 1, partner_jobs is not on that path.
+Expected: `test_core_stays_free_of_deploys` FAIL (`core imports deploys`) from `core/partner_verify.py`'s function-level `from deploys.models import Deployment`. Detector PASS (`wizard` is allowed to import deploys). Unwired quotas FAIL until `evaluate_quotas` calls `store()` (or FAIL because `_store` is still None and the old Deployment import path does not raise `not wired`). After Task 1, partner_jobs is not in `_direct_imports("core")` except via partner_verify.
 
 - [ ] **Step 3: Minimal implementation**
 
@@ -322,14 +369,14 @@ Per-site must **not** also filter `partner` (today's shape; the site is already 
 
 Do not change max_sites / fleet / domains / nonce rate (those stay on Partner / PartnerSite / PartnerReplayNonce). Do not add PartnerSite counter columns. Do not file `budget-cap-hit:partner` on `reason=="rate"`. No fallback `import deploys`.
 
-- [ ] **Step 4:** `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py tests/test_partner_quotas.py::test_deploys_per_day_default_50 tests/test_partner_quotas.py::test_rate_limit_60_and_deploy_create_3_per_min tests/test_partner_quotas.py::test_rate_429_does_not_file_budget_cap_hit_partner tests/test_partner_isolation.py::test_digest_pinned_fixture_template_deploys tests/test_partner_isolation.py::test_partner_a_404s_on_partner_b_ids -q` PASS.
+- [ ] **Step 4:** `/Users/j/j/deploy-hub/.venv/bin/pytest tests/test_import_rule.py tests/test_partner_quotas.py::test_unwired_evaluate_quotas_deploy_create_fails_loud tests/test_partner_quotas.py::test_deploys_per_day_default_50 tests/test_partner_quotas.py::test_rate_limit_60_and_deploy_create_3_per_min tests/test_partner_quotas.py::test_rate_429_does_not_file_budget_cap_hit_partner tests/test_partner_isolation.py::test_digest_pinned_fixture_template_deploys tests/test_partner_isolation.py::test_partner_a_404s_on_partner_b_ids -q` PASS.
 
-51st partner deploy-create still 403 `quota`. 4th per-site minute still 429 `rate` without `budget-cap-hit:partner`. `_reaches("core", "deploys")` is None. `test_cloud_sdk_imports_only_under_providers` and `test_core_stays_free_of_scanner` still PASS.
+51st partner deploy-create still 403 `quota`. 4th per-site minute still 429 `rate` without `budget-cap-hit:partner`. `"deploys" not in _direct_imports("core")`. `test_cloud_sdk_imports_only_under_providers` and `test_core_stays_free_of_scanner` still PASS. Do not assert `_reaches("core", "deploys") is None`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_import_rule.py core/partner_deploys.py deploys/partner_ledger.py core/partner_verify.py
+git add tests/test_import_rule.py tests/test_partner_quotas.py core/partner_deploys.py deploys/partner_ledger.py core/partner_verify.py
 git commit -m "$(cat <<'EOF'
 evaluate_quotas counted U2 deploys by importing Deployment, so the new
 core ↛ deploys walk stayed red after partner_jobs dropped its edge.

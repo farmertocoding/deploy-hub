@@ -17,13 +17,22 @@ as `core.events` / `realtime.apps.ready()`. Core never imports `deploys`
 (function-level still counts). A thin helper in `deploys/` that
 `core/partner_jobs.py` imports **is the cycle**, not a cut.
 
-1. `tests/test_import_rule.py` grows `_reaches("core", "deploys") is None`
-   (peer of `test_core_stays_free_of_scanner`). Detector pin:
-   `_reaches("wizard", "deploys")` is not None.
+1. `tests/test_import_rule.py` grows `"deploys" not in _direct_imports("core")`
+   (kernel docstring is **core imports nothing from deploys/**, not
+   “nothing core imports may import deploys”). `_reaches("core", "deploys")
+   is None` stays red on the **legal** `core → monitor → deploys` M2 path
+   after the direct edge leaves; do not special-case `_reaches` or delete
+   `monitor → deploys`. Detector pin: `"deploys" in _direct_imports("wizard")`
+   (and `_reaches("wizard", "deploys")` is not None as a walk pin only).
 2. `core/partner_deploys.py` is the D5 port (`PartnerDeployStore` +
-   `register_store` / `_require`). Unwired calls fail loud. No fallback
-   `import deploys`. Peer of `core/events.py` — do not claim it on
-   `paths.yaml`; isolation stays in already-claimed `core/partner_jobs.py`.
+   `register_store` / `_require`). Unwired calls fail loud (`RuntimeError`
+   matching `not wired`). No fallback `import deploys`. Peer of
+   `core/events.py` — do not claim it on `paths.yaml`; isolation stays in
+   already-claimed `core/partner_jobs.py`. `DeploysConfig.ready()` is the
+   wiring path (events analog: unwind `_store`, assert fail-loud, call
+   `get_app_config("deploys").ready()`, live `DjangoPartnerDeployStore`).
+   Do not register from `tests/conftest.py`. Do not skip `ready()` when
+   `DEBUG`. INSTALLED_APPS stays `"deploys"`.
 3. `deploys/partner_ledger.py` is the Django ORM adapter (lookups,
    queued Manifest+Deployment insert, U2 `count_since`). Ordinary; do
    not broaden `deploys/**` on the sensitive-path list.
@@ -65,5 +74,6 @@ ignores planted Manifest/Deployment rows. Collapsing the intake wall.
 One green `make review-round` + `conformance --phase 5 --exclude-tier t2
 --exclude-tier t3` on the merged tree. Five-seat MERGE (or
 MERGE-AFTER-FIXES + scoped re-review). Panel vote is the merge click.
-The tooth is `test_core_stays_free_of_deploys` green because the edge
-moved, not because the walk is broken.
+The tooth is `test_core_stays_free_of_deploys` green because
+`"deploys" not in _direct_imports("core")` after the edge moved, not
+because `_reaches` was broken.
