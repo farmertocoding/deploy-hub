@@ -1045,6 +1045,7 @@ export interface components {
             cert_refusal?: components["schemas"]["CertRefusal"] | null;
             attack_state?: components["schemas"]["AttackState"] | null;
             edge_owner?: components["schemas"]["EdgeOwnerEnum"];
+            scale_ready?: boolean;
         };
         SshRotate: {
             confirm_name: string;

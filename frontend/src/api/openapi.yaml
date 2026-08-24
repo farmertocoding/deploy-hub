@@ -2066,6 +2066,8 @@ components:
           nullable: true
         edge_owner:
           $ref: '#/components/schemas/EdgeOwnerEnum'
+        scale_ready:
+          type: boolean
       required:
       - domain
       - id

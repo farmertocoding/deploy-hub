@@ -336,6 +336,36 @@
           ]
         }
       ]
+    },
+    {
+      "id": "single-instance-only",
+      "must_render": ["single-instance-only"],
+      "site": {
+        "id": 91, "name": "sqlite-lab", "domain": "sqlite.example.test",
+        "project": "sqlite-lab",
+        "scale_ready": false,
+        "latest_manifest_version": 1,
+        "manifest_current": true
+      }
+    },
+    {
+      "id": "scale-out-proposal",
+      "must_render": [
+        "P2",
+        "Scale-out proposal awaiting approval (propose mode)",
+        "0.0416",
+        "t3.medium",
+        "Ack is not launch. Propose-mode does not launch."
+      ],
+      "finding": {
+        "id": 41, "source_engine": "scaling.evaluator", "severity": "p2",
+        "entity": "site:shop.example.com",
+        "title": "Scale-out proposal awaiting approval (propose mode)",
+        "body": "shop has sustained ram pressure. Overflow estimate 0.0416 USD/hour on t3.medium. propose-mode does not launch.",
+        "fix_action": "Ack is not launch. Propose-mode does not launch.",
+        "state": "open", "fingerprint": "scale-out-proposal:1",
+        "accepted_reason": ""
+      }
     }
   ],
   "scripted_events": [
@@ -367,6 +397,8 @@
     {"t": 49, "state_id": "partner-intake-degraded", "topic": "findings", "event": {"kind": "partner-intake", "state": "degraded", "title": "Fake intake degraded"}},
     {"t": 51, "state_id": "partner-site", "topic": "findings", "event": {"kind": "partner-site", "title": "partner site", "entity": "partner:fixture-partner"}},
     {"t": 53, "state_id": "partner-kill-switch-overlay", "topic": "findings", "event": {"kind": "partner-kill-switch", "title": "Suspend partner", "entity": "partner:fixture-partner"}},
-    {"t": 55, "state_id": "partner-destination-order-confirm", "topic": "findings", "event": {"kind": "partner-destination-rank", "title": "Rank partner destination", "entity": "partner:fixture-partner"}}
+    {"t": 55, "state_id": "partner-destination-order-confirm", "topic": "findings", "event": {"kind": "partner-destination-rank", "title": "Rank partner destination", "entity": "partner:fixture-partner"}},
+    {"t": 57, "state_id": "single-instance-only", "topic": "site.lab.status", "event": {"site": "sqlite.example.test", "scale_ready": false, "badge": "single-instance-only"}},
+    {"t": 59, "state_id": "scale-out-proposal", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 41, "severity": "p2", "state": "open", "entity": "site:shop.example.com", "title": "Scale-out proposal awaiting approval (propose mode)", "fingerprint": "scale-out-proposal:1"}}
   ]
 }

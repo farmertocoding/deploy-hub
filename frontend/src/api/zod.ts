@@ -229,6 +229,7 @@ const SiteSummary = z
     cert_refusal: CertRefusal.nullish(),
     attack_state: AttackState.nullish(),
     edge_owner: EdgeOwnerEnum.optional(),
+    scale_ready: z.boolean().optional(),
   })
   .passthrough();
 const ProjectSummary = z

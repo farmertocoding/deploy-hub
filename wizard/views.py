@@ -208,6 +208,10 @@ class SiteSummarySerializer(serializers.Serializer):
     edge_owner = serializers.ChoiceField(
         choices=Site.EdgeOwner.choices, required=False,
     )
+    # Always emitted by project_row_body as a real bool. required=False so
+    # older sim rows still parse; omit is not the live shape. Do not alias
+    # single_instance = not scale_ready; omit single_instance this wave.
+    scale_ready = serializers.BooleanField(required=False)
 
 
 class ProjectSummarySerializer(serializers.Serializer):
@@ -321,6 +325,7 @@ def project_row_body(project):
             ),
             "attack_state": _attack_state_payload(site, attacks),
             "edge_owner": site.edge_owner,
+            "scale_ready": site.scale_ready,
         })
     return ProjectSummarySerializer({
         "id": project.pk, "name": project.name, "slug": project.slug,

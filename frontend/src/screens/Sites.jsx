@@ -97,7 +97,9 @@ export function ManifestLine({ site }) {
 // refused this site a certificate and said why, and the Finding carries the full
 // story — the link routes to the finding detail, never through the map (§F6).
 // Observed-state badges the §F8 seed paints: warming (elapsed/expected),
-// data-stale, single-instance, cert-expiring. Symbol + words, never colour.
+// data-stale, single-instance-only (scale_ready === false), single-instance
+// (F8 one-copy), cert-expiring. Symbol + words, never colour. Omitted
+// scale_ready does not paint — not `if (!site.scale_ready)`.
 export function SiteObserved({ site }) {
   if (!site) return null;
   const bits = [];
@@ -108,6 +110,7 @@ export function SiteObserved({ site }) {
   }
   if (site.badge === "data-stale" || site.data_stale || site.observed === "data-stale")
     bits.push("data-stale");
+  if (site.scale_ready === false) bits.push("single-instance-only");
   if (site.single_instance || site.instances === 1) bits.push("single-instance");
   if (site.cert_expiring) bits.push("cert expiring");
   if (!bits.length) return null;
@@ -350,7 +353,8 @@ export function SitesView({
           <strong>{s.name}</strong>{s.domain ? ` — ${s.domain}` : ""}{" "}
           <span style={{ color: "#8b949e" }}>({s.project})</span>{" "}
           <PartnerBadge site={s} />{" "}
-          <ManifestLine site={s} />
+          <ManifestLine site={s} />{" "}
+          <SiteObserved site={s} />
           <CertState site={s} />
           <AttackState site={s} />
         </div>
