@@ -306,7 +306,8 @@ class FakeImageRegistry(ImageRegistry):
 
     _MUTATING = {"push"}
     _PUSH_USER = "hub-push"
-    _PUSH_PASSWORD = "hub-push-secret-not-for-targets"
+    # nosec B105 — T1 Fake push password, never a live credential.
+    _PUSH_PASSWORD = "hub-push-secret-not-for-targets"  # nosec B105
 
     def __init__(
         self,
