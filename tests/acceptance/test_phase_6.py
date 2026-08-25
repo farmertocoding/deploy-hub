@@ -116,11 +116,13 @@ def _assert_honest_t1_demo():
 def test_scale_ready_quiet_five_hot_mem_files_p2_proposal():
     """A public scale-ready site, quiet attack playbook, not a PartnerSite,
     five HostMetric rows ram=90 one distinct UTC minute apart inside the
-    300s window → P2 scale-out-proposal fingerprint scale-out-proposal:{pk},
-    body contains 0.0416 / t3.medium / propose-mode does not launch;
-    fix_action is the C8 sentence; Target count unchanged; no
-    enroll_aws_target. Re-evaluate while OPEN does not add a push-log
-    event. Disk-only five hot minutes → no Finding.
+    300s window → P2 scale-cheap-remediation fingerprint
+    scale-cheap-remediation:{pk}, body contains Cache-Control / Cloudflare
+    cache / gunicorn / 2×CPU+1 / propose-mode does not launch. Accept-risk
+    the cheap row with a reason → re-evaluate files scale-out-proposal
+    with 0.0416 / t3.medium. Target count unchanged; no enroll_aws_target.
+    Re-evaluate while OPEN does not add a push-log event. Disk-only five
+    hot minutes → no Finding.
 
     Transcribes tests/test_scale_evaluator.py::
     test_five_hot_mem_minutes_file_cheap_before_overflow,
@@ -194,17 +196,23 @@ def test_one_spike_does_not_propose():
 @pytest.mark.req("SCALE-NEVER-ATTACK")
 def test_attack_engaged_does_not_propose():
     """Same pressure while the attack playbook is engaged (FakeEdgeProtection)
-    → no scale-out-proposal; an already-OPEN or ACKED proposal is resolved.
+    → neither scale-cheap-remediation nor scale-out-proposal files; an
+    already-OPEN cheap resolves; an already-OPEN or ACKED overflow
+    proposal is resolved.
 
     Transcribes tests/test_scale_evaluator.py::
     test_attack_engaged_does_not_propose,
+    ::test_open_cheap_resolves_when_attack_engages,
+    ::test_acked_cheap_resolves_when_attack_engages,
     ::test_open_proposal_resolves_when_attack_engages,
     ::test_acked_proposal_resolves_when_attack_engages, and
     ::test_evaluate_site_source_calls_refuse_if_attack.
     """
     from test_scale_evaluator import (
+        test_acked_cheap_resolves_when_attack_engages,
         test_acked_proposal_resolves_when_attack_engages,
         test_evaluate_site_source_calls_refuse_if_attack,
+        test_open_cheap_resolves_when_attack_engages,
         test_open_proposal_resolves_when_attack_engages,
     )
     from test_scale_evaluator import (
@@ -212,6 +220,8 @@ def test_attack_engaged_does_not_propose():
     )
 
     _engaged()
+    test_open_cheap_resolves_when_attack_engages()
+    test_acked_cheap_resolves_when_attack_engages()
     test_open_proposal_resolves_when_attack_engages()
     test_acked_proposal_resolves_when_attack_engages()
     test_evaluate_site_source_calls_refuse_if_attack()
@@ -220,25 +230,30 @@ def test_attack_engaged_does_not_propose():
 @pytest.mark.django_db
 @pytest.mark.req("SCALE-NEVER-PARTNER")
 def test_partner_site_does_not_propose():
-    """Same pressure on a PartnerSite → no proposal. Binding PartnerSite
-    after file system-resolves an OPEN or ACKED proposal.
+    """Same pressure on a PartnerSite → no scale-cheap-remediation and no
+    scale-out-proposal. Binding PartnerSite after file system-resolves an
+    OPEN cheap or overflow Finding.
 
     Transcribes tests/test_scale_evaluator.py::
     test_partner_site_does_not_propose,
-    ::test_partner_bind_after_file_resolves_open_proposal, and
-    ::test_partner_bind_after_file_resolves_acked_proposal.
+    ::test_partner_bind_resolves_open_cheap, and
+    ::test_partner_bind_after_file_resolves_open_proposal.
+
+    Does not call test_partner_bind_after_file_resolves_acked_proposal or
+    test_partner_bind_resolves_acked_cheap: SCALE-NEVER-PARTNER text is
+    OPEN-only (C11 / D-096).
     """
     from test_scale_evaluator import (
-        test_partner_bind_after_file_resolves_acked_proposal,
         test_partner_bind_after_file_resolves_open_proposal,
+        test_partner_bind_resolves_open_cheap,
     )
     from test_scale_evaluator import (
         test_partner_site_does_not_propose as _partner,
     )
 
     _partner()
+    test_partner_bind_resolves_open_cheap()
     test_partner_bind_after_file_resolves_open_proposal()
-    test_partner_bind_after_file_resolves_acked_proposal()
 
 
 @pytest.mark.django_db

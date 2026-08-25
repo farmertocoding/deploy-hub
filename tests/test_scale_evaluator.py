@@ -292,7 +292,7 @@ def test_open_cheap_resolves_when_attack_engages():
 @pytest.mark.req("SCALE-NEVER-PARTNER")
 def test_partner_bind_resolves_open_cheap():
     """Binding PartnerSite system-resolves OPEN cheap; no overflow."""
-    from core.models import Partner, PartnerSite
+    from core.models import AuditEvent, Partner, PartnerSite
     from scaling.evaluator import evaluate_site
 
     site = _ready_site("cheap-part")
@@ -303,7 +303,50 @@ def test_partner_bind_resolves_open_cheap():
     assert evaluate_site(site, now=NOW) is None
     row.refresh_from_db()
     assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
     assert _proposal(site) is None
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+def test_partner_bind_resolves_acked_cheap():
+    """Binding PartnerSite system-resolves ACKED cheap; no overflow.
+
+    Marked SCALE-CHEAP-BEFORE-OVERFLOW only (that id's text is OPEN or ACKED
+    cheap). Unmarked for SCALE-NEVER-PARTNER: that id's retract sentence is
+    OPEN-only (C11 / D-096).
+    """
+    from core.findings import ack
+    from core.models import AuditEvent, Partner, PartnerSite
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-acked-part")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    assert row.fingerprint == _cheap_fp(site)
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    partner = Partner.objects.create(
+        slug="cheap-acked-part-p", name="cheap-acked-part-p",
+    )
+    PartnerSite.objects.create(
+        partner=partner, site=site, tenant_ref="cheap-acked-part-t",
+    )
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
+    assert _proposal(site) is None
+    assert Finding.objects.filter(fingerprint=_cheap_fp(site)).count() == 1
 
 
 @pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
@@ -559,6 +602,7 @@ def test_attack_engaged_does_not_propose():
     run(site, FakeEdgeProtection())
     assert evaluate_site(site, now=NOW) is None
     assert _proposal(site) is None
+    assert _cheap(site) is None
 
 
 @pytest.mark.req("SCALE-NEVER-ATTACK")
@@ -629,6 +673,53 @@ def test_acked_proposal_resolves_when_attack_engages():
     assert Finding.objects.filter(fingerprint=_fp(site)).count() == 1
 
 
+@pytest.mark.req("SCALE-NEVER-ATTACK")
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+def test_acked_cheap_resolves_when_attack_engages():
+    """ACKED cheap system-resolves when the attack playbook engages.
+
+    What would make this fail: `_retract` resolving ACKED only for overflow
+    and OPEN-only for cheap, so an ACKED cheap Finding stays in the inbox
+    (SCALE-NEVER-ATTACK / SCALE-CHEAP-BEFORE-OVERFLOW text is OPEN or ACKED).
+    """
+    from test_attack_playbook import _attack_shaped
+
+    from core.findings import ack
+    from core.models import AuditEvent
+    from monitor.attack_playbook import run
+    from providers.fakes import FakeEdgeProtection
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-acked-atk")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    assert row.fingerprint == _cheap_fp(site)
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    _attack_shaped(site)
+    run(site, FakeEdgeProtection())
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
+    assert _proposal(site) is None
+    assert Finding.objects.filter(fingerprint=_cheap_fp(site)).count() == 1
+    assert Finding.objects.filter(
+        fingerprint=_cheap_fp(site),
+        state=Finding.State.OPEN,
+    ).count() == 0
+    assert Finding.objects.filter(
+        fingerprint=_fp(site),
+        state=Finding.State.OPEN,
+    ).count() == 0
+
+
 @pytest.mark.req("SCALE-NEVER-PARTNER")
 def test_partner_site_does_not_propose():
     """PartnerSite + quiet playbook + five hot mem must not file.
@@ -648,6 +739,7 @@ def test_partner_site_does_not_propose():
     PartnerSite.objects.create(partner=partner, site=site, tenant_ref="part-hot-t")
     assert evaluate_site(site, now=NOW) is None
     assert _proposal(site) is None
+    assert _cheap(site) is None
 
 
 @pytest.mark.req("SCALE-NEVER-PARTNER")
