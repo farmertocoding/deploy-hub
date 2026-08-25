@@ -1404,3 +1404,14 @@ requirements:
     text_hash: sha256:52067515c6014845a2f5f0c3e2c04c4e184a55076187852fe2c072099cd5ad28
     text: >
       evaluate_site overflow body prefers a READY permanent non-primary Target with current headroom (latest HostMetric within 120s, ram not >85 and load not >cores) at 0 USD/hour on own-machine over t3.medium; ephemeral, pending, error, decommissioned, partner destination_order, hub host matching HUB_PUBLIC_URL hostname, stale or missing metrics, and the site's primary_target are never picked; propose-mode still does not create a Target.
+  # Phase 6.7 (docs/phase-6.7-design-note.md §3, Task 0 / D-104…D-106).
+  # New MUST id is tier-less (no `tier:` key). Do not rewrite
+  # SCALE-PROPOSE-NO-PROVISION text:. Do not stub a new demo file
+  # (append is Task 2). Everyday conformance stays phase 5.
+  - id: SCALE-OVERFLOW-T1-ENROLL
+    phase: 6
+    verify: test
+    source: phase-6.7-design-note.md §3
+    text_hash: sha256:77666fc7d0c3e65f24ddad632f2b2c1ea761c77776f725e6be22b53c71379894
+    text: >
+      instance.create with overflow_site enrolls an ephemeral Target only when a Finding scale-out-proposal:{site.pk} is ACCEPTED, pick_overflow_home misses (no idle registered machine), and refuse_if_attack is quiet; OPEN or ACKED overflow refuses with Ack is not launch. Propose-mode does not launch; T1 RequireRecentTouch and type-the-name still apply; evaluate_site still never creates a Target; tests inject FakeCloudProvider.

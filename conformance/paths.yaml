@@ -130,3 +130,6 @@ sensitive:
   # Phase 6.6 (Task 0): claim scaling/destination.py before Task 1
   # creates it (D-101 / C9). Do not broaden to scaling/**.
   - scaling/destination.py
+  # Phase 6.7 (Task 0): claim provision/overflow.py before Task 1
+  # creates it (D-104 / C9). Do not broaden to provision/**.
+  - provision/overflow.py
