@@ -1327,7 +1327,7 @@ requirements:
     source: phase-6.5-design-note.md §3
     text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
     text: >
-      five consecutive distinct UTC minutes of HostMetric samples in a 300s Hub-clock window over the same axis (mem_pct>85 or load1>cores) file Finding kind scale-cheap-remediation fingerprint scale-cheap-remediation:{site.pk} whose body includes Cache-Control, Cloudflare cache, gunicorn 2×CPU+1, and the sentence propose-mode does not launch; disk-only heat does not file; an ACCEPTED cheap finding plus still-sustained pressure files scale-out-proposal as before.
+      five consecutive distinct UTC minutes of HostMetric samples in a 300s Hub-clock window over the same axis (mem_pct>85 or load1>cores) file Finding kind scale-cheap-remediation fingerprint scale-cheap-remediation:{site.pk} whose body includes Cache-Control, Cloudflare cache, gunicorn 2×CPU+1, and the sentence propose-mode does not launch; disk-only heat does not file; an ACCEPTED cheap finding plus still-sustained pressure files scale-out-proposal whose body names idle registered machine, 0, and own-machine when a READY permanent non-primary non-partner-destination non-hub-host Target has current headroom, otherwise 0.0416 and t3.medium.
   - id: SCALE-SPIKE-NO-PROPOSE
     phase: 6
     verify: test
@@ -1393,3 +1393,14 @@ requirements:
     text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
     text: >
       cheap-remediation evaluate_site never creates a Target, never calls EdgeProtection cache or enroll_aws_target, and does not rewrite gunicorn workers.
+  # Phase 6.6 (docs/phase-6.6-design-note.md §3, Task 0 / D-101…D-103).
+  # New MUST id is tier-less (no `tier:` key). SCALE-SUSTAINED-PROPOSE
+  # `text:` rewritten to name idle-or-t3. Do not stub a new demo file
+  # (append is Task 2). Everyday conformance stays phase 5.
+  - id: SCALE-OVERFLOW-IDLE-FIRST
+    phase: 6
+    verify: test
+    source: phase-6.6-design-note.md §3
+    text_hash: sha256:52067515c6014845a2f5f0c3e2c04c4e184a55076187852fe2c072099cd5ad28
+    text: >
+      evaluate_site overflow body prefers a READY permanent non-primary Target with current headroom (latest HostMetric within 120s, ram not >85 and load not >cores) at 0 USD/hour on own-machine over t3.medium; ephemeral, pending, error, decommissioned, partner destination_order, hub host matching HUB_PUBLIC_URL hostname, stale or missing metrics, and the site's primary_target are never picked; propose-mode still does not create a Target.
