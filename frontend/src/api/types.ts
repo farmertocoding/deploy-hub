@@ -967,9 +967,10 @@ export interface components {
          *     * `container` - container
          *     * `hub` - hub
          *     * `edge` - edge
+         *     * `ghost` - ghost
          * @enum {string}
          */
-        KindEnum: "zone" | "host" | "container" | "hub" | "edge";
+        KindEnum: "zone" | "host" | "container" | "hub" | "edge" | "ghost";
         Login: {
             username: string;
             password: string;

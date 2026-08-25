@@ -20,6 +20,7 @@ const STATUS_ICON = {
   absent: "○",
   unhealthy: "⚠",
   warming: "↻",
+  ghost: "◌",
 };
 
 export function statusMark(status) {
@@ -28,7 +29,8 @@ export function statusMark(status) {
 
 function isEmptyFleet(nodes) {
   return !(nodes || []).some((n) =>
-    n.kind === "zone" || n.kind === "host" || n.kind === "container");
+    n.kind === "zone" || n.kind === "host" || n.kind === "container"
+    || n.kind === "ghost");
 }
 
 export function MapView({ graph, listView = false, onToggle }) {
@@ -165,6 +167,7 @@ function layout(nodes) {
   };
   const zones = nodes.filter((n) => n.kind === "zone");
   const hosts = nodes.filter((n) => n.kind === "host");
+  const ghosts = nodes.filter((n) => n.kind === "ghost");
   const containers = nodes.filter((n) => n.kind === "container");
   const zoneW = 280;
   const zoneH = 160;
@@ -179,7 +182,7 @@ function layout(nodes) {
     };
   });
   const hostsByZone = new Map();
-  for (const h of hosts) {
+  for (const h of [...hosts, ...ghosts.filter((g) => g.parent)]) {
     const key = h.parent || "_";
     if (!hostsByZone.has(key)) hostsByZone.set(key, []);
     hostsByZone.get(key).push(h);
@@ -190,6 +193,14 @@ function layout(nodes) {
       pos[h.id] = { x: zp.x + 8 + (i % 2) * 130, y: zp.y + 36 + Math.floor(i / 2) * 48 };
     });
   }
+  let fallbackY = 70;
+  for (const z of zones) {
+    const p = pos[z.id];
+    if (p) fallbackY = Math.max(fallbackY, p.y + (p.h || zoneH));
+  }
+  ghosts.filter((g) => !g.parent).forEach((g, i) => {
+    pos[g.id] = { x: 40, y: fallbackY + 24 + i * 24 };
+  });
   const kidsByHost = new Map();
   for (const c of containers) {
     const key = c.parent || "_";

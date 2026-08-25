@@ -1824,6 +1824,7 @@ components:
       - container
       - hub
       - edge
+      - ghost
       type: string
       description: |-
         * `zone` - zone
@@ -1831,6 +1832,7 @@ components:
         * `container` - container
         * `hub` - hub
         * `edge` - edge
+        * `ghost` - ghost
     Login:
       type: object
       properties:

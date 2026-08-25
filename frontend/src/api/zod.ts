@@ -126,7 +126,7 @@ const InstanceCreate = z
 const InstanceCreateResult = z
   .object({ id: z.number().int(), host: z.string(), kind: z.string() })
   .passthrough();
-const KindEnum = z.enum(["zone", "host", "container", "hub", "edge"]);
+const KindEnum = z.enum(["zone", "host", "container", "hub", "edge", "ghost"]);
 const MapNode = z
   .object({
     id: z.string(),

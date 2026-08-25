@@ -116,7 +116,8 @@ class FindingTransitionView(APIView):
 
 class MapNodeSerializer(serializers.Serializer):
     id = serializers.CharField()
-    kind = serializers.ChoiceField(choices=["zone", "host", "container", "hub", "edge"])
+    kind = serializers.ChoiceField(
+        choices=["zone", "host", "container", "hub", "edge", "ghost"])
     label = serializers.CharField()
     status = serializers.CharField()
     parent = serializers.CharField(required=False)

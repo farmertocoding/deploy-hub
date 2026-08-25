@@ -9,10 +9,11 @@ walk, through core.events — monitor must not import realtime (ARCH-V6).
 """
 from core import events
 from core.models import NetworkZone, Site, SiteInstance, Target
+from monitor.lan_ghosts import attach_lan_ghosts
 
 TOPIC = "map.graph"
 
-_NODE_KINDS = ("zone", "host", "container", "hub", "edge")
+_NODE_KINDS = ("zone", "host", "container", "hub", "edge", "ghost")
 
 
 def advise_topology():
@@ -45,6 +46,9 @@ def graph_snapshot():
     """
     seq = events.current_seq(TOPIC)
     nodes, edges = _derive()
+    nodes = attach_lan_ghosts(
+        nodes, list(Target.objects.order_by("pk")), lan_scan=None,
+    )
     from monitor.topology import attach_findings
 
     attach_findings(nodes)

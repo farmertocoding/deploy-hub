@@ -78,6 +78,41 @@ test("optional_finding_chips_link_hash_findings", () => {
   assert.ok(!list.includes("#/findings/42"), "chips are SVG-only");
 });
 
+const GHOST_GRAPH = {
+  nodes: [
+    { id: "hub", kind: "hub", label: "Hub", status: "ok" },
+    { id: "edge", kind: "edge", label: "Cloudflare", status: "ok" },
+    { id: "zone:1", kind: "zone", label: "prod-vlan", status: "ok" },
+    { id: "host:1", kind: "host", label: "web-1", status: "ready", parent: "zone:1" },
+    { id: "ghost:printer.lan", kind: "ghost", label: "printer.lan", status: "ghost",
+      parent: "zone:1" },
+    { id: "ghost:orphan.lan", kind: "ghost", label: "orphan.lan", status: "ghost" },
+  ],
+  edges: [],
+};
+
+test("ghost_nodes_render_in_list_and_svg_with_icon_label", () => {
+  const svgMarkup = render(MapView, { graph: GHOST_GRAPH, listView: false });
+  const listMarkup = render(MapView, { graph: GHOST_GRAPH, listView: true });
+  const svg = visibleText(svgMarkup);
+  const list = visibleText(listMarkup);
+  assert.ok(svg.includes("printer.lan"), `svg missing printer.lan: ${svg}`);
+  assert.ok(list.includes("printer.lan"), `list missing printer.lan: ${list}`);
+  assert.ok(svg.includes("orphan.lan"), `svg missing parentless ghost: ${svg}`);
+  assert.ok(/◌/.test(svg) || /ghost/.test(svg), `svg status not icon+label: ${svg}`);
+  assert.ok(/◌/.test(list) || /ghost/.test(list), `list status not icon+label: ${list}`);
+  assert.ok(svg.includes("◌") && svg.includes("ghost"), `svg must show ◌ ghost: ${svg}`);
+  assert.ok(list.includes("◌") && list.includes("ghost"), `list must show ◌ ghost: ${list}`);
+  assert.match(svgMarkup, /data-kind="ghost"/);
+  assert.match(svgMarkup, /data-status="ghost"/);
+  assert.match(listMarkup, /data-status="ghost"/);
+  const chromeSrc = readFileSync(new URL("../src/Chrome.jsx", import.meta.url), "utf8");
+  assert.equal(
+    [...chromeSrc.matchAll(/id: "(home|sites|targets|deploys|findings|settings)"/g)].length,
+    6,
+  );
+});
+
 test("empty_fleet_shows_the_onboarding_hint", () => {
   const empty = {
     nodes: [
