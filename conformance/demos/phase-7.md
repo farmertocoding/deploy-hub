@@ -15,7 +15,7 @@ SiteInstance untouched; command block still on GET list. Wrong confirm
 `BACKUP_KEY`, never the KEK.
 
 Record: `conformance/demos/phase-7.md`. This record **does not claim**
-live docker overwrite, a KEK restore, Azure, Router Advisor, preview
+live docker overwrite, a KEK restore, Azure, preview
 environments, LAN ghosts, Pulumi, or U1. `PART-U1-NAMED-PARTNER` stays
 uncovered until Joseph writes `conformance/demos/named-partner.md`.
 Everyday `make review-round` (phase 5) may go green while U1 is
@@ -41,7 +41,7 @@ NAV is still six.
 
 - `PART-U1-NAMED-PARTNER` stays uncovered. `conformance/demos/named-partner.md`
   is absent. This record does not claim a named committed partner.
-- Router Advisor, preview environments (private repos), LAN discovery
+- Preview environments (private repos), LAN discovery
   ghosts, Pulumi/managed-DB/LB, Azure adapter, overwrite-live restore
   are later Phase 7 polish, not this wave.
 - Everyday `conformance` / `review-round` stay `--phase 5 --exclude-tier t2
@@ -57,3 +57,64 @@ each body calls the Task 1 proof:
 - `test_restore_command_block_remains`
 - `test_nav_stays_six`
 - `test_demo_does_not_claim_live_docker_or_kek`
+- `test_tunnel_nothing_forwarded_files_and_resolves`
+- `test_router_advice_target_tab`
+
+## Phase 7.1 — Router Advisor (P7-ROUTER-DEMO)
+
+**Date:** 2026-08-26 · **Branch:** `master` · **Recorded by:** Phase 7.1
+Task 2. **T1 inject only.** Injected `wan_probe` — not live UPnP, not a
+live WAN scan. This session did not run a live UPnP discovery or a live
+WAN scan. No model-tailored steps. No Playwright.
+
+### What the milestone asked (design note §4)
+
+Tunnel-mode SSH target, injected `wan_probe` returning one
+`{port: 443, proto: tcp}` → Finding OPEN `router-forwarded:{pk}`; GET
+detail `router_advice.finding_id` set; T3 POST **Probe router** with
+empty forwards → Finding RESOLVED; GET detail `finding_id` null.
+Missing inject → 4xx `wan probe refused`, no Finding. Non-tunnel target
+→ 4xx `not tunnel mode`, no Finding.
+
+Target detail tabs **Hardening** | **Router**. NAV six. Honest: no live
+UPnP, no live WAN scan, no model-tailored steps, no preview, no LAN
+ghosts, no Pulumi, no Azure, no U1.
+
+`PART-U1-NAMED-PARTNER` stays uncovered; `named-partner.md` absent.
+Everyday `conformance` stays phase 5; `conformance-7` is the phase gate
+and excludes t2/t3:
+`python conformance/check.py --phase 7 --exclude-tier t2 --exclude-tier t3`.
+No invented token env. No Playwright. `P7-ROUTER-DEMO` named.
+
+### The honest state of this host
+
+T1. Inject actually driven this session:
+
+- `wan_probe=` wrap on `monitor.router_views.probe_nothing_forwarded`
+  (HTTP) and the same inject on
+  `monitor.router_advisor.probe_nothing_forwarded` (direct). Default
+  `wan_probe` is refuse-closed. No live UPnP. No live WAN scan.
+
+NAV is still six.
+
+### Still outstanding — named, not greened
+
+- `PART-U1-NAMED-PARTNER` stays uncovered. `conformance/demos/named-partner.md`
+  is absent. This record does not claim a named committed partner.
+- Preview environments (private repos), LAN discovery ghosts,
+  Pulumi/managed-DB/LB, Azure adapter, overwrite-live restore are later
+  Phase 7 polish, not this wave.
+- Everyday `conformance` / `review-round` stay `--phase 5 --exclude-tier t2
+  --exclude-tier t3`. `conformance-7` is not a `review-round` or
+  `nightly-gates` prereq.
+
+This record **does not claim** live UPnP, a live WAN scan, model-tailored
+steps, preview, LAN ghosts, Pulumi, Azure, or U1.
+
+### Acceptance transcription — real nodeids
+
+`tests/acceptance/test_phase_7.py` (`@pytest.mark.acceptance(phase=7)`),
+each body calls the Task 1 proof:
+
+- `test_tunnel_nothing_forwarded_files_and_resolves`
+- `test_router_advice_target_tab`

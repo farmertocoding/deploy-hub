@@ -4,7 +4,7 @@
 Everyday `conformance` / `review-round` stay `--phase 5`. T1 inject only:
 `restore_to_clean=` never live docker. Do not invent HUB_TEST_* /
 HUB_INTAKE_HMAC / HUB_WEBHOOK_SECRET. Do not add Playwright. Do not stub
-named-partner.md. Do not mark P7-RESTORE-DEMO on pytest.
+named-partner.md. Do not mark P7-RESTORE-DEMO or P7-ROUTER-DEMO on pytest.
 """
 
 import re
@@ -22,6 +22,8 @@ NAMED = (
     "test_restore_command_block_remains",
     "test_nav_stays_six",
     "test_demo_does_not_claim_live_docker_or_kek",
+    "test_tunnel_nothing_forwarded_files_and_resolves",
+    "test_router_advice_target_tab",
 )
 
 pytestmark = [pytest.mark.acceptance(phase=7)]
@@ -159,12 +161,28 @@ def test_nav_stays_six():
     demo_req = _registry()["P7-RESTORE-DEMO"]
     assert demo_req["verify"] == "demo"
     assert "conformance/demos/phase-7.md" in demo_req.get("demo", [])
+    router_demo = _registry()["P7-ROUTER-DEMO"]
+    assert router_demo["verify"] == "demo"
+    assert "conformance/demos/phase-7.md" in router_demo.get("demo", [])
     u1 = _registry()["PART-U1-NAMED-PARTNER"]
     assert u1["verify"] == "demo"
     assert "conformance/demos/named-partner.md" in u1.get("demo", [])
 
     record = _assert_honest_t1_demo()
     assert "conformance-5" in record.lower() or "phase 5" in record.lower()
+    assert "P7-ROUTER-DEMO" in record
+    assert "wan_probe" in record
+    assert "router-forwarded" in record
+    assert "Probe router" in record
+    assert "Hardening" in record and "Router" in record
+    lower = record.lower()
+    assert "no live upnp" in lower
+    assert "no live wan" in lower
+    assert "model-tailored" in lower
+    assert "no preview" in lower or "preview" in lower
+    assert "lan" in lower
+    assert "pulumi" in lower
+    assert "azure" in lower
 
 
 def test_demo_does_not_claim_live_docker_or_kek():
@@ -178,3 +196,53 @@ def test_demo_does_not_claim_live_docker_or_kek():
     assert "does not claim" in lower or "does **not** claim" in lower
     assert "did not run" in lower or "this session did not" in lower
     assert not NAMED_PARTNER.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("ROUTER-TUNNEL-NOTHING-FORWARDED")
+def test_tunnel_nothing_forwarded_files_and_resolves():
+    """Tunnel target + injected wan_probe files then resolves
+    router-forwarded:{pk}. Missing inject and non-tunnel skip.
+
+    Transcribes tests/test_router_advisor.py::
+    test_tunnel_forward_files_finding,
+    ::test_empty_forwards_resolves_finding,
+    ::test_missing_wan_probe_does_not_file,
+    and ::test_non_tunnel_skips.
+    """
+    from test_router_advisor import (
+        test_empty_forwards_resolves_finding,
+        test_missing_wan_probe_does_not_file,
+        test_non_tunnel_skips,
+        test_tunnel_forward_files_finding,
+    )
+
+    test_tunnel_forward_files_finding()
+    test_empty_forwards_resolves_finding()
+    test_missing_wan_probe_does_not_file()
+    test_non_tunnel_skips()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("ROUTER-ADVICE-TARGET-TAB")
+def test_router_advice_target_tab(client, monkeypatch):
+    """GET detail router_advice; T3 Probe router empty forwards
+    resolves; missing inject and non-tunnel POST are 4xx.
+
+    Transcribes tests/test_router_advisor.py::
+    test_target_detail_returns_router_advice,
+    ::test_probe_http_t3_empty_forwards_resolves,
+    ::test_probe_http_missing_inject_is_4xx,
+    and ::test_probe_http_non_tunnel_is_4xx.
+    """
+    from test_router_advisor import (
+        test_probe_http_missing_inject_is_4xx,
+        test_probe_http_non_tunnel_is_4xx,
+        test_probe_http_t3_empty_forwards_resolves,
+        test_target_detail_returns_router_advice,
+    )
+
+    test_target_detail_returns_router_advice(client)
+    test_probe_http_t3_empty_forwards_resolves(client, monkeypatch)
+    test_probe_http_missing_inject_is_4xx(client, monkeypatch)
+    test_probe_http_non_tunnel_is_4xx(client, monkeypatch)

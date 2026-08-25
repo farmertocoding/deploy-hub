@@ -10,6 +10,7 @@ import inspect
 import json
 import pathlib
 import re
+import uuid
 
 import pytest
 
@@ -61,9 +62,10 @@ def _login(client):
     from django.contrib.auth.models import User
     from django_otp.plugins.otp_totp.models import TOTPDevice
 
-    user = User.objects.create_user("joseph", password="a-long-dev-password")
+    username = f"joseph-{uuid.uuid4().hex[:8]}"
+    user = User.objects.create_user(username, password="a-long-dev-password")
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
-    client.login(username="joseph", password="a-long-dev-password")
+    client.login(username=username, password="a-long-dev-password")
     return user
 
 
@@ -338,12 +340,18 @@ def test_probe_http_t3_empty_forwards_resolves(client, monkeypatch):
 
 
 @pytest.mark.req("ROUTER-ADVICE-TARGET-TAB")
-def test_probe_http_missing_inject_is_4xx(client):
+def test_probe_http_missing_inject_is_4xx(client, monkeypatch):
     """POST without wan_probe inject is 4xx `wan probe refused`, no Finding.
 
     What would make this fail: binding forwards from the request body, or
     filing when the seam is missing.
     """
+    from monitor.router_advisor import probe_nothing_forwarded
+
+    monkeypatch.setattr(
+        "monitor.router_views.probe_nothing_forwarded",
+        probe_nothing_forwarded,
+    )
     box = _target(_zone("router-refuse"), "tun-refuse.lan", tunnel=True)
     _login(client)
     before = Finding.objects.count()
@@ -379,3 +387,13 @@ def test_probe_http_non_tunnel_is_4xx(client, monkeypatch):
     assert Finding.objects.filter(
         fingerprint=f"router-forwarded:{box.pk}",
     ).count() == 0
+
+
+def test_two_http_proofs_do_not_collide_on_username(client, monkeypatch):
+    """A NAMED that calls two HTTP proofs shares one transaction.
+
+    What would make this fail: `_login` always creating username joseph
+    so the second create_user raises UNIQUE.
+    """
+    test_probe_http_missing_inject_is_4xx(client, monkeypatch)
+    test_probe_http_non_tunnel_is_4xx(client, monkeypatch)
