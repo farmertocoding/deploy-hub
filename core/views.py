@@ -378,11 +378,11 @@ class OverflowDeployView(APIView):
                 {"detail": "Type the target host name to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        from deploys import overflow as overflow_mod
+        from core import overflow_deploys
 
         try:
-            deployment = overflow_mod.deploy_overflow_copy(site, target)
-        except overflow_mod.OverflowDeployError as exc:
+            deployment = overflow_deploys.deploy(site, target)
+        except overflow_deploys.OverflowDeployError as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,

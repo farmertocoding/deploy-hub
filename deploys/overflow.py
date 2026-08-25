@@ -8,13 +8,17 @@ queue the worker and do not default the site primary transport.
 """
 from django.utils import timezone
 
+from core.overflow_deploys import OverflowDeployError
 from scaling.attack_gate import AttackRefuse, PartnerOverflowRefuse, refuse_if_attack
 from scaling.constants import FIX_ACTION
 from scaling.destination import pick_overflow_home
 
 
-class OverflowDeployError(Exception):
-    """Propose-gate or overflow-target refuse. No Deployment on the gate path."""
+def overflow_copy_thunk(*args, **kwargs):
+    """Port thunk: look up deploy_overflow_copy at call time (HTTP inject)."""
+    from deploys import overflow as overflow_mod
+
+    return overflow_mod.deploy_overflow_copy(*args, **kwargs)
 
 
 def deploy_overflow_copy(

@@ -507,3 +507,33 @@ def test_idle_registered_machine_refuses_overflow_deploy(client, monkeypatch):
 
     response = _post_deploy(client, site, overflow)
     _assert_refused(response, before, detail=IDLE_REFUSE)
+
+
+def test_overflow_deploy_view_does_not_import_deploys():
+    """ARCH-D4: OverflowDeployView uses the core port; core never imports deploys.
+
+    Unmarked: import-rule pin, not SCALE-OVERFLOW-SAME-IMAGE text.
+    """
+    import pathlib
+
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    banned = re.compile(r"^\s*(?:from|import)\s+deploys\b", re.M)
+    for rel in ("core/views.py", "core/overflow_deploys.py"):
+        src = (repo / rel).read_text(encoding="utf-8")
+        assert banned.search(src) is None, rel
+    from test_import_rule import _direct_imports
+
+    assert "deploys" not in _direct_imports("core")
+
+
+def test_overflow_deploy_port_unwired_fails_loud(monkeypatch):
+    """Unwired overflow port raises RuntimeError naming DeploysConfig.ready()."""
+    from django.apps import apps as django_apps
+
+    import core.overflow_deploys as port
+
+    monkeypatch.setattr(port, "_impl", None)
+    with pytest.raises(RuntimeError, match="DeploysConfig.ready"):
+        port.deploy(None, None)
+    django_apps.get_app_config("deploys").ready()
+    assert port._impl is not None
