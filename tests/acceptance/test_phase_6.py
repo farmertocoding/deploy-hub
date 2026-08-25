@@ -31,6 +31,7 @@ NAMED = (
     "test_overflow_deploy_pins_live_image_skips_dns",
     "test_overflow_join_adds_overflow_a_next_to_primary",
     "test_overflow_scale_in_unjoins_terminates_and_reaper_flags",
+    "test_ephemeral_reaper_runs_on_daily_beat",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -288,6 +289,28 @@ def test_overflow_scale_in_unjoins_terminates_and_reaper_flags(
     test_overflow_scale_in_unjoins_and_terminates(client, monkeypatch)
     User.objects.filter(username="joseph").delete()
     test_reaper_flags_ephemeral_older_than_24h()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT")
+def test_ephemeral_reaper_runs_on_daily_beat():
+    """Daily Beat ephemeral-overflow-reaper-daily names the wrapper,
+    86400s, queue probes, no kwargs. Task flags a 25h leftover;
+    target stays READY; no CheckRun. Honest: no live AWS VM, no
+    auto-terminate, no 30s health-pull, no auto, no AMI, no real
+    drain window.
+
+    Transcribes tests/test_overflow_scale_in.py::
+    test_beat_entry_runs_reaper_daily_on_queue_probes and
+    ::test_beat_task_flags_and_does_not_terminate.
+    """
+    from test_overflow_scale_in import (
+        test_beat_entry_runs_reaper_daily_on_queue_probes,
+        test_beat_task_flags_and_does_not_terminate,
+    )
+
+    test_beat_entry_runs_reaper_daily_on_queue_probes()
+    test_beat_task_flags_and_does_not_terminate()
 
 
 @pytest.mark.django_db

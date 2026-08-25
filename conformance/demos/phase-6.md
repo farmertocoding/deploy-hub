@@ -7,7 +7,8 @@ clause on HEAD `f6824e9`. Phase 6.7 Task 2 appended the T1 Fake overflow
 enroll clause. Phase 6.8 Task 2 appended the same-image overflow
 deploy clause. Phase 6.9 Task 2 appended the T1 Fake overflow
 join clause. Phase 6.10 Task 2 appended the T1 Fake scale-in
-and ephemeral-reaper clause. **T1 fakes only.** This is not a live AWS,
+and ephemeral-reaper clause. Phase 6.11 Task 2 appended the daily
+Beat reaper clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No live AWS VM. No auto mode. No AMI. No
 ScalePolicy table. FakeDns join only — no live Cloudflare zone, no
@@ -95,6 +96,8 @@ overflow deploy clause; the file is expected **11 passed**, 0 skipped.
 Phase 6.9 Task 2 adds the T1 Fake join clause; the file is expected
 **12 passed**, 0 skipped. Phase 6.10 Task 2 adds the T1 Fake scale-in
 and reaper clause; the file is expected **13 passed**, 0 skipped.
+Phase 6.11 Task 2 adds the daily Beat reaper clause; the file is
+expected **14 passed**, 0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -187,6 +190,20 @@ window. This wave does not design out forgotten billing. NAV six. F8
 overflow seed stays the no-idle `0.0416` / `t3.medium` case. No Approve
 or Launch on the Finding. Ack does not stop billing.
 
+### Daily ephemeral reaper Beat (§4, Phase 6.11)
+
+Beat `ephemeral-overflow-reaper-daily` names
+`monitor.tasks.reap_stale_overflow_ephemerals`, schedule 86400.0,
+queue `probes`, no kwargs. Calling the task with an ephemeral READY
+aws_ec2, birth 25h ago, not primary → Finding
+`ephemeral-overflow-orphan:{pk}`; target still READY (not terminated);
+no CheckRun. (`test_ephemeral_reaper_runs_on_daily_beat` calls the
+Task 1 proofs; it does not reimplement them.) Honest: no live AWS VM,
+no auto-terminate, no 30s health-pull, no auto, no AMI, no real drain
+window. Forgotten billing is designed out as a daily flag, not as a
+kill. NAV six. F8 overflow seed stays the no-idle `0.0416` /
+`t3.medium` case. No Approve or Launch. Ack does not stop billing.
+
 ### Four-of-five / spike / hole / mixed / stale
 
 Four of five in-window minutes over + one under does not file. A single
@@ -243,6 +260,7 @@ T1 fakes, this session:
 - `::test_overflow_deploy_pins_live_image_skips_dns`
 - `::test_overflow_join_adds_overflow_a_next_to_primary`
 - `::test_overflow_scale_in_unjoins_terminates_and_reaper_flags`
+- `::test_ephemeral_reaper_runs_on_daily_beat`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`
