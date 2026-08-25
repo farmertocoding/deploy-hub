@@ -71,3 +71,5 @@
 /monitor/router_advisor.py @farmertocoding
 /monitor/router_views.py @farmertocoding
 /monitor/lan_ghosts.py @farmertocoding
+/deploys/preview.py @farmertocoding
+/deploys/preview_views.py @farmertocoding

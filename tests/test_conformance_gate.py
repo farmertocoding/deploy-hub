@@ -2702,9 +2702,13 @@ PHASE_7_MUST_IDS = {
     "LAN-GHOST-INJECT",
     "LAN-GHOST-MAP-VIEW",
     "P7-LAN-GHOST-DEMO",
+    "PREVIEW-PRIVATE-ONLY",
+    "PREVIEW-T2-HTTP",
+    "P7-PREVIEW-DEMO",
 }
 PHASE_7_TEST_IDS = PHASE_7_MUST_IDS - {
     "P7-RESTORE-DEMO", "P7-ROUTER-DEMO", "P7-LAN-GHOST-DEMO",
+    "P7-PREVIEW-DEMO",
 }
 
 
@@ -2733,6 +2737,7 @@ def test_phase_7_due_set_includes_all_section_3_must_ids(tmp_path):
         "phase-7-design-note.md §3",
         "phase-7.1-design-note.md §3",
         "phase-7.2-design-note.md §3",
+        "phase-7.3-design-note.md §3",
     }
     for rid in sorted(PHASE_7_MUST_IDS):
         assert reg[rid]["source"] in allowed_sources, (
@@ -2927,6 +2932,80 @@ def test_p7_lan_ghost_demo_names_phase_7_md():
     path = REPO / "conformance" / "demos" / "phase-7.md"
     assert path.is_file(), (
         "conformance/demos/phase-7.md must exist — P7-LAN-GHOST-DEMO is verify: demo"
+    )
+    assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
+        "a whitespace-only demo is not a record"
+    )
+
+
+def test_preview_py_is_claimed():
+    """Phase 7.3 Task 0 claims deploys/preview.py before Task 1
+    creates it.
+
+    Unmarked: custody is not a MUST id. What would make this fail: listing
+    only paths.yaml or only CODEOWNERS, or broadening to deploys/** or
+    frontend/**.
+    """
+    paths = yaml.safe_load(
+        (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
+    assert "deploys/preview.py" in paths["sensitive"], (
+        "deploys/preview.py is not a sensitive-path entry in "
+        "conformance/paths.yaml")
+    owners = [
+        line.strip()
+        for line in (REPO / ".github" / "CODEOWNERS")
+        .read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "/deploys/preview.py @farmertocoding" in owners, (
+        "CODEOWNERS has no owners line "
+        "`/deploys/preview.py @farmertocoding`")
+
+
+def test_preview_views_py_is_claimed():
+    """Phase 7.3 Task 0 claims deploys/preview_views.py before Task 1
+    creates it.
+
+    Unmarked: custody is not a MUST id. What would make this fail: listing
+    only paths.yaml or only CODEOWNERS, or broadening to deploys/** or
+    frontend/**.
+    """
+    paths = yaml.safe_load(
+        (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
+    assert "deploys/preview_views.py" in paths["sensitive"], (
+        "deploys/preview_views.py is not a sensitive-path entry in "
+        "conformance/paths.yaml")
+    owners = [
+        line.strip()
+        for line in (REPO / ".github" / "CODEOWNERS")
+        .read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "/deploys/preview_views.py @farmertocoding" in owners, (
+        "CODEOWNERS has no owners line "
+        "`/deploys/preview_views.py @farmertocoding`")
+
+
+def test_p7_preview_demo_names_phase_7_md():
+    """P7-PREVIEW-DEMO is verify: demo naming conformance/demos/phase-7.md.
+
+    What would make this fail: a missing demo: key, pointing at a new
+    file, or deleting the existing 7.0/7.1/7.2 record. Task 0 forbade
+    rewriting the file; Task 2 appends the preview record.
+    """
+    reg = _live_registry()
+    assert "P7-PREVIEW-DEMO" in reg, "P7-PREVIEW-DEMO is not in the registry"
+    demo = reg["P7-PREVIEW-DEMO"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-7.md" in demo_paths, (
+        f"P7-PREVIEW-DEMO must name conformance/demos/phase-7.md: "
+        f"{demo.get('demo')}")
+    path = REPO / "conformance" / "demos" / "phase-7.md"
+    assert path.is_file(), (
+        "conformance/demos/phase-7.md must exist — P7-PREVIEW-DEMO is verify: demo"
     )
     assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
         "a whitespace-only demo is not a record"

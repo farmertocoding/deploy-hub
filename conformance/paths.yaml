@@ -148,3 +148,8 @@ sensitive:
   # creates it (D-128 / C6). Do not claim map_graph.py wholesale.
   # Do not broaden to monitor/** or frontend/**.
   - monitor/lan_ghosts.py
+  # Phase 7.3 (Task 0): claim deploys/preview.py and
+  # deploys/preview_views.py before Task 1 creates them (D-131 / C6).
+  # Do not broaden to deploys/** or frontend/**.
+  - deploys/preview.py
+  - deploys/preview_views.py

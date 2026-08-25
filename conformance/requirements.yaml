@@ -1560,3 +1560,32 @@ requirements:
     text_hash: sha256:2614610de2dfaa83286b623b15e49f76b32799d8697b81f99a13cb4246ad6cbb
     text: >
       Zone + enrolled target web-1, injected lan_scan returning web-1 and printer.lan yields one ghost ghost:printer.lan and no ghost:web-1; lan_scan None yields no ghost kinds; Map list/SVG show ◌ ghost + printer.lan.
+
+  # Phase 7.3 (docs/phase-7.3-design-note.md §3, Task 0 / D-131…D-135).
+  # New MUST ids are tier-less (no `tier:` key). Do not rewrite Phase 7.0
+  # BACKUP-RESTORE-* / P7-RESTORE-DEMO, Phase 7.1 ROUTER-* / P7-ROUTER-DEMO,
+  # or Phase 7.2 LAN-GHOST-* / P7-LAN-GHOST-DEMO text:. Everyday
+  # conformance stays phase 5. Do not stub named-partner.md.
+  - id: PREVIEW-PRIVATE-ONLY
+    phase: 7
+    verify: test
+    source: phase-7.3-design-note.md §3
+    text_hash: sha256:7890c83fd0724e6dea5912a58845616c6c8f52a873078640423b9878a60d0693
+    text: >
+      create_preview refuses missing visibility and public repos and non-git parents; private visibility creates a mesh-only sibling Site with preview_of and preview_ref and does not call run_deploy.
+  - id: PREVIEW-T2-HTTP
+    phase: 7
+    verify: test
+    source: phase-7.3-design-note.md §3
+    text_hash: sha256:7890c83fd0724e6dea5912a58845616c6c8f52a873078640423b9878a60d0693
+    text: >
+      T2 POST site.preview_create Create preview type-the-parent-name; 201 returns site_id parent_id ref; 4xx public/missing visibility; tests inject visibility; no webhook route.
+  - id: P7-PREVIEW-DEMO
+    phase: 7
+    verify: demo
+    demo:
+      - conformance/demos/phase-7.md
+    source: phase-7.3-design-note.md §3
+    text_hash: sha256:7890c83fd0724e6dea5912a58845616c6c8f52a873078640423b9878a60d0693
+    text: >
+      Git Project + Site, injected visibility=private, T2 confirm parent name, ref feature/pr-12 yields 201; new Site mesh_only preview-…-feature-pr-12, preview_of set, no Deployment created; visibility=public is 4xx public repo refused; missing inject is 4xx.
