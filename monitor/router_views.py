@@ -1,0 +1,106 @@
+"""Target list/detail and T3 Probe router. Not folded into core/views.py.
+
+Views call probe_nothing_forwarded(target, wan_probe=None). Tests wrap
+this module's callee to inject wan_probe=. The request body never binds
+a WAN scan.
+"""
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers, status
+from rest_framework.generics import get_object_or_404
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from core.models import Target
+from monitor.router_advisor import probe_nothing_forwarded, router_advice_for
+
+
+def _tunnel_flag(target):
+    return (target.collect_payload or {}).get("tunnel") is True
+
+
+def _list_row(target):
+    return {
+        "id": target.pk,
+        "host": target.host,
+        "kind": target.kind,
+        "tunnel": _tunnel_flag(target),
+    }
+
+
+class TargetListSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    host = serializers.CharField()
+    kind = serializers.CharField()
+    tunnel = serializers.BooleanField()
+
+
+class RouterAdviceSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(choices=["tunnel", "not_tunnel", "no_seam"])
+    forwarded = serializers.BooleanField()
+    finding_id = serializers.IntegerField(allow_null=True)
+    title = serializers.CharField(allow_blank=True)
+    body = serializers.CharField(allow_blank=True)
+
+
+class TargetDetailSerializer(TargetListSerializer):
+    router_advice = RouterAdviceSerializer()
+
+
+class RouterProbeSerializer(serializers.Serializer):
+    """Empty body — Probe router takes no operator fields."""
+
+
+class RouterProbeResultSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    target_id = serializers.IntegerField()
+    forwarded = serializers.BooleanField()
+    finding_id = serializers.IntegerField(allow_null=True)
+
+
+class TargetListView(APIView):
+    @extend_schema(responses={200: TargetListSerializer(many=True)})
+    def get(self, request):
+        rows = Target.objects.order_by("pk")
+        return Response(TargetListSerializer(
+            [_list_row(row) for row in rows], many=True,
+        ).data)
+
+
+class TargetDetailView(APIView):
+    @extend_schema(responses={200: TargetDetailSerializer})
+    def get(self, request, pk):
+        target = get_object_or_404(Target, pk=pk)
+        payload = _list_row(target)
+        payload["router_advice"] = router_advice_for(target)
+        return Response(TargetDetailSerializer(payload).data)
+
+
+class RouterProbeView(APIView):
+    @extend_schema(
+        request=RouterProbeSerializer,
+        responses={201: RouterProbeResultSerializer},
+    )
+    def post(self, request, pk):
+        target = get_object_or_404(Target, pk=pk)
+        ser = RouterProbeSerializer(data=request.data or {})
+        ser.is_valid(raise_exception=True)
+        result = probe_nothing_forwarded(target, wan_probe=None)
+        if result["mode"] == "no_seam":
+            return Response(
+                {"detail": "wan probe refused"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if result["mode"] == "not_tunnel":
+            return Response(
+                {"detail": "not tunnel mode"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            RouterProbeResultSerializer({
+                "ok": True,
+                "target_id": target.pk,
+                "forwarded": bool(result.get("forwarded")),
+                "finding_id": result.get("finding_id"),
+            }).data,
+            status=status.HTTP_201_CREATED,
+        )

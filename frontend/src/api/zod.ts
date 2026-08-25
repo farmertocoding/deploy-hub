@@ -162,11 +162,11 @@ const PartnerPublic = z
   })
   .passthrough();
 const StatusEnum = z.enum(["degraded", "error"]);
-const ModeEnum = z.enum(["fake", "configured"]);
+const IntakeStatusModeEnum = z.enum(["fake", "configured"]);
 const IntakeStatus = z
   .object({
     status: StatusEnum,
-    mode: ModeEnum,
+    mode: IntakeStatusModeEnum,
     configured: z.boolean(),
     as_of: z.string().nullish(),
   })
@@ -387,7 +387,42 @@ const WizardState = z
 const PatchedAnswers = z
   .object({ answers: z.object({}).partial().passthrough() })
   .passthrough();
+const TargetList = z
+  .object({
+    id: z.number().int(),
+    host: z.string(),
+    kind: z.string(),
+    tunnel: z.boolean(),
+  })
+  .passthrough();
+const RouterAdviceModeEnum = z.enum(["tunnel", "not_tunnel", "no_seam"]);
+const RouterAdvice = z
+  .object({
+    mode: RouterAdviceModeEnum,
+    forwarded: z.boolean(),
+    finding_id: z.number().int().nullable(),
+    title: z.string(),
+    body: z.string(),
+  })
+  .passthrough();
+const TargetDetail = z
+  .object({
+    id: z.number().int(),
+    host: z.string(),
+    kind: z.string(),
+    tunnel: z.boolean(),
+    router_advice: RouterAdvice,
+  })
+  .passthrough();
 const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
+const RouterProbeResult = z
+  .object({
+    ok: z.boolean(),
+    target_id: z.number().int(),
+    forwarded: z.boolean(),
+    finding_id: z.number().int().nullable(),
+  })
+  .passthrough();
 const SshRotate = z.object({ confirm_name: z.string() }).passthrough();
 const InstanceTerminate = z.object({ confirm_name: z.string() }).passthrough();
 
@@ -432,7 +467,7 @@ export const schemas = {
   PartnerDestination,
   PartnerPublic,
   StatusEnum,
-  ModeEnum,
+  IntakeStatusModeEnum,
   IntakeStatus,
   CandidateTarget,
   PartnerList,
@@ -471,7 +506,12 @@ export const schemas = {
   Question,
   WizardState,
   PatchedAnswers,
+  TargetList,
+  RouterAdviceModeEnum,
+  RouterAdvice,
+  TargetDetail,
   TargetDelete,
+  RouterProbeResult,
   SshRotate,
   InstanceTerminate,
 };

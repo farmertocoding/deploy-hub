@@ -648,6 +648,38 @@ export interface paths {
         patch: operations["v1_sites_wizard_partial_update"];
         trace?: never;
     };
+    "/api/v1/targets/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_targets_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_targets_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/targets/{id}/delete/": {
         parameters: {
             query?: never;
@@ -659,6 +691,22 @@ export interface paths {
         put?: never;
         /** @description T1: two passkeys + recent WebAuthn touch + type-the-name. */
         post: operations["v1_targets_delete_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{id}/router-probe/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_targets_router_probe_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -903,10 +951,16 @@ export interface components {
         };
         IntakeStatus: {
             status: components["schemas"]["StatusEnum"];
-            mode: components["schemas"]["ModeEnum"];
+            mode: components["schemas"]["IntakeStatusModeEnum"];
             configured: boolean;
             as_of?: string | null;
         };
+        /**
+         * @description * `fake` - fake
+         *     * `configured` - configured
+         * @enum {string}
+         */
+        IntakeStatusModeEnum: "fake" | "configured";
         /**
          * @description * `zone` - zone
          *     * `host` - host
@@ -962,12 +1016,6 @@ export interface components {
             totp_enrolled?: boolean;
             t1_available?: boolean;
         };
-        /**
-         * @description * `fake` - fake
-         *     * `configured` - configured
-         * @enum {string}
-         */
-        ModeEnum: "fake" | "configured";
         OriginCaPlant: {
             path: string;
         };
@@ -1129,6 +1177,26 @@ export interface components {
             original_id: number;
             status: string;
         };
+        RouterAdvice: {
+            mode: components["schemas"]["RouterAdviceModeEnum"];
+            forwarded: boolean;
+            finding_id: number | null;
+            title: string;
+            body: string;
+        };
+        /**
+         * @description * `tunnel` - tunnel
+         *     * `not_tunnel` - not_tunnel
+         *     * `no_seam` - no_seam
+         * @enum {string}
+         */
+        RouterAdviceModeEnum: "tunnel" | "not_tunnel" | "no_seam";
+        RouterProbeResult: {
+            ok: boolean;
+            target_id: number;
+            forwarded: boolean;
+            finding_id: number | null;
+        };
         /**
          * @description * `p1` - P1
          *     * `p2` - P2
@@ -1170,6 +1238,19 @@ export interface components {
         StatusEnum: "degraded" | "error";
         TargetDelete: {
             confirm_name: string;
+        };
+        TargetDetail: {
+            id: number;
+            host: string;
+            kind: string;
+            tunnel: boolean;
+            router_advice: components["schemas"]["RouterAdvice"];
+        };
+        TargetList: {
+            id: number;
+            host: string;
+            kind: string;
+            tunnel: boolean;
         };
         Transition: {
             action: components["schemas"]["ActionEnum"];
@@ -2270,6 +2351,46 @@ export interface operations {
             };
         };
     };
+    v1_targets_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetList"][];
+                };
+            };
+        };
+    };
+    v1_targets_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetDetail"];
+                };
+            };
+        };
+    };
     v1_targets_delete_create: {
         parameters: {
             query?: never;
@@ -2293,6 +2414,27 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_targets_router_probe_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouterProbeResult"];
+                };
             };
         };
     };

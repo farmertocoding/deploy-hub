@@ -10,6 +10,7 @@ ACTION_TIERS = (
     {"id": "site.rollback", "tier": "T3", "label": "Roll back", "undo_window_s": 10},
     {"id": "site.restart", "tier": "T3", "label": "Restart", "undo_window_s": 10},
     {"id": "check.rerun", "tier": "T3", "label": "Re-run check", "undo_window_s": 10},
+    {"id": "target.router_probe", "tier": "T3", "label": "Probe router", "undo_window_s": 10},
     {"id": "site.deploy", "tier": "T2", "label": "Deploy"},
     {"id": "dns.change", "tier": "T2", "label": "Change DNS"},
     {"id": "site.auto_mode", "tier": "T2", "label": "Toggle auto-mode"},

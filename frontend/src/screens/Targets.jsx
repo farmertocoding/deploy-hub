@@ -2,10 +2,71 @@
 // + one button: provision CLI when AWS_CREDENTIALS_REF is empty, else Create
 // target (T1). Copy says Target, never "instance".
 import React, { useEffect, useState } from "react";
-import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
+import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { ActionButton } from "../Tiers.jsx";
 import { tierFor } from "../actions.js";
 import { api } from "../api.js";
+
+const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+
+export const TARGET_TABS = [
+  { id: "hardening", label: "Hardening" },
+  { id: "router", label: "Router" },
+];
+
+export async function probeRouter(id) {
+  return api(`v1/targets/${id}/router-probe/`, {});
+}
+
+export function adviceStatus(advice) {
+  if (!advice) return { icon: "ℹ", label: "no advice" };
+  if (advice.mode === "not_tunnel") return { icon: "ℹ", label: "not tunnel mode" };
+  if (advice.mode === "no_seam") return { icon: "⚠", label: "no probe seam" };
+  if (advice.forwarded) return { icon: "⚠", label: "forwarded" };
+  return { icon: "✓", label: "nothing forwarded" };
+}
+
+export function RouterAdvice({ advice }) {
+  if (!advice) return null;
+  const status = adviceStatus(advice);
+  return (
+    <div>
+      <p>{status.icon} {status.label}</p>
+      {advice.title ? <p>{advice.title}</p> : null}
+      {advice.body ? <p>{advice.body}</p> : null}
+      {advice.finding_id ? (
+        <a href={routeHash("findings", advice.finding_id)}
+          style={{ color: "#79c0ff" }}>View finding</a>
+      ) : null}
+    </div>
+  );
+}
+
+export function TargetDetail({ target, tab = "hardening", onTab }) {
+  return (
+    <div style={{ ...box, marginTop: 12 }}>
+      <nav style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        {TARGET_TABS.map((row) => (
+          <button key={row.id} style={{ ...box, opacity: tab === row.id ? 1 : 0.6 }}
+            onClick={() => onTab?.(row.id)}>{row.label}</button>
+        ))}
+      </nav>
+      {tab === "hardening" && (
+        <div data-tab="hardening">
+          <p>Hardening findings stay in the Findings inbox. This tab does
+            not invent a hardening engine.</p>
+        </div>
+      )}
+      {tab === "router" && (
+        <div data-tab="router">
+          <RouterAdvice advice={target?.router_advice} />
+          <ActionButton row={tierFor("target.router_probe")}
+            onRun={() => probeRouter(target.id)} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const PROVISION_CMD = "python -m hub provision <host>";
 
@@ -43,7 +104,7 @@ export function costFromCreateGet(status, data) {
 
 export function TargetsView({
   phase, targets = [], awsCredentialsRef = "", cost, onError, onCopy, onCreate,
-  onRetryCost,
+  onRetryCost, selectedId, selected, tab = "hardening", onTab, onSelect,
 }) {
   if (phase === "loading") return <LoadingLine what="targets" />;
   if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
@@ -66,27 +127,45 @@ export function TargetsView({
       </div>
     );
   }
+  const detail = selected
+    || targets.find((t) => String(t.id) === String(selectedId));
   return (
     <div style={{ padding: 16 }}>
       {targets.map((t) => (
         <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "center",
-          marginBottom: 8 }}>
+          marginBottom: 8, cursor: "pointer" }}
+          role="button" tabIndex={0}
+          onClick={() => onSelect?.(t.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect?.(t.id);
+            }
+          }}>
           <span>{t.host || t.name}</span>
-          <ActionButton row={tierFor("target.delete")} confirmName={t.host}
-            onRun={() => deleteTarget(t.id, t.host)} />
+          <span onClick={(e) => e.stopPropagation()}>
+            <ActionButton row={tierFor("target.delete")} confirmName={t.host}
+              onRun={() => deleteTarget(t.id, t.host)} />
+          </span>
         </div>
       ))}
+      {detail && (
+        <TargetDetail target={detail} tab={tab} onTab={onTab} />
+      )}
     </div>
   );
 }
 
-export default function Targets() {
+export default function Targets({ route, onNav }) {
   const [copied, setCopied] = useState(false);
   const [awsRef, setAwsRef] = useState("");
   const [cost, setCost] = useState(null);
   const [phase, setPhase] = useState("live");
   const [errorText, setErrorText] = useState("");
   const [createdHost, setCreatedHost] = useState("");
+  const [targets, setTargets] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState("hardening");
   useEffect(() => {
     api("v1/aws/connect/").then(({ data }) => {
       const reason = data?.reason || "";
@@ -96,7 +175,19 @@ export default function Targets() {
     instanceCreateCost().then(({ status, data }) => {
       setCost(costFromCreateGet(status, data));
     });
+    api("v1/targets/").then(({ status, data }) => {
+      if (status === 200 && Array.isArray(data)) setTargets(data);
+    });
   }, []);
+  useEffect(() => {
+    if (!route?.id) {
+      setSelected(null);
+      return;
+    }
+    api(`v1/targets/${route.id}/`).then(({ status, data }) => {
+      if (status === 200) setSelected(data);
+    });
+  }, [route?.id]);
   async function onCreate(host) {
     const result = await runCreateTarget(createTarget, host, { zone: "aws-use1" });
     if (!result.ok) {
@@ -105,6 +196,9 @@ export default function Targets() {
       return;
     }
     setCreatedHost(host);
+    api("v1/targets/").then(({ status, data }) => {
+      if (status === 200 && Array.isArray(data)) setTargets(data);
+    });
   }
   if (phase === "error") {
     return (
@@ -114,7 +208,9 @@ export default function Targets() {
   }
   return (
     <div>
-      <TargetsView phase="live" targets={[]} awsCredentialsRef={awsRef} cost={cost}
+      <TargetsView phase="live" targets={targets} awsCredentialsRef={awsRef} cost={cost}
+        selectedId={route?.id} selected={selected} tab={tab} onTab={setTab}
+        onSelect={(id) => onNav("targets", id)}
         onCreate={onCreate}
         onRetryCost={() => instanceCreateCost().then(({ status, data }) => {
           setCost(costFromCreateGet(status, data));

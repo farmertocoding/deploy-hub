@@ -93,7 +93,7 @@ export function Shell({ user }) {
         username={user.username} />
       {route.screen === "home" && <Home width={width} events={events} onNav={onNav} />}
       {route.screen === "sites" && <Sites route={route} onNav={onNav} />}
-      {route.screen === "targets" && <Targets />}
+      {route.screen === "targets" && <Targets route={route} onNav={onNav} />}
       {route.screen === "deploys" && <Deploys onNav={onNav} />}
       {route.screen === "findings" && <Findings route={route} onNav={onNav} events={events} />}
       {route.screen === "settings" && <Settings user={user} events={events} />}

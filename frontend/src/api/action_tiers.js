@@ -22,6 +22,12 @@ export const ACTION_TIERS = [
     "undo_window_s": 10
   },
   {
+    "id": "target.router_probe",
+    "tier": "T3",
+    "label": "Probe router",
+    "undo_window_s": 10
+  },
+  {
     "id": "site.deploy",
     "tier": "T2",
     "label": "Deploy"

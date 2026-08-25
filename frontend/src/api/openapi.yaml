@@ -1167,6 +1167,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/WizardState'
           description: ''
+  /api/v1/targets/:
+    get:
+      operationId: v1_targets_list
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TargetList'
+          description: ''
+  /api/v1/targets/{id}/:
+    get:
+      operationId: v1_targets_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetDetail'
+          description: ''
   /api/v1/targets/{id}/delete/:
     post:
       operationId: v1_targets_delete_create
@@ -1196,6 +1232,26 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/targets/{id}/router-probe/:
+    post:
+      operationId: v1_targets_router_probe_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouterProbeResult'
+          description: ''
   /api/v1/targets/{id}/ssh-rotate/:
     post:
       operationId: v1_targets_ssh_rotate_create
@@ -1743,7 +1799,7 @@ components:
         status:
           $ref: '#/components/schemas/StatusEnum'
         mode:
-          $ref: '#/components/schemas/ModeEnum'
+          $ref: '#/components/schemas/IntakeStatusModeEnum'
         configured:
           type: boolean
         as_of:
@@ -1753,6 +1809,14 @@ components:
       - configured
       - mode
       - status
+    IntakeStatusModeEnum:
+      enum:
+      - fake
+      - configured
+      type: string
+      description: |-
+        * `fake` - fake
+        * `configured` - configured
     KindEnum:
       enum:
       - zone
@@ -1877,14 +1941,6 @@ components:
           type: boolean
       required:
       - authenticated
-    ModeEnum:
-      enum:
-      - fake
-      - configured
-      type: string
-      description: |-
-        * `fake` - fake
-        * `configured` - configured
     OriginCaPlant:
       type: object
       properties:
@@ -2254,6 +2310,53 @@ components:
       - deployment_id
       - original_id
       - status
+    RouterAdvice:
+      type: object
+      properties:
+        mode:
+          $ref: '#/components/schemas/RouterAdviceModeEnum'
+        forwarded:
+          type: boolean
+        finding_id:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        body:
+          type: string
+      required:
+      - body
+      - finding_id
+      - forwarded
+      - mode
+      - title
+    RouterAdviceModeEnum:
+      enum:
+      - tunnel
+      - not_tunnel
+      - no_seam
+      type: string
+      description: |-
+        * `tunnel` - tunnel
+        * `not_tunnel` - not_tunnel
+        * `no_seam` - no_seam
+    RouterProbeResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        target_id:
+          type: integer
+        forwarded:
+          type: boolean
+        finding_id:
+          type: integer
+          nullable: true
+      required:
+      - finding_id
+      - forwarded
+      - ok
+      - target_id
     SeverityEnum:
       enum:
       - p1
@@ -2339,6 +2442,41 @@ components:
           type: string
       required:
       - confirm_name
+    TargetDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        host:
+          type: string
+        kind:
+          type: string
+        tunnel:
+          type: boolean
+        router_advice:
+          $ref: '#/components/schemas/RouterAdvice'
+      required:
+      - host
+      - id
+      - kind
+      - router_advice
+      - tunnel
+    TargetList:
+      type: object
+      properties:
+        id:
+          type: integer
+        host:
+          type: string
+        kind:
+          type: string
+        tunnel:
+          type: boolean
+      required:
+      - host
+      - id
+      - kind
+      - tunnel
     Transition:
       type: object
       properties:
