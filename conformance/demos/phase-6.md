@@ -4,7 +4,8 @@
 on BASE `fe8e20e` (merge of MUST Tasks 0–5) plus the acceptance file
 `2fdab81` and this record. Phase 6.6 Task 2 appended the idle-first
 clause on HEAD `f6824e9`. Phase 6.7 Task 2 appended the T1 Fake overflow
-enroll clause. **T1 fakes only.** This is not a live AWS,
+enroll clause. Phase 6.8 Task 2 appended the same-image overflow
+deploy clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No live AWS VM. No auto mode. No AMI. No
 ScalePolicy table. No DNS join. No new token env was added.
@@ -26,8 +27,12 @@ ACCEPTED cheap, five ram=90 minutes, no idle machine → overflow Finding
 FakeCloudProvider, touch + type-the-name → Target count +1,
 `kind=aws_ec2`, `lifecycle=ephemeral`. OPEN overflow + same POST → 4xx,
 Target count unchanged. Idle registered machine present → 4xx, Target
-count unchanged. Attack engaged → 4xx. No VM launched. No live AWS VM.
-No ScalePolicy. No DNS join. No auto. No AMI. Re-evaluate while OPEN
+count unchanged. Attack engaged → 4xx. ACCEPTED overflow, enrolled
+ephemeral READY target, prior succeeded deploy with image_tag artifact,
+PipelineTransport → Deployment SUCCEEDED; BUILD and DNS SKIPPED; SHIP
+not skipped; `primary_target` unchanged; SiteInstance exists; no DNS
+upsert. OPEN overflow → 4xx, no Deployment. No VM launched. No live AWS
+VM. No ScalePolicy. No DNS join. No auto. No AMI. Re-evaluate while OPEN
 does not add a push-log event. Four of five over + one under → no
 Finding. One spike → no Finding. Disk-only five hot minutes → no
 Finding. Same pressure while attack playbook is engaged
@@ -76,7 +81,8 @@ two record clauses stayed red until this file existed. After this file:
 `tests/acceptance/test_phase_6.py` was **8 passed**, 0 skipped (T1
 fakes). Phase 6.6 Task 2 adds §4 (b); the file is expected **9 passed**,
 0 skipped. Phase 6.7 Task 2 adds the T1 Fake enroll clause; the file is
-expected **10 passed**, 0 skipped.
+expected **10 passed**, 0 skipped. Phase 6.8 Task 2 adds the same-image
+overflow deploy clause; the file is expected **11 passed**, 0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -122,6 +128,19 @@ count unchanged. Attack engaged → 4xx. Honest: no live AWS VM, no DNS
 join, no auto, no AMI. F8 overflow seed stays the no-idle `0.0416` /
 `t3.medium` case. Evaluator still never creates a Target. Ack is not
 launch.
+
+### Same-image overflow deploy (§4, Phase 6.8)
+
+ACCEPTED overflow, enrolled ephemeral READY target, a prior succeeded
+deploy with image_tag artifact, PipelineTransport → Deployment
+SUCCEEDED; BUILD and DNS SKIPPED; SHIP not skipped; `primary_target`
+unchanged; SiteInstance exists; no DNS upsert. OPEN overflow → 4xx, no
+Deployment. (`test_overflow_deploy_pins_live_image_skips_dns` calls the
+Task 1 proofs; it does not reimplement them.) Honest: no live AWS VM,
+no DNS join, no auto, no AMI. NAV six. F8 overflow seed stays the
+no-idle `0.0416` / `t3.medium` case. No Approve or Launch on the
+Finding. Same-image overflow deploy only — this record does not claim a
+VM launched.
 
 ### Four-of-five / spike / hole / mixed / stale
 
@@ -175,6 +194,7 @@ T1 fakes, this session:
 - `::test_scale_ready_quiet_five_hot_mem_files_p2_proposal`
 - `::test_idle_registered_machine_named_when_second_target_has_headroom`
 - `::test_accepted_overflow_t1_enrolls_ephemeral_via_fake`
+- `::test_overflow_deploy_pins_live_image_skips_dns`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`

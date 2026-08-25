@@ -28,6 +28,7 @@ NAMED = (
     "test_scale_ready_quiet_five_hot_mem_files_p2_proposal",
     "test_idle_registered_machine_named_when_second_target_has_headroom",
     "test_accepted_overflow_t1_enrolls_ephemeral_via_fake",
+    "test_overflow_deploy_pins_live_image_skips_dns",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -205,6 +206,30 @@ def test_accepted_overflow_t1_enrolls_ephemeral_via_fake(client, monkeypatch):
     test_idle_registered_machine_refuses_overflow_enroll(client, monkeypatch)
     User.objects.filter(username="joseph").delete()
     test_attack_refuses_overflow_enroll(client, monkeypatch)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-SAME-IMAGE")
+def test_overflow_deploy_pins_live_image_skips_dns(client, monkeypatch):
+    """ACCEPTED overflow, enrolled ephemeral READY target, a prior succeeded
+    deploy with image_tag artifact, PipelineTransport → Deployment SUCCEEDED;
+    BUILD and DNS SKIPPED; SHIP not skipped; primary_target unchanged;
+    SiteInstance exists; no DNS upsert. OPEN overflow → 4xx, no Deployment.
+    Honest: no live AWS VM, no DNS join, no auto, no AMI.
+
+    Transcribes tests/test_overflow_deploy.py::
+    test_overflow_deploy_pins_live_tag_skips_build_and_dns and
+    ::test_open_overflow_refuses_deploy_with_ack_is_not_launch.
+    """
+    from django.contrib.auth.models import User
+    from test_overflow_deploy import (
+        test_open_overflow_refuses_deploy_with_ack_is_not_launch,
+        test_overflow_deploy_pins_live_tag_skips_build_and_dns,
+    )
+
+    test_overflow_deploy_pins_live_tag_skips_build_and_dns(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_open_overflow_refuses_deploy_with_ack_is_not_launch(client, monkeypatch)
 
 
 @pytest.mark.django_db
