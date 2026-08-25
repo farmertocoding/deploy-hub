@@ -30,6 +30,7 @@ NAMED = (
     "test_accepted_overflow_t1_enrolls_ephemeral_via_fake",
     "test_overflow_deploy_pins_live_image_skips_dns",
     "test_overflow_join_adds_overflow_a_next_to_primary",
+    "test_overflow_scale_in_unjoins_terminates_and_reaper_flags",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -258,6 +259,35 @@ def test_overflow_join_adds_overflow_a_next_to_primary(client, monkeypatch):
     test_overflow_join_upserts_a_next_to_primary(client, monkeypatch)
     User.objects.filter(username="joseph").delete()
     test_open_overflow_refuses_join_with_ack_is_not_launch(client, monkeypatch)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-SCALE-IN")
+@pytest.mark.req("SCALE-OVERFLOW-EPHEMERAL-REAPER")
+def test_overflow_scale_in_unjoins_terminates_and_reaper_flags(
+    client, monkeypatch,
+):
+    """Joined TEST-NET-3 pair, FakeDns + FakeCloudProvider → T1 scale-in
+    200; DnsRecord is primary-only; terminate_instance called; target
+    DECOMMISSIONED; SiteInstance ABSENT; primary_target unchanged.
+    Reaper: ephemeral READY, birth 25h ago, not primary → Finding
+    ephemeral-overflow-orphan:{pk}; target still READY. Honest: no live
+    AWS VM, no 30s health-pull, no auto, no AMI, no Beat reaper, no real
+    drain window.
+
+    Transcribes tests/test_overflow_scale_in.py::
+    test_overflow_scale_in_unjoins_and_terminates and
+    ::test_reaper_flags_ephemeral_older_than_24h.
+    """
+    from django.contrib.auth.models import User
+    from test_overflow_scale_in import (
+        test_overflow_scale_in_unjoins_and_terminates,
+        test_reaper_flags_ephemeral_older_than_24h,
+    )
+
+    test_overflow_scale_in_unjoins_and_terminates(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_reaper_flags_ephemeral_older_than_24h()
 
 
 @pytest.mark.django_db

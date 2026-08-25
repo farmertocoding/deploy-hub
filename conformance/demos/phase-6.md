@@ -6,7 +6,8 @@ on BASE `fe8e20e` (merge of MUST Tasks 0–5) plus the acceptance file
 clause on HEAD `f6824e9`. Phase 6.7 Task 2 appended the T1 Fake overflow
 enroll clause. Phase 6.8 Task 2 appended the same-image overflow
 deploy clause. Phase 6.9 Task 2 appended the T1 Fake overflow
-join clause. **T1 fakes only.** This is not a live AWS,
+join clause. Phase 6.10 Task 2 appended the T1 Fake scale-in
+and ephemeral-reaper clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No live AWS VM. No auto mode. No AMI. No
 ScalePolicy table. FakeDns join only — no live Cloudflare zone, no
@@ -92,7 +93,8 @@ fakes). Phase 6.6 Task 2 adds §4 (b); the file is expected **9 passed**,
 expected **10 passed**, 0 skipped. Phase 6.8 Task 2 adds the same-image
 overflow deploy clause; the file is expected **11 passed**, 0 skipped.
 Phase 6.9 Task 2 adds the T1 Fake join clause; the file is expected
-**12 passed**, 0 skipped.
+**12 passed**, 0 skipped. Phase 6.10 Task 2 adds the T1 Fake scale-in
+and reaper clause; the file is expected **13 passed**, 0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -168,6 +170,23 @@ NAV six. F8 overflow seed stays the no-idle `0.0416` / `t3.medium` case.
 No Approve or Launch on the Finding. FakeDns join only — this record
 does not claim a live Cloudflare zone or a Hub-vaulted tunnel JWT.
 
+### Scale-in overflow + ephemeral reaper (§4, Phase 6.10)
+
+ACCEPTED overflow, RUNNING SiteInstance, joined TEST-NET-3 pair,
+FakeDns + FakeCloudProvider → T1 scale-in 200; DnsRecord is
+primary-only; `terminate_instance` called; target DECOMMISSIONED;
+SiteInstance ABSENT; `primary_target` unchanged. PartnerSite → 4xx, no
+terminate. Attack engaged → scale-in still 200. Reaper: ephemeral
+READY, birth 25h ago, not primary → Finding
+`ephemeral-overflow-orphan:{pk}`; target still READY (not terminated).
+Birth 23h ago → no Finding.
+(`test_overflow_scale_in_unjoins_terminates_and_reaper_flags` calls the
+Task 1 proofs; it does not reimplement them.) Honest: no live AWS VM,
+no 30s health-pull, no auto, no AMI, no Beat reaper, no real drain
+window. This wave does not design out forgotten billing. NAV six. F8
+overflow seed stays the no-idle `0.0416` / `t3.medium` case. No Approve
+or Launch on the Finding. Ack does not stop billing.
+
 ### Four-of-five / spike / hole / mixed / stale
 
 Four of five in-window minutes over + one under does not file. A single
@@ -203,7 +222,7 @@ control. NAV is the six objects. `VALID_TIERS` stays `{t1, t2, t3}`.
   not rewrite them.
 - Live AWS of any kind is a Joseph interrupt. This record does not claim
   live provision, auto mode, AMI, a ScalePolicy table, a live Cloudflare
-  zone, or a 30s origin health-pull.
+  zone, a 30s origin health-pull, or a Beat reaper that auto-terminates.
 - Two consecutive clean `conformance-6` rounds wait on the U1 interrupt.
   This session did not run `make review-round` or two consecutive
   `make conformance-6` rounds; those gates re-earn green from a fresh
@@ -223,6 +242,7 @@ T1 fakes, this session:
 - `::test_accepted_overflow_t1_enrolls_ephemeral_via_fake`
 - `::test_overflow_deploy_pins_live_image_skips_dns`
 - `::test_overflow_join_adds_overflow_a_next_to_primary`
+- `::test_overflow_scale_in_unjoins_terminates_and_reaper_flags`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`
