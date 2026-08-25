@@ -2385,6 +2385,8 @@ PHASE_6_MUST_IDS = {
     "SCALE-OVERFLOW-T1-ENROLL",
     "SCALE-OVERFLOW-SAME-IMAGE",
     "SCALE-OVERFLOW-JOIN-TRAFFIC",
+    "SCALE-OVERFLOW-SCALE-IN",
+    "SCALE-OVERFLOW-EPHEMERAL-REAPER",
 }
 PHASE_6_TEST_IDS = PHASE_6_MUST_IDS - {"P6-SCALER-DEMO"}
 
@@ -2417,6 +2419,7 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
         "phase-6.7-design-note.md §3",
         "phase-6.8-design-note.md §3",
         "phase-6.9-design-note.md §3",
+        "phase-6.10-design-note.md §3",
     }
     for rid in sorted(PHASE_6_MUST_IDS):
         assert reg[rid]["source"] in allowed_sources, (

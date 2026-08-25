@@ -136,3 +136,6 @@ sensitive:
   # Phase 6.8 (Task 0): claim deploys/overflow.py before Task 1
   # creates it (D-107 / C9). Do not broaden to deploys/**.
   - deploys/overflow.py
+  # Phase 6.10 (Task 0): claim monitor/overflow_reaper.py before Task 1
+  # creates it (D-113 / C9). Do not broaden to monitor/**.
+  - monitor/overflow_reaper.py

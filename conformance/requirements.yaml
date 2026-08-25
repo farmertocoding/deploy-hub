@@ -1439,3 +1439,19 @@ requirements:
     text_hash: sha256:aeb4d8e0a723a2adb56af976df09b29497c899771104e98710e8ba6b6d64073f
     text: >
       join_overflow_traffic on a public site with joinable IPv4 origins upserts the overflow A next to the primary (round-robin, proxied) without changing Site.primary_target; tunnel-mode home sites add a cloudflared replica on the overflow host instead of an A record; OPEN or ACKED overflow refuses with Ack is not launch; evaluate_site still never joins traffic; tests inject FakeDnsProvider.
+
+  # Phase 6.10 (docs/phase-6.10-design-note.md §3, Task 0 / D-113…D-115).
+  - id: SCALE-OVERFLOW-SCALE-IN
+    phase: 6
+    verify: test
+    source: phase-6.10-design-note.md §3
+    text_hash: sha256:47b55232f78454dc9deaa8929a2191fe3a1c5b1b77771b615a3f2af9d46c2523
+    text: >
+      scale_in_overflow on an ephemeral overflow Target unjoins that origin from DNS (or skips if already unjoined), does not change Site.primary_target, terminates via CloudProvider (absent equals success), and marks a SiteInstance absent when one exists; tunnel-mode home sites skip the A record and still terminate; partner overflow refuses; attack does not block scale-in; evaluate_site still never terminates; tests inject FakeDnsProvider and FakeCloudProvider.
+  - id: SCALE-OVERFLOW-EPHEMERAL-REAPER
+    phase: 6
+    verify: test
+    source: phase-6.10-design-note.md §3
+    text_hash: sha256:47b55232f78454dc9deaa8929a2191fe3a1c5b1b77771b615a3f2af9d46c2523
+    text: >
+      reap_stale_ephemerals flags an ephemeral aws_ec2 that is not a site primary when its instance.create AuditEvent is older than 24 hours; it does not terminate; missing birth audit is skipped; evaluate_site still never terminates; tests plant AuditEvent timestamps.

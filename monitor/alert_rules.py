@@ -219,6 +219,13 @@ RULES = (
         "deploy-system-plan.md §9.5.3 / phase-6.5-design-note.md §1.1",
     ),
     _r(
+        "ephemeral-overflow-orphan",
+        "p2",
+        "Forgotten ephemeral overflow (past 24 hours) — flag only, "
+        "propose-mode does not terminate",
+        "deploy-system-plan.md §9.5.5 / phase-6.10-design-note.md §1.1",
+    ),
+    _r(
         "feed-data-stale",
         "p2",
         "Feed data-stale beyond per-feed threshold (market-calendar-aware) "
