@@ -4,7 +4,8 @@
 Everyday `conformance` / `review-round` stay `--phase 5`. T1 inject only:
 `restore_to_clean=` never live docker. Do not invent HUB_TEST_* /
 HUB_INTAKE_HMAC / HUB_WEBHOOK_SECRET. Do not add Playwright. Do not stub
-named-partner.md. Do not mark P7-RESTORE-DEMO or P7-ROUTER-DEMO on pytest.
+named-partner.md. Do not mark P7-RESTORE-DEMO, P7-ROUTER-DEMO, or
+P7-LAN-GHOST-DEMO on pytest.
 """
 
 import re
@@ -24,6 +25,8 @@ NAMED = (
     "test_demo_does_not_claim_live_docker_or_kek",
     "test_tunnel_nothing_forwarded_files_and_resolves",
     "test_router_advice_target_tab",
+    "test_lan_ghosts_inject_skips_enrolled",
+    "test_lan_ghosts_map_view",
 )
 
 pytestmark = [pytest.mark.acceptance(phase=7)]
@@ -164,6 +167,9 @@ def test_nav_stays_six():
     router_demo = _registry()["P7-ROUTER-DEMO"]
     assert router_demo["verify"] == "demo"
     assert "conformance/demos/phase-7.md" in router_demo.get("demo", [])
+    ghost_demo = _registry()["P7-LAN-GHOST-DEMO"]
+    assert ghost_demo["verify"] == "demo"
+    assert "conformance/demos/phase-7.md" in ghost_demo.get("demo", [])
     u1 = _registry()["PART-U1-NAMED-PARTNER"]
     assert u1["verify"] == "demo"
     assert "conformance/demos/named-partner.md" in u1.get("demo", [])
@@ -171,6 +177,11 @@ def test_nav_stays_six():
     record = _assert_honest_t1_demo()
     assert "conformance-5" in record.lower() or "phase 5" in record.lower()
     assert "P7-ROUTER-DEMO" in record
+    assert "P7-LAN-GHOST-DEMO" in record
+    assert "lan_scan" in record
+    assert "printer.lan" in record
+    assert "web-1" in record
+    assert "◌ ghost" in record
     assert "wan_probe" in record
     assert "router-forwarded" in record
     assert "Probe router" in record
@@ -178,6 +189,7 @@ def test_nav_stays_six():
     lower = record.lower()
     assert "no live upnp" in lower
     assert "no live wan" in lower
+    assert "no live nmap" in lower
     assert "model-tailored" in lower
     assert "no preview" in lower or "preview" in lower
     assert "lan" in lower
@@ -246,3 +258,47 @@ def test_router_advice_target_tab(client, monkeypatch):
     test_probe_http_t3_empty_forwards_resolves(client, monkeypatch)
     test_probe_http_missing_inject_is_4xx(client, monkeypatch)
     test_probe_http_non_tunnel_is_4xx(client, monkeypatch)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("LAN-GHOST-INJECT")
+def test_lan_ghosts_inject_skips_enrolled():
+    """Unenrolled lan_scan host becomes ghost; enrolled host is skipped;
+    missing inject adds no ghosts; module names no live scanner.
+
+    Transcribes tests/test_lan_ghosts.py::
+    test_inject_adds_ghost_for_unenrolled_host,
+    ::test_inject_skips_enrolled_host,
+    ::test_missing_lan_scan_adds_no_ghosts,
+    and ::test_module_has_no_live_discovery.
+    """
+    from test_lan_ghosts import (
+        test_inject_adds_ghost_for_unenrolled_host,
+        test_inject_skips_enrolled_host,
+        test_missing_lan_scan_adds_no_ghosts,
+        test_module_has_no_live_discovery,
+    )
+
+    test_inject_adds_ghost_for_unenrolled_host()
+    test_inject_skips_enrolled_host()
+    test_missing_lan_scan_adds_no_ghosts()
+    test_module_has_no_live_discovery()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("LAN-GHOST-MAP-VIEW")
+def test_lan_ghosts_map_view(client, monkeypatch):
+    """GET map serializes kind=ghost; serializer / KindEnum / _NODE_KINDS
+    include ghost.
+
+    Transcribes tests/test_lan_ghosts.py::
+    test_map_snapshot_serializes_ghost_kind
+    and ::test_map_kind_enum_includes_ghost.
+    """
+    from test_lan_ghosts import (
+        test_map_kind_enum_includes_ghost,
+        test_map_snapshot_serializes_ghost_kind,
+    )
+
+    test_map_snapshot_serializes_ghost_kind(client, monkeypatch)
+    test_map_kind_enum_includes_ghost()

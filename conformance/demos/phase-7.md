@@ -118,3 +118,59 @@ each body calls the Task 1 proof:
 
 - `test_tunnel_nothing_forwarded_files_and_resolves`
 - `test_router_advice_target_tab`
+
+## Phase 7.2 — LAN ghosts (P7-LAN-GHOST-DEMO)
+
+**Date:** 2026-08-26 · **Branch:** `master` · **Recorded by:** Phase 7.2
+Task 2. **T1 inject only.** Injected `lan_scan` — not a live nmap run,
+not mDNS, not ARP. This session did not run live discovery. No
+Playwright.
+
+### What the milestone asked (design note §4)
+
+Zone + enrolled target `web-1`, injected `lan_scan` returning `web-1`
+and `printer.lan` → snapshot has one ghost `ghost:printer.lan` and no
+`ghost:web-1`. `lan_scan=None` → no ghost kinds. Map list/SVG show
+`◌ ghost` + `printer.lan`. Enrolled host skipped. Missing inject adds
+no ghosts. Module names no live scanner.
+
+Honest: no live nmap, no preview, no Azure, no U1. LAN ghosts are
+done this wave. Preview environments, Pulumi/managed-DB/LB, Azure
+adapter stay later.
+
+`PART-U1-NAMED-PARTNER` stays uncovered; `named-partner.md` absent.
+Everyday `conformance` stays phase 5; `conformance-7` is the phase gate
+and excludes t2/t3:
+`python conformance/check.py --phase 7 --exclude-tier t2 --exclude-tier t3`.
+No invented token env. No Playwright. `P7-LAN-GHOST-DEMO` named.
+
+### The honest state of this host
+
+T1. Inject actually driven this session:
+
+- `lan_scan=` wrap on `monitor.map_graph.attach_lan_ghosts` (GET map)
+  and the same inject on `monitor.lan_ghosts.attach_lan_ghosts`
+  (direct). Default `lan_scan` is refuse-closed. No live nmap.
+
+NAV is still six.
+
+### Still outstanding — named, not greened
+
+- `PART-U1-NAMED-PARTNER` stays uncovered. `conformance/demos/named-partner.md`
+  is absent. This record does not claim a named committed partner.
+- Preview environments (private repos), Pulumi/managed-DB/LB, Azure
+  adapter, overwrite-live restore are later Phase 7 polish. LAN ghosts
+  are done.
+- Everyday `conformance` / `review-round` stay `--phase 5 --exclude-tier t2
+  --exclude-tier t3`. `conformance-7` is not a `review-round` or
+  `nightly-gates` prereq.
+
+This record **does not claim** live nmap, preview, Pulumi, Azure, or U1.
+
+### Acceptance transcription — real nodeids
+
+`tests/acceptance/test_phase_7.py` (`@pytest.mark.acceptance(phase=7)`),
+each body calls the Task 1 proof:
+
+- `test_lan_ghosts_inject_skips_enrolled`
+- `test_lan_ghosts_map_view`
