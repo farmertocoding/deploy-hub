@@ -53,6 +53,11 @@ export const ACTION_TIERS = [
     "label": "Cancel adopt"
   },
   {
+    "id": "site.preview_create",
+    "tier": "T2",
+    "label": "Create preview"
+  },
+  {
     "id": "demo.launch",
     "tier": "T2",
     "label": "Launch demo job"

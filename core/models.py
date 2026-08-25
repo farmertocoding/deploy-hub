@@ -284,6 +284,14 @@ class Site(models.Model):
     edge_owner = models.CharField(
         max_length=16, choices=EdgeOwner.choices, default=EdgeOwner.HOST_CADDY,
     )
+    preview_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="previews",
+    )
+    preview_ref = models.CharField(max_length=128, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                    on_delete=models.SET_NULL,

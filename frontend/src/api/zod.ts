@@ -358,6 +358,17 @@ const Materialize = z
   .object({ confirm_warnings: z.boolean().default(false) })
   .partial()
   .passthrough();
+const PreviewCreate = z
+  .object({ ref: z.string(), confirm_name: z.string() })
+  .passthrough();
+const PreviewCreateResult = z
+  .object({
+    ok: z.boolean(),
+    site_id: z.number().int(),
+    parent_id: z.number().int(),
+    ref: z.string(),
+  })
+  .passthrough();
 const RollbackResult = z
   .object({
     deployment_id: z.number().int(),
@@ -502,6 +513,8 @@ export const schemas = {
   PatchedEnvWrite,
   Manifest,
   Materialize,
+  PreviewCreate,
+  PreviewCreateResult,
   RollbackResult,
   Question,
   WizardState,

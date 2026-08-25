@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { AttackBanner } from "../src/screens/Home.jsx";
 import {
   AttackState, BackupPanel, CertState, SiteStatus, SitesView, flattenSites,
-  restoreBackup, rollbackSite, t3SiteActions, testBackupNow,
+  createPreview, restoreBackup, rollbackSite, t3SiteActions, testBackupNow,
 } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -180,4 +180,26 @@ test("test_backup_now_posts_the_test_route", async () => {
   const { status } = await testBackupNow(4, 1);
   assert.equal(status, 201);
   assert.equal(calls[0].url, "/api/v1/sites/4/backups/1/test/");
+});
+
+test("create_preview_button_label", () => {
+  const markup = render(SiteStatus, { site: SITE });
+  const text = visibleText(markup);
+  assert.match(text, /Create preview/);
+  assert.match(markup, /aria-label="preview ref"/);
+  const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
+  assert.match(src, /site\.preview_create/);
+  assert.match(src, /confirmName=\{site\.name\}/);
+});
+
+test("create_preview_posts_the_route", async () => {
+  const calls: Array<{ url: string; body: any }> = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    calls.push({ url, body: opts?.body ? JSON.parse(opts.body) : undefined });
+    return { status: 201, json: async () => ({ ok: true, site_id: 9, parent_id: 4, ref: "feature/pr-12" }) };
+  };
+  const { status } = await createPreview(4, "feature/pr-12", "bare");
+  assert.equal(status, 201);
+  assert.equal(calls[0].url, "/api/v1/sites/4/preview/");
+  assert.deepEqual(calls[0].body, { ref: "feature/pr-12", confirm_name: "bare" });
 });

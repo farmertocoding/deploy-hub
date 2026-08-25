@@ -25,6 +25,10 @@ export async function rollbackSite(siteId) {
   return api(`v1/sites/${siteId}/rollback/`, {});
 }
 
+export async function createPreview(siteId, ref, confirmName) {
+  return api(`v1/sites/${siteId}/preview/`, { ref, confirm_name: confirmName });
+}
+
 export async function takedownPartnerSite(siteId, confirmName) {
   return api(`v1/sites/${siteId}/takedown/`, { confirm_name: confirmName });
 }
@@ -268,6 +272,7 @@ export function SiteStatus({
   backups: backupsProp, onTestNow,
 }) {
   const [liveComposePath, setLiveComposePath] = useState("");
+  const [previewRef, setPreviewRef] = useState("");
   const [backups, setBackups] = useState(backupsProp);
   useEffect(() => {
     if (backupsProp !== undefined) {
@@ -310,6 +315,15 @@ export function SiteStatus({
       <CertState site={site} />
       <AttackState site={site} />
       <BackupPanel site={site} backups={backups} onTestNow={testNow} />
+      <label style={{ display: "grid", gap: 4 }}>
+        preview ref
+        <input aria-label="preview ref" style={box} value={previewRef}
+          onChange={(e) => setPreviewRef(e.target.value)} />
+      </label>
+      <ActionButton row={tierFor("site.preview_create")}
+        confirmName={site.name}
+        summary={`Create preview of ${site.name} at ${previewRef}`}
+        onRun={() => createPreview(site.id, previewRef, site.name)} />
       {!isPartnerSite(site) && (site.edge_owner || site.adopt) && (
         <AdoptPlan site={site} liveComposePath={liveComposePath}
           onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />

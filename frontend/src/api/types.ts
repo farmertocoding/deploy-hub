@@ -613,6 +613,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T2 site.preview_create: type the parent name. */
+        post: operations["v1_sites_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/rollback/": {
         parameters: {
             query?: never;
@@ -1104,6 +1121,16 @@ export interface components {
          * @enum {string}
          */
         PathEnum: "public" | "mesh";
+        PreviewCreate: {
+            ref: string;
+            confirm_name: string;
+        };
+        PreviewCreateResult: {
+            ok: boolean;
+            site_id: number;
+            parent_id: number;
+            ref: string;
+        };
         /** @description POST /api/v1/projects/ — Project + Site in one transaction (I-target). */
         ProjectCreate: {
             name: string;
@@ -2279,6 +2306,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Manifest"];
+                };
+            };
+        };
+    };
+    v1_sites_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["PreviewCreate"];
+                "multipart/form-data": components["schemas"]["PreviewCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewCreateResult"];
                 };
             };
         };
