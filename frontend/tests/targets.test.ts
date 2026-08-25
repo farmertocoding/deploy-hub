@@ -58,6 +58,34 @@ test("hardening_tab_copy_is_honest", () => {
   assert.doesNotMatch(text, /\binstance\b/i);
 });
 
+test("switching_selectedId_does_not_keep_previous_router_advice", () => {
+  const next = {
+    id: 4,
+    host: "other.lan",
+    kind: "ssh",
+    tunnel: true,
+    router_advice: {
+      mode: "tunnel",
+      forwarded: false,
+      finding_id: null,
+      title: "",
+      body: "",
+    },
+  };
+  const markup = render(TargetsView, {
+    phase: "live",
+    targets: [TARGET, next],
+    selectedId: 4,
+    selected: TARGET,
+    tab: "router",
+    onSelect: () => {},
+  });
+  const text = visibleText(markup);
+  assert.doesNotMatch(markup, /href="#\/findings\/9"/);
+  assert.doesNotMatch(text, /Tunnel target has a WAN forward/);
+  assert.match(text, /nothing forwarded/i);
+});
+
 test("targets_view_shows_hardening_and_router_tabs", () => {
   const markup = render(TargetsView, {
     phase: "live",
@@ -129,5 +157,7 @@ test("app_passes_route_and_onNav_into_targets", () => {
   assert.match(src, /target\.router_probe/);
   assert.match(src, /probeRouter/);
   assert.match(src, /probeAndRefresh/);
-  assert.match(src, /setSelected\(result\.data\)/);
+  assert.match(src, /String\(selected\.id\) === String\(selectedId\)/);
+  assert.match(src, /String\(data\.id\) === String\(requested\)/);
+  assert.match(src, /data\.router_advice/);
 });

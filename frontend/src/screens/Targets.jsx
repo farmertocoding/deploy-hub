@@ -136,8 +136,9 @@ export function TargetsView({
       </div>
     );
   }
-  const detail = selected
-    || targets.find((t) => String(t.id) === String(selectedId));
+  const detail = selected && String(selected.id) === String(selectedId)
+    ? selected
+    : targets.find((t) => String(t.id) === String(selectedId));
   return (
     <div style={{ padding: 16 }}>
       {targets.map((t) => (
@@ -193,13 +194,17 @@ export default function Targets({ route, onNav }) {
       setSelected(null);
       return;
     }
-    api(`v1/targets/${route.id}/`).then(({ status, data }) => {
-      if (status === 200) setSelected(data);
+    const requested = route.id;
+    setSelected(null);
+    api(`v1/targets/${requested}/`).then(({ status, data }) => {
+      if (status === 200 && String(data.id) === String(requested)
+        && data.router_advice) setSelected(data);
     });
   }, [route?.id]);
   async function onProbe(id) {
     const result = await probeAndRefresh(id);
-    if (result.status === 201 && result.data) setSelected(result.data);
+    if (result.status === 201 && result.data?.router_advice
+      && String(result.data.id) === String(id)) setSelected(result.data);
     return result;
   }
   async function onCreate(host) {
