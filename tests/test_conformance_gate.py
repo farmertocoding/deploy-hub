@@ -2383,6 +2383,7 @@ PHASE_6_MUST_IDS = {
     "SCALE-CHEAP-NO-MUTATE",
     "SCALE-OVERFLOW-IDLE-FIRST",
     "SCALE-OVERFLOW-T1-ENROLL",
+    "SCALE-OVERFLOW-SAME-IMAGE",
 }
 PHASE_6_TEST_IDS = PHASE_6_MUST_IDS - {"P6-SCALER-DEMO"}
 
@@ -2413,6 +2414,7 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
         "phase-6.5-design-note.md §3",
         "phase-6.6-design-note.md §3",
         "phase-6.7-design-note.md §3",
+        "phase-6.8-design-note.md §3",
     }
     for rid in sorted(PHASE_6_MUST_IDS):
         assert reg[rid]["source"] in allowed_sources, (
@@ -2466,9 +2468,9 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
     assert matrix(root5)["requirements"]["FIX-P6-SKIP"]["due"] is False
     assert matrix(root5)["requirements"]["FIX-P5-DUE"]["due"] is True
 
-    # Task 0 claims scaling/destination.py (6.6) and provision/overflow.py
-    # (6.7) before Task 1 creates overflow.py (C9). Unmarked: custody is
-    # not a MUST id.
+    # Task 0 claims scaling/destination.py (6.6), provision/overflow.py
+    # (6.7), and deploys/overflow.py (6.8) before Task 1 creates them (C9).
+    # Unmarked: custody is not a MUST id.
     paths = yaml.safe_load(
         (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
     assert "scaling/destination.py" in paths["sensitive"], (
@@ -2476,6 +2478,9 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
         "conformance/paths.yaml")
     assert "provision/overflow.py" in paths["sensitive"], (
         "provision/overflow.py is not a sensitive-path entry in "
+        "conformance/paths.yaml")
+    assert "deploys/overflow.py" in paths["sensitive"], (
+        "deploys/overflow.py is not a sensitive-path entry in "
         "conformance/paths.yaml")
     owners = [
         line.strip()
@@ -2487,6 +2492,8 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
         "CODEOWNERS has no owners line `/scaling/destination.py @farmertocoding`")
     assert "/provision/overflow.py @farmertocoding" in owners, (
         "CODEOWNERS has no owners line `/provision/overflow.py @farmertocoding`")
+    assert "/deploys/overflow.py @farmertocoding" in owners, (
+        "CODEOWNERS has no owners line `/deploys/overflow.py @farmertocoding`")
 
 
 def test_scale_sustained_propose_text_names_idle_and_t3():
@@ -2541,6 +2548,27 @@ def test_provision_overflow_py_is_claimed():
     ]
     assert "/provision/overflow.py @farmertocoding" in owners, (
         "CODEOWNERS has no owners line `/provision/overflow.py @farmertocoding`")
+
+
+def test_deploys_overflow_py_is_claimed():
+    """Phase 6.8 Task 0 claims deploys/overflow.py before Task 1 creates it.
+
+    Unmarked: custody is not a MUST id. What would make this fail: listing
+    only paths.yaml or only CODEOWNERS, or broadening to deploys/**.
+    """
+    paths = yaml.safe_load(
+        (REPO / "conformance" / "paths.yaml").read_text(encoding="utf-8"))
+    assert "deploys/overflow.py" in paths["sensitive"], (
+        "deploys/overflow.py is not a sensitive-path entry in "
+        "conformance/paths.yaml")
+    owners = [
+        line.strip()
+        for line in (REPO / ".github" / "CODEOWNERS")
+        .read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert "/deploys/overflow.py @farmertocoding" in owners, (
+        "CODEOWNERS has no owners line `/deploys/overflow.py @farmertocoding`")
 
 
 def test_new_phase_6_must_ids_have_no_tier():
