@@ -8,7 +8,8 @@ enroll clause. Phase 6.8 Task 2 appended the same-image overflow
 deploy clause. Phase 6.9 Task 2 appended the T1 Fake overflow
 join clause. Phase 6.10 Task 2 appended the T1 Fake scale-in
 and ephemeral-reaper clause. Phase 6.11 Task 2 appended the daily
-Beat reaper clause. **T1 fakes only.** This is not a live AWS,
+Beat reaper clause. Phase 6.12 Task 2 appended the overflow
+seam-refuse lock-release clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No live AWS VM. No auto mode. No AMI. No
 ScalePolicy table. FakeDns join only — no live Cloudflare zone, no
@@ -204,6 +205,20 @@ window. Forgotten billing is designed out as a daily flag, not as a
 kill. NAV six. F8 overflow seed stays the no-idle `0.0416` /
 `t3.medium` case. No Approve or Launch. Ack does not stop billing.
 
+### Overflow seam-refuse releases locks (§4, Phase 6.12)
+
+ACCEPTED overflow, ephemeral READY target, prior succeeded image_tag,
+PipelineTransport, no dns=/cert_issuer=, DnsAccount without token refs
+→ `deploy_overflow_copy` raises DeploySeamRefused; the overflow
+Deployment is FAILED; no OperationLock remains with
+`holder=<that deployment pk>`; a subsequent site deploy-lock acquire
+succeeds. evaluate_site still does not create a Deployment.
+(`test_overflow_seam_refuse_releases_deploy_locks` calls the Task 1
+proof; it does not reimplement it.) Honest: no live AWS VM, no live
+Cloudflare zone, no auto-terminate, no 30s health-pull, no auto, no
+AMI, no real drain window. NAV six. F8 overflow seed stays the no-idle
+`0.0416` / `t3.medium` case. No Approve or Launch.
+
 ### Four-of-five / spike / hole / mixed / stale
 
 Four of five in-window minutes over + one under does not file. A single
@@ -261,6 +276,7 @@ T1 fakes, this session:
 - `::test_overflow_join_adds_overflow_a_next_to_primary`
 - `::test_overflow_scale_in_unjoins_terminates_and_reaper_flags`
 - `::test_ephemeral_reaper_runs_on_daily_beat`
+- `::test_overflow_seam_refuse_releases_deploy_locks`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`

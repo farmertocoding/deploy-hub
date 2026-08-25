@@ -32,6 +32,7 @@ NAMED = (
     "test_overflow_join_adds_overflow_a_next_to_primary",
     "test_overflow_scale_in_unjoins_terminates_and_reaper_flags",
     "test_ephemeral_reaper_runs_on_daily_beat",
+    "test_overflow_seam_refuse_releases_deploy_locks",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -311,6 +312,24 @@ def test_ephemeral_reaper_runs_on_daily_beat():
 
     test_beat_entry_runs_reaper_daily_on_queue_probes()
     test_beat_task_flags_and_does_not_terminate()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-LOCK-ON-SEAM-REFUSE")
+def test_overflow_seam_refuse_releases_deploy_locks():
+    """Overflow begin_deploy then DeploySeamRefused: FAILED, locks released.
+    A later site deploy-lock acquire succeeds. Honest: no live AWS VM,
+    no live Cloudflare, no auto-terminate, no 30s health-pull, no auto,
+    no AMI, no real drain window.
+
+    Transcribes tests/test_overflow_deploy.py::
+    test_overflow_seam_refuse_after_begin_deploy_releases_locks.
+    """
+    from test_overflow_deploy import (
+        test_overflow_seam_refuse_after_begin_deploy_releases_locks,
+    )
+
+    test_overflow_seam_refuse_after_begin_deploy_releases_locks()
 
 
 @pytest.mark.django_db
