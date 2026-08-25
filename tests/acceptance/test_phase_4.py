@@ -797,7 +797,7 @@ def test_backup_list_test_now_command_block_and_p1(
     test_backup_list_hides_key_material,
     ::test_test_backup_now_seals_with_backup_key_not_kek,
     ::test_restore_is_command_block_not_a_post,
-    ::test_no_restore_route_exists, and
+    ::test_restore_route_is_require_recent_touch, and
     ::test_failed_dump_files_hub_db_or_backup_failure.
     """
     import stat
@@ -894,7 +894,7 @@ def test_backup_list_test_now_command_block_and_p1(
         f"/api/v1/sites/{site.pk}/backups/{unit.pk}/restore/",
         content_type="application/json",
     )
-    assert missing.status_code == 404
+    assert missing.status_code == 403
 
 
 @pytest.mark.django_db

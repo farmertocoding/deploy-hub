@@ -1,8 +1,9 @@
-"""Backup operator surface (UX-E5 / D-063 / C7).
+"""Backup operator surface (UX-E5 / D-063 / C7) plus Phase 7 T1 restore.
 
 Persist sealed dumps, Beat backup-nightly, P1 hub-db-or-backup-failure,
-Sites list + T2 test-now, restore command block. Restore UI stays Phase 7.
+Sites list + T2 test-now, restore command block, T1 clean-container restore.
 """
+import inspect
 import json
 import re
 import stat
@@ -198,11 +199,12 @@ def test_test_backup_now_seals_with_backup_key_not_kek(
     assert vault_backup.unseal(sealed, backup_key, aad=aad) == DUMP
 
 
+@pytest.mark.req("BACKUP-RESTORE-COMMAND-REMAINS")
 def test_restore_is_command_block_not_a_post(auth_client, backup_dir):
-    """Restore is a §6.6 <pre> command block. No Restore POST / button.
+    """GET list still returns restore_command; BackupPanel still renders <pre>.
 
-    What would make this fail: a restore endpoint, a restore ActionButton, or
-    a list payload that omits the copy-paste command.
+    What would make this fail: dropping the copy-paste block after the T1
+    restore button lands, or a list payload that omits restore_command.
     """
     from provision.backup import persist_backup
 
@@ -222,28 +224,31 @@ def test_restore_is_command_block_not_a_post(auth_client, backup_dir):
     assert "<pre" in jsx
     assert "restore_command" in jsx
     assert "Test backup now" in jsx
-    assert not re.search(r"backups/.+restore", jsx)
+    assert "site.backup_restore" in jsx
+    assert "Restore into clean container" in jsx or "tierFor(\"site.backup_restore\")" in jsx
     assert "export function AttackState" in jsx
 
 
-def test_no_restore_route_exists(auth_client):
-    """urlpatterns contain no POST .../restore/ for backups.
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_route_is_require_recent_touch(auth_client):
+    """POST .../backups/{unit}/restore/ is T1 RequireRecentTouch, not anonymous.
 
-    What would make this fail: adding a restore view, even session-gated.
+    What would make this fail: a session-only restore POST, or no route so
+    the operator still has only the command block.
     """
-    site, unit = _unit("noroute")
-    offenders = [
-        route for route in _route_strings()
-        if "restore" in route and "backup" in route
-    ]
-    assert offenders == [], offenders
-    for path in (
-        f"/api/v1/sites/{site.pk}/restore/",
-        f"/api/v1/sites/{site.pk}/backups/restore/",
-        f"/api/v1/sites/{site.pk}/backups/{unit.pk}/restore/",
-    ):
-        response = auth_client.post(path, content_type="application/json")
-        assert response.status_code == 404, f"{path} returned {response.status_code}"
+    from django.urls import resolve
+
+    from core.permissions import RequireRecentTouch
+    from provision.views import BackupRestoreView
+
+    site, unit = _unit("t1route")
+    path = f"/api/v1/sites/{site.pk}/backups/{unit.pk}/restore/"
+    match = resolve(path)
+    view_cls = getattr(match.func, "cls", None)
+    assert view_cls is BackupRestoreView
+    assert RequireRecentTouch in view_cls.permission_classes
+    response = auth_client.post(path, content_type="application/json")
+    assert response.status_code == 403, response.content
 
 
 def test_failed_dump_files_hub_db_or_backup_failure(backup_dir):
@@ -417,3 +422,220 @@ def test_restore_drill_skipped_only_when_siteless(backup_dir):
     stored = json.dumps(ran.results, default=str)
     assert "age-stub:" not in stored
     assert DUMP.decode() not in stored
+
+
+RESTORE_URL = "/api/v1/sites/{site_id}/backups/{unit_id}/restore/"
+INSTANCE_WORD = re.compile(r"\binstance\b")
+
+
+def _inject_restore(monkeypatch):
+    """Wrap the view callee so HTTP never hits live docker."""
+    from provision import backup as backup_mod
+
+    seen = []
+
+    def injected(unit, plaintext):
+        seen.append(plaintext)
+        return True
+
+    real = backup_mod.restore_to_clean
+
+    def wrapped(unit, *, checkrun_pk, restore_to_clean=None):
+        return real(
+            unit,
+            checkrun_pk=checkrun_pk,
+            restore_to_clean=restore_to_clean or injected,
+        )
+
+    monkeypatch.setattr("provision.views.restore_to_clean", wrapped)
+    return seen
+
+
+def _post_restore(client, site, unit, *, checkrun_pk, confirm_name=None):
+    body = {
+        "checkrun_pk": checkrun_pk,
+        "confirm_name": site.name if confirm_name is None else confirm_name,
+    }
+    return client.post(
+        RESTORE_URL.format(site_id=site.pk, unit_id=unit.pk),
+        data=json.dumps(body),
+        content_type="application/json",
+    )
+
+
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_to_clean_unseals_chosen_dump_with_backup_key(backup_dir):
+    """restore_to_clean unseals BACKUP_KEY, never KEK; metadata only.
+
+    What would make this fail: using the KEK, writing dump bytes into
+    CheckRun, or calling the inject with sealed bytes.
+    """
+    from core.models import CheckRun, SiteInstance
+    from provision.backup import persist_backup, restore_to_clean
+    from vault import service
+    from vault.models import Secret
+
+    site, unit = _unit("clean")
+    run = persist_backup(unit, plaintext=DUMP)
+    key_row = Secret.objects.get(
+        kind=Secret.Kind.BACKUP_KEY, owner_type="site", owner_id=str(site.pk),
+    )
+    backup_key = service.get(key_row, reason="restore-proof")
+
+    seen = []
+
+    def injected(called_unit, plaintext):
+        seen.append((called_unit.pk, plaintext))
+        return True
+
+    before = SiteInstance.objects.count()
+    restore_run = restore_to_clean(
+        unit, checkrun_pk=run.pk, restore_to_clean=injected,
+    )
+    assert restore_run.kind == CheckRun.Kind.RESTORE_CLEAN
+    assert restore_run.status == CheckRun.Status.SUCCEEDED
+    assert restore_run.results == {
+        "schema_version": 1,
+        "unit_id": unit.pk,
+        "site_id": site.pk,
+        "checkrun_pk": run.pk,
+    }
+    blob = json.dumps(restore_run.results, default=str)
+    for needle in FORBIDDEN_LIST_NEEDLES:
+        assert needle not in blob, needle
+    assert DUMP.decode() not in blob
+    assert backup_key.hex() not in blob
+    assert seen == [(unit.pk, DUMP)]
+    assert not any(p.startswith(b"age-stub:") for _, p in seen)
+    assert SiteInstance.objects.count() == before
+    src = inspect.getsource(restore_to_clean)
+    assert "Secret.Kind.KEK" not in src
+    assert "docker" not in src
+
+
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_http_is_t1_type_the_site_name(client, backup_dir, monkeypatch):
+    """T1 POST restore: touch + type-the-site-name; 201; no ciphertext.
+
+    What would make this fail: confirm_name ignored, binding key material
+    from the request, or a 201 that returns dump bytes.
+    """
+    from test_aws_enroll import _t1_user, _touch
+
+    from core.actions import ACTION_TIERS
+    from core.models import CheckRun, SiteInstance
+    from provision.backup import persist_backup
+    from provision.views import BackupRestoreSerializer, BackupRestoreView
+    from tests.test_webauthn_t1 import T1_HTTP
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    seen = _inject_restore(monkeypatch)
+    site, unit = _unit("http")
+    run = persist_backup(unit, plaintext=DUMP)
+    before = (
+        SiteInstance.objects.count(),
+        CheckRun.objects.filter(kind=CheckRun.Kind.RESTORE_CLEAN).count(),
+    )
+    response = _post_restore(client, site, unit, checkrun_pk=run.pk)
+    assert response.status_code == 201, response.content
+    body = response.json()
+    assert body == {"ok": True, "unit_id": unit.pk, "checkrun_pk": run.pk}
+    blob = _blob_text(body)
+    for needle in FORBIDDEN_LIST_NEEDLES:
+        assert needle not in blob, needle
+    assert DUMP.decode() not in blob
+    assert seen == [DUMP]
+    restore_run = CheckRun.objects.get(kind=CheckRun.Kind.RESTORE_CLEAN)
+    assert restore_run.status == CheckRun.Status.SUCCEEDED
+    assert restore_run.results["checkrun_pk"] == run.pk
+    assert SiteInstance.objects.count() == before[0]
+    assert INSTANCE_WORD.search(blob) is None
+
+    row = next(r for r in ACTION_TIERS if r["id"] == "site.backup_restore")
+    assert row == {
+        "id": "site.backup_restore",
+        "tier": "T1",
+        "label": "Restore into clean container",
+    }
+    assert INSTANCE_WORD.search(row["label"]) is None
+    assert set(BackupRestoreSerializer().get_fields()) == {
+        "checkrun_pk", "confirm_name",
+    }
+    view_src = inspect.getsource(BackupRestoreView)
+    assert "backup_key" not in view_src
+    assert "ciphertext" not in view_src
+    assert "request.data.get" not in view_src
+    assert T1_HTTP["site.backup_restore"] == "/api/v1/sites/{pk}/backups/1/restore/"
+
+
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_wrong_confirm_is_4xx(client, backup_dir, monkeypatch):
+    """confirm_name != site.name → 4xx; no SUCCEEDED restore CheckRun.
+
+    What would make this fail: confirm_name ignored so any string restores.
+    """
+    from test_aws_enroll import _t1_user, _touch
+
+    from core.models import CheckRun
+    from provision.backup import persist_backup
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    _inject_restore(monkeypatch)
+    site, unit = _unit("wrong")
+    run = persist_backup(unit, plaintext=DUMP)
+    response = _post_restore(
+        client, site, unit, checkrun_pk=run.pk, confirm_name="wrong-site",
+    )
+    assert 400 <= response.status_code < 500, response.content
+    blob = response.content.decode()
+    for needle in FORBIDDEN_LIST_NEEDLES:
+        assert needle not in blob, needle
+    assert DUMP.decode() not in blob
+    assert not CheckRun.objects.filter(
+        kind=CheckRun.Kind.RESTORE_CLEAN, status=CheckRun.Status.SUCCEEDED,
+    ).exists()
+
+
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_missing_dump_is_4xx(client, backup_dir, monkeypatch):
+    """Unknown checkrun_pk → 4xx; no SUCCEEDED restore; no ciphertext.
+
+    What would make this fail: inventing a dump or returning sealed bytes.
+    """
+    from test_aws_enroll import _t1_user, _touch
+
+    from core.models import AuditEvent, CheckRun
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    _inject_restore(monkeypatch)
+    site, unit = _unit("missdump")
+    response = _post_restore(client, site, unit, checkrun_pk=999_001)
+    assert 400 <= response.status_code < 500, response.content
+    blob = response.content.decode()
+    for needle in FORBIDDEN_LIST_NEEDLES:
+        assert needle not in blob, needle
+    assert not CheckRun.objects.filter(
+        kind=CheckRun.Kind.RESTORE_CLEAN, status=CheckRun.Status.SUCCEEDED,
+    ).exists()
+    assert AuditEvent.objects.filter(action="backup-restore-failed").exists()
+
+
+@pytest.mark.req("BACKUP-RESTORE-CLEAN-T1")
+def test_restore_still_requires_recent_touch(client, backup_dir, monkeypatch):
+    """Without hardware_touch_at the restore POST is 403.
+
+    Unmarked-adjacent: C3 RequireRecentTouch, not the unseal clause.
+    """
+    from test_aws_enroll import _t1_user
+
+    from provision.backup import persist_backup
+
+    _t1_user(client)
+    _inject_restore(monkeypatch)
+    site, unit = _unit("notouch")
+    run = persist_backup(unit, plaintext=DUMP)
+    response = _post_restore(client, site, unit, checkrun_pk=run.pk)
+    assert response.status_code == 403, response.content

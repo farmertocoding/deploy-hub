@@ -97,6 +97,11 @@ export const ACTION_TIERS = [
     "label": "Scale in overflow"
   },
   {
+    "id": "site.backup_restore",
+    "tier": "T1",
+    "label": "Restore into clean container"
+  },
+  {
     "id": "partner.create",
     "tier": "T1",
     "label": "Create partner"

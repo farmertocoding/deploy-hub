@@ -1,12 +1,21 @@
-"""Backup operator HTTP: Sites-detail list + T2 test-now. No restore POST."""
+"""Backup operator HTTP: Sites-detail list + T2 test-now + T1 restore."""
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.audit import audit
 from core.models import BackupUnit, Site
-from provision.backup import list_payload, persist_backup, transport_for_site
+from core.permissions import RequireRecentTouch
+from provision.backup import (
+    RestoreError,
+    list_payload,
+    persist_backup,
+    restore_to_clean,
+    transport_for_site,
+)
 
 
 class BackupDumpSerializer(serializers.Serializer):
@@ -63,5 +72,61 @@ class BackupTestNowView(APIView):
             )
         return Response(
             BackupRunSerializer(run.results).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BackupRestoreSerializer(serializers.Serializer):
+    checkrun_pk = serializers.IntegerField()
+    confirm_name = serializers.CharField()
+
+
+class BackupRestoreResultSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    unit_id = serializers.IntegerField()
+    checkrun_pk = serializers.IntegerField()
+
+
+class BackupRestoreView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-site-name."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(
+        request=BackupRestoreSerializer,
+        responses={201: BackupRestoreResultSerializer},
+    )
+    def post(self, request, site_id, unit_id):
+        site = get_object_or_404(Site, pk=site_id)
+        unit = get_object_or_404(BackupUnit, pk=unit_id, site=site)
+        ser = BackupRestoreSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        if ser.validated_data["confirm_name"] != site.name:
+            return Response(
+                {"detail": "Type the site name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            restore_to_clean(
+                unit, checkrun_pk=ser.validated_data["checkrun_pk"],
+            )
+        except RestoreError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "site.backup_restore",
+            source="api",
+            actor=request.user,
+            obj=site,
+            severity="security",
+        )
+        return Response(
+            BackupRestoreResultSerializer({
+                "ok": True,
+                "unit_id": unit.pk,
+                "checkrun_pk": ser.validated_data["checkrun_pk"],
+            }).data,
             status=status.HTTP_201_CREATED,
         )

@@ -146,18 +146,30 @@ export function AttackState({ site }) {
   );
 }
 
-// Sites-detail backup list (C7 / D-063): metadata + restore <pre>, T2 test-now.
-// Restore is a command block. No Restore POST / button.
+// Sites-detail backup list (C7 / D-063 / D-122): metadata + restore <pre>,
+// T2 test-now, T1 Restore into clean container. Command block stays.
 export async function testBackupNow(siteId, unitId) {
   return api(`v1/sites/${siteId}/backups/${unitId}/test/`, {});
 }
 
-export function BackupPanel({ site, backups, onTestNow = () => {} }) {
+export async function restoreBackup(siteId, unitId, { checkrun_pk, confirm_name }) {
+  return api(`v1/sites/${siteId}/backups/${unitId}/restore/`, {
+    checkrun_pk, confirm_name,
+  });
+}
+
+export function BackupPanel({ site, backups, onTestNow = () => {}, onRestore }) {
   const [confirming, setConfirming] = useState(false);
   if (!backups) return null;
   const units = backups.units || [];
   const dumps = units.flatMap((u) =>
     (u.dumps || []).map((d) => ({ ...d, kind: u.kind, unit_id: u.id })));
+  const restore = onRestore || (async (current, unit, dump, name) => {
+    if (!unit || !dump) return;
+    await restoreBackup(current.id, unit.id, {
+      checkrun_pk: dump.id, confirm_name: name,
+    });
+  });
   return (
     <div style={{ ...box, borderColor: "#3fb950" }}>
       <h4 style={{ margin: "0 0 8px" }}>Backups</h4>
@@ -186,6 +198,11 @@ export function BackupPanel({ site, backups, onTestNow = () => {} }) {
         <button style={box} onClick={() => setConfirming(true)}>
           Test backup now</button>
       ))}
+      {dumps.length > 0 && (
+        <ActionButton row={tierFor("site.backup_restore")}
+          confirmName={site.name}
+          onRun={({ name }) => restore(site, units[0], dumps[0], name)} />
+      )}
     </div>
   );
 }

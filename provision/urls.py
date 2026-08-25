@@ -13,4 +13,9 @@ urlpatterns = [
         views.BackupTestNowView.as_view(),
         name="site-backup-test",
     ),
+    path(
+        "sites/<int:site_id>/backups/<int:unit_id>/restore/",
+        views.BackupRestoreView.as_view(),
+        name="site-backup-restore",
+    ),
 ]

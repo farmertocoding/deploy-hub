@@ -684,6 +684,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/Readiness'
           description: ''
+  /api/v1/sites/{id}/overflow-deploy/:
+    post:
+      operationId: v1_sites_overflow_deploy_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-host, then
+        overflow copy.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverflowDeploy'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OverflowDeploy'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OverflowDeploy'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverflowDeployResult'
+          description: ''
+  /api/v1/sites/{id}/overflow-join/:
+    post:
+      operationId: v1_sites_overflow_join_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-host, then
+        join.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverflowJoin'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OverflowJoin'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OverflowJoin'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverflowJoinResult'
+          description: ''
+  /api/v1/sites/{id}/overflow-scale-in/:
+    post:
+      operationId: v1_sites_overflow_scale_in_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-host, then
+        scale-in.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OverflowScaleIn'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OverflowScaleIn'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OverflowScaleIn'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverflowScaleInResult'
+          description: ''
   /api/v1/sites/{id}/takedown/:
     post:
       operationId: v1_sites_takedown_create
@@ -765,6 +867,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BackupList'
+          description: ''
+  /api/v1/sites/{site_id}/backups/{unit_id}/restore/:
+    post:
+      operationId: v1_sites_backups_restore_create
+      description: 'T1: two passkeys + recent WebAuthn touch + type-the-site-name.'
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: unit_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRestore'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BackupRestore'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BackupRestore'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupRestoreResult'
           description: ''
   /api/v1/sites/{site_id}/backups/{unit_id}/test/:
     post:
@@ -1209,6 +1349,29 @@ components:
       required:
       - restore_command
       - units
+    BackupRestore:
+      type: object
+      properties:
+        checkrun_pk:
+          type: integer
+        confirm_name:
+          type: string
+      required:
+      - checkrun_pk
+      - confirm_name
+    BackupRestoreResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        unit_id:
+          type: integer
+        checkrun_pk:
+          type: integer
+      required:
+      - checkrun_pk
+      - ok
+      - unit_id
     BackupRun:
       type: object
       properties:
@@ -1537,6 +1700,8 @@ components:
         instance_type:
           type: string
           default: t3.micro
+        overflow_site:
+          type: integer
       required:
       - confirm_name
       - host
@@ -1736,6 +1901,72 @@ components:
           type: boolean
       required:
       - planted
+    OverflowDeploy:
+      type: object
+      properties:
+        target:
+          type: integer
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
+      - target
+    OverflowDeployResult:
+      type: object
+      properties:
+        deployment:
+          type: integer
+        target:
+          type: integer
+      required:
+      - deployment
+      - target
+    OverflowJoin:
+      type: object
+      properties:
+        target:
+          type: integer
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
+      - target
+    OverflowJoinResult:
+      type: object
+      properties:
+        target:
+          type: integer
+        joined:
+          type: string
+        name:
+          type: string
+        values:
+          type: array
+          items:
+            type: string
+      required:
+      - joined
+      - target
+    OverflowScaleIn:
+      type: object
+      properties:
+        target:
+          type: integer
+        confirm_name:
+          type: string
+      required:
+      - confirm_name
+      - target
+    OverflowScaleInResult:
+      type: object
+      properties:
+        target:
+          type: integer
+        unjoined:
+          type: string
+      required:
+      - target
+      - unjoined
     PartnerCreate:
       type: object
       properties:

@@ -21,6 +21,10 @@ RESULTS_SCHEMA_VERSION = 1
 _NIGHTLY_WINDOW = timedelta(hours=24)
 
 
+class RestoreError(RuntimeError):
+    """Missing dump / missing key / clean-restore refuse. Never carries dump bytes."""
+
+
 def run_backup(unit, *, plaintext=None, transport=None):
     """Given a BackupUnit, return sealed dump bytes. Failure audits then re-raises."""
     try:
@@ -156,8 +160,8 @@ def restore_command_block(site, *, checkrun_pk=None):
         f"# Restore site {site.name} (id {site.pk}) into a clean container.\n"
         "# What: decrypt the sealed dump with Secret.Kind.BACKUP_KEY for this site.\n"
         "# Why it matters: a restore that uses the KEK, or overwrites live, is the\n"
-        "# wrong drill. Restore UI stays Phase 7; there is no restore API.\n"
-        "# Exact fix: copy-paste. The backup key never appears in this block.\n"
+        "# wrong drill. T1 Restore into clean container is the operator path.\n"
+        "# Exact fix: copy-paste or the T1 button. The backup key never appears here.\n"
         "\n"
         f"age -d -i /var/lib/deploy-hub/backup-keys/site-{site.pk}.key \\\n"
         f"  {blob} \\\n"
@@ -166,25 +170,68 @@ def restore_command_block(site, *, checkrun_pk=None):
     )
 
 
-def latest_unsealed_dump(unit):
-    """Open the latest succeeded blob with BACKUP_KEY. Never the KEK."""
-    runs = _succeeded_runs(unit)
-    if not runs:
-        raise RuntimeError("no sealed dump")
-    run = runs[0]
-    sealed = (BACKUP_STORE_DIR / str(run.pk)).read_bytes()
+def latest_unsealed_dump(unit, *, checkrun_pk=None):
+    """Open a succeeded blob with BACKUP_KEY. Never the KEK."""
+    from core.models import CheckRun
+
+    if checkrun_pk is None:
+        runs = _succeeded_runs(unit)
+        if not runs:
+            raise RestoreError("no sealed dump")
+        run = runs[0]
+    else:
+        run = CheckRun.objects.filter(
+            pk=checkrun_pk,
+            kind=CheckRun.Kind.BACKUP,
+            status=CheckRun.Status.SUCCEEDED,
+        ).first()
+        if run is None or run.results.get("unit_id") != unit.pk:
+            raise RestoreError("no sealed dump")
+    path = BACKUP_STORE_DIR / str(run.pk)
+    if not path.is_file():
+        raise RestoreError("no sealed dump")
+    sealed = path.read_bytes()
     key_row = Secret.objects.filter(
         kind=Secret.Kind.BACKUP_KEY,
         owner_type="site",
         owner_id=str(unit.site_id),
     ).first()
     if key_row is None:
-        raise RuntimeError("no backup key")
+        raise RestoreError("no backup key")
     key = service.get(key_row, reason="restore-drill")
     aad = Secret.build_aad(
         Secret.Kind.BACKUP_KEY, "site", str(unit.site_id),
     )
     return vault_backup.unseal(sealed, key, aad=aad)
+
+
+def restore_to_clean(unit, *, checkrun_pk, restore_to_clean=None):
+    """Unseal a chosen dump into the clean-container primitive. Never live."""
+    from core.models import CheckRun
+    from monitor.drills import _restore_to_clean_container
+
+    try:
+        plaintext = latest_unsealed_dump(unit, checkrun_pk=checkrun_pk)
+        restore = restore_to_clean or _restore_to_clean_container
+        ok = bool(restore(unit, plaintext))
+    except Exception:
+        from core.audit import audit
+
+        audit("backup-restore-failed", unit, source="system", severity="warning")
+        raise
+    now = timezone.now()
+    return CheckRun.objects.create(
+        kind=CheckRun.Kind.RESTORE_CLEAN,
+        status=CheckRun.Status.SUCCEEDED if ok else CheckRun.Status.FAILED,
+        started=now,
+        finished=now,
+        results={
+            "schema_version": RESULTS_SCHEMA_VERSION,
+            "unit_id": int(unit.pk),
+            "site_id": int(unit.site_id),
+            "checkrun_pk": int(checkrun_pk),
+        },
+    )
 
 
 def transport_for_site(site):

@@ -458,6 +458,7 @@ T1_HTTP = {
     "site.overflow_deploy": "/api/v1/sites/{pk}/overflow-deploy/",
     "site.overflow_join": "/api/v1/sites/{pk}/overflow-join/",
     "site.overflow_scale_in": "/api/v1/sites/{pk}/overflow-scale-in/",
+    "site.backup_restore": "/api/v1/sites/{pk}/backups/1/restore/",
 }
 
 

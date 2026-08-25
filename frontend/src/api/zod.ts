@@ -120,6 +120,7 @@ const InstanceCreate = z
     host: z.string(),
     zone: z.string().regex(/^[-a-zA-Z0-9_]+$/),
     instance_type: z.string().optional().default("t3.micro"),
+    overflow_site: z.number().int().optional(),
   })
   .passthrough();
 const InstanceCreateResult = z
@@ -267,6 +268,29 @@ const Readiness = z
     pending_sandbox: z.array(z.object({}).partial().passthrough()),
   })
   .passthrough();
+const OverflowDeploy = z
+  .object({ target: z.number().int(), confirm_name: z.string() })
+  .passthrough();
+const OverflowDeployResult = z
+  .object({ deployment: z.number().int(), target: z.number().int() })
+  .passthrough();
+const OverflowJoin = z
+  .object({ target: z.number().int(), confirm_name: z.string() })
+  .passthrough();
+const OverflowJoinResult = z
+  .object({
+    target: z.number().int(),
+    joined: z.string(),
+    name: z.string().optional(),
+    values: z.array(z.string()).optional(),
+  })
+  .passthrough();
+const OverflowScaleIn = z
+  .object({ target: z.number().int(), confirm_name: z.string() })
+  .passthrough();
+const OverflowScaleInResult = z
+  .object({ target: z.number().int(), unjoined: z.string() })
+  .passthrough();
 const PatchedSiteEdgeOwner = z
   .object({ edge_owner: EdgeOwnerEnum })
   .partial()
@@ -291,6 +315,16 @@ const BackupUnit = z
   .passthrough();
 const BackupList = z
   .object({ units: z.array(BackupUnit), restore_command: z.string() })
+  .passthrough();
+const BackupRestore = z
+  .object({ checkrun_pk: z.number().int(), confirm_name: z.string() })
+  .passthrough();
+const BackupRestoreResult = z
+  .object({
+    ok: z.boolean(),
+    unit_id: z.number().int(),
+    checkrun_pk: z.number().int(),
+  })
   .passthrough();
 const BackupRun = z
   .object({
@@ -413,11 +447,19 @@ export const schemas = {
   ExposureEnum,
   ProjectCreate,
   Readiness,
+  OverflowDeploy,
+  OverflowDeployResult,
+  OverflowJoin,
+  OverflowJoinResult,
+  OverflowScaleIn,
+  OverflowScaleInResult,
   PatchedSiteEdgeOwner,
   SiteEdgeOwner,
   BackupDump,
   BackupUnit,
   BackupList,
+  BackupRestore,
+  BackupRestoreResult,
   BackupRun,
   EnvNames,
   EnvApply,

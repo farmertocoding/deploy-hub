@@ -439,6 +439,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{id}/overflow-deploy/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-host, then overflow copy. */
+        post: operations["v1_sites_overflow_deploy_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{id}/overflow-join/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-host, then join. */
+        post: operations["v1_sites_overflow_join_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{id}/overflow-scale-in/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-host, then scale-in. */
+        post: operations["v1_sites_overflow_scale_in_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{id}/takedown/": {
         parameters: {
             query?: never;
@@ -484,6 +535,23 @@ export interface paths {
         get: operations["v1_sites_backups_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/backups/{unit_id}/restore/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description T1: two passkeys + recent WebAuthn touch + type-the-site-name. */
+        post: operations["v1_sites_backups_restore_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -672,6 +740,15 @@ export interface components {
             units: components["schemas"]["BackupUnit"][];
             restore_command: string;
         };
+        BackupRestore: {
+            checkrun_pk: number;
+            confirm_name: string;
+        };
+        BackupRestoreResult: {
+            ok: boolean;
+            unit_id: number;
+            checkrun_pk: number;
+        };
         BackupRun: {
             schema_version: number;
             unit_id: number;
@@ -809,6 +886,7 @@ export interface components {
             zone: string;
             /** @default t3.micro */
             instance_type: string;
+            overflow_site?: number;
         };
         InstanceCreateCost: {
             /** Format: double */
@@ -895,6 +973,32 @@ export interface components {
         };
         OriginCaPlantResult: {
             planted: boolean;
+        };
+        OverflowDeploy: {
+            target: number;
+            confirm_name: string;
+        };
+        OverflowDeployResult: {
+            deployment: number;
+            target: number;
+        };
+        OverflowJoin: {
+            target: number;
+            confirm_name: string;
+        };
+        OverflowJoinResult: {
+            target: number;
+            joined: string;
+            name?: string;
+            values?: string[];
+        };
+        OverflowScaleIn: {
+            target: number;
+            confirm_name: string;
+        };
+        OverflowScaleInResult: {
+            target: number;
+            unjoined: string;
         };
         PartnerCreate: {
             slug: string;
@@ -1748,6 +1852,87 @@ export interface operations {
             };
         };
     };
+    v1_sites_overflow_deploy_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverflowDeploy"];
+                "application/x-www-form-urlencoded": components["schemas"]["OverflowDeploy"];
+                "multipart/form-data": components["schemas"]["OverflowDeploy"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverflowDeployResult"];
+                };
+            };
+        };
+    };
+    v1_sites_overflow_join_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverflowJoin"];
+                "application/x-www-form-urlencoded": components["schemas"]["OverflowJoin"];
+                "multipart/form-data": components["schemas"]["OverflowJoin"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverflowJoinResult"];
+                };
+            };
+        };
+    };
+    v1_sites_overflow_scale_in_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverflowScaleIn"];
+                "application/x-www-form-urlencoded": components["schemas"]["OverflowScaleIn"];
+                "multipart/form-data": components["schemas"]["OverflowScaleIn"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverflowScaleInResult"];
+                };
+            };
+        };
+    };
     v1_sites_takedown_create: {
         parameters: {
             query?: never;
@@ -1818,6 +2003,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupList"];
+                };
+            };
+        };
+    };
+    v1_sites_backups_restore_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupRestore"];
+                "application/x-www-form-urlencoded": components["schemas"]["BackupRestore"];
+                "multipart/form-data": components["schemas"]["BackupRestore"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRestoreResult"];
                 };
             };
         };

@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { AttackBanner } from "../src/screens/Home.jsx";
 import {
   AttackState, BackupPanel, CertState, SiteStatus, SitesView, flattenSites,
-  rollbackSite, t3SiteActions, testBackupNow,
+  restoreBackup, rollbackSite, t3SiteActions, testBackupNow,
 } from "../src/screens/Sites.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -147,9 +147,22 @@ test("restore_is_command_block_not_a_post", () => {
   assert.match(markup, /<pre/);
   assert.match(text, /pg_restore/);
   assert.match(text, /Test backup now/);
-  assert.doesNotMatch(markup, /backups\/.+\/restore/);
+  assert.match(text, /Restore into clean container/);
   const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
   assert.match(src, /export function AttackState/);
+  assert.match(src, /site\.backup_restore/);
+});
+
+test("restore_backup_posts_the_restore_route", async () => {
+  const calls: Array<{ url: string; body: any }> = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    calls.push({ url, body: opts?.body ? JSON.parse(opts.body) : undefined });
+    return { status: 201, json: async () => ({ ok: true, unit_id: 1, checkrun_pk: 9 }) };
+  };
+  const { status } = await restoreBackup(4, 1, { checkrun_pk: 9, confirm_name: "bare" });
+  assert.equal(status, 201);
+  assert.equal(calls[0].url, "/api/v1/sites/4/backups/1/restore/");
+  assert.deepEqual(calls[0].body, { checkrun_pk: 9, confirm_name: "bare" });
 });
 
 test("test_backup_now_posts_the_test_route", async () => {
