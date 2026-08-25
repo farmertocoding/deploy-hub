@@ -26,6 +26,7 @@ NAMED_PARTNER = REPO / "conformance" / "demos" / "named-partner.md"
 NAV_IDS = ["home", "sites", "targets", "deploys", "findings", "settings"]
 NAMED = (
     "test_scale_ready_quiet_five_hot_mem_files_p2_proposal",
+    "test_idle_registered_machine_named_when_second_target_has_headroom",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -150,6 +151,26 @@ def test_scale_ready_quiet_five_hot_mem_files_p2_proposal():
     test_five_hot_disk_minutes_do_not_propose()
     test_re_evaluate_while_open_does_not_record_second_push()
     test_scaling_and_beat_do_not_import_enroll_or_ec2()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-IDLE-FIRST")
+@pytest.mark.req("SCALE-SUSTAINED-PROPOSE")
+def test_idle_registered_machine_named_when_second_target_has_headroom():
+    """A second READY permanent non-hub Target with a latest ram=10
+    sample at now → overflow body contains idle registered machine, that
+    host, 0, own-machine, propose-mode does not launch; Target count
+    unchanged; no enroll. Propose-mode does not launch; no instance /
+    Approve / Launch (via _assert_idle_copy on the named proof).
+
+    Transcribes tests/test_overflow_destination.py::
+    test_idle_ready_machine_named_in_overflow_body (§4 (b)).
+    """
+    from test_overflow_destination import (
+        test_idle_ready_machine_named_in_overflow_body,
+    )
+
+    test_idle_ready_machine_named_in_overflow_body()
 
 
 @pytest.mark.django_db

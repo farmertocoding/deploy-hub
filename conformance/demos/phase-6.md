@@ -2,10 +2,11 @@
 
 **Date:** 2026-08-25 · **Branch:** `p6-design` · **Recorded by:** Task 6
 on BASE `fe8e20e` (merge of MUST Tasks 0–5) plus the acceptance file
-`2fdab81` and this record. **T1 fakes only.** This is not a live AWS,
+`2fdab81` and this record. Phase 6.6 Task 2 appended the idle-first
+clause on HEAD `f6824e9`. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No auto mode. No AMI. No ScalePolicy table.
-No new token env was added.
+No DNS join. No new token env was added.
 
 ## What the milestone asked (design note §4)
 
@@ -13,9 +14,13 @@ A public scale-ready site (`core.scale-ready` ok, `Site.scale_ready=True`,
 not `mesh_only`), quiet attack playbook, not a PartnerSite, five
 HostMetric rows `ram=90` one distinct UTC minute apart inside the 300s
 window → Findings inbox shows P2 **scale-out-proposal** fingerprint
-`scale-out-proposal:{pk}`, body contains `0.0416`, `t3.medium`, and
-`propose-mode does not launch`; `fix_action` is the C8 sentence; Target
-count unchanged; no `enroll_aws_target` call. Re-evaluate while OPEN
+`scale-out-proposal:{pk}`; `fix_action` is the C8 sentence; Target
+count unchanged; no `enroll_aws_target` call. (a) No other ready Target
+with headroom → body contains `0.0416` / `t3.medium`. (b) A second
+READY permanent non-hub Target with a latest ram=10 sample at `now` →
+body contains `idle registered machine`, that host, `0`, `own-machine`,
+`propose-mode does not launch`; Target count unchanged; no enroll. No
+VM launched. No ScalePolicy. No DNS join. Re-evaluate while OPEN
 does not add a push-log event. Four of five over + one under → no
 Finding. One spike → no Finding. Disk-only five hot minutes → no
 Finding. Same pressure while attack playbook is engaged
@@ -26,7 +31,8 @@ mem samples → no proposal; Sites **list** paints **single-instance-only**.
 `mesh_only` + five hot mem → no proposal. NAV is still six.
 
 Record: `conformance/demos/phase-6.md`. This record **does not claim a
-VM launched**, auto mode, AMI, live AWS, live provision, or U1.
+VM launched**, auto mode, AMI, live AWS, live provision, DNS join,
+ScalePolicy, or U1.
 `PART-U1-NAMED-PARTNER` stays uncovered until Joseph writes
 `conformance/demos/named-partner.md`. Everyday `make review-round`
 (phase 5) may go green while U1 is uncovered. Two consecutive clean
@@ -58,8 +64,9 @@ record file: **41 passed**, 0 skipped, across
 `test_sites_single_instance.py`. Then the named acceptance file was
 written and its six behavioural clauses passed on those same fakes; the
 two record clauses stayed red until this file existed. After this file:
-`tests/acceptance/test_phase_6.py` is expected **8 passed**, 0 skipped
-(T1 fakes).
+`tests/acceptance/test_phase_6.py` was **8 passed**, 0 skipped (T1
+fakes). Phase 6.6 Task 2 adds §4 (b); the file is expected **9 passed**,
+0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -77,6 +84,20 @@ Target count is unchanged. AST-scan of `scaling/` + `monitor/tasks.py` +
 Re-evaluate while OPEN returns the same row and does not add a push-log
 event. Same-axis `load>cores` also files. Disk-only five hot minutes do
 not file.
+
+### Idle registered machine before t3.medium (§4 (b), Phase 6.6)
+
+Same public scale-ready quiet site, five ram=90 minutes, ACCEPTED cheap
+→ overflow. (a) stays the no-second-Target path: body names `0.0416` /
+`t3.medium`; Target count unchanged
+(`test_scale_ready_quiet_five_hot_mem_files_p2_proposal`). (b) A second
+READY permanent non-hub Target with a latest ram=10 sample at `now`:
+body names `idle registered machine`, that host, `Overflow estimate 0
+USD/hour on own-machine`, and `propose-mode does not launch`; Target
+count unchanged; no enroll. No `\bApprove\b` / `\bLaunch\b`. This
+session did not launch a VM, did not add a ScalePolicy table, and did
+not join DNS. F8 `scale-out-proposal` seed stays the no-idle `0.0416` /
+`t3.medium` case. Propose-mode still does not create a Target.
 
 ### Four-of-five / spike / hole / mixed / stale
 
@@ -112,7 +133,7 @@ control. NAV is the six objects. `VALID_TIERS` stays `{t1, t2, t3}`.
 - PART-K text and `text_hash` stay the 4f30c7a freeze. This record does
   not rewrite them.
 - Live AWS of any kind is a Joseph interrupt. This record does not claim
-  live provision, auto mode, AMI, or a ScalePolicy table.
+  live provision, auto mode, AMI, a ScalePolicy table, or a DNS join.
 - Two consecutive clean `conformance-6` rounds wait on the U1 interrupt.
   This session did not run `make review-round` or two consecutive
   `make conformance-6` rounds; those gates re-earn green from a fresh
@@ -128,6 +149,7 @@ control. NAV is the six objects. `VALID_TIERS` stays `{t1, t2, t3}`.
 T1 fakes, this session:
 
 - `::test_scale_ready_quiet_five_hot_mem_files_p2_proposal`
+- `::test_idle_registered_machine_named_when_second_target_has_headroom`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`
