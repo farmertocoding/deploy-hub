@@ -2776,8 +2776,8 @@ def test_p7_restore_demo_names_phase_7_md():
     """P7-RESTORE-DEMO is verify: demo naming conformance/demos/phase-7.md.
 
     What would make this fail: a missing demo: key, pointing at phase-6.md,
-    or creating a filler named-partner.md. Task 0 forbids creating
-    phase-7.md so a stub cannot verify; Task 2 lands the honest record.
+    or a missing / whitespace-only record. Task 0 forbade creating the
+    file so a filler could not verify; Task 2 landed the honest T1 record.
     """
     reg = _live_registry()
     assert "P7-RESTORE-DEMO" in reg, "P7-RESTORE-DEMO is not in the registry"
@@ -2790,7 +2790,9 @@ def test_p7_restore_demo_names_phase_7_md():
         f"P7-RESTORE-DEMO must name conformance/demos/phase-7.md: "
         f"{demo.get('demo')}")
     path = REPO / "conformance" / "demos" / "phase-7.md"
-    assert not path.exists(), (
-        "conformance/demos/phase-7.md must stay absent in Task 0 — a stub "
-        "would verify P7-RESTORE-DEMO before the restore path exists"
+    assert path.is_file(), (
+        "conformance/demos/phase-7.md must exist — P7-RESTORE-DEMO is verify: demo"
+    )
+    assert path.stat().st_size > 0 and path.read_text(encoding="utf-8").strip(), (
+        "a whitespace-only demo is not a record"
     )

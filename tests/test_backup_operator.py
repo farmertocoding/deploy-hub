@@ -546,7 +546,9 @@ def test_restore_http_is_t1_type_the_site_name(client, backup_dir, monkeypatch):
         assert needle not in blob, needle
     assert DUMP.decode() not in blob
     assert seen == [DUMP]
-    restore_run = CheckRun.objects.get(kind=CheckRun.Kind.RESTORE_CLEAN)
+    restore_run = CheckRun.objects.get(
+        kind=CheckRun.Kind.RESTORE_CLEAN, results__unit_id=unit.pk,
+    )
     assert restore_run.status == CheckRun.Status.SUCCEEDED
     assert restore_run.results["checkrun_pk"] == run.pk
     assert SiteInstance.objects.count() == before[0]
