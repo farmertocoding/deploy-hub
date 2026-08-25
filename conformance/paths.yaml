@@ -139,3 +139,8 @@ sensitive:
   # Phase 6.10 (Task 0): claim monitor/overflow_reaper.py before Task 1
   # creates it (D-113 / C9). Do not broaden to monitor/**.
   - monitor/overflow_reaper.py
+  # Phase 7.1 (Task 0): claim monitor/router_advisor.py and
+  # monitor/router_views.py before Task 1 creates it (D-125 / C6).
+  # Do not broaden to monitor/** or frontend/**.
+  - monitor/router_advisor.py
+  - monitor/router_views.py

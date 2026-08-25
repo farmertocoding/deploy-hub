@@ -1504,3 +1504,31 @@ requirements:
     text_hash: sha256:070fa2d2b73040dfc37bd4767e1b33bd674ca8499d1742d5e07b185baa79390a
     text: >
       A site with a sealed dump, T1 touch plus type-the-name, injected restore_to_clean yields 201 ok; RESTORE_CLEAN CheckRun metadata has unit_id and checkrun_pk; response has no dump bytes; live SiteInstance untouched; command block still on GET list.
+
+  # Phase 7.1 (docs/phase-7.1-design-note.md §3, Task 0 / D-125…D-127).
+  # New MUST ids are tier-less (no `tier:` key). Do not rewrite Phase 7.0
+  # BACKUP-RESTORE-* / P7-RESTORE-DEMO text:. Everyday conformance stays
+  # phase 5. Do not stub named-partner.md.
+  - id: ROUTER-TUNNEL-NOTHING-FORWARDED
+    phase: 7
+    verify: test
+    source: phase-7.1-design-note.md §3
+    text_hash: sha256:264612beba93b499b754ed86d6725f1e40bb2d6e900640bf044b8135b4fb83d7
+    text: >
+      Tunnel-mode Target (collect_payload.tunnel true) probe_nothing_forwarded files Finding router-forwarded:{pk} when wan_probe reports any WAN forward and resolves that fingerprint when forwards is empty; missing wan_probe does not file; non-tunnel targets skip; default wan_probe is refuse-closed.
+  - id: ROUTER-ADVICE-TARGET-TAB
+    phase: 7
+    verify: test
+    source: phase-7.1-design-note.md §3
+    text_hash: sha256:264612beba93b499b754ed86d6725f1e40bb2d6e900640bf044b8135b4fb83d7
+    text: >
+      GET /api/v1/targets/{id}/ returns router_advice; Targets detail has Hardening and Router tabs; Router tab renders the advice and T3 Probe router; NAV stays six; no color-only status.
+  - id: P7-ROUTER-DEMO
+    phase: 7
+    verify: demo
+    demo:
+      - conformance/demos/phase-7.md
+    source: phase-7.1-design-note.md §3
+    text_hash: sha256:264612beba93b499b754ed86d6725f1e40bb2d6e900640bf044b8135b4fb83d7
+    text: >
+      Tunnel-mode SSH target, injected wan_probe returning one {port: 443, proto: tcp} yields Finding OPEN router-forwarded:{pk}; GET detail router_advice.finding_id set; T3 POST probe with empty forwards resolves the Finding; GET detail finding_id null. Missing inject is 4xx and no Finding. Non-tunnel target files nothing.

@@ -68,3 +68,5 @@
 /provision/overflow.py @farmertocoding
 /deploys/overflow.py @farmertocoding
 /monitor/overflow_reaper.py @farmertocoding
+/monitor/router_advisor.py @farmertocoding
+/monitor/router_views.py @farmertocoding
