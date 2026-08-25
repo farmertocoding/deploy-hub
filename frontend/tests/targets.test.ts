@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
 import {
-  TargetDetail, TargetsView, probeRouter,
+  TargetDetail, TargetsView, probeAndRefresh, probeRouter,
 } from "../src/screens/Targets.jsx";
 
 const render = (component: any, props: any = {}) =>
@@ -74,6 +74,41 @@ test("targets_view_shows_hardening_and_router_tabs", () => {
   assert.match(text, /Probe router/);
 });
 
+test("probeAndRefresh_refetches_target_detail_after_probe", async () => {
+  const calls: string[] = [];
+  (globalThis as any).fetch = async (url: string) => {
+    calls.push(String(url));
+    if (String(url).includes("router-probe")) {
+      return {
+        status: 201,
+        json: async () => ({ ok: true, target_id: 3, forwarded: false, finding_id: null }),
+      };
+    }
+    return {
+      status: 200,
+      json: async () => ({
+        id: 3,
+        host: "tun.lan",
+        kind: "ssh",
+        tunnel: true,
+        router_advice: {
+          mode: "tunnel",
+          forwarded: false,
+          finding_id: null,
+          title: "",
+          body: "",
+        },
+      }),
+    };
+  };
+  const { status, data } = await probeAndRefresh(3);
+  assert.equal(status, 201);
+  assert.equal(data.router_advice.finding_id, null);
+  assert.equal(data.router_advice.forwarded, false);
+  assert.equal(calls[0], "/api/v1/targets/3/router-probe/");
+  assert.equal(calls[1], "/api/v1/targets/3/");
+});
+
 test("probeRouter_posts_the_router_probe_route", async () => {
   const calls: Array<{ url: string; body: any }> = [];
   (globalThis as any).fetch = async (url: string, opts: any) => {
@@ -93,4 +128,6 @@ test("app_passes_route_and_onNav_into_targets", () => {
   assert.match(src, /onNav\("targets"/);
   assert.match(src, /target\.router_probe/);
   assert.match(src, /probeRouter/);
+  assert.match(src, /probeAndRefresh/);
+  assert.match(src, /setSelected\(result\.data\)/);
 });

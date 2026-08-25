@@ -18,6 +18,14 @@ export async function probeRouter(id) {
   return api(`v1/targets/${id}/router-probe/`, {});
 }
 
+export async function probeAndRefresh(id) {
+  const probed = await probeRouter(id);
+  if (probed.status < 200 || probed.status >= 300) return probed;
+  const detail = await api(`v1/targets/${id}/`);
+  if (detail.status !== 200) return probed;
+  return { status: probed.status, data: detail.data };
+}
+
 export function adviceStatus(advice) {
   if (!advice) return { icon: "ℹ", label: "no advice" };
   if (advice.mode === "not_tunnel") return { icon: "ℹ", label: "not tunnel mode" };
@@ -42,7 +50,7 @@ export function RouterAdvice({ advice }) {
   );
 }
 
-export function TargetDetail({ target, tab = "hardening", onTab }) {
+export function TargetDetail({ target, tab = "hardening", onTab, onProbe }) {
   return (
     <div style={{ ...box, marginTop: 12 }}>
       <nav style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -61,7 +69,7 @@ export function TargetDetail({ target, tab = "hardening", onTab }) {
         <div data-tab="router">
           <RouterAdvice advice={target?.router_advice} />
           <ActionButton row={tierFor("target.router_probe")}
-            onRun={() => probeRouter(target.id)} />
+            onRun={() => (onProbe || probeAndRefresh)(target.id)} />
         </div>
       )}
     </div>
@@ -105,6 +113,7 @@ export function costFromCreateGet(status, data) {
 export function TargetsView({
   phase, targets = [], awsCredentialsRef = "", cost, onError, onCopy, onCreate,
   onRetryCost, selectedId, selected, tab = "hardening", onTab, onSelect,
+  onProbe,
 }) {
   if (phase === "loading") return <LoadingLine what="targets" />;
   if (phase === "error") return <ErrorLine text={onError.text} onRetry={onError.retry} />;
@@ -150,7 +159,7 @@ export function TargetsView({
         </div>
       ))}
       {detail && (
-        <TargetDetail target={detail} tab={tab} onTab={onTab} />
+        <TargetDetail target={detail} tab={tab} onTab={onTab} onProbe={onProbe} />
       )}
     </div>
   );
@@ -188,6 +197,11 @@ export default function Targets({ route, onNav }) {
       if (status === 200) setSelected(data);
     });
   }, [route?.id]);
+  async function onProbe(id) {
+    const result = await probeAndRefresh(id);
+    if (result.status === 201 && result.data) setSelected(result.data);
+    return result;
+  }
   async function onCreate(host) {
     const result = await runCreateTarget(createTarget, host, { zone: "aws-use1" });
     if (!result.ok) {
@@ -210,7 +224,7 @@ export default function Targets({ route, onNav }) {
     <div>
       <TargetsView phase="live" targets={targets} awsCredentialsRef={awsRef} cost={cost}
         selectedId={route?.id} selected={selected} tab={tab} onTab={setTab}
-        onSelect={(id) => onNav("targets", id)}
+        onSelect={(id) => onNav("targets", id)} onProbe={onProbe}
         onCreate={onCreate}
         onRetryCost={() => instanceCreateCost().then(({ status, data }) => {
           setCost(costFromCreateGet(status, data));
