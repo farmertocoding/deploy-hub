@@ -1466,3 +1466,13 @@ requirements:
     text_hash: sha256:48e4c215693dfc048897e3b6c689b3fd371086133706fbf73619612897412d23
     text: >
       Beat ephemeral-overflow-reaper-daily (86400s, queue probes) calls reap_stale_ephemerals; it does not terminate; evaluate_site still never terminates; tests assert the Beat entry and call the task with planted AuditEvent timestamps.
+  # Phase 6.12 (docs/phase-6.12-design-note.md §3, Task 0 / D-119…D-121).
+  # New MUST id is tier-less (no `tier:` key). Do not rewrite
+  # SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT text:. Everyday conformance stays phase 5.
+  - id: SCALE-OVERFLOW-LOCK-ON-SEAM-REFUSE
+    phase: 6
+    verify: test
+    source: phase-6.12-design-note.md §3
+    text_hash: sha256:1075f46e47064d4d5f4cbcf7329cdb6e51478b7d08417e185af33b10b4661b9f
+    text: >
+      After overflow begin_deploy holds site and overflow-target deploy locks, execute that raises DeploySeamRefused from _resolve_seams marks FAILED and releases those locks; a FAILED holder is not left for heartbeat sweep to miss; evaluate_site still never creates a Deployment.
