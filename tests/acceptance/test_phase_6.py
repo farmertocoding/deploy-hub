@@ -123,20 +123,26 @@ def test_scale_ready_quiet_five_hot_mem_files_p2_proposal():
     event. Disk-only five hot minutes → no Finding.
 
     Transcribes tests/test_scale_evaluator.py::
-    test_five_hot_mem_minutes_file_proposal_with_cost,
+    test_five_hot_mem_minutes_file_cheap_before_overflow,
+    ::test_accepted_cheap_unblocks_overflow,
+    ::test_five_hot_mem_minutes_file_proposal_with_cost,
     ::test_five_hot_load_minutes_file_proposal,
     ::test_five_hot_disk_minutes_do_not_propose,
     ::test_re_evaluate_while_open_does_not_record_second_push, and
     ::test_scaling_and_beat_do_not_import_enroll_or_ec2.
     """
     from test_scale_evaluator import (
+        test_accepted_cheap_unblocks_overflow,
         test_five_hot_disk_minutes_do_not_propose,
         test_five_hot_load_minutes_file_proposal,
+        test_five_hot_mem_minutes_file_cheap_before_overflow,
         test_five_hot_mem_minutes_file_proposal_with_cost,
         test_re_evaluate_while_open_does_not_record_second_push,
         test_scaling_and_beat_do_not_import_enroll_or_ec2,
     )
 
+    test_five_hot_mem_minutes_file_cheap_before_overflow()
+    test_accepted_cheap_unblocks_overflow()
     test_five_hot_mem_minutes_file_proposal_with_cost()
     test_five_hot_load_minutes_file_proposal()
     test_five_hot_disk_minutes_do_not_propose()

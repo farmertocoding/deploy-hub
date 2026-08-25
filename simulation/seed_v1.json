@@ -349,6 +349,27 @@
       }
     },
     {
+      "id": "scale-cheap-remediation",
+      "must_render": [
+        "P2",
+        "Cheap remediations before overflow (propose mode)",
+        "Cache-Control",
+        "Cloudflare cache",
+        "gunicorn",
+        "2×CPU+1",
+        "Ack is not launch. Apply cache and workers before overflow."
+      ],
+      "finding": {
+        "id": 42, "source_engine": "scaling.evaluator", "severity": "p2",
+        "entity": "site:shop.example.com",
+        "title": "Cheap remediations before overflow (propose mode)",
+        "body": "shop has sustained ram pressure. Apply cheap remediations before overflow: Cache-Control, Cloudflare cache, gunicorn 2×CPU+1. propose-mode does not launch.",
+        "fix_action": "Ack is not launch. Apply cache and workers before overflow.",
+        "state": "open", "fingerprint": "scale-cheap-remediation:1",
+        "accepted_reason": ""
+      }
+    },
+    {
       "id": "scale-out-proposal",
       "must_render": [
         "P2",
@@ -399,6 +420,7 @@
     {"t": 53, "state_id": "partner-kill-switch-overlay", "topic": "findings", "event": {"kind": "partner-kill-switch", "title": "Suspend partner", "entity": "partner:fixture-partner"}},
     {"t": 55, "state_id": "partner-destination-order-confirm", "topic": "findings", "event": {"kind": "partner-destination-rank", "title": "Rank partner destination", "entity": "partner:fixture-partner"}},
     {"t": 57, "state_id": "single-instance-only", "topic": "site.lab.status", "event": {"site": "sqlite.example.test", "scale_ready": false, "badge": "single-instance-only"}},
-    {"t": 59, "state_id": "scale-out-proposal", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 41, "severity": "p2", "state": "open", "entity": "site:shop.example.com", "title": "Scale-out proposal awaiting approval (propose mode)", "fingerprint": "scale-out-proposal:1"}}
+    {"t": 59, "state_id": "scale-out-proposal", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 41, "severity": "p2", "state": "open", "entity": "site:shop.example.com", "title": "Scale-out proposal awaiting approval (propose mode)", "fingerprint": "scale-out-proposal:1"}},
+    {"t": 61, "state_id": "scale-cheap-remediation", "topic": "findings", "event": {"kind": "finding", "action": "filed", "id": 42, "severity": "p2", "state": "open", "entity": "site:shop.example.com", "title": "Cheap remediations before overflow (propose mode)", "fingerprint": "scale-cheap-remediation:1"}}
   ]
 }

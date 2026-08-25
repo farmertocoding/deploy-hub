@@ -10,6 +10,9 @@ from core.models import Finding, HostMetric, OperationLock, Site
 from monitor.alerts import raise_alert
 from scaling.attack_gate import AttackRefuse, PartnerOverflowRefuse, refuse_if_attack
 from scaling.constants import (
+    CHEAP_FIX_ACTION,
+    CHEAP_KIND,
+    CHEAP_TITLE,
     FIX_ACTION,
     OVERFLOW_HOURLY_USD,
     OVERFLOW_SIZE,
@@ -82,6 +85,12 @@ def _evaluate_eligible(site, *, now):
     if not sustained_pressure(samples, now=clock):
         _retract(site)
         return None
+    cheap_fp = f"{CHEAP_KIND}:{site.pk}"
+    cheap = Finding.objects.filter(fingerprint=cheap_fp).first()
+    if cheap is None or cheap.state == Finding.State.RESOLVED:
+        return _file_cheap(site, samples, clock)
+    if cheap.state in {Finding.State.OPEN, Finding.State.ACKED}:
+        return cheap
     fingerprint = f"{KIND}:{site.pk}"
     existing = Finding.objects.filter(fingerprint=fingerprint).first()
     if existing is not None and existing.state in {
@@ -108,6 +117,26 @@ def _evaluate_eligible(site, *, now):
     )
 
 
+def _file_cheap(site, samples, clock):
+    axis = _overflow_axis(samples, now=clock) or "ram"
+    entity = f"site:{site.domain or site.name}"
+    body = (
+        f"{site.name} has sustained {axis} pressure. "
+        "Apply cheap remediations before overflow: Cache-Control, "
+        "Cloudflare cache, gunicorn 2×CPU+1. "
+        "propose-mode does not launch."
+    )
+    return raise_alert(
+        "scale-cheap-remediation",
+        entity,
+        fingerprint=f"{CHEAP_KIND}:{site.pk}",
+        title=CHEAP_TITLE,
+        body=body,
+        fix_action=CHEAP_FIX_ACTION,
+        source_engine=SOURCE,
+    )
+
+
 def _samples(site, clock):
     rows = HostMetric.objects.filter(
         target_id=site.primary_target_id,
@@ -127,12 +156,13 @@ def _samples(site, clock):
 
 
 def _retract(site):
-    row = Finding.objects.filter(fingerprint=f"{KIND}:{site.pk}").first()
-    if row is not None and row.state in {
-        Finding.State.OPEN,
-        Finding.State.ACKED,
-    }:
-        resolve(row, source="system")
+    for kind in (CHEAP_KIND, KIND):
+        row = Finding.objects.filter(fingerprint=f"{kind}:{site.pk}").first()
+        if row is not None and row.state in {
+            Finding.State.OPEN,
+            Finding.State.ACKED,
+        }:
+            resolve(row, source="system")
 
 
 def _acquire_cycle_lock():

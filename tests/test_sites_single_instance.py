@@ -149,6 +149,31 @@ def test_f8_required_ids_include_single_instance_only_and_scale_out_proposal():
     assert "scale-out-proposal" in seed_ids
 
 
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+def test_f8_required_ids_include_scale_cheap_remediation():
+    """F8 seed for cheap remediations: title, three steps, no Approve/Launch."""
+    ids = _required_state_ids()
+    assert "scale-cheap-remediation" in ids
+    state = next(row for row in _seed()["states"] if row["id"] == "scale-cheap-remediation")
+    finding = state.get("finding") or {}
+    blob = json.dumps(state)
+    stripped = _strip_allowed_instance_tokens(blob)
+    assert re.search(r"\binstance\b", stripped, re.I) is None
+    assert finding.get("title") == "Cheap remediations before overflow (propose mode)"
+    assert finding.get("fix_action") == (
+        "Ack is not launch. Apply cache and workers before overflow."
+    )
+    body = finding.get("body") or ""
+    assert "Cache-Control" in body
+    assert "Cloudflare cache" in body
+    assert "gunicorn" in body
+    assert "2×CPU+1" in body
+    assert "propose-mode does not launch" in body
+    assert re.search(r"\bApprove\b", blob) is None
+    assert re.search(r"\bLaunch\b", blob) is None
+    assert "Create target" not in blob
+
+
 @pytest.mark.req("UX-P6-SINGLE-INSTANCE")
 def test_nav_stays_six():
     """NAV stays the six object-centric items. No Scale / Overflow / Instances."""

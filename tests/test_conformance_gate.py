@@ -2379,6 +2379,8 @@ PHASE_6_MUST_IDS = {
     "SCALE-READY-PREREQ",
     "UX-P6-SINGLE-INSTANCE",
     "P6-SCALER-DEMO",
+    "SCALE-CHEAP-BEFORE-OVERFLOW",
+    "SCALE-CHEAP-NO-MUTATE",
 }
 PHASE_6_TEST_IDS = PHASE_6_MUST_IDS - {"P6-SCALER-DEMO"}
 
@@ -2404,9 +2406,13 @@ def test_phase_6_due_set_includes_all_section_3_must_ids(tmp_path):
         f"§3 MUST ids must omit the tier: key: "
         f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
 
+    allowed_sources = {
+        "phase-6-design-note.md §3",
+        "phase-6.5-design-note.md §3",
+    }
     for rid in sorted(PHASE_6_MUST_IDS):
-        assert reg[rid]["source"] == "phase-6-design-note.md §3", (
-            f"{rid} source must be phase-6-design-note.md §3, "
+        assert reg[rid]["source"] in allowed_sources, (
+            f"{rid} source must be a phase-6 design-note §3, "
             f"got {reg[rid].get('source')!r}")
 
     for rid in sorted(PHASE_6_TEST_IDS):

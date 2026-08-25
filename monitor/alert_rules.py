@@ -212,6 +212,13 @@ RULES = (
         "alert-protocol.md §2 P2",
     ),
     _r(
+        "scale-cheap-remediation",
+        "p2",
+        "Cheap remediations before overflow (propose mode) — Cache-Control, "
+        "Cloudflare cache, gunicorn 2×CPU+1",
+        "deploy-system-plan.md §9.5.3 / phase-6.5-design-note.md §1.1",
+    ),
+    _r(
         "feed-data-stale",
         "p2",
         "Feed data-stale beyond per-feed threshold (market-calendar-aware) "

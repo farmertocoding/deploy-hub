@@ -64,7 +64,9 @@ two record clauses stayed red until this file existed. After this file:
 ### Sustained propose (quiet, scale-ready, public)
 
 Five distinct UTC minutes of `ram=90` inside the 300s Hub-clock window
-file kind `scale-out-proposal` fingerprint `scale-out-proposal:{site.pk}`
+file kind `scale-cheap-remediation` first (`scale-cheap-remediation:{site.pk}`),
+body names Cache-Control / Cloudflare cache / gunicorn 2×CPU+1, then
+accept-risk of that row files kind `scale-out-proposal` fingerprint `scale-out-proposal:{site.pk}`
 P2, title `Scale-out proposal awaiting approval (propose mode)`,
 `fix_action` exactly `Ack is not launch. Propose-mode does not launch.`,
 body names the site, `ram`, `0.0416`, `t3.medium`, and

@@ -62,6 +62,7 @@ const REQUIRED_STATE_IDS = [
   "partner-destination-order-confirm",
   "single-instance-only",
   "scale-out-proposal",
+  "scale-cheap-remediation",
 ];
 
 function loadSeed() {
@@ -189,6 +190,12 @@ const RENDER: Record<string, (state: any) => string> = {
     phase: "live", sites: [s.site], onSelect: () => {}, onNav: () => {},
   }),
   "scale-out-proposal": (s) =>
+    render(FindingsView, {
+      phase: "live", findings: [findingFrom(s)], onNav: () => {},
+    }) + render(FindingDetail, {
+      finding: findingFrom(s), onBack: () => {},
+    }),
+  "scale-cheap-remediation": (s) =>
     render(FindingsView, {
       phase: "live", findings: [findingFrom(s)], onNav: () => {},
     }) + render(FindingDetail, {

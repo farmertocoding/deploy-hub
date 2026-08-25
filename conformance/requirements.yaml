@@ -1324,10 +1324,10 @@ requirements:
   - id: SCALE-SUSTAINED-PROPOSE
     phase: 6
     verify: test
-    source: phase-6-design-note.md §3
-    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    source: phase-6.5-design-note.md §3
+    text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
     text: >
-      five consecutive distinct UTC minutes of HostMetric samples in a 300s Hub-clock window over the same axis (mem_pct>85 or load1>cores) file Finding kind scale-out-proposal fingerprint scale-out-proposal:{site.pk} whose body includes the cost estimate and the sentence propose-mode does not launch; disk-only heat does not file.
+      five consecutive distinct UTC minutes of HostMetric samples in a 300s Hub-clock window over the same axis (mem_pct>85 or load1>cores) file Finding kind scale-cheap-remediation fingerprint scale-cheap-remediation:{site.pk} whose body includes Cache-Control, Cloudflare cache, gunicorn 2×CPU+1, and the sentence propose-mode does not launch; disk-only heat does not file; an ACCEPTED cheap finding plus still-sustained pressure files scale-out-proposal as before.
   - id: SCALE-SPIKE-NO-PROPOSE
     phase: 6
     verify: test
@@ -1338,17 +1338,17 @@ requirements:
   - id: SCALE-NEVER-ATTACK
     phase: 6
     verify: test
-    source: phase-6-design-note.md §3
-    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    source: phase-6.5-design-note.md §3
+    text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
     text: >
-      evaluate_site calls refuse_if_attack first; when the attack playbook is engaged no scale-out-proposal is filed and an OPEN or ACKED proposal for that site is system-resolved.
+      evaluate_site calls refuse_if_attack first; when the attack playbook is engaged no scale-cheap-remediation and no scale-out-proposal is filed and an OPEN or ACKED cheap or overflow Finding for that site is system-resolved.
   - id: SCALE-NEVER-PARTNER
     phase: 6
     verify: test
-    source: phase-6-design-note.md §3
-    text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
+    source: phase-6.5-design-note.md §3
+    text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
     text: >
-      a PartnerSite never receives scale-out-proposal even on sustained pressure and a quiet attack playbook; binding PartnerSite after file system-resolves an OPEN proposal.
+      a PartnerSite never receives scale-cheap-remediation or scale-out-proposal even on sustained pressure and a quiet attack playbook; binding PartnerSite after file system-resolves an OPEN cheap or overflow Finding.
   - id: SCALE-PROPOSE-NO-PROVISION
     phase: 6
     verify: test
@@ -1379,3 +1379,17 @@ requirements:
     text_hash: sha256:cd013d0e1833039a97128ab62f9fff13acd19d59db1678e51959102bd4f2d404
     text: >
       demo record names the MUST path in design note §4; no live provision, no auto mode, no AMI, no ScalePolicy table.
+  - id: SCALE-CHEAP-BEFORE-OVERFLOW
+    phase: 6
+    verify: test
+    source: phase-6.5-design-note.md §3
+    text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
+    text: >
+      evaluate_site files scale-cheap-remediation before scale-out-proposal; OPEN or ACKED cheap does not file overflow; ACCEPTED cheap unblocks scale-out-proposal; attack or partner refuse system-resolves OPEN or ACKED cheap.
+  - id: SCALE-CHEAP-NO-MUTATE
+    phase: 6
+    verify: test
+    source: phase-6.5-design-note.md §3
+    text_hash: sha256:55240144ba8faa5c3a3a6b4f6ece8f9db07cde439e0c78c73993826b68795ee2
+    text: >
+      cheap-remediation evaluate_site never creates a Target, never calls EdgeProtection cache or enroll_aws_target, and does not rewrite gunicorn workers.

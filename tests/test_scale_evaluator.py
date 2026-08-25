@@ -28,6 +28,9 @@ BANNED_IMPORTS = (
     "InstanceCreateView",
     "boto3",
     "CloudProvider",
+    "EdgeProtection",
+    "purge_cache",
+    "set_security_level",
 )
 AST_PATHS = (
     REPO / "scaling",
@@ -56,6 +59,27 @@ def _ready_site(slug):
 
 def _fp(site):
     return f"scale-out-proposal:{site.pk}"
+
+
+def _cheap_fp(site):
+    return f"scale-cheap-remediation:{site.pk}"
+
+
+def _cheap(site):
+    return Finding.objects.filter(fingerprint=_cheap_fp(site)).first()
+
+
+def _overflow_after_cheap(site, *, now=NOW):
+    """Accept the cheap Finding so evaluate_site may file overflow."""
+    from core.findings import accept_risk
+    from scaling.evaluator import evaluate_site
+
+    cheap = evaluate_site(site, now=now)
+    assert cheap is not None
+    assert cheap.fingerprint == _cheap_fp(site)
+    if cheap.state != Finding.State.ACCEPTED:
+        accept_risk(cheap, "cheap remediations already applied")
+    return evaluate_site(site, now=now)
 
 
 def _minutes(now=NOW, n=5):
@@ -156,6 +180,189 @@ def _call_name(call):
     return None
 
 
+CHEAP_TITLE = "Cheap remediations before overflow (propose mode)"
+CHEAP_FIX_ACTION = "Ack is not launch. Apply cache and workers before overflow."
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+@pytest.mark.req("SCALE-SUSTAINED-PROPOSE")
+def test_five_hot_mem_minutes_file_cheap_before_overflow():
+    """Five ram=90 minutes file cheap remediations, not overflow.
+
+    What would make this fail: skipping §9.5.3 so the first streak still
+    opens scale-out-proposal:{pk} and rents a server in copy.
+    """
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-mem")
+    before = Target.objects.count()
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    assert row.fingerprint == _cheap_fp(site)
+    assert row.entity == f"site:{site.domain}"
+    assert row.title == CHEAP_TITLE
+    assert row.fix_action == CHEAP_FIX_ACTION
+    assert "Cache-Control" in row.body
+    assert "Cloudflare cache" in row.body
+    assert "gunicorn" in row.body
+    assert "2×CPU+1" in row.body or "2xCPU+1" in row.body
+    assert "propose-mode does not launch" in row.body
+    assert site.name in row.body
+    assert "ram" in row.body
+    blob = f"{row.title} {row.body} {row.fix_action}"
+    assert re.search(r"\binstance\b", blob) is None
+    assert "Approve" not in blob
+    assert "Launch" not in blob
+    assert "enroll" not in blob
+    assert _proposal(site) is None
+    assert Target.objects.count() == before
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+def test_open_cheap_does_not_file_overflow():
+    """OPEN cheap blocks scale-out-proposal on the next evaluate.
+
+    What would make this fail: filing overflow while cheap is still OPEN.
+    """
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-open")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    first = evaluate_site(site, now=NOW)
+    assert first is not None
+    assert first.fingerprint == _cheap_fp(site)
+    second = evaluate_site(site, now=NOW)
+    assert second is not None
+    assert second.pk == first.pk
+    assert second.state == Finding.State.OPEN
+    assert _proposal(site) is None
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+def test_acked_cheap_does_not_file_overflow():
+    """ACKED cheap still blocks overflow.
+
+    What would make this fail: treating Ack as skip-cheap so overflow files.
+    """
+    from core.findings import ack
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-acked")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    again = evaluate_site(site, now=NOW)
+    assert again is not None
+    assert again.pk == row.pk
+    assert _proposal(site) is None
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+@pytest.mark.req("SCALE-NEVER-ATTACK")
+def test_open_cheap_resolves_when_attack_engages():
+    """OPEN cheap system-resolves when the attack playbook engages."""
+    from test_attack_playbook import _attack_shaped
+
+    from core.models import AuditEvent
+    from monitor.attack_playbook import run
+    from providers.fakes import FakeEdgeProtection
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-atk")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row.fingerprint == _cheap_fp(site)
+    _attack_shaped(site)
+    run(site, FakeEdgeProtection())
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
+    assert _proposal(site) is None
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+@pytest.mark.req("SCALE-NEVER-PARTNER")
+def test_partner_bind_resolves_open_cheap():
+    """Binding PartnerSite system-resolves OPEN cheap; no overflow."""
+    from core.models import Partner, PartnerSite
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-part")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    partner = Partner.objects.create(slug="cheap-part-p", name="cheap-part-p")
+    PartnerSite.objects.create(partner=partner, site=site, tenant_ref="cheap-part-t")
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert _proposal(site) is None
+
+
+@pytest.mark.req("SCALE-CHEAP-BEFORE-OVERFLOW")
+@pytest.mark.req("SCALE-SUSTAINED-PROPOSE")
+def test_accepted_cheap_unblocks_overflow():
+    """ACCEPTED cheap + still-sustained files the costed overflow Finding.
+
+    What would make this fail: ACCEPTED cheap staying a dead-end, or filing
+    overflow without the operator skipping cheap remediations.
+    """
+    from core.findings import accept_risk
+    from scaling.constants import FIX_ACTION as PINNED_FIX
+    from scaling.constants import TITLE as PINNED_TITLE
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-ack")
+    before = Target.objects.count()
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    cheap = evaluate_site(site, now=NOW)
+    assert cheap is not None
+    assert cheap.fingerprint == _cheap_fp(site)
+    accept_risk(cheap, "cache and workers already applied")
+    cheap.refresh_from_db()
+    assert cheap.state == Finding.State.ACCEPTED
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    assert row.fingerprint == _fp(site)
+    assert row.title == TITLE == PINNED_TITLE
+    assert row.fix_action == FIX_ACTION == PINNED_FIX
+    assert "0.0416" in row.body
+    assert "t3.medium" in row.body
+    assert "propose-mode does not launch" in row.body
+    assert Target.objects.count() == before
+
+
+@pytest.mark.req("SCALE-CHEAP-NO-MUTATE")
+def test_cheap_path_does_not_call_edge_cache_or_enroll():
+    """Cheap evaluate never mutates Cloudflare cache or gunicorn or enrolls.
+
+    What would make this fail: scaling.evaluator importing EdgeProtection
+    cache helpers or rewriting workers while proposing cheap steps.
+    """
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("cheap-nomut")
+    before = Target.objects.count()
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    evaluate_site(site, now=NOW)
+    src = (REPO / "scaling" / "evaluator.py").read_text(encoding="utf-8")
+    assert "set_security_level" not in src
+    assert "purge_cache" not in src
+    assert "gunicorn" not in src or "2×CPU+1" in src or "2xCPU+1" in src
+    assert "--workers" not in src
+    hits = _ast_hits(AST_PATHS, BANNED_IMPORTS)
+    assert hits == [], hits
+    assert Target.objects.count() == before
+    assert not (REPO / "scaling" / "tasks.py").exists()
+
+
 @pytest.mark.req("SCALE-SUSTAINED-PROPOSE")
 def test_five_hot_mem_minutes_file_proposal_with_cost():
     """Five distinct UTC minutes of ram=90 file a costed propose-mode Finding.
@@ -166,12 +373,11 @@ def test_five_hot_mem_minutes_file_proposal_with_cost():
     """
     from scaling.constants import FIX_ACTION as PINNED_FIX
     from scaling.constants import TITLE as PINNED_TITLE
-    from scaling.evaluator import evaluate_site
 
     site = _ready_site("hot-mem")
     before = Target.objects.count()
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     assert row.fingerprint == _fp(site)
     assert row.entity == f"site:{site.domain}"
@@ -202,11 +408,10 @@ def test_five_hot_load_minutes_file_proposal():
     What would make this fail: requiring ram heat, ignoring cores, or treating
     load=5 with cores=4 as cold.
     """
-    from scaling.evaluator import evaluate_site
 
     site = _ready_site("hot-load")
     _plant(site.primary_target, _minutes(), ram=10.0, disk=10.0, load=5.0, cores=4)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     assert row.fingerprint == _fp(site)
     assert "load" in row.body
@@ -372,7 +577,7 @@ def test_open_proposal_resolves_when_attack_engages():
 
     site = _ready_site("atk-retract")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     assert row.state == Finding.State.OPEN
     _attack_shaped(site)
@@ -406,7 +611,7 @@ def test_acked_proposal_resolves_when_attack_engages():
 
     site = _ready_site("atk-acked")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     ack(row)
     row.refresh_from_db()
@@ -460,7 +665,7 @@ def test_partner_bind_after_file_resolves_open_proposal():
     assert refuse_if_attack(control) is None
     site = _ready_site("bind-hot")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     partner = Partner.objects.create(slug="bind-hot-p", name="bind-hot-p")
     PartnerSite.objects.create(partner=partner, site=site, tenant_ref="bind-hot-t")
@@ -489,7 +694,7 @@ def test_partner_bind_after_file_resolves_acked_proposal():
     assert refuse_if_attack(control) is None
     site = _ready_site("bind-acked")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     ack(row)
     row.refresh_from_db()
@@ -635,7 +840,7 @@ def test_re_evaluate_while_open_does_not_record_second_push():
 
     site = _ready_site("re-open")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    first = evaluate_site(site, now=NOW)
+    first = _overflow_after_cheap(site)
     assert first is not None
     n = _push_count()
     assert n >= 1
@@ -658,7 +863,7 @@ def test_streak_break_resolves_open_proposal():
 
     site = _ready_site("streak-break")
     _plant(site.primary_target, _minutes(), ram=90.0)
-    row = evaluate_site(site, now=NOW)
+    row = _overflow_after_cheap(site)
     assert row is not None
     later = NOW + timedelta(minutes=1)
     _plant(site.primary_target, [later], ram=10.0)
