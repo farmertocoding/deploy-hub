@@ -449,3 +449,52 @@ class OverflowJoinView(APIView):
         )
         body = OverflowJoinResultSerializer(result)
         return Response(body.data, status=status.HTTP_201_CREATED)
+
+
+class OverflowScaleInSerializer(serializers.Serializer):
+    target = serializers.IntegerField()
+    confirm_name = serializers.CharField()
+
+
+class OverflowScaleInResultSerializer(serializers.Serializer):
+    target = serializers.IntegerField()
+    unjoined = serializers.CharField()
+
+
+class OverflowScaleInView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-host, then scale-in."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(
+        request=OverflowScaleInSerializer,
+        responses={200: OverflowScaleInResultSerializer},
+    )
+    def post(self, request, pk):
+        site = get_object_or_404(Site, pk=pk)
+        ser = OverflowScaleInSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        target = get_object_or_404(Target, pk=ser.validated_data["target"])
+        if ser.validated_data["confirm_name"] != target.host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from core import overflow_deploys
+
+        try:
+            result = overflow_deploys.scale_in(site, target)
+        except overflow_deploys.OverflowDeployError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "site.overflow_scale_in",
+            source="api",
+            actor=request.user,
+            obj=site,
+            severity="security",
+        )
+        body = OverflowScaleInResultSerializer(result)
+        return Response(body.data, status=status.HTTP_200_OK)

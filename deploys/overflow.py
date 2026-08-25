@@ -26,6 +26,12 @@ COPY_NOT_RUNNING = "overflow copy is not running"
 LOCK_BUSY = "could not acquire deploy lock"
 EQUAL_IPV4 = "overflow origin IPv4 matches primary"
 NEED_ORIGIN = "overflow join needs origin IPv4s or a tunnel-mode home"
+UNJOIN_FAIL = "could not unjoin overflow origin"
+TERMINATE_FAIL = "overflow terminate failed"
+SCALE_IN_TARGET = (
+    "overflow target must be an ephemeral aws_ec2 that is not "
+    "the site primary"
+)
 
 
 def overflow_copy_thunk(*args, **kwargs):
@@ -40,6 +46,13 @@ def overflow_join_thunk(*args, **kwargs):
     from deploys import overflow as overflow_mod
 
     return overflow_mod.join_overflow_traffic(*args, **kwargs)
+
+
+def overflow_scale_in_thunk(*args, **kwargs):
+    """Port thunk: look up scale_in_overflow at call time (HTTP inject)."""
+    from deploys import overflow as overflow_mod
+
+    return overflow_mod.scale_in_overflow(*args, **kwargs)
 
 
 def _joinable_ipv4(host):
@@ -265,4 +278,114 @@ def join_overflow_traffic(
             "values": [primary_ip, overflow_ip],
         }
     finally:
+        locks.release("site", site.pk, "deploy", holder=holder)
+
+
+def scale_in_overflow(
+    site, target, *, dns=None, provider=None, transport=None,
+    replica=None, sleep=None,
+):
+    """Unjoin overflow origin then terminate. Attack does not block."""
+    from scaling.attack_gate import PartnerOverflowRefuse, refuse_if_partner_overflow
+
+    try:
+        refuse_if_partner_overflow(site)
+    except PartnerOverflowRefuse as exc:
+        raise OverflowDeployError(str(exc)) from exc
+
+    from core import locks
+    from core.findings import resolve
+    from core.models import DnsRecord, Finding, Site, SiteInstance, Target
+    from deploys.steps import ensure_dns
+    from provision.aws_enroll import TerminateError, terminate_aws_target
+
+    if (
+        target.kind != Target.Kind.AWS_EC2
+        or target.lifecycle != Target.Lifecycle.EPHEMERAL
+        or target.pk == site.primary_target_id
+    ):
+        raise OverflowDeployError(SCALE_IN_TARGET)
+
+    holder = f"overflow-scale-in:{site.pk}"
+    if locks.acquire("site", site.pk, "deploy", holder) is None:
+        raise OverflowDeployError(LOCK_BUSY)
+    target_lock = None
+    unjoined = "none"
+    try:
+        target_lock = locks.acquire("target", target.pk, "deploy", holder)
+        if target_lock is None:
+            raise OverflowDeployError(LOCK_BUSY)
+
+        if _tunnel_home(site):
+            fn = replica if replica is not None else (lambda *_a, **_k: None)
+            fn(site, target, transport)
+            unjoined = "tunnel"
+        elif site.exposure != Site.Exposure.MESH_ONLY:
+            rec = DnsRecord.objects.filter(
+                site=site, name=site.domain, rtype="A",
+            ).first()
+            host = (target.host or "").strip()
+            parts = []
+            if rec is not None and rec.value:
+                parts = [p.strip() for p in rec.value.split(",") if p.strip()]
+            if host and host in parts:
+                remainder = [p for p in parts if p != host]
+                joinable = [ip for ip in (_joinable_ipv4(p) for p in remainder) if ip]
+                if not joinable:
+                    primary = site.primary_target
+                    pip = _joinable_ipv4(
+                        primary.host if primary is not None else "",
+                    )
+                    if not pip:
+                        raise OverflowDeployError(UNJOIN_FAIL)
+                    joinable = [pip]
+                if dns is None:
+                    from providers.registry import ScopeError, dns_provider_for
+
+                    if site.dns_zone_id is None:
+                        raise OverflowDeployError(UNJOIN_FAIL)
+                    try:
+                        dns = dns_provider_for(site.dns_zone)
+                    except ScopeError as exc:
+                        raise OverflowDeployError(UNJOIN_FAIL) from exc
+                try:
+                    ensure_dns({
+                        "site": site,
+                        "dns": dns,
+                        "dns_zone": site.dns_zone,
+                        "zone": site.dns_zone,
+                        "domain": site.domain,
+                        "dns_values": joinable,
+                        "dns_proxied": site.proxied,
+                    })
+                except OverflowDeployError:
+                    raise
+                except Exception as exc:
+                    raise OverflowDeployError(UNJOIN_FAIL) from exc
+                unjoined = "dns"
+
+        if target.status != Target.Status.DECOMMISSIONED:
+            try:
+                terminate_aws_target(target, provider=provider)
+            except TerminateError as exc:
+                raise OverflowDeployError(TERMINATE_FAIL) from exc
+
+        inst = SiteInstance.objects.filter(site=site, target=target).first()
+        if inst is not None:
+            inst.desired_state = SiteInstance.DesiredState.ABSENT
+            inst.observed_state = SiteInstance.ObservedState.ABSENT
+            inst.save(update_fields=["desired_state", "observed_state"])
+
+        row = Finding.objects.filter(
+            fingerprint=f"scale-out-proposal:{site.pk}",
+        ).first()
+        if row is not None and row.state in (
+            Finding.State.OPEN, Finding.State.ACKED, Finding.State.ACCEPTED,
+        ):
+            resolve(row, source="system")
+
+        return {"target": target.pk, "unjoined": unjoined}
+    finally:
+        if target_lock is not None:
+            locks.release("target", target.pk, "deploy", holder=holder)
         locks.release("site", site.pk, "deploy", holder=holder)

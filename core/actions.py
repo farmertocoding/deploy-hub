@@ -24,6 +24,7 @@ ACTION_TIERS = (
     {"id": "instance.terminate", "tier": "T1", "label": "Terminate target"},
     {"id": "site.overflow_deploy", "tier": "T1", "label": "Deploy overflow copy"},
     {"id": "site.overflow_join", "tier": "T1", "label": "Join overflow traffic"},
+    {"id": "site.overflow_scale_in", "tier": "T1", "label": "Scale in overflow"},
     {"id": "partner.create", "tier": "T1", "label": "Create partner"},
     {"id": "partner.suspend", "tier": "T1", "label": "Suspend partner"},
     {"id": "partner.api_kill_switch", "tier": "T1", "label": "Disable partner API"},

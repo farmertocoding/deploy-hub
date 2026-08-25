@@ -457,6 +457,7 @@ T1_HTTP = {
     "partner.api_kill_switch": "/api/v1/partner-api/kill-switch/",
     "site.overflow_deploy": "/api/v1/sites/{pk}/overflow-deploy/",
     "site.overflow_join": "/api/v1/sites/{pk}/overflow-join/",
+    "site.overflow_scale_in": "/api/v1/sites/{pk}/overflow-scale-in/",
 }
 
 

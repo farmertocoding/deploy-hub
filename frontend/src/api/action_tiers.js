@@ -92,6 +92,11 @@ export const ACTION_TIERS = [
     "label": "Join overflow traffic"
   },
   {
+    "id": "site.overflow_scale_in",
+    "tier": "T1",
+    "label": "Scale in overflow"
+  },
+  {
     "id": "partner.create",
     "tier": "T1",
     "label": "Create partner"

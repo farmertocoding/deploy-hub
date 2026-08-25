@@ -459,17 +459,18 @@ def _joined_dns_values(site):
     rec = DnsRecord.objects.filter(
         site=site, name=site.domain, rtype="A",
     ).first()
-    if rec is None or "," not in (rec.value or ""):
+    if rec is None or not (rec.value or "").strip():
         return None
     parts = [part.strip() for part in rec.value.split(",") if part.strip()]
-    if len(parts) < 2:
+    if not parts:
         return None
     try:
-        for part in parts:
-            ipaddress.IPv4Address(part)
+        addrs = [ipaddress.IPv4Address(part) for part in parts]
     except ValueError:
         return None
-    return parts
+    if any(addr.is_loopback or addr.is_link_local for addr in addrs):
+        return None
+    return [str(addr) for addr in addrs]
 
 
 def _json_list(raw):

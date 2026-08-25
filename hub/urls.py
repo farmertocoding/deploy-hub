@@ -13,6 +13,7 @@ from core.views import (
     InstanceTerminateView,
     OverflowDeployView,
     OverflowJoinView,
+    OverflowScaleInView,
     SshRotateView,
     TargetDeleteView,
 )
@@ -43,6 +44,8 @@ urlpatterns = [
          name="site-overflow-deploy"),
     path("api/v1/sites/<int:pk>/overflow-join/", OverflowJoinView.as_view(),
          name="site-overflow-join"),
+    path("api/v1/sites/<int:pk>/overflow-scale-in/", OverflowScaleInView.as_view(),
+         name="site-overflow-scale-in"),
     path("api/v1/partners/<int:pk>/destination-rank/",
          PartnerDestinationRankView.as_view(),
          name="partner-destination-rank"),

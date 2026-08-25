@@ -29,6 +29,9 @@ BANNED_IMPORTS = (
     "overflow",
     "deploy_overflow_copy",
     "join_overflow_traffic",
+    "scale_in_overflow",
+    "reap_stale_ephemerals",
+    "terminate_aws_target",
     "InstanceCreateView",
     "boto3",
     "CloudProvider",
@@ -40,6 +43,7 @@ AST_PATHS = (
     REPO / "scaling",
     REPO / "monitor" / "tasks.py",
     REPO / "monitor" / "host_metrics.py",
+    REPO / "monitor" / "overflow_reaper.py",
 )
 
 
