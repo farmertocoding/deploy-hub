@@ -106,10 +106,11 @@ def _write_heartbeat(deployment, now):
     Deployment.objects.filter(pk=deployment.pk).update(last_heartbeat=now)
     deployment.last_heartbeat = now
     holder = str(deployment.pk)
-    site = deployment.manifest.site
-    locks.heartbeat("site", site.pk, "deploy", holder=holder)
-    if site.primary_target_id:
-        locks.heartbeat("target", site.primary_target_id, "deploy", holder=holder)
+    rows = OperationLock.objects.filter(
+        kind=OperationLock.Kind.DEPLOY, holder=holder,
+    )
+    for row in rows:
+        locks.heartbeat(row.scope, row.object_id, row.kind, holder=holder)
 
 
 def load_env_snapshot(deployment):
@@ -124,13 +125,15 @@ def load_env_snapshot(deployment):
     return vault_service.get(secret, reason=f"deploy {deployment.pk}")
 
 
-def begin_deploy(deployment):
+def begin_deploy(deployment, *, target=None):
     """Acquire site+target deploy locks, persist steps, set running.
 
     Returns False (and does not start) if a lock cannot be taken.
+    `target` defaults to site.primary_target; overflow passes the ephemeral Target.
     """
     site = deployment.manifest.site
-    target = site.primary_target
+    if target is None:
+        target = site.primary_target
     if target is None:
         return False
 
@@ -291,14 +294,11 @@ def _previous_succeeded(deployment):
     )
 
 
-def _build_and_ship_skipped(deployment):
-    skipped = set(
-        deployment.steps.filter(
-            name__in=[DeploymentStep.Name.BUILD, DeploymentStep.Name.SHIP],
-            status=DeploymentStep.Status.SKIPPED,
-        ).values_list("name", flat=True)
-    )
-    return skipped == {DeploymentStep.Name.BUILD, DeploymentStep.Name.SHIP}
+def _build_skipped(deployment):
+    return deployment.steps.filter(
+        name=DeploymentStep.Name.BUILD,
+        status=DeploymentStep.Status.SKIPPED,
+    ).exists()
 
 
 def _stored_image_tag(deployment):
@@ -377,7 +377,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
     else:
         env_names = list(body.get("env_names") or [])
 
-    if prev is not None and _build_and_ship_skipped(deployment):
+    if prev is not None and _build_skipped(deployment):
         git_sha, pinned_tag = _pin_from_succeeded_history(deployment, git_sha)
     else:
         pinned_tag = image_tag(git_sha, body)

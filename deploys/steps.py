@@ -70,8 +70,7 @@ def ensure_ship(desired):
     with pull-only creds via a 0600 file — never password-on-argv.
     """
     transport = desired["transport"]
-    body = desired.get("manifest_body") or {}
-    tag = image_tag(desired["git_sha"], body)
+    tag = _desired_image_tag(desired)
     if _image_present(transport, tag):
         return {"status": "skipped", "tag": tag}
 

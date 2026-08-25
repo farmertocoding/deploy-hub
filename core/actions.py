@@ -22,6 +22,7 @@ ACTION_TIERS = (
     {"id": "ssh.rotate", "tier": "T1", "label": "Rotate SSH key"},
     {"id": "instance.create", "tier": "T1", "label": "Create target"},
     {"id": "instance.terminate", "tier": "T1", "label": "Terminate target"},
+    {"id": "site.overflow_deploy", "tier": "T1", "label": "Deploy overflow copy"},
     {"id": "partner.create", "tier": "T1", "label": "Create partner"},
     {"id": "partner.suspend", "tier": "T1", "label": "Suspend partner"},
     {"id": "partner.api_kill_switch", "tier": "T1", "label": "Disable partner API"},

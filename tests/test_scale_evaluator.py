@@ -27,6 +27,7 @@ BANNED_IMPORTS = (
     "enroll_aws_target",
     "enroll_overflow_target",
     "overflow",
+    "deploy_overflow_copy",
     "InstanceCreateView",
     "boto3",
     "CloudProvider",

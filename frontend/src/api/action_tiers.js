@@ -82,6 +82,11 @@ export const ACTION_TIERS = [
     "label": "Terminate target"
   },
   {
+    "id": "site.overflow_deploy",
+    "tier": "T1",
+    "label": "Deploy overflow copy"
+  },
+  {
     "id": "partner.create",
     "tier": "T1",
     "label": "Create partner"

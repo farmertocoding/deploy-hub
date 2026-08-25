@@ -347,3 +347,54 @@ class InstanceTerminateView(APIView):
             severity="security",
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OverflowDeploySerializer(serializers.Serializer):
+    target = serializers.IntegerField()
+    confirm_name = serializers.CharField()
+
+
+class OverflowDeployResultSerializer(serializers.Serializer):
+    deployment = serializers.IntegerField()
+    target = serializers.IntegerField()
+
+
+class OverflowDeployView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-host, then overflow copy."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(
+        request=OverflowDeploySerializer,
+        responses={201: OverflowDeployResultSerializer},
+    )
+    def post(self, request, pk):
+        site = get_object_or_404(Site, pk=pk)
+        ser = OverflowDeploySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        target = get_object_or_404(Target, pk=ser.validated_data["target"])
+        if ser.validated_data["confirm_name"] != target.host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from deploys import overflow as overflow_mod
+
+        try:
+            deployment = overflow_mod.deploy_overflow_copy(site, target)
+        except overflow_mod.OverflowDeployError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "site.overflow_deploy",
+            source="api",
+            actor=request.user,
+            obj=site,
+            severity="security",
+        )
+        body = OverflowDeployResultSerializer(
+            {"deployment": deployment.pk, "target": target.pk}
+        )
+        return Response(body.data, status=status.HTTP_201_CREATED)

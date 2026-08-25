@@ -11,6 +11,7 @@ from core.partner_views import (
 from core.views import (
     InstanceCreateView,
     InstanceTerminateView,
+    OverflowDeployView,
     SshRotateView,
     TargetDeleteView,
 )
@@ -37,6 +38,8 @@ urlpatterns = [
          name="partner-api-kill-switch"),
     path("api/v1/sites/<int:pk>/takedown/", PartnerSiteTakedownView.as_view(),
          name="site-takedown"),
+    path("api/v1/sites/<int:pk>/overflow-deploy/", OverflowDeployView.as_view(),
+         name="site-overflow-deploy"),
     path("api/v1/partners/<int:pk>/destination-rank/",
          PartnerDestinationRankView.as_view(),
          name="partner-destination-rank"),
