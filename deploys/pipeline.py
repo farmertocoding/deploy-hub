@@ -193,6 +193,7 @@ def execute(deployment_id, *, transport=None, dns=None, sleep=None, cert_issuer=
     except DeploySeamRefused:
         deployment.status = Deployment.Status.FAILED
         deployment.save(update_fields=["status"])
+        release_deploy_locks(deployment)
         raise
     if deployment.status == Deployment.Status.QUEUED:
         if not begin_deploy(deployment):

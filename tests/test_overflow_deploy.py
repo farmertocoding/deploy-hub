@@ -537,3 +537,56 @@ def test_overflow_deploy_port_unwired_fails_loud(monkeypatch):
         port.deploy(None, None)
     django_apps.get_app_config("deploys").ready()
     assert port._impl is not None
+
+
+@pytest.mark.req("SCALE-OVERFLOW-LOCK-ON-SEAM-REFUSE")
+def test_overflow_seam_refuse_after_begin_deploy_releases_locks():
+    """Overflow begin_deploy then production seams refuse: FAILED, locks gone.
+
+    transport injected, dns/cert_issuer unset so _resolve_seams takes the
+    factory. DnsAccount has no token refs. A later site deploy-lock acquire
+    must succeed — join must not 4xx lock-busy on a FAILED holder.
+
+    What would make this fail: execute setting FAILED and re-raising before
+    release_deploy_locks, leaving holder=str(pk) for heartbeat (RUNNING-only)
+    to miss.
+    """
+    from core import locks
+    from deploys.overflow import deploy_overflow_copy
+    from deploys.seams import DeploySeamRefused
+    from deploys.testing import PipelineTransport
+
+    site, _row = _accepted_overflow("ovf-seam-lock")
+    account = site.dns_zone.account
+    assert not account.dns_token_ref
+    assert not account.origin_ca_key_ref
+    _plant_live_tag(site)
+    overflow = _ephemeral_ready(site, host="ovf-seam-lock.lan")
+
+    with pytest.raises(DeploySeamRefused, match="dns_token_ref|origin_ca_key_ref"):
+        deploy_overflow_copy(site, overflow, transport=PipelineTransport())
+
+    deployment = (
+        Deployment.objects.filter(manifest__site=site).exclude(
+            status=Deployment.Status.SUCCEEDED,
+        ).latest("pk")
+    )
+    assert deployment.status == Deployment.Status.FAILED
+    leftover = OperationLock.objects.filter(
+        kind=OperationLock.Kind.DEPLOY, holder=str(deployment.pk),
+    )
+    assert list(leftover) == [], [
+        (row.scope, row.object_id, row.holder) for row in leftover
+    ]
+    probe = locks.acquire("site", site.pk, "deploy", "overflow-join-probe")
+    assert probe is not None
+    locks.release("site", site.pk, "deploy", holder="overflow-join-probe")
+
+
+@pytest.mark.req("SCALE-OVERFLOW-LOCK-ON-SEAM-REFUSE")
+def test_evaluate_site_still_does_not_create_a_deployment_on_lock_wave():
+    """evaluate_site still does not +1 Deployment on the lock-release wave.
+
+    Calls the 6.8 proof; do not remake that test with this id.
+    """
+    test_evaluate_site_still_does_not_create_a_deployment()
