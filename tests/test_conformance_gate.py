@@ -2688,3 +2688,109 @@ def test_part_k_text_and_text_hash_untouched():
             f"  now: {reg[rid]['text']!r}\n"
             f"  was: {frozen['text']!r}")
         assert "tier" not in reg[rid]
+
+
+# ── Phase 7.0 Task 0: due set, tier-less MUST, conformance-7 ──
+
+PHASE_7_MUST_IDS = {
+    "BACKUP-RESTORE-CLEAN-T1",
+    "BACKUP-RESTORE-COMMAND-REMAINS",
+    "P7-RESTORE-DEMO",
+}
+PHASE_7_TEST_IDS = PHASE_7_MUST_IDS - {"P7-RESTORE-DEMO"}
+
+
+def test_phase_7_due_set_includes_all_section_3_must_ids(tmp_path):
+    """Every design-note §3 MUST id exists at phase 7 with no tier key, and
+    check.py grades a phase-7 req as due at `--phase 7`.
+
+    What would make this fail: a missing/rephased id, a `tier:` on a MUST
+    id so exclude-tier drops it, P7-RESTORE-DEMO not naming
+    conformance/demos/phase-7.md, or argparse/schema refusing 7.
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_7_MUST_IDS - set(reg))
+    assert missing == [], f"phase-7 §3 MUST ids missing from the registry: {missing}"
+    wrong_phase = sorted(
+        rid for rid in PHASE_7_MUST_IDS if reg[rid]["phase"] != 7)
+    assert wrong_phase == [], (
+        f"phase-7 §3 MUST ids not registered at phase 7: "
+        f"{[(rid, reg[rid]['phase']) for rid in wrong_phase]}")
+    tagged = sorted(rid for rid in PHASE_7_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"§3 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+    allowed_sources = {"phase-7-design-note.md §3"}
+    for rid in sorted(PHASE_7_MUST_IDS):
+        assert reg[rid]["source"] in allowed_sources, (
+            f"{rid} source must be a phase-7 design-note §3, "
+            f"got {reg[rid].get('source')!r}")
+
+    for rid in sorted(PHASE_7_TEST_IDS):
+        assert reg[rid]["verify"] == "test", (
+            f"{rid} must be verify: test, got {reg[rid]['verify']}")
+
+    demo = reg["P7-RESTORE-DEMO"]
+    assert demo["verify"] == "demo"
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-7.md" in demo_paths, (
+        f"P7-RESTORE-DEMO must name conformance/demos/phase-7.md: "
+        f"{demo.get('demo')}")
+
+    root = write_repo(
+        tmp_path / "at7",
+        reqs=[_req("FIX-P7-DUE", phase=7)],
+        tests_src={"tests/test_fixture.py":
+                   MARKED_TEST.format(rid="FIX-P7-DUE", name="test_a")},
+        outcomes={"tests/test_fixture.py::test_a": "passed"},
+    )
+    res = run_check(root, phase=7)
+    assert res.returncode == 0, (
+        f"--phase 7 was rejected:\n{res.stdout}{res.stderr}")
+    header = matrix(root)
+    assert header["phase"] == 7
+    assert header["requirements"]["FIX-P7-DUE"]["due"] is True
+    assert status_of(root, "FIX-P7-DUE") == "verified"
+
+
+def test_new_phase_7_must_ids_have_no_tier():
+    """New Phase 7 MUST ids are tier-less (no `tier:` key; D-124).
+
+    What would make this fail: a mistaken `tier: t2` or `tier: t3` so
+    exclude-tier drops a MUST id, or an explicit `tier: t1` (absence is
+    the contract).
+    """
+    reg = _live_registry()
+    missing = sorted(PHASE_7_MUST_IDS - set(reg))
+    assert missing == [], f"phase-7 MUST ids missing from the registry: {missing}"
+    tagged = sorted(rid for rid in PHASE_7_MUST_IDS if "tier" in reg[rid])
+    assert tagged == [], (
+        f"new phase-7 MUST ids must omit the tier: key: "
+        f"{[(rid, reg[rid].get('tier')) for rid in tagged]}")
+
+
+def test_p7_restore_demo_names_phase_7_md():
+    """P7-RESTORE-DEMO is verify: demo naming conformance/demos/phase-7.md.
+
+    What would make this fail: a missing demo: key, pointing at phase-6.md,
+    or creating a filler named-partner.md. Task 0 forbids creating
+    phase-7.md so a stub cannot verify; Task 2 lands the honest record.
+    """
+    reg = _live_registry()
+    assert "P7-RESTORE-DEMO" in reg, "P7-RESTORE-DEMO is not in the registry"
+    demo = reg["P7-RESTORE-DEMO"]
+    assert demo["verify"] == "demo", demo
+    demo_paths = demo.get("demo")
+    if isinstance(demo_paths, str):
+        demo_paths = [demo_paths]
+    assert demo_paths and "conformance/demos/phase-7.md" in demo_paths, (
+        f"P7-RESTORE-DEMO must name conformance/demos/phase-7.md: "
+        f"{demo.get('demo')}")
+    path = REPO / "conformance" / "demos" / "phase-7.md"
+    assert not path.exists(), (
+        "conformance/demos/phase-7.md must stay absent in Task 0 — a stub "
+        "would verify P7-RESTORE-DEMO before the restore path exists"
+    )

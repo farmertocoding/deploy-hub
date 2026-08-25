@@ -53,7 +53,7 @@ any SHELL or .SHELLFLAGS override. To inspect what a target would do, read the M
 endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
-	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 conformance-5.5 conformance-6 review-round generate-client check-generated \
+	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 conformance-5.5 conformance-6 conformance-7 review-round generate-client check-generated \
 	log-scrub py-roots mutation scripts-lint
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
@@ -157,9 +157,10 @@ scripts-lint:
 # honestly (D-071 / D-080 / D-091). conformance-5.5 is the Phase 5.5
 # exit gate and is not a review-round or nightly-gates prereq.
 # conformance-6 is the Phase 6 exit gate and is not a review-round or
-# nightly-gates prereq. conformance-3 stays all-tiers Phase 3 (nightly).
-# conformance-4 stays phase 4 minus live. Do not add an all-tiers 5,
-# 5.5, or 6 target.
+# nightly-gates prereq. conformance-7 is the Phase 7 exit gate and is
+# not a review-round or nightly-gates prereq. conformance-3 stays
+# all-tiers Phase 3 (nightly). conformance-4 stays phase 4 minus live.
+# Do not add an all-tiers 5, 5.5, 6, or 7 target.
 conformance:
 	python conformance/check.py --phase 5 --exclude-tier t2 --exclude-tier t3
 
@@ -194,6 +195,12 @@ conformance-5.5:
 # Do not add t4. Everyday `conformance` stays phase 5.
 conformance-6:
 	python conformance/check.py --phase 6 --exclude-tier t2 --exclude-tier t3
+
+# Phase 7 gate: --phase 7 minus live. Not a review-round or
+# nightly-gates prereq (D-124). Do not add an all-tiers 7 target.
+# Do not add t4. Everyday `conformance` stays phase 5.
+conformance-7:
+	python conformance/check.py --phase 7 --exclude-tier t2 --exclude-tier t3
 
 # ── the mutation gate (spec-mutation-gate.md) ──────────────────────────────────
 #

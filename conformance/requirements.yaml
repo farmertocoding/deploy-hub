@@ -1476,3 +1476,31 @@ requirements:
     text_hash: sha256:1075f46e47064d4d5f4cbcf7329cdb6e51478b7d08417e185af33b10b4661b9f
     text: >
       After overflow begin_deploy holds site and overflow-target deploy locks, execute that raises DeploySeamRefused from _resolve_seams marks FAILED and releases those locks; a FAILED holder is not left for heartbeat sweep to miss; evaluate_site still never creates a Deployment.
+
+  # Phase 7.0 (docs/phase-7-design-note.md §3, Task 0 / D-122…D-124).
+  # New MUST ids are tier-less (no `tier:` key). Do not rewrite Phase 4/6
+  # text:. Everyday conformance stays phase 5. Do not stub named-partner.md
+  # (missing is uncovered; a non-empty stub would verify).
+  - id: BACKUP-RESTORE-CLEAN-T1
+    phase: 7
+    verify: test
+    source: phase-7-design-note.md §3
+    text_hash: sha256:070fa2d2b73040dfc37bd4767e1b33bd674ca8499d1742d5e07b185baa79390a
+    text: >
+      T1 POST site.backup_restore Restore into clean container unseals a chosen BackupUnit dump with BACKUP_KEY never the KEK, writes RESTORE_CLEAN metadata only, never returns ciphertext, never overwrites a live volume; OPEN confirm is type-the-site-name; tests inject restore_to_clean.
+  - id: BACKUP-RESTORE-COMMAND-REMAINS
+    phase: 7
+    verify: test
+    source: phase-7-design-note.md §3
+    text_hash: sha256:070fa2d2b73040dfc37bd4767e1b33bd674ca8499d1742d5e07b185baa79390a
+    text: >
+      Sites backup list still returns restore_command and BackupPanel still renders the pre command block after the T1 restore button lands.
+  - id: P7-RESTORE-DEMO
+    phase: 7
+    verify: demo
+    demo:
+      - conformance/demos/phase-7.md
+    source: phase-7-design-note.md §3
+    text_hash: sha256:070fa2d2b73040dfc37bd4767e1b33bd674ca8499d1742d5e07b185baa79390a
+    text: >
+      A site with a sealed dump, T1 touch plus type-the-name, injected restore_to_clean yields 201 ok; RESTORE_CLEAN CheckRun metadata has unit_id and checkrun_pk; response has no dump bytes; live SiteInstance untouched; command block still on GET list.

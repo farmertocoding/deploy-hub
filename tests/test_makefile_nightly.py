@@ -429,3 +429,64 @@ def test_conformance_5_5_still_phase_5_5_minus_live_tiers():
         f"conformance-5.5 must omit t2 (no docker on the T1 host):\n{recipe}")
     assert "--exclude-tier t3" in recipe, (
         f"conformance-5.5 must omit t3 (no Multipass on the T1 host):\n{recipe}")
+
+
+def test_conformance_7_target_exists():
+    """What would make this fail: no `conformance-7` target, or leaving it
+    off `.PHONY` so a same-named file could skip the recipe.
+    """
+    targets = gates.makefile_targets(REPO)
+    assert "conformance-7" in targets, (
+        "Makefile must declare conformance-7 as the phase-7 gate")
+    phony = gates.phony_targets(REPO)
+    assert "conformance-7" in phony, "conformance-7 must be .PHONY"
+
+
+def test_conformance_7_is_phase_7_minus_live_not_a_review_round_prereq():
+    """conformance-7 is the phase-7 gate: --phase 7 minus t2/t3. Not
+    all-tiers. Not a review-round prereq (D-124).
+
+    What would make this fail: an all-tiers 7 recipe, still grading
+    phase 6, or adding conformance-7 to review-round.
+    """
+    recipe = gates.recipe(REPO, "conformance-7")
+    assert recipe, "Makefile has no `conformance-7` recipe"
+    assert "--phase 7" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-7 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-7 must omit t3 (no Multipass on the T1 host):\n{recipe}")
+    prereqs = gates.review_round_prerequisites(REPO)
+    assert "conformance-7" not in prereqs, (
+        f"review-round must not run conformance-7: {prereqs}")
+    assert "conformance" in prereqs, (
+        f"review-round must still run everyday conformance: {prereqs}")
+
+
+def test_conformance_7_is_not_a_nightly_gates_prereq():
+    """conformance-7 is the Phase 7 exit gate, not a nightly-gates prereq
+    (D-124).
+
+    What would make this fail: adding conformance-7 to nightly-gates.
+    """
+    nightly = _target_prereqs("nightly-gates")
+    assert "conformance-7" not in nightly, (
+        f"nightly-gates must not run conformance-7: {nightly}")
+    assert "conformance-3" in nightly, (
+        f"nightly-gates must still run conformance-3: {nightly}")
+
+
+def test_conformance_6_still_phase_6_minus_live_tiers():
+    """conformance-6 stays phase 6 minus live after conformance-7 lands.
+
+    What would make this fail: folding conformance-6 into phase 7, or
+    dropping its t2/t3 excludes.
+    """
+    recipe = gates.recipe(REPO, "conformance-6")
+    assert recipe, "Makefile has no `conformance-6` recipe"
+    assert "--phase 7" not in recipe, recipe
+    assert "--phase 6" in recipe, recipe
+    assert "--exclude-tier t2" in recipe, (
+        f"conformance-6 must omit t2 (no docker on the T1 host):\n{recipe}")
+    assert "--exclude-tier t3" in recipe, (
+        f"conformance-6 must omit t3 (no Multipass on the T1 host):\n{recipe}")
