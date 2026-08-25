@@ -231,3 +231,12 @@ def evaluate_scale_proposals():
 
     return evaluate_all()
 
+
+@shared_task(ignore_result=True)
+def reap_stale_overflow_ephemerals(*, now=None):
+    """Beat `ephemeral-overflow-reaper-daily`. Flag only; never terminate."""
+    from monitor.overflow_reaper import reap_stale_ephemerals as body
+
+    rows = body(now=now)
+    return {"ok": True, "n": len(rows)}
+

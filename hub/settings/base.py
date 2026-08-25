@@ -300,6 +300,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.audit_aws_iam_scope",
         "schedule": 86400.0,
     },
+    "ephemeral-overflow-reaper-daily": {
+        "task": "monitor.tasks.reap_stale_overflow_ephemerals",
+        "schedule": 86400.0,
+    },
     "tailscale-device-audit-daily": {
         "task": "monitor.tasks.audit_tailscale_devices",
         "schedule": 86400.0,

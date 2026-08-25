@@ -27,6 +27,8 @@ from test_overflow_join import (
 from test_scale_evaluator import (
     AST_PATHS,
     BANNED_IMPORTS,
+    BANNED_REAPER_CALLERS,
+    EVALUATOR_REAPER_AST_PATHS,
     NOW,
     _ast_hits,
     _minutes,
@@ -314,7 +316,8 @@ def test_evaluate_site_still_does_not_terminate():
     hits = _ast_hits(AST_PATHS, BANNED_IMPORTS)
     assert hits == [], hits
     assert "scale_in_overflow" in BANNED_IMPORTS
-    assert "reap_stale_ephemerals" in BANNED_IMPORTS
+    assert "reap_stale_ephemerals" in BANNED_REAPER_CALLERS
+    assert _ast_hits(EVALUATOR_REAPER_AST_PATHS, BANNED_REAPER_CALLERS) == []
     assert "terminate_aws_target" in BANNED_IMPORTS
 
 
@@ -405,3 +408,81 @@ def test_overflow_scale_in_view_does_not_import_deploys():
     for rel in ("core/views.py", "core/overflow_deploys.py"):
         src = (repo / rel).read_text(encoding="utf-8")
         assert banned.search(src) is None, rel
+
+
+@pytest.mark.req("SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT")
+def test_beat_entry_runs_reaper_daily_on_queue_probes():
+    """ephemeral-overflow-reaper-daily exists, names the wrapper, 86400s,
+    rides queue probes, and carries no kwargs.
+
+    What would make this fail: a callable reaper with no scheduler owner
+    (D-113's forgotten-billing slip), or conflating this with
+    drill-reaper-weekly / evaluate-scale-proposals.
+    """
+    from django.conf import settings
+
+    from monitor import tasks as monitor_tasks
+
+    entry = settings.CELERY_BEAT_SCHEDULE["ephemeral-overflow-reaper-daily"]
+    assert entry["task"] == monitor_tasks.reap_stale_overflow_ephemerals.name
+    assert float(entry["schedule"]) == 86400.0
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert "kwargs" not in entry
+    beat = settings.CELERY_BEAT_SCHEDULE
+    assert entry["task"] != beat["evaluate-scale-proposals"]["task"]
+    assert entry["task"] != beat["drill-reaper-weekly"]["task"]
+
+
+@pytest.mark.req("SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT")
+def test_beat_task_flags_and_does_not_terminate():
+    """Task with no args flags a 25h leftover; target stays READY; no CheckRun."""
+    from core.models import CheckRun, Finding
+    from monitor.tasks import reap_stale_overflow_ephemerals
+
+    now = timezone.now()
+    site, overflow = _ready_scale("ovf-reap-beat")
+    _birth(overflow, ago_h=25, now=now)
+    before_cr = CheckRun.objects.count()
+    outcome = reap_stale_overflow_ephemerals()
+    assert set(outcome) == {"ok", "n"}
+    assert outcome["ok"] is True
+    assert outcome["n"] >= 1
+    assert Finding.objects.filter(
+        fingerprint=f"ephemeral-overflow-orphan:{overflow.pk}",
+    ).exists()
+    overflow.refresh_from_db()
+    assert overflow.status == Target.Status.READY
+    assert CheckRun.objects.count() == before_cr
+
+
+@pytest.mark.req("SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT")
+def test_evaluate_scale_proposals_does_not_call_reaper():
+    """evaluate_scale_proposals / scaling / host_metrics do not name the reaper."""
+    import ast
+
+    from test_scale_evaluator import (
+        BANNED_REAPER_CALLERS,
+        EVALUATOR_REAPER_AST_PATHS,
+        REPO,
+        _ast_hits,
+    )
+
+    hits = _ast_hits(EVALUATOR_REAPER_AST_PATHS, BANNED_REAPER_CALLERS)
+    assert hits == [], hits
+    tasks_src = (REPO / "monitor" / "tasks.py").read_text(encoding="utf-8")
+    task_fn = next(
+        node
+        for node in ast.parse(tasks_src).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "evaluate_scale_proposals"
+    )
+    for node in ast.walk(task_fn):
+        if isinstance(node, ast.Name) and node.id in {
+            "reap_stale_ephemerals", "overflow_reaper",
+        }:
+            pytest.fail("evaluate_scale_proposals names the reaper")
+        if isinstance(node, ast.Attribute) and node.attr in {
+            "reap_stale_ephemerals", "overflow_reaper",
+        }:
+            pytest.fail("evaluate_scale_proposals attributes the reaper")
+

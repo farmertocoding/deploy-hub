@@ -30,7 +30,8 @@ BANNED_IMPORTS = (
     "deploy_overflow_copy",
     "join_overflow_traffic",
     "scale_in_overflow",
-    "reap_stale_ephemerals",
+    # reap_stale_ephemerals lives in BANNED_REAPER_CALLERS (6.11): the Beat
+    # wrapper in monitor/tasks.py must name it; evaluator still must not.
     "terminate_aws_target",
     "InstanceCreateView",
     "boto3",
@@ -39,11 +40,16 @@ BANNED_IMPORTS = (
     "purge_cache",
     "set_security_level",
 )
+BANNED_REAPER_CALLERS = ("reap_stale_ephemerals",)
 AST_PATHS = (
     REPO / "scaling",
     REPO / "monitor" / "tasks.py",
     REPO / "monitor" / "host_metrics.py",
     REPO / "monitor" / "overflow_reaper.py",
+)
+EVALUATOR_REAPER_AST_PATHS = (
+    REPO / "scaling",
+    REPO / "monitor" / "host_metrics.py",
 )
 
 
