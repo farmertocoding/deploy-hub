@@ -388,6 +388,42 @@ def test_open_proposal_resolves_when_attack_engages():
     assert Finding.objects.filter(fingerprint=_fp(site)).count() == 1
 
 
+@pytest.mark.req("SCALE-NEVER-ATTACK")
+def test_acked_proposal_resolves_when_attack_engages():
+    """File while quiet, ack, engage the playbook, evaluate_site → resolved.
+
+    What would make this fail: `_retract` handling OPEN only so an ACKED
+    proposal stays in the inbox after AttackRefuse (SCALE-NEVER-ATTACK text
+    is OPEN or ACKED).
+    """
+    from test_attack_playbook import _attack_shaped
+
+    from core.findings import ack
+    from core.models import AuditEvent
+    from monitor.attack_playbook import run
+    from providers.fakes import FakeEdgeProtection
+    from scaling.evaluator import evaluate_site
+
+    site = _ready_site("atk-acked")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    _attack_shaped(site)
+    run(site, FakeEdgeProtection())
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
+    assert Finding.objects.filter(fingerprint=_fp(site)).count() == 1
+
+
 @pytest.mark.req("SCALE-NEVER-PARTNER")
 def test_partner_site_does_not_propose():
     """PartnerSite + quiet playbook + five hot mem must not file.
@@ -428,6 +464,38 @@ def test_partner_bind_after_file_resolves_open_proposal():
     assert row is not None
     partner = Partner.objects.create(slug="bind-hot-p", name="bind-hot-p")
     PartnerSite.objects.create(partner=partner, site=site, tenant_ref="bind-hot-t")
+    assert evaluate_site(site, now=NOW) is None
+    row.refresh_from_db()
+    assert row.state == Finding.State.RESOLVED
+    assert AuditEvent.objects.filter(
+        action="finding_resolved",
+        source="system",
+        object_id=str(row.pk),
+    ).exists()
+
+
+def test_partner_bind_after_file_resolves_acked_proposal():
+    """Binding PartnerSite after ack system-resolves the ACKED proposal.
+
+    Unmarked: SCALE-NEVER-PARTNER text is OPEN-only (C11 / D-096). C5 still
+    retracts ACKED on PartnerOverflowRefuse.
+    """
+    from core.findings import ack
+    from core.models import AuditEvent, Partner, PartnerSite
+    from scaling.attack_gate import refuse_if_attack
+    from scaling.evaluator import evaluate_site
+
+    control = _ready_site("bind-acked-ctl")
+    assert refuse_if_attack(control) is None
+    site = _ready_site("bind-acked")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    row = evaluate_site(site, now=NOW)
+    assert row is not None
+    ack(row)
+    row.refresh_from_db()
+    assert row.state == Finding.State.ACKED
+    partner = Partner.objects.create(slug="bind-acked-p", name="bind-acked-p")
+    PartnerSite.objects.create(partner=partner, site=site, tenant_ref="bind-acked-t")
     assert evaluate_site(site, now=NOW) is None
     row.refresh_from_db()
     assert row.state == Finding.State.RESOLVED

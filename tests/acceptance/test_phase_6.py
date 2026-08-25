@@ -188,23 +188,26 @@ def test_one_spike_does_not_propose():
 @pytest.mark.req("SCALE-NEVER-ATTACK")
 def test_attack_engaged_does_not_propose():
     """Same pressure while the attack playbook is engaged (FakeEdgeProtection)
-    → no scale-out-proposal; an already-OPEN proposal is resolved.
+    → no scale-out-proposal; an already-OPEN or ACKED proposal is resolved.
 
     Transcribes tests/test_scale_evaluator.py::
     test_attack_engaged_does_not_propose,
-    ::test_open_proposal_resolves_when_attack_engages, and
+    ::test_open_proposal_resolves_when_attack_engages,
+    ::test_acked_proposal_resolves_when_attack_engages, and
     ::test_evaluate_site_source_calls_refuse_if_attack.
     """
     from test_scale_evaluator import (
-        test_attack_engaged_does_not_propose as _engaged,
-    )
-    from test_scale_evaluator import (
+        test_acked_proposal_resolves_when_attack_engages,
         test_evaluate_site_source_calls_refuse_if_attack,
         test_open_proposal_resolves_when_attack_engages,
+    )
+    from test_scale_evaluator import (
+        test_attack_engaged_does_not_propose as _engaged,
     )
 
     _engaged()
     test_open_proposal_resolves_when_attack_engages()
+    test_acked_proposal_resolves_when_attack_engages()
     test_evaluate_site_source_calls_refuse_if_attack()
 
 
@@ -212,13 +215,15 @@ def test_attack_engaged_does_not_propose():
 @pytest.mark.req("SCALE-NEVER-PARTNER")
 def test_partner_site_does_not_propose():
     """Same pressure on a PartnerSite → no proposal. Binding PartnerSite
-    after file system-resolves an OPEN proposal.
+    after file system-resolves an OPEN or ACKED proposal.
 
     Transcribes tests/test_scale_evaluator.py::
-    test_partner_site_does_not_propose and
-    ::test_partner_bind_after_file_resolves_open_proposal.
+    test_partner_site_does_not_propose,
+    ::test_partner_bind_after_file_resolves_open_proposal, and
+    ::test_partner_bind_after_file_resolves_acked_proposal.
     """
     from test_scale_evaluator import (
+        test_partner_bind_after_file_resolves_acked_proposal,
         test_partner_bind_after_file_resolves_open_proposal,
     )
     from test_scale_evaluator import (
@@ -227,6 +232,7 @@ def test_partner_site_does_not_propose():
 
     _partner()
     test_partner_bind_after_file_resolves_open_proposal()
+    test_partner_bind_after_file_resolves_acked_proposal()
 
 
 @pytest.mark.django_db
