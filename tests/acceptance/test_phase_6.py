@@ -27,6 +27,7 @@ NAV_IDS = ["home", "sites", "targets", "deploys", "findings", "settings"]
 NAMED = (
     "test_scale_ready_quiet_five_hot_mem_files_p2_proposal",
     "test_idle_registered_machine_named_when_second_target_has_headroom",
+    "test_accepted_overflow_t1_enrolls_ephemeral_via_fake",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -171,6 +172,39 @@ def test_idle_registered_machine_named_when_second_target_has_headroom():
     )
 
     test_idle_ready_machine_named_in_overflow_body()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-T1-ENROLL")
+def test_accepted_overflow_t1_enrolls_ephemeral_via_fake(client, monkeypatch):
+    """Public scale-ready quiet site, ACCEPTED cheap, five ram=90 minutes,
+    no idle machine → overflow Finding 0.0416 / t3.medium. T1 instance.create
+    with overflow_site={pk}, FakeCloudProvider, touch + type-the-name →
+    Target count +1, kind=aws_ec2, lifecycle=ephemeral. OPEN overflow + same
+    POST → 4xx, Target count unchanged. Idle registered machine present →
+    4xx, Target count unchanged. Attack engaged → 4xx.
+
+    Transcribes tests/test_overflow_enroll.py::
+    test_accepted_overflow_t1_create_enrolls_ephemeral_via_fake,
+    ::test_open_overflow_refuses_with_ack_is_not_launch,
+    ::test_idle_registered_machine_refuses_overflow_enroll, and
+    ::test_attack_refuses_overflow_enroll.
+    """
+    from django.contrib.auth.models import User
+    from test_overflow_enroll import (
+        test_accepted_overflow_t1_create_enrolls_ephemeral_via_fake,
+        test_attack_refuses_overflow_enroll,
+        test_idle_registered_machine_refuses_overflow_enroll,
+        test_open_overflow_refuses_with_ack_is_not_launch,
+    )
+
+    test_accepted_overflow_t1_create_enrolls_ephemeral_via_fake(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_open_overflow_refuses_with_ack_is_not_launch(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_idle_registered_machine_refuses_overflow_enroll(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_attack_refuses_overflow_enroll(client, monkeypatch)
 
 
 @pytest.mark.django_db

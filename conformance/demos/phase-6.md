@@ -3,10 +3,11 @@
 **Date:** 2026-08-25 · **Branch:** `p6-design` · **Recorded by:** Task 6
 on BASE `fe8e20e` (merge of MUST Tasks 0–5) plus the acceptance file
 `2fdab81` and this record. Phase 6.6 Task 2 appended the idle-first
-clause on HEAD `f6824e9`. **T1 fakes only.** This is not a live AWS,
+clause on HEAD `f6824e9`. Phase 6.7 Task 2 appended the T1 Fake overflow
+enroll clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
-success. No VM launched. No auto mode. No AMI. No ScalePolicy table.
-No DNS join. No new token env was added.
+success. No VM launched. No live AWS VM. No auto mode. No AMI. No
+ScalePolicy table. No DNS join. No new token env was added.
 
 ## What the milestone asked (design note §4)
 
@@ -19,8 +20,14 @@ count unchanged; no `enroll_aws_target` call. (a) No other ready Target
 with headroom → body contains `0.0416` / `t3.medium`. (b) A second
 READY permanent non-hub Target with a latest ram=10 sample at `now` →
 body contains `idle registered machine`, that host, `0`, `own-machine`,
-`propose-mode does not launch`; Target count unchanged; no enroll. No
-VM launched. No ScalePolicy. No DNS join. Re-evaluate while OPEN
+`propose-mode does not launch`; Target count unchanged; no enroll. (c)
+ACCEPTED cheap, five ram=90 minutes, no idle machine → overflow Finding
+`0.0416` / `t3.medium`. T1 `instance.create` with `overflow_site={pk}`,
+FakeCloudProvider, touch + type-the-name → Target count +1,
+`kind=aws_ec2`, `lifecycle=ephemeral`. OPEN overflow + same POST → 4xx,
+Target count unchanged. Idle registered machine present → 4xx, Target
+count unchanged. Attack engaged → 4xx. No VM launched. No live AWS VM.
+No ScalePolicy. No DNS join. No auto. No AMI. Re-evaluate while OPEN
 does not add a push-log event. Four of five over + one under → no
 Finding. One spike → no Finding. Disk-only five hot minutes → no
 Finding. Same pressure while attack playbook is engaged
@@ -31,8 +38,8 @@ mem samples → no proposal; Sites **list** paints **single-instance-only**.
 `mesh_only` + five hot mem → no proposal. NAV is still six.
 
 Record: `conformance/demos/phase-6.md`. This record **does not claim a
-VM launched**, auto mode, AMI, live AWS, live provision, DNS join,
-ScalePolicy, or U1.
+VM launched**, a live AWS VM, auto mode, AMI, live AWS, live provision,
+DNS join, ScalePolicy, or U1.
 `PART-U1-NAMED-PARTNER` stays uncovered until Joseph writes
 `conformance/demos/named-partner.md`. Everyday `make review-round`
 (phase 5) may go green while U1 is uncovered. Two consecutive clean
@@ -48,6 +55,8 @@ T1. Fakes actually driven this session:
 
 - `FakeEdgeProtection` (L5 playbook engaged; `refuse_if_attack` first;
   OPEN/ACKED proposal system-resolved; no scale-out-proposal filed)
+- `FakeCloudProvider` (T1 `instance.create` with `overflow_site`;
+  RecordingCloud inject; no live `cloud_provider_for`)
 
 HostMetric rows are real Django rows (Hub-clock `ts`, ram=90), not a
 fake metric port. Partner refuse binds a real `PartnerSite`. Attack
@@ -66,7 +75,8 @@ written and its six behavioural clauses passed on those same fakes; the
 two record clauses stayed red until this file existed. After this file:
 `tests/acceptance/test_phase_6.py` was **8 passed**, 0 skipped (T1
 fakes). Phase 6.6 Task 2 adds §4 (b); the file is expected **9 passed**,
-0 skipped.
+0 skipped. Phase 6.7 Task 2 adds the T1 Fake enroll clause; the file is
+expected **10 passed**, 0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -98,6 +108,20 @@ count unchanged; no enroll. No `\bApprove\b` / `\bLaunch\b`. This
 session did not launch a VM, did not add a ScalePolicy table, and did
 not join DNS. F8 `scale-out-proposal` seed stays the no-idle `0.0416` /
 `t3.medium` case. Propose-mode still does not create a Target.
+
+### T1 Fake overflow enroll (§4, Phase 6.7)
+
+Same public scale-ready quiet site, ACCEPTED cheap, five ram=90 minutes,
+no idle machine → overflow Finding `0.0416` / `t3.medium`. T1
+`instance.create` with `overflow_site={pk}`, FakeCloudProvider, touch +
+type-the-name → Target count +1, `kind=aws_ec2`, `lifecycle=ephemeral`
+(`test_accepted_overflow_t1_enrolls_ephemeral_via_fake` calls the Task 1
+proofs; it does not reimplement them). OPEN overflow + same POST → 4xx,
+Target count unchanged. Idle registered machine present → 4xx, Target
+count unchanged. Attack engaged → 4xx. Honest: no live AWS VM, no DNS
+join, no auto, no AMI. F8 overflow seed stays the no-idle `0.0416` /
+`t3.medium` case. Evaluator still never creates a Target. Ack is not
+launch.
 
 ### Four-of-five / spike / hole / mixed / stale
 
@@ -150,6 +174,7 @@ T1 fakes, this session:
 
 - `::test_scale_ready_quiet_five_hot_mem_files_p2_proposal`
 - `::test_idle_registered_machine_named_when_second_target_has_headroom`
+- `::test_accepted_overflow_t1_enrolls_ephemeral_via_fake`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`
