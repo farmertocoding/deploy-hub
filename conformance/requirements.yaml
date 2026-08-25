@@ -1427,3 +1427,15 @@ requirements:
     text_hash: sha256:d17188fb4c8c4b469a252010756ad6d1d525063ac89832615325936588e8704e
     text: >
       deploy_overflow_copy onto an ephemeral overflow Target pins the site's last succeeded image_tag, skips BUILD and DNS, runs SHIP, does not change Site.primary_target, and creates a SiteInstance; OPEN or ACKED overflow refuses with Ack is not launch; evaluate_site still never creates a Deployment; tests inject PipelineTransport.
+
+  # Phase 6.9 (docs/phase-6.9-design-note.md §3, Task 0 / D-110…D-112).
+  # New MUST id is tier-less (no `tier:` key). Do not rewrite
+  # SCALE-PROPOSE-NO-PROVISION / SCALE-OVERFLOW-T1-ENROLL /
+  # SCALE-OVERFLOW-SAME-IMAGE text:. Everyday conformance stays phase 5.
+  - id: SCALE-OVERFLOW-JOIN-TRAFFIC
+    phase: 6
+    verify: test
+    source: phase-6.9-design-note.md §3
+    text_hash: sha256:aeb4d8e0a723a2adb56af976df09b29497c899771104e98710e8ba6b6d64073f
+    text: >
+      join_overflow_traffic on a public site with joinable IPv4 origins upserts the overflow A next to the primary (round-robin, proxied) without changing Site.primary_target; tunnel-mode home sites add a cloudflared replica on the overflow host instead of an A record; OPEN or ACKED overflow refuses with Ack is not launch; evaluate_site still never joins traffic; tests inject FakeDnsProvider.
