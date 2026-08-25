@@ -29,6 +29,7 @@ NAMED = (
     "test_idle_registered_machine_named_when_second_target_has_headroom",
     "test_accepted_overflow_t1_enrolls_ephemeral_via_fake",
     "test_overflow_deploy_pins_live_image_skips_dns",
+    "test_overflow_join_adds_overflow_a_next_to_primary",
     "test_four_of_five_does_not_propose",
     "test_one_spike_does_not_propose",
     "test_attack_engaged_does_not_propose",
@@ -230,6 +231,33 @@ def test_overflow_deploy_pins_live_image_skips_dns(client, monkeypatch):
     test_overflow_deploy_pins_live_tag_skips_build_and_dns(client, monkeypatch)
     User.objects.filter(username="joseph").delete()
     test_open_overflow_refuses_deploy_with_ack_is_not_launch(client, monkeypatch)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("SCALE-OVERFLOW-JOIN-TRAFFIC")
+def test_overflow_join_adds_overflow_a_next_to_primary(client, monkeypatch):
+    """ACCEPTED overflow, RUNNING SiteInstance, TEST-NET-3 IPv4s,
+    FakeDnsProvider → 201 joined=dns; upsert_record values are
+    [primary_ipv4, overflow_ipv4] proxied; primary_target unchanged; no
+    new Deployment; later _assemble_desired dns_values and dns_set keep
+    both. OPEN overflow → 4xx, no upsert. Tunnel-mode home primary
+    (kind=ssh, collect_payload.tunnel true) + injected replica → 201
+    joined=tunnel; no upsert_record. Honest: no live Cloudflare zone, no
+    live AWS VM, no 30s health-pull, no auto, no AMI.
+
+    Transcribes tests/test_overflow_join.py::
+    test_overflow_join_upserts_a_next_to_primary and
+    ::test_open_overflow_refuses_join_with_ack_is_not_launch.
+    """
+    from django.contrib.auth.models import User
+    from test_overflow_join import (
+        test_open_overflow_refuses_join_with_ack_is_not_launch,
+        test_overflow_join_upserts_a_next_to_primary,
+    )
+
+    test_overflow_join_upserts_a_next_to_primary(client, monkeypatch)
+    User.objects.filter(username="joseph").delete()
+    test_open_overflow_refuses_join_with_ack_is_not_launch(client, monkeypatch)
 
 
 @pytest.mark.django_db

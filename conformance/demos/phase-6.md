@@ -5,10 +5,12 @@ on BASE `fe8e20e` (merge of MUST Tasks 0–5) plus the acceptance file
 `2fdab81` and this record. Phase 6.6 Task 2 appended the idle-first
 clause on HEAD `f6824e9`. Phase 6.7 Task 2 appended the T1 Fake overflow
 enroll clause. Phase 6.8 Task 2 appended the same-image overflow
-deploy clause. **T1 fakes only.** This is not a live AWS,
+deploy clause. Phase 6.9 Task 2 appended the T1 Fake overflow
+join clause. **T1 fakes only.** This is not a live AWS,
 live provision, live Cloudflare, named committed partner, or Playwright
 success. No VM launched. No live AWS VM. No auto mode. No AMI. No
-ScalePolicy table. No DNS join. No new token env was added.
+ScalePolicy table. FakeDns join only — no live Cloudflare zone, no
+30s health-pull. No new token env was added.
 
 ## What the milestone asked (design note §4)
 
@@ -31,8 +33,12 @@ count unchanged. Attack engaged → 4xx. ACCEPTED overflow, enrolled
 ephemeral READY target, prior succeeded deploy with image_tag artifact,
 PipelineTransport → Deployment SUCCEEDED; BUILD and DNS SKIPPED; SHIP
 not skipped; `primary_target` unchanged; SiteInstance exists; no DNS
-upsert. OPEN overflow → 4xx, no Deployment. No VM launched. No live AWS
-VM. No ScalePolicy. No DNS join. No auto. No AMI. Re-evaluate while OPEN
+upsert. OPEN overflow → 4xx, no Deployment. ACCEPTED overflow, RUNNING
+SiteInstance, TEST-NET-3 IPv4s, FakeDnsProvider → 201 joined=dns;
+upsert values are both origins, proxied; `primary_target` unchanged; no
+new Deployment. OPEN overflow → 4xx, no upsert. Tunnel-mode home +
+injected replica → 201 joined=tunnel; no upsert. No VM launched. No live AWS
+VM. No ScalePolicy. No live Cloudflare zone. No 30s health-pull. No auto. No AMI. Re-evaluate while OPEN
 does not add a push-log event. Four of five over + one under → no
 Finding. One spike → no Finding. Disk-only five hot minutes → no
 Finding. Same pressure while attack playbook is engaged
@@ -44,7 +50,7 @@ mem samples → no proposal; Sites **list** paints **single-instance-only**.
 
 Record: `conformance/demos/phase-6.md`. This record **does not claim a
 VM launched**, a live AWS VM, auto mode, AMI, live AWS, live provision,
-DNS join, ScalePolicy, or U1.
+live Cloudflare zone, 30s health-pull, ScalePolicy, or U1.
 `PART-U1-NAMED-PARTNER` stays uncovered until Joseph writes
 `conformance/demos/named-partner.md`. Everyday `make review-round`
 (phase 5) may go green while U1 is uncovered. Two consecutive clean
@@ -62,6 +68,8 @@ T1. Fakes actually driven this session:
   OPEN/ACKED proposal system-resolved; no scale-out-proposal filed)
 - `FakeCloudProvider` (T1 `instance.create` with `overflow_site`;
   RecordingCloud inject; no live `cloud_provider_for`)
+- `FakeDnsProvider` (T1 `site.overflow_join`; wrap inject; no live
+  `dns_provider_for` / Cloudflare zone)
 
 HostMetric rows are real Django rows (Hub-clock `ts`, ram=90), not a
 fake metric port. Partner refuse binds a real `PartnerSite`. Attack
@@ -83,6 +91,8 @@ fakes). Phase 6.6 Task 2 adds §4 (b); the file is expected **9 passed**,
 0 skipped. Phase 6.7 Task 2 adds the T1 Fake enroll clause; the file is
 expected **10 passed**, 0 skipped. Phase 6.8 Task 2 adds the same-image
 overflow deploy clause; the file is expected **11 passed**, 0 skipped.
+Phase 6.9 Task 2 adds the T1 Fake join clause; the file is expected
+**12 passed**, 0 skipped.
 
 ### Sustained propose (quiet, scale-ready, public)
 
@@ -142,6 +152,22 @@ no-idle `0.0416` / `t3.medium` case. No Approve or Launch on the
 Finding. Same-image overflow deploy only — this record does not claim a
 VM launched.
 
+### Join overflow traffic (§4, Phase 6.9)
+
+ACCEPTED overflow, RUNNING SiteInstance on an ephemeral overflow Target,
+primary and overflow hosts are TEST-NET-3 IPv4s, FakeDnsProvider → 201
+`joined=dns`; upsert_record values are `[primary_ipv4, overflow_ipv4]`
+proxied; `primary_target` unchanged; no new Deployment; later
+`_assemble_desired` `dns_values` and `dns_set` keep both. OPEN overflow
+→ 4xx, no upsert. Tunnel-mode home primary (`kind=ssh`,
+`collect_payload.tunnel true`) + injected replica → 201 `joined=tunnel`;
+no upsert_record. (`test_overflow_join_adds_overflow_a_next_to_primary`
+calls the Task 1 proofs; it does not reimplement them.) Honest: no live
+Cloudflare zone, no live AWS VM, no 30s health-pull, no auto, no AMI.
+NAV six. F8 overflow seed stays the no-idle `0.0416` / `t3.medium` case.
+No Approve or Launch on the Finding. FakeDns join only — this record
+does not claim a live Cloudflare zone or a Hub-vaulted tunnel JWT.
+
 ### Four-of-five / spike / hole / mixed / stale
 
 Four of five in-window minutes over + one under does not file. A single
@@ -176,7 +202,8 @@ control. NAV is the six objects. `VALID_TIERS` stays `{t1, t2, t3}`.
 - PART-K text and `text_hash` stay the 4f30c7a freeze. This record does
   not rewrite them.
 - Live AWS of any kind is a Joseph interrupt. This record does not claim
-  live provision, auto mode, AMI, a ScalePolicy table, or a DNS join.
+  live provision, auto mode, AMI, a ScalePolicy table, a live Cloudflare
+  zone, or a 30s origin health-pull.
 - Two consecutive clean `conformance-6` rounds wait on the U1 interrupt.
   This session did not run `make review-round` or two consecutive
   `make conformance-6` rounds; those gates re-earn green from a fresh
@@ -195,6 +222,7 @@ T1 fakes, this session:
 - `::test_idle_registered_machine_named_when_second_target_has_headroom`
 - `::test_accepted_overflow_t1_enrolls_ephemeral_via_fake`
 - `::test_overflow_deploy_pins_live_image_skips_dns`
+- `::test_overflow_join_adds_overflow_a_next_to_primary`
 - `::test_four_of_five_does_not_propose`
 - `::test_one_spike_does_not_propose`
 - `::test_attack_engaged_does_not_propose`
