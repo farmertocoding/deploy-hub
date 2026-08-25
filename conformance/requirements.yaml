@@ -1532,3 +1532,31 @@ requirements:
     text_hash: sha256:264612beba93b499b754ed86d6725f1e40bb2d6e900640bf044b8135b4fb83d7
     text: >
       Tunnel-mode SSH target, injected wan_probe returning one {port: 443, proto: tcp} yields Finding OPEN router-forwarded:{pk}; GET detail router_advice.finding_id set; T3 POST probe with empty forwards resolves the Finding; GET detail finding_id null. Missing inject is 4xx and no Finding. Non-tunnel target files nothing.
+
+  # Phase 7.2 (docs/phase-7.2-design-note.md §3, Task 0 / D-128…D-130).
+  # New MUST ids are tier-less (no `tier:` key). Do not rewrite Phase 7.0
+  # BACKUP-RESTORE-* / P7-RESTORE-DEMO or Phase 7.1 ROUTER-* / P7-ROUTER-DEMO
+  # text:. Everyday conformance stays phase 5. Do not stub named-partner.md.
+  - id: LAN-GHOST-INJECT
+    phase: 7
+    verify: test
+    source: phase-7.2-design-note.md §3
+    text_hash: sha256:2614610de2dfaa83286b623b15e49f76b32799d8697b81f99a13cb4246ad6cbb
+    text: >
+      attach_lan_ghosts appends kind=ghost nodes for lan_scan hosts that are not enrolled Target.host and skips enrolled hosts; lan_scan None leaves the graph unchanged; default is refuse-closed.
+  - id: LAN-GHOST-MAP-VIEW
+    phase: 7
+    verify: test
+    source: phase-7.2-design-note.md §3
+    text_hash: sha256:2614610de2dfaa83286b623b15e49f76b32799d8697b81f99a13cb4246ad6cbb
+    text: >
+      GET map snapshot serializes kind=ghost; Map list and SVG render ghost with icon+label status not color-only; NAV stays six.
+  - id: P7-LAN-GHOST-DEMO
+    phase: 7
+    verify: demo
+    demo:
+      - conformance/demos/phase-7.md
+    source: phase-7.2-design-note.md §3
+    text_hash: sha256:2614610de2dfaa83286b623b15e49f76b32799d8697b81f99a13cb4246ad6cbb
+    text: >
+      Zone + enrolled target web-1, injected lan_scan returning web-1 and printer.lan yields one ghost ghost:printer.lan and no ghost:web-1; lan_scan None yields no ghost kinds; Map list/SVG show ◌ ghost + printer.lan.

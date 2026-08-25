@@ -144,3 +144,7 @@ sensitive:
   # Do not broaden to monitor/** or frontend/**.
   - monitor/router_advisor.py
   - monitor/router_views.py
+  # Phase 7.2 (Task 0): claim monitor/lan_ghosts.py before Task 1
+  # creates it (D-128 / C6). Do not claim map_graph.py wholesale.
+  # Do not broaden to monitor/** or frontend/**.
+  - monitor/lan_ghosts.py

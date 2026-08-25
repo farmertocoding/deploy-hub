@@ -70,3 +70,4 @@
 /monitor/overflow_reaper.py @farmertocoding
 /monitor/router_advisor.py @farmertocoding
 /monitor/router_views.py @farmertocoding
+/monitor/lan_ghosts.py @farmertocoding
