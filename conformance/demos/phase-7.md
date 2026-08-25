@@ -174,3 +174,62 @@ each body calls the Task 1 proof:
 
 - `test_lan_ghosts_inject_skips_enrolled`
 - `test_lan_ghosts_map_view`
+
+## Phase 7.3 — Preview (P7-PREVIEW-DEMO)
+
+**Date:** 2026-08-26 · **Branch:** `master` · **Recorded by:** Phase 7.3
+Task 2. **T1 inject only.** Injected `visibility` — not a live GitHub
+visibility API, not a webhook, not an auto-deploy. This session did not
+call live GitHub. No Playwright.
+
+### What the milestone asked (design note §4)
+
+Git Project + Site, injected `visibility="private"`, T2 confirm parent
+name, ref `feature/pr-12` → 201, new Site `mesh_only`
+`preview-…-feature-pr-12`, `preview_of` set, no Deployment created.
+`visibility="public"` → 4xx `public repo refused`. Missing inject → 4xx
+`visibility refused`. Wrong confirm → 4xx.
+
+Honest: no live GitHub, no webhook, no auto-deploy, no U1. Preview
+environments (private repos) are done this wave. Pulumi/managed-DB/LB
+parked (D-134). Azure adapter parked (D-135).
+
+`PART-U1-NAMED-PARTNER` stays uncovered; `named-partner.md` absent.
+Everyday `conformance` stays phase 5; `conformance-7` is the phase gate
+and excludes t2/t3:
+`python conformance/check.py --phase 7 --exclude-tier t2 --exclude-tier t3`.
+No invented token env. No Playwright. `P7-PREVIEW-DEMO` named.
+
+### The honest state of this host
+
+T1. Inject actually driven this session:
+
+- `visibility=` wrap on `deploys.preview_views.create_preview` (HTTP)
+  and the same inject on `deploys.preview.create_preview` (direct).
+  Default `visibility` is refuse-closed (`None`). No live GitHub. No
+  webhook. No auto-deploy.
+
+NAV is still six.
+
+### Still outstanding — named, not greened
+
+- `PART-U1-NAMED-PARTNER` stays uncovered. `conformance/demos/named-partner.md`
+  is absent. This record does not claim a named committed partner.
+- HMAC, live AWS, overwrite-live restore, ScalePolicy/auto stay later
+  Phase 7 polish. Preview, LAN ghosts, router advisor, and restore are
+  done. Pulumi/managed-DB/LB (D-134) and Azure adapter (D-135) stay
+  parked.
+- Everyday `conformance` / `review-round` stay `--phase 5 --exclude-tier t2
+  --exclude-tier t3`. `conformance-7` is not a `review-round` or
+  `nightly-gates` prereq.
+
+This record **does not claim** live GitHub, a webhook, auto-deploy,
+Pulumi, Azure, or U1.
+
+### Acceptance transcription — real nodeids
+
+`tests/acceptance/test_phase_7.py` (`@pytest.mark.acceptance(phase=7)`),
+each body calls the Task 1 proof:
+
+- `test_preview_private_only_creates_sibling`
+- `test_preview_t2_http`

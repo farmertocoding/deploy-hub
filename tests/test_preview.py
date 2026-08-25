@@ -9,10 +9,12 @@ import ast
 import inspect
 import json
 import pathlib
+import uuid
 
 import pytest
+from django.contrib.auth.models import User
 from django.urls import resolve
-from test_aws_enroll import _t1_user
+from test_aws_enroll import _login, _make_cred
 from test_git_poller import TRIGGER_PATHS, WEBHOOK_NEEDLES, _route_strings
 
 from tests.test_webauthn_t1 import T1_HTTP
@@ -27,6 +29,16 @@ FORBIDDEN_TOKENS = (
     "HUB_TEST_",
     "github.com/api",
 )
+
+
+def _preview_user(client):
+    """Unique username so combined NAMED HTTP proofs share one transaction."""
+    username = f"joseph-{uuid.uuid4().hex[:8]}"
+    user = User.objects.create_user(username, password="a-long-dev-password")
+    _make_cred(user, "yubikey")
+    _make_cred(user, "phone")
+    _login(client, user)
+    return user
 
 
 def _parent(*, name="app", source_kind=None, git_url=GIT_URL):
@@ -239,7 +251,7 @@ def test_preview_http_private_201(client, monkeypatch):
     from deploys.preview_views import create_preview as view_create_preview
     assert inspect.signature(view_create_preview).parameters["visibility"].default is None
 
-    _t1_user(client)
+    _preview_user(client)
     _inject_visibility(monkeypatch, "private")
     parent = _parent(name="httpok")
     response = _post_preview(client, parent, ref="feature/pr-12")
@@ -264,7 +276,7 @@ def test_preview_http_public_4xx(client, monkeypatch):
     """
     from core.models import Site
 
-    _t1_user(client)
+    _preview_user(client)
     _inject_visibility(monkeypatch, "public")
     parent = _parent(name="httppub")
     before = Site.objects.count()
@@ -275,15 +287,20 @@ def test_preview_http_public_4xx(client, monkeypatch):
 
 
 @pytest.mark.req("PREVIEW-T2-HTTP")
-def test_preview_http_missing_inject_4xx(client):
+def test_preview_http_missing_inject_4xx(client, monkeypatch):
     """View default visibility=None → 4xx visibility refused.
 
     What would make this fail: the view hard-coding visibility=private so a
     missing inject still creates a Site.
     """
     from core.models import Site
+    from deploys.preview import create_preview
 
-    _t1_user(client)
+    monkeypatch.setattr(
+        "deploys.preview_views.create_preview",
+        create_preview,
+    )
+    _preview_user(client)
     parent = _parent(name="httpmiss")
     before = Site.objects.count()
     response = _post_preview(client, parent)
@@ -300,7 +317,7 @@ def test_preview_wrong_confirm_4xx(client, monkeypatch):
     """
     from core.models import Site
 
-    _t1_user(client)
+    _preview_user(client)
     _inject_visibility(monkeypatch, "private")
     parent = _parent(name="httpwrong")
     before = Site.objects.count()

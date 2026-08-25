@@ -4,8 +4,8 @@
 Everyday `conformance` / `review-round` stay `--phase 5`. T1 inject only:
 `restore_to_clean=` never live docker. Do not invent HUB_TEST_* /
 HUB_INTAKE_HMAC / HUB_WEBHOOK_SECRET. Do not add Playwright. Do not stub
-named-partner.md. Do not mark P7-RESTORE-DEMO, P7-ROUTER-DEMO, or
-P7-LAN-GHOST-DEMO on pytest.
+named-partner.md. Do not mark P7-RESTORE-DEMO, P7-ROUTER-DEMO,
+P7-LAN-GHOST-DEMO, or P7-PREVIEW-DEMO on pytest.
 """
 
 import re
@@ -27,6 +27,8 @@ NAMED = (
     "test_router_advice_target_tab",
     "test_lan_ghosts_inject_skips_enrolled",
     "test_lan_ghosts_map_view",
+    "test_preview_private_only_creates_sibling",
+    "test_preview_t2_http",
 )
 
 pytestmark = [pytest.mark.acceptance(phase=7)]
@@ -170,6 +172,9 @@ def test_nav_stays_six():
     ghost_demo = _registry()["P7-LAN-GHOST-DEMO"]
     assert ghost_demo["verify"] == "demo"
     assert "conformance/demos/phase-7.md" in ghost_demo.get("demo", [])
+    preview_demo = _registry()["P7-PREVIEW-DEMO"]
+    assert preview_demo["verify"] == "demo"
+    assert "conformance/demos/phase-7.md" in preview_demo.get("demo", [])
     u1 = _registry()["PART-U1-NAMED-PARTNER"]
     assert u1["verify"] == "demo"
     assert "conformance/demos/named-partner.md" in u1.get("demo", [])
@@ -178,6 +183,7 @@ def test_nav_stays_six():
     assert "conformance-5" in record.lower() or "phase 5" in record.lower()
     assert "P7-ROUTER-DEMO" in record
     assert "P7-LAN-GHOST-DEMO" in record
+    assert "P7-PREVIEW-DEMO" in record
     assert "lan_scan" in record
     assert "printer.lan" in record
     assert "web-1" in record
@@ -302,3 +308,60 @@ def test_lan_ghosts_map_view(client, monkeypatch):
 
     test_map_snapshot_serializes_ghost_kind(client, monkeypatch)
     test_map_kind_enum_includes_ghost()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("PREVIEW-PRIVATE-ONLY")
+def test_preview_private_only_creates_sibling(monkeypatch):
+    """Private visibility creates a mesh-only sibling; public / missing
+    visibility / non-git parent refuse; create_preview does not call
+    run_deploy.
+
+    Transcribes tests/test_preview.py::
+    test_private_creates_mesh_only_sibling,
+    ::test_public_refuses,
+    ::test_missing_visibility_refuses,
+    ::test_non_git_parent_refuses,
+    and ::test_create_preview_does_not_call_run_deploy.
+    """
+    from test_preview import (
+        test_create_preview_does_not_call_run_deploy,
+        test_missing_visibility_refuses,
+        test_non_git_parent_refuses,
+        test_private_creates_mesh_only_sibling,
+        test_public_refuses,
+    )
+
+    test_private_creates_mesh_only_sibling()
+    test_public_refuses()
+    test_missing_visibility_refuses()
+    test_non_git_parent_refuses()
+    test_create_preview_does_not_call_run_deploy(monkeypatch)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("PREVIEW-T2-HTTP")
+def test_preview_t2_http(client, monkeypatch):
+    """T2 POST site.preview_create: injected private → 201 mesh-only
+    sibling; public / missing inject / wrong confirm → 4xx; no webhook.
+
+    Transcribes tests/test_preview.py::
+    test_preview_http_private_201,
+    ::test_preview_http_public_4xx,
+    ::test_preview_http_missing_inject_4xx,
+    ::test_preview_wrong_confirm_4xx,
+    and ::test_no_webhook_route.
+    """
+    from test_preview import (
+        test_no_webhook_route,
+        test_preview_http_missing_inject_4xx,
+        test_preview_http_private_201,
+        test_preview_http_public_4xx,
+        test_preview_wrong_confirm_4xx,
+    )
+
+    test_preview_http_private_201(client, monkeypatch)
+    test_preview_http_public_4xx(client, monkeypatch)
+    test_preview_http_missing_inject_4xx(client, monkeypatch)
+    test_preview_wrong_confirm_4xx(client, monkeypatch)
+    test_no_webhook_route(client)
