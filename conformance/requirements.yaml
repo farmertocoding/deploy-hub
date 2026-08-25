@@ -1455,3 +1455,14 @@ requirements:
     text_hash: sha256:47b55232f78454dc9deaa8929a2191fe3a1c5b1b77771b615a3f2af9d46c2523
     text: >
       reap_stale_ephemerals flags an ephemeral aws_ec2 that is not a site primary when its instance.create AuditEvent is older than 24 hours; it does not terminate; missing birth audit is skipped; evaluate_site still never terminates; tests plant AuditEvent timestamps.
+
+  # Phase 6.11 (docs/phase-6.11-design-note.md §3, Task 0 / D-116…D-118).
+  # New MUST id is tier-less (no `tier:` key). Do not rewrite
+  # SCALE-OVERFLOW-EPHEMERAL-REAPER text:. Everyday conformance stays phase 5.
+  - id: SCALE-OVERFLOW-EPHEMERAL-REAPER-BEAT
+    phase: 6
+    verify: test
+    source: phase-6.11-design-note.md §3
+    text_hash: sha256:48e4c215693dfc048897e3b6c689b3fd371086133706fbf73619612897412d23
+    text: >
+      Beat ephemeral-overflow-reaper-daily (86400s, queue probes) calls reap_stale_ephemerals; it does not terminate; evaluate_site still never terminates; tests assert the Beat entry and call the task with planted AuditEvent timestamps.
