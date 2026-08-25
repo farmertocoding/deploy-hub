@@ -5,6 +5,7 @@ core.partner_deploys / realtime.apps.ready(). Unwired calls fail loud.
 """
 
 _impl = None
+_join = None
 
 
 class OverflowDeployError(Exception):
@@ -16,6 +17,11 @@ def register_deploy(impl):
     _impl = impl
 
 
+def register_join(impl):
+    global _join
+    _join = impl
+
+
 def deploy(*args, **kwargs):
     if _impl is None:
         raise RuntimeError(
@@ -23,3 +29,12 @@ def deploy(*args, **kwargs):
             "must call core.overflow_deploys.register_deploy()"
         )
     return _impl(*args, **kwargs)
+
+
+def join(*args, **kwargs):
+    if _join is None:
+        raise RuntimeError(
+            "overflow join not wired — deploys.apps.DeploysConfig.ready() "
+            "must call core.overflow_deploys.register_join()"
+        )
+    return _join(*args, **kwargs)

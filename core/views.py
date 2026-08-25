@@ -398,3 +398,54 @@ class OverflowDeployView(APIView):
             {"deployment": deployment.pk, "target": target.pk}
         )
         return Response(body.data, status=status.HTTP_201_CREATED)
+
+
+class OverflowJoinSerializer(serializers.Serializer):
+    target = serializers.IntegerField()
+    confirm_name = serializers.CharField()
+
+
+class OverflowJoinResultSerializer(serializers.Serializer):
+    target = serializers.IntegerField()
+    joined = serializers.CharField()
+    name = serializers.CharField(required=False)
+    values = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class OverflowJoinView(APIView):
+    """T1: two passkeys + recent WebAuthn touch + type-the-host, then join."""
+
+    permission_classes = [IsAuthenticated, RequireRecentTouch]
+
+    @extend_schema(
+        request=OverflowJoinSerializer,
+        responses={201: OverflowJoinResultSerializer},
+    )
+    def post(self, request, pk):
+        site = get_object_or_404(Site, pk=pk)
+        ser = OverflowJoinSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        target = get_object_or_404(Target, pk=ser.validated_data["target"])
+        if ser.validated_data["confirm_name"] != target.host:
+            return Response(
+                {"detail": "Type the target host name to confirm."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from core import overflow_deploys
+
+        try:
+            result = overflow_deploys.join(site, target)
+        except overflow_deploys.OverflowDeployError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        audit(
+            "site.overflow_join",
+            source="api",
+            actor=request.user,
+            obj=site,
+            severity="security",
+        )
+        body = OverflowJoinResultSerializer(result)
+        return Response(body.data, status=status.HTTP_201_CREATED)

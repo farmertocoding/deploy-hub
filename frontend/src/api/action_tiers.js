@@ -87,6 +87,11 @@ export const ACTION_TIERS = [
     "label": "Deploy overflow copy"
   },
   {
+    "id": "site.overflow_join",
+    "tier": "T1",
+    "label": "Join overflow traffic"
+  },
+  {
     "id": "partner.create",
     "tier": "T1",
     "label": "Create partner"

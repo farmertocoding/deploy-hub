@@ -28,6 +28,7 @@ BANNED_IMPORTS = (
     "enroll_overflow_target",
     "overflow",
     "deploy_overflow_copy",
+    "join_overflow_traffic",
     "InstanceCreateView",
     "boto3",
     "CloudProvider",

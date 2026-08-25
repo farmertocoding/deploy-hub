@@ -414,7 +414,7 @@ def _persist_dns_rows(desired, records):
     from core.models import DnsRecord
 
     for rec in records:
-        value = rec["values"][0] if rec["values"] else ""
+        value = ",".join(rec["values"]) if rec["values"] else ""
         DnsRecord.objects.update_or_create(
             site=site,
             name=rec["name"],

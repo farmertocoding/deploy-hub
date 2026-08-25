@@ -4,6 +4,7 @@ Lock boundary: OperationLock kind=deploy on the site and the target, holder =
 the deployment id. A new deploy while one is running supersedes the old row
 before taking the unique (scope, object_id, kind) lock.
 """
+import ipaddress
 import json
 import os
 import signal
@@ -399,6 +400,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
         "dns_zone": dns_zone,
         "domain": domain,
         "dns_values": list(body.get("dns_values") or ["127.0.0.1"]),
+        "dns_proxied": bool(getattr(site, "proxied", True)),
         "poll_interval_s": poll,
         "internal_port": int(body.get("internal_port") or 20000),
         "docker_run_extra": body.get("docker_run_extra"),
@@ -431,8 +433,11 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
             separators=(",", ":"),
         )
 
+    joined = _joined_dns_values(site)
+    if joined:
+        desired["dns_values"] = joined
     desired["dns_set"] = arts.get("dns_set")
-    if desired["dns_set"] is None:
+    if joined or desired["dns_set"] is None:
         desired["dns_set"] = json.dumps(_desired_dns_records(desired))
 
     if "env_names" in arts:
@@ -440,6 +445,31 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
     if "firewall_argv" in arts:
         desired["firewall_argv"] = _json_list(arts["firewall_argv"])
     return desired
+
+
+def _joined_dns_values(site):
+    """Comma-joined A values from DnsRecord, or None.
+
+    A joined overflow list must win over a stale single-A dns_set overlay.
+    """
+    if site is None or not getattr(site, "pk", None) or not getattr(site, "domain", None):
+        return None
+    from core.models import DnsRecord
+
+    rec = DnsRecord.objects.filter(
+        site=site, name=site.domain, rtype="A",
+    ).first()
+    if rec is None or "," not in (rec.value or ""):
+        return None
+    parts = [part.strip() for part in rec.value.split(",") if part.strip()]
+    if len(parts) < 2:
+        return None
+    try:
+        for part in parts:
+            ipaddress.IPv4Address(part)
+    except ValueError:
+        return None
+    return parts
 
 
 def _json_list(raw):
