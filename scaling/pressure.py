@@ -79,6 +79,28 @@ def _get(sample, key):
     return None
 
 
+def has_headroom(sample):
+    """True when ram is numeric <= 85 and load is numeric and not over."""
+    if not isinstance(sample, Mapping):
+        return False
+    ram = _get(sample, "ram")
+    load = _get(sample, "load")
+    if ram is None or load is None:
+        return False
+    if not _is_number(ram) or not _is_number(load):
+        return False
+    if ram > MEM_PCT_THRESHOLD:
+        return False
+    cores = _get(sample, "cores")
+    if cores is None or not _is_number(cores) or cores < 1:
+        return True
+    return load <= cores
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _ram_over(sample):
     ram = _get(sample, "ram")
     return ram is not None and ram > MEM_PCT_THRESHOLD

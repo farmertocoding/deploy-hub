@@ -1054,6 +1054,7 @@ def test_evaluate_scale_proposals_does_not_write_checkrun():
         REPO / "scaling" / "evaluator.py",
         REPO / "scaling" / "pressure.py",
         REPO / "scaling" / "constants.py",
+        REPO / "scaling" / "destination.py",
     ):
         scoped.append(ast.parse(path.read_text(encoding="utf-8")))
     for tree in scoped:

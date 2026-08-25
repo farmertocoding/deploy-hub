@@ -14,11 +14,10 @@ from scaling.constants import (
     CHEAP_KIND,
     CHEAP_TITLE,
     FIX_ACTION,
-    OVERFLOW_HOURLY_USD,
-    OVERFLOW_SIZE,
     TITLE,
     WINDOW_S,
 )
+from scaling.destination import pick_overflow_home
 from scaling.pressure import _overflow_axis, sustained_pressure
 
 CYCLE_LOCK = ("target", "evaluate-scale-proposals", "collect")
@@ -101,9 +100,12 @@ def _evaluate_eligible(site, *, now):
         return existing
     axis = _overflow_axis(samples, now=clock) or "ram"
     entity = f"site:{site.domain or site.name}"
+    host, cost, size = pick_overflow_home(site, now=clock)
+    extra = f"idle registered machine {host}. " if host is not None else ""
     body = (
         f"{site.name} has sustained {axis} pressure. "
-        f"Overflow estimate {OVERFLOW_HOURLY_USD} USD/hour on {OVERFLOW_SIZE}. "
+        f"Overflow estimate {cost} USD/hour on {size}. "
+        f"{extra}"
         "propose-mode does not launch."
     )
     return raise_alert(
