@@ -25,6 +25,8 @@ BANNED_IMPORTS = (
     "aws_enroll",
     "ec2",
     "enroll_aws_target",
+    "enroll_overflow_target",
+    "overflow",
     "InstanceCreateView",
     "boto3",
     "CloudProvider",
@@ -808,8 +810,9 @@ def test_scaling_and_beat_do_not_import_enroll_or_ec2():
     """AST-scan scaling/ + monitor/tasks.py + monitor/host_metrics.py.
 
     What would make this fail: importing provision.aws_enroll, providers.ec2,
-    enroll_aws_target, InstanceCreateView, boto3, or CloudProvider, or adding
-    scaling/tasks.py (scaling.* routes to control).
+    enroll_aws_target, enroll_overflow_target, provision.overflow,
+    InstanceCreateView, boto3, or CloudProvider, or adding scaling/tasks.py
+    (scaling.* routes to control).
     """
     assert (REPO / "scaling" / "evaluator.py").is_file()
     assert (REPO / "scaling" / "pressure.py").is_file()

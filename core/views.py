@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audit import audit
-from .models import NetworkZone, Target
+from .models import NetworkZone, Site, Target
 from .otp import consume_recovery_code
 from .permissions import RequireRecentTouch
 
@@ -214,6 +214,7 @@ class InstanceCreateSerializer(serializers.Serializer):
     host = serializers.CharField()
     zone = serializers.SlugField()
     instance_type = serializers.CharField(required=False, default="t3.micro")
+    overflow_site = serializers.IntegerField(required=False)
 
 
 class InstanceCreateCostSerializer(serializers.Serializer):
@@ -273,13 +274,25 @@ class InstanceCreateView(APIView):
         zone = get_object_or_404(NetworkZone, slug=ser.validated_data["zone"])
         from provision import aws_enroll as aws_enroll_mod
 
+        overflow_site = ser.validated_data.get("overflow_site")
         try:
-            target = aws_enroll_mod.enroll_aws_target(
-                host=host,
-                name=host,
-                zone=zone,
-                instance_type=ser.validated_data.get("instance_type") or "t3.micro",
-            )
+            if overflow_site is not None:
+                from provision import overflow as overflow_mod
+
+                site = get_object_or_404(Site, pk=overflow_site)
+                target = overflow_mod.enroll_overflow_target(
+                    site=site,
+                    host=host,
+                    zone=zone,
+                    confirm_name=ser.validated_data["confirm_name"],
+                )
+            else:
+                target = aws_enroll_mod.enroll_aws_target(
+                    host=host,
+                    name=host,
+                    zone=zone,
+                    instance_type=ser.validated_data.get("instance_type") or "t3.micro",
+                )
         except aws_enroll_mod.EnrollError as exc:
             return Response(
                 {"detail": str(exc)},
