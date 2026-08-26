@@ -735,9 +735,9 @@ requirements:
     text_hash: sha256:b5450f27ac6f53b51fc4824ff24c5559434cec8e3bca61df34ad32269de3d0b5
     text: >
       Unproxied public sites get certificates via Hub-central DNS-01 with
-      renewal owned by a Hub Beat job; until it is built the pipeline refuses
-      with a Finding plus a visible Sites-screen state, never a bare exception
-      (the unbuilt clause of SEC-B2, D-035).
+      renewal owned by a Hub Beat job; missing inject refuses with a Finding
+      plus a visible Sites-screen state, never a bare exception
+      (the Hub-central clause of SEC-B2, D-035).
   - id: UX-F5-T2-T3-FRICTION
     phase: 3
     verify: test

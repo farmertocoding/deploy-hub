@@ -2,9 +2,9 @@
 
 Self-hosted deployment control plane. Phases 0–7 T1 MUST are on `master`.
 Phase 7 polish on this tree: restore-into-a-clean-container, Router Advisor
-(one tunnel probe), LAN discovery ghosts, private-repo preview Sites.
-Hub-central DNS-01 for unproxied sites is the named remaining slip
-(`TLS-B2-HUB-DNS01-UNPROXIED`, still waived until that wave lands).
+(one tunnel probe), LAN discovery ghosts, private-repo preview Sites,
+Hub-central DNS-01 T1 Fake for unproxied sites. Live Let's Encrypt stays
+skipped.
 
 **Plan docs** (frozen copies, review3 is the topmost patch layer):
 `docs/plan/deploy-system-plan.md` · `docs/plan/plan-addendum-2026-07-30.md` ·

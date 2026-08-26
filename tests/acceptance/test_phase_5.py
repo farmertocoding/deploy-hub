@@ -4,8 +4,8 @@
 T1 fakes/moto only: FakeCloudProvider, FakeIam, FakeSsm, FakeImageRegistry,
 FakeTransport, FakeHelper, moto on providers/{ec2,route53,ssm,aws_creds}.py.
 Do not require live AWS. Do not invent HUB_TEST_AWS_TOKEN or HUB_TEST_CF_TOKEN.
-Do not add Playwright. Do not claim SSH-CA enablement. DNS-01 stays the
-phase-4 first slip. Do not claim a 24 h Hub-down.
+Do not add Playwright. Do not claim SSH-CA enablement. Hub-central DNS-01
+T1 Fake landed (still phase 4). Do not claim a 24 h Hub-down.
 
 Every T1 body asserts the same properties an existing named proof asserts
 (transcription, not fiction); each docstring names its source test.
@@ -101,7 +101,7 @@ def _assert_honest_t1_demo():
     )
     assert "docs/ssh-ca-evaluation.md" in record
     assert DNS01_ID in record
-    assert "first slip" in lower
+    assert "first slip" not in lower
     assert WAIVER_24H in record
     assert "24 h hub-down" not in lower and "24h hub-down" not in lower
     assert "playwright" not in lower or "no playwright" in lower or "slip" in lower
@@ -684,11 +684,12 @@ def test_nav_stays_six():
     assert demo_req["verify"] == "demo"
     assert "conformance/demos/phase-5.md" in demo_req.get("demo", [])
 
-    dns01 = _waiver_lines(DNS01_ID)
-    assert dns01, f"{DNS01_ID} must stay waived — named first slip"
-    assert "first slip" in dns01[0].lower() or "DNS-01" in dns01[0]
-    sec = _waiver_lines(FULL_TEXT_SEC_B2)
-    assert sec, f"{FULL_TEXT_SEC_B2} must stay waived — DNS-01 is unbuilt"
+    assert not _waiver_lines(DNS01_ID), (
+        f"{DNS01_ID} waiver retires now that Hub-central DNS-01 is marked"
+    )
+    assert not _waiver_lines(FULL_TEXT_SEC_B2), (
+        f"{FULL_TEXT_SEC_B2} waiver retires now that both clauses hold"
+    )
     assert WAIVER_24H in _waivers()
 
     record = _assert_honest_t1_demo()

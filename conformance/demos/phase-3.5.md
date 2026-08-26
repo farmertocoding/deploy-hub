@@ -118,10 +118,11 @@ green. Retirement does not wait on a live zone token.
 - `REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven` **stays in WAIVERS.md**
   (D-042). The 24-hour form is a dated calendar item. This record is
   T1 adopt fakes. The REL-P2 duration is still not claimed. Not this phase.
-- `TLS-B2-HUB-DNS01-UNPROXIED` stays **phase 4**. Unproxied refusal stays
-  (`UnproxiedCertUnsupported` / Sites-screen). DNS-01 is not due. The
-  full-text `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waiver stays (Hub-central
-  DNS-01 clause unimplemented).
+- `TLS-B2-HUB-DNS01-UNPROXIED` stays **phase 4** (not due at 3.5).
+  Unproxied refusal stays (`UnproxiedCertUnsupported` / Sites-screen)
+  when inject is missing. Hub-central DNS-01 T1 Fake landed later;
+  the TLS-B2 and full-text `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waivers
+  are retired.
 - `HARNESS-T3-LE-STAGING` stays waived (`no-test-zone-credentials`).
   Leftover Task 8 owns that line. 3b neither freezes nor retires it.
 - Task 8 UI landed; HTTP start still 404.
@@ -143,8 +144,9 @@ T1 fakes, this session:
 - `::test_rel_p2_24h_still_not_claimed`
 - `::test_hub_central_dns01_still_not_due`
 
-No `@pytest.mark.req` on `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` or
-`TLS-B2-HUB-DNS01-UNPROXIED`.
+`TLS-B2-HUB-DNS01-UNPROXIED` and `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` are
+marked on later Phase 7.4 proofs; they stay phase 4 / phase 3 and are
+not due at 3.5.
 
 ## Gates
 

@@ -1,7 +1,8 @@
 """Phase 7.4 T1: Hub-central DNS-01 issue + Beat renew (C1–C5, C7).
 
-Unmarked proofs. Do not mark P7-DNS01-DEMO or TLS-B2 this task.
-Default dns01 is refuse-closed; tests inject. No live Let's Encrypt.
+TLS-B2 is marked on the issue/refuse/renew functions. Do not mark
+P7-DNS01-DEMO. Default dns01 is refuse-closed; tests inject. No live
+Let's Encrypt.
 """
 from __future__ import annotations
 
@@ -60,6 +61,7 @@ def _unproxied_desired(site, transport, **extra):
     return desired, dns
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_unproxied_injected_dns01_issues_hub_mode():
     """Injected dns01 upserts TXT, pushes PEM, mode hub_dns01, no token on target.
 
@@ -106,6 +108,7 @@ def test_unproxied_injected_dns01_issues_hub_mode():
             assert "BEGIN" in text
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_missing_dns01_refuses_with_finding():
     """No inject → Dns01Error('dns01 refused'), Finding, no put.
 
@@ -132,6 +135,7 @@ def test_missing_dns01_refuses_with_finding():
     assert not any(kind == "put" for kind, _ in transport.calls)
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_issue_resolves_open_unproxied_finding():
     """Successful issue resolves OPEN/ACKED unproxied-cert:{pk}; ACCEPTED stays.
 
@@ -180,6 +184,7 @@ def test_issue_resolves_open_unproxied_finding():
     ).state == Finding.State.ACCEPTED
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_renew_due_reissues_inside_window():
     """hub_dns01 rows inside RENEW_BEFORE_DAYS call issue=; CheckRun.HUB_DNS01.
 
@@ -346,6 +351,7 @@ def test_renew_due_uses_latest_hub_dns01_per_site():
     assert run.status == CheckRun.Status.SUCCEEDED
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_module_has_no_acme_caddy_block():
     """dns01.py must not grow a Caddy ACME DNS block or invented token env.
 
@@ -366,6 +372,7 @@ def test_module_has_no_acme_caddy_block():
             assert "acme_dns" not in lowered
 
 
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
 def test_beat_hub_dns01_renew_daily_is_registered():
     """hub-dns01-renew-daily is 86400s on queue probes with no secret kwargs.
 

@@ -1128,11 +1128,11 @@ def test_rel_p2_24h_still_not_claimed():
 
 
 def test_hub_central_dns01_stays_first_slip():
-    """Hub-central DNS-01 stays the named first slip. Unproxied refusal stays.
+    """Hub-central DNS-01 stays phase 4 and is marked. Both TLS-B2 and
+    full-text SEC-B2 waivers are retired. LE-staging stays waived.
 
     Transcribes tests/test_certs_phase_pin.py and
     tests/test_conformance_gate.py::test_tls_b2_hub_dns01_stays_phase_4.
-    Do not mark TLS-B2-HUB-DNS01-UNPROXIED or full-text SEC-B2.
     """
     import check
     from test_certs_phase_pin import _unproxied_class_docstring, _unproxied_fix_action
@@ -1140,16 +1140,20 @@ def test_hub_central_dns01_stays_first_slip():
     reg = _registry()
     assert reg[DNS01_ID]["phase"] == 4
     markers = check.collect_markers(REPO)
-    assert DNS01_ID not in markers
-    assert FULL_TEXT_SEC_B2 not in markers
+    assert DNS01_ID in markers
+    assert FULL_TEXT_SEC_B2 in markers
 
-    dns01 = _waiver_lines(DNS01_ID)
-    assert dns01, f"{DNS01_ID} must stay waived — named first slip"
-    assert "first slip" in dns01[0].lower() or "DNS-01" in dns01[0]
-
-    sec = _waiver_lines(FULL_TEXT_SEC_B2)
-    assert sec, f"{FULL_TEXT_SEC_B2} must stay waived — DNS-01 is unbuilt"
-    assert "DNS-01" in sec[0] or "Hub-central" in sec[0]
+    assert not _waiver_lines(DNS01_ID), (
+        f"{DNS01_ID} waiver retires now that Hub-central DNS-01 is marked"
+    )
+    assert not _waiver_lines(FULL_TEXT_SEC_B2), (
+        f"{FULL_TEXT_SEC_B2} waiver retires now that both clauses hold"
+    )
+    waivers = _waivers()
+    assert any("RETIRED" in line and DNS01_ID in line for line in waivers.splitlines())
+    assert any(
+        "RETIRED" in line and FULL_TEXT_SEC_B2 in line for line in waivers.splitlines()
+    )
 
     le = _waiver_lines(LE_STAGING)
     assert le, f"{LE_STAGING} must stay — leftover Task 8 owns that line"
@@ -1166,7 +1170,7 @@ def test_hub_central_dns01_stays_first_slip():
 
     record = _assert_honest_t1_demo()
     assert DNS01_ID in record
-    assert "first slip" in record.lower() or "waived" in record.lower()
+    assert "first slip" not in record.lower()
 
 
 def test_conformance_4_excludes_t2_t3():

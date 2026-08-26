@@ -1,11 +1,9 @@
 """SEC-B2 / UX-F5 clause split (D-035 / D-040, SCAN-M4 precedent).
 
-The full-text ids stay in the registry untouched and carry NO marker while one
-of their clauses is unbuilt: a marker would claim the whole text, and the whole
-text is not true this phase. The buildable clauses live under their own new
-ids; the unbuilt clauses are registered at phase 4. These tests are the ratchet
-that keeps the shape from eroding — the moment somebody puts a marker back on a
-full-text id, or rephases a split id, this file goes red by name.
+The full-text ids stay in the registry untouched. A marker claims the whole
+text, so it goes on only after every clause holds. Both SEC-B2 clauses and
+both UX-F5 clauses have landed; the split ids stay at their registered
+phases. These tests are the ratchet that keeps the shape from eroding.
 """
 import pathlib
 
@@ -41,16 +39,13 @@ def _registry():
     return {r["id"]: r for r in data["requirements"]}
 
 
-def test_sec_b2_full_text_id_carries_no_marker():
-    """A marker on SEC-B2-NO-DNS-TOKENS-ON-TARGETS claims both clauses, and the
-    Hub-central-DNS-01 clause is unbuilt until phase 4 (D-035). The exfiltration
-    clause is proven under SEC-B2-NO-TOKEN-ON-TARGET; the full-text id sits
-    uncovered behind Task 19's clause-scoped waiver, never behind a marker.
+def test_sec_b2_full_text_id_is_marked_now_that_dns01_lands():
+    """D-035 retirement: TLS-B2-HUB-DNS01-UNPROXIED is marked, so the full-text
+    SEC-B2-NO-DNS-TOKENS-ON-TARGETS marker goes back on.
     """
     markers = _suite_markers()
-    assert FULL_TEXT_SEC_B2 not in markers, (
-        f"{FULL_TEXT_SEC_B2} must carry no marker while its DNS-01 clause is "
-        f"unbuilt — found: {markers.get(FULL_TEXT_SEC_B2)}")
+    assert FULL_TEXT_SEC_B2 in markers, (
+        f"{FULL_TEXT_SEC_B2} must be marked now that the DNS-01 clause landed")
 
 
 def test_ux_f5_full_text_id_is_marked_now_that_hardware_lands():

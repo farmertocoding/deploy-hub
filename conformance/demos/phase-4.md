@@ -151,10 +151,10 @@ AWS.
   (D-042). The 24-hour form is a dated calendar item. This record is T1
   security-suite fakes. The REL-P2 duration is still not claimed. Not this
   phase.
-- `TLS-B2-HUB-DNS01-UNPROXIED` stays the named **first slip**. Unproxied
-  refusal stays (`UnproxiedCertUnsupported` / Sites-screen). Hub-central
-  DNS-01 is waived, not verified. The full-text
-  `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waiver stays.
+- `TLS-B2-HUB-DNS01-UNPROXIED` stays **phase 4** and is marked. Hub-central
+  DNS-01 T1 Fake landed (issue + Beat renew). The TLS-B2 and full-text
+  `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waivers are retired. Live Let's
+  Encrypt stays skipped.
 - `HARNESS-T3-LE-STAGING` and `DNS-CF-T3-LIVE` stay waived
   (`no-test-zone-credentials`). Leftover Task 8 owns the LE line.
 - `SEC-B8-TAILSCALE-DEVICE-POLL` skip-unless-configured stays while the
@@ -187,9 +187,9 @@ T1 fakes, this session:
 - `::test_hub_central_dns01_stays_first_slip`
 - `::test_conformance_4_excludes_t2_t3`
 
-No `@pytest.mark.req` on `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` or
-`TLS-B2-HUB-DNS01-UNPROXIED`. No `@pytest.mark.req` on
-`SEC-B3-AUDIT-HASH-CHAIN` (live S3 P2 is SLIP).
+`TLS-B2-HUB-DNS01-UNPROXIED` and `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` are
+marked on the Phase 7.4 NAMED / issue proofs (still phase 4). No
+`@pytest.mark.req` on `SEC-B3-AUDIT-HASH-CHAIN` (live S3 P2 is SLIP).
 
 ## Gates
 

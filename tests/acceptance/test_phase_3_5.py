@@ -485,7 +485,8 @@ def test_rel_p2_24h_still_not_claimed():
 
 
 def test_hub_central_dns01_still_not_due():
-    """Hub-central DNS-01 stays phase 4. SEC-B2 clause waiver and LE line stay.
+    """Hub-central DNS-01 stays phase 4 (not due at 3.5). Marks are on;
+    TLS-B2 and full-text SEC-B2 waivers are retired. LE-staging stays.
 
     Transcribes tests/test_certs_phase_pin.py and tests/test_conformance_gate.py::
     test_tls_b2_hub_dns01_stays_phase_4. Leftover Task 8 still owns
@@ -497,13 +498,15 @@ def test_hub_central_dns01_still_not_due():
     reg = _registry()
     assert reg[DNS01_ID]["phase"] == 4
     markers = check.collect_markers(REPO)
-    assert DNS01_ID not in markers
-    assert FULL_TEXT_SEC_B2 not in markers
+    assert DNS01_ID in markers
+    assert FULL_TEXT_SEC_B2 in markers
 
-    sec = _waiver_lines(FULL_TEXT_SEC_B2)
-    assert sec, f"{FULL_TEXT_SEC_B2} must stay waived — DNS-01 is unbuilt"
-    assert "DNS-01" in sec[0] or "Hub-central" in sec[0]
-    assert DNS01_ID in sec[0]
+    assert not _waiver_lines(FULL_TEXT_SEC_B2), (
+        f"{FULL_TEXT_SEC_B2} waiver retires now that both clauses hold"
+    )
+    assert not _waiver_lines(DNS01_ID), (
+        f"{DNS01_ID} waiver retires now that Hub-central DNS-01 is marked"
+    )
 
     le = _waiver_lines(LE_STAGING)
     assert le, f"{LE_STAGING} must stay — leftover Task 8 owns that line"

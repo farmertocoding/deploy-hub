@@ -233,3 +233,63 @@ each body calls the Task 1 proof:
 
 - `test_preview_private_only_creates_sibling`
 - `test_preview_t2_http`
+
+## Phase 7.4 — Hub-central DNS-01 (P7-DNS01-DEMO)
+
+**Date:** 2026-08-26 · **Branch:** `master` · **Recorded by:** Phase 7.4
+Task 2. **T1 inject only.** Injected `dns01` — not live Let's Encrypt,
+not a Caddy ACME DNS block, not a token on a target. This session did
+not run live Let's Encrypt. No Playwright.
+
+### What the milestone asked (design note §4)
+
+Unproxied public Site + injected `dns01` → `ensure_site_certificate`
+issues, upserts TXT `_acme-challenge`, pushes PEM, `mode` `hub_dns01`,
+`unproxied-cert:{pk}` RESOLVED. Missing inject refuses with Finding
+`unproxied-cert` + `Dns01Error`. Beat `renew_due` /
+`hub-dns01-renew-daily` reissues due `hub_dns01` rows.
+
+Honest: **no live Let's Encrypt**, no invented token env, no Caddy
+DNS-01, no U1. Hub-central DNS-01 T1 Fake landed this wave. Pulumi /
+managed-DB/LB parked (D-134). Azure adapter parked (D-135).
+
+`PART-U1-NAMED-PARTNER` stays uncovered; `named-partner.md` absent.
+Everyday `conformance` stays phase 5; `conformance-7` is the phase gate
+and excludes t2/t3:
+`python conformance/check.py --phase 7 --exclude-tier t2 --exclude-tier t3`.
+No invented token env. No Playwright. `P7-DNS01-DEMO` named. NAV six.
+
+### The honest state of this host
+
+T1. Inject actually driven this session:
+
+- `dns01=` wrap on `deploys.certs.ensure_site_certificate` /
+  `deploys.dns01.issue_unproxied`. Default `dns01` is refuse-closed
+  (`None`). Injected `dns01` upserts TXT `_acme-challenge` via
+  `desired["dns"]` and returns PEM. No live Let's Encrypt. No token
+  on the target.
+
+NAV is still six.
+
+### Still outstanding — named, not greened
+
+- `PART-U1-NAMED-PARTNER` stays uncovered. `conformance/demos/named-partner.md`
+  is absent. This record does not claim a named committed partner.
+- Live Let's Encrypt / inventing a test-zone token, HMAC, overwrite-live
+  restore stay later. Preview, LAN ghosts, router advisor, and restore
+  are done. Pulumi/managed-DB/LB (D-134) and Azure adapter (D-135) stay
+  parked.
+- Everyday `conformance` / `review-round` stay `--phase 5 --exclude-tier t2
+  --exclude-tier t3`. `conformance-7` is not a `review-round` or
+  `nightly-gates` prereq.
+
+This record **does not claim** live Let's Encrypt, a Caddy ACME DNS
+block, Pulumi, Azure, or U1.
+
+### Acceptance transcription — real nodeids
+
+`tests/acceptance/test_phase_7.py` (`@pytest.mark.acceptance(phase=7)`),
+each body calls the Task 1 proof:
+
+- `test_unproxied_dns01_issues_and_refuses`
+- `test_dns01_renew_beat_and_surfaces`

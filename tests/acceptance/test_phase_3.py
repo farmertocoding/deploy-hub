@@ -915,20 +915,22 @@ def test_canary_fail_degrades_to_one_hub_egress_p2():
 
 
 def test_clause_scoped_full_text_ids_are_waived_not_marked():
-    """SCAN-M4 shape: full-text ids have no marker; clause-scoped waivers name
-    the unbuilt clause and its retirement id. Unmarked — a marker here would
-    claim the whole text.
+    """SCAN-M4 retirement: both full-text ids are marked now that every
+    clause landed. Phase-3 acceptance still must not carry the full-text
+    SEC-B2 decorator.
     """
     import check
 
     markers = check.collect_markers(REPO)
-    assert FULL_TEXT_SEC_B2 not in markers
+    assert FULL_TEXT_SEC_B2 in markers
     assert FULL_TEXT_UX_F5 in markers
 
     sec = _waiver_lines(FULL_TEXT_SEC_B2)
-    assert sec, f"{FULL_TEXT_SEC_B2} must have a clause-scoped WAIVED line"
-    assert "Hub-central-DNS-01" in sec[0] or "DNS-01" in sec[0]
-    assert "TLS-B2-HUB-DNS01-UNPROXIED" in sec[0]
+    assert not sec, f"{FULL_TEXT_SEC_B2} waiver retires with the DNS-01 clause"
+    assert any(
+        "RETIRED" in line and FULL_TEXT_SEC_B2 in line
+        for line in _waivers().splitlines()
+    )
 
     ux = _waiver_lines(FULL_TEXT_UX_F5)
     assert not ux, f"{FULL_TEXT_UX_F5} waiver retires with the hardware clause"

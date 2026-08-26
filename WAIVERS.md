@@ -125,15 +125,20 @@ WAIVED: DNS-CF-T3-LIVE — no-test-zone-credentials: HUB_TEST_CF_TOKEN is not se
 # — tests/test_adopt_flow.py + tests/test_adopt_reaper.py +
 # tests/acceptance/test_phase_3_5.py::test_temp_subdomain_on_site_zone_cleans_up
 # (T1 FakeDnsProvider; temp on Site.dns_zone; cleanup + 24 h reaper).
-WAIVED: SEC-B2-NO-DNS-TOKENS-ON-TARGETS — Hub-central-DNS-01 clause unimplemented: the full-text id names two clauses; SEC-B2-NO-TOKEN-ON-TARGET is proven by the target-bound surface scan (tests/test_no_token_exfiltration.py, unmarked here); Hub-central DNS-01 for unproxied sites is unbuilt and the honest interim is the named refusal (Finding + Sites-screen state). Retire when TLS-B2-HUB-DNS01-UNPROXIED (registered at phase 4; built in phase 4) is verified and the full-text markers go back on. (2026-08-23)
+# RETIRED 2026-08-26 (Phase 7.4 Task 2): SEC-B2-NO-DNS-TOKENS-ON-TARGETS
+# — both clauses hold: no token on target (SEC-B2-NO-TOKEN-ON-TARGET) and
+# Hub-central DNS-01 for unproxied sites (TLS-B2-HUB-DNS01-UNPROXIED).
+# Full-text SEC-B2 marker restored on the issue NAMED.
 # RETIRED 2026-08-23 (Phase 4 Task 2): UX-F5-ACTION-TIERS
 # — SEC-F5-T1-HARDWARE-TOUCH marked; full-text UX-F5 markers restored.
 # T1 is WebAuthn hardware touch + type-the-name; TOTP never writes
 # hardware_touch_at; T3 never takes RequireRecentTouch (D-062).
 
 # Phase 4 Task 0 (D-054 / D-055 / D-060). Do not retire REL-P2, LE-staging,
-# DNS-CF-T3-LIVE, or full-text SEC-B2.
-WAIVED: TLS-B2-HUB-DNS01-UNPROXIED — first slip: Hub-central DNS-01 is the named Phase 4 slip so conformance-4 can start (D-054, D-060); unproxied public sites keep the named refusal (Finding plus Sites-screen state), never a bare exception. Do not mark full-text SEC-B2-NO-DNS-TOKENS-ON-TARGETS. Retire when Hub-central DNS-01 lands and this id is verified. (2026-08-23)
+# or DNS-CF-T3-LIVE.
+# RETIRED 2026-08-26 (Phase 7.4 Task 2): TLS-B2-HUB-DNS01-UNPROXIED
+# — Hub-central DNS-01 T1 Fake + Beat renew marked on issue/refuse/renew
+# proofs. Live Let's Encrypt stays skipped (HARNESS-T3-LE-STAGING).
 # SCAN-DECLARED-TEST-MATERIAL and SCAN-DECLARED-GUARDS: Task 3 retired the
 # clause-scoped full-text waivers. Markers live on tests/test_d012_reland.py.
 

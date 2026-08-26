@@ -5,7 +5,7 @@ Everyday `conformance` / `review-round` stay `--phase 5`. T1 inject only:
 `restore_to_clean=` never live docker. Do not invent HUB_TEST_* /
 HUB_INTAKE_HMAC / HUB_WEBHOOK_SECRET. Do not add Playwright. Do not stub
 named-partner.md. Do not mark P7-RESTORE-DEMO, P7-ROUTER-DEMO,
-P7-LAN-GHOST-DEMO, or P7-PREVIEW-DEMO on pytest.
+P7-LAN-GHOST-DEMO, P7-PREVIEW-DEMO, or P7-DNS01-DEMO on pytest.
 """
 
 import re
@@ -29,6 +29,8 @@ NAMED = (
     "test_lan_ghosts_map_view",
     "test_preview_private_only_creates_sibling",
     "test_preview_t2_http",
+    "test_unproxied_dns01_issues_and_refuses",
+    "test_dns01_renew_beat_and_surfaces",
 )
 
 pytestmark = [pytest.mark.acceptance(phase=7)]
@@ -175,6 +177,9 @@ def test_nav_stays_six():
     preview_demo = _registry()["P7-PREVIEW-DEMO"]
     assert preview_demo["verify"] == "demo"
     assert "conformance/demos/phase-7.md" in preview_demo.get("demo", [])
+    dns01_demo = _registry()["P7-DNS01-DEMO"]
+    assert dns01_demo["verify"] == "demo"
+    assert "conformance/demos/phase-7.md" in dns01_demo.get("demo", [])
     u1 = _registry()["PART-U1-NAMED-PARTNER"]
     assert u1["verify"] == "demo"
     assert "conformance/demos/named-partner.md" in u1.get("demo", [])
@@ -184,6 +189,17 @@ def test_nav_stays_six():
     assert "P7-ROUTER-DEMO" in record
     assert "P7-LAN-GHOST-DEMO" in record
     assert "P7-PREVIEW-DEMO" in record
+    assert "P7-DNS01-DEMO" in record
+    assert "dns01" in record
+    assert "_acme-challenge" in record
+    assert "hub_dns01" in record
+    assert "unproxied-cert" in record
+    assert "Dns01Error" in record
+    assert "renew_due" in record
+    assert "hub-dns01-renew-daily" in record
+    assert "no live let's encrypt" in record.lower()
+    assert "D-134" in record
+    assert "D-135" in record
     assert "lan_scan" in record
     assert "printer.lan" in record
     assert "web-1" in record
@@ -365,3 +381,48 @@ def test_preview_t2_http(client, monkeypatch):
     test_preview_http_missing_inject_4xx(client, monkeypatch)
     test_preview_wrong_confirm_4xx(client, monkeypatch)
     test_no_webhook_route(client)
+
+
+@pytest.mark.django_db
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
+@pytest.mark.req("SEC-B2-NO-DNS-TOKENS-ON-TARGETS")
+def test_unproxied_dns01_issues_and_refuses():
+    """Injected dns01 issues hub_dns01 + PEM; missing inject refuses with
+    Finding unproxied-cert + Dns01Error; issue resolves OPEN/ACKED.
+
+    Transcribes tests/test_dns01.py::
+    test_unproxied_injected_dns01_issues_hub_mode,
+    ::test_missing_dns01_refuses_with_finding,
+    and ::test_issue_resolves_open_unproxied_finding.
+    """
+    from test_dns01 import (
+        test_issue_resolves_open_unproxied_finding,
+        test_missing_dns01_refuses_with_finding,
+        test_unproxied_injected_dns01_issues_hub_mode,
+    )
+
+    test_unproxied_injected_dns01_issues_hub_mode()
+    test_missing_dns01_refuses_with_finding()
+    test_issue_resolves_open_unproxied_finding()
+
+
+@pytest.mark.django_db
+@pytest.mark.req("TLS-B2-HUB-DNS01-UNPROXIED")
+def test_dns01_renew_beat_and_surfaces():
+    """renew_due reissues hub_dns01 rows inside the window; dns01.py has no
+    ACME Caddy block; Beat hub-dns01-renew-daily is registered.
+
+    Transcribes tests/test_dns01.py::
+    test_renew_due_reissues_inside_window,
+    ::test_module_has_no_acme_caddy_block,
+    and ::test_beat_hub_dns01_renew_daily_is_registered.
+    """
+    from test_dns01 import (
+        test_beat_hub_dns01_renew_daily_is_registered,
+        test_module_has_no_acme_caddy_block,
+        test_renew_due_reissues_inside_window,
+    )
+
+    test_renew_due_reissues_inside_window()
+    test_module_has_no_acme_caddy_block()
+    test_beat_hub_dns01_renew_daily_is_registered()

@@ -149,9 +149,10 @@ is not used. NAV is the six objects. `VALID_TIERS` stays `{t1, t2, t3}`.
 
 ## Still outstanding — named, not greened
 
-- `TLS-B2-HUB-DNS01-UNPROXIED` stays the named **first slip** (phase 4).
-  Unproxied refusal stays. Hub-central DNS-01 is waived, not verified.
-  The full-text `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waiver stays.
+- `TLS-B2-HUB-DNS01-UNPROXIED` stays **phase 4** and is marked. Hub-central
+  DNS-01 T1 Fake landed. The TLS-B2 and full-text
+  `SEC-B2-NO-DNS-TOKENS-ON-TARGETS` waivers are retired. Live Let's
+  Encrypt stays skipped.
 - SSH-CA is evaluation outstanding (`docs/ssh-ca-evaluation.md`, Task 10).
   Dual-key rotate stays. This record does not enable an in-Hub CA; it
   does not claim SSH-CA enablement.
