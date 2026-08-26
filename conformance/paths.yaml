@@ -153,3 +153,6 @@ sensitive:
   # Do not broaden to deploys/** or frontend/**.
   - deploys/preview.py
   - deploys/preview_views.py
+  # Phase 7.4 (Task 0): claim deploys/dns01.py before Task 1 creates
+  # it (D-136 / C6). Do not broaden to deploys/** or providers/**.
+  - deploys/dns01.py

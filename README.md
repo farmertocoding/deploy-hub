@@ -1,11 +1,19 @@
 # Deploy Hub
 
-Self-hosted deployment control plane — Phase 0 skeleton.
+Self-hosted deployment control plane. Phases 0–7 T1 MUST are on `master`.
+Phase 7 polish on this tree: restore-into-a-clean-container, Router Advisor
+(one tunnel probe), LAN discovery ghosts, private-repo preview Sites.
+Hub-central DNS-01 for unproxied sites is the named remaining slip
+(`TLS-B2-HUB-DNS01-UNPROXIED`, still waived until that wave lands).
 
-**Plan docs live in the Claude project** ("web deploy automation & monitor"):
-`deploy-system-plan.md` (master) · `plan-addendum-2026-07-30.md` · scanner addendum ·
-`plan-addendum-2026-08-02-review3.md` (topmost patch layer) · `build-process.md`.
-The Phase 0 design note is in `docs/phase-0-design-note.md`.
+**Plan docs** (frozen copies, review3 is the topmost patch layer):
+`docs/plan/deploy-system-plan.md` · `docs/plan/plan-addendum-2026-07-30.md` ·
+scanner addendum · `docs/plan/plan-addendum-2026-08-02-review3.md` ·
+`docs/plan/build-process.md`.
+
+Do not invent `HUB_TEST_*` / HMAC tokens. Do not stub
+`conformance/demos/named-partner.md` — `PART-U1-NAMED-PARTNER` stays
+uncovered until Joseph names a partner.
 
 ## Run (dev, zero services)
 
@@ -28,26 +36,30 @@ docker compose exec web python manage.py migrate
 docker compose exec web python manage.py createsuperuser
 ```
 
-TOTP enrollment (until the UI flow lands): add a TOTP device for your user in
-`/admin` → *TOTP devices* → scan the QR with your authenticator. Login then
-requires password + code — mandatory-2FA per plan §6.10.
+Login is password + TOTP (or a WebAuthn hardware touch for T1 actions).
+Add a TOTP device in `/admin` → *TOTP devices* if you are bootstrapping
+a fresh database.
 
 ## Gates
 
 ```bash
-make test          # T1 unit + acceptance
-make lint          # ruff, bandit, pip-audit, log-scrubber grep
-make conformance   # conformance/check.py --phase 0 (review3 §Q2)
-make review-round  # all mechanical gates
+make test            # T1 unit + acceptance (`not t2 and not t3`)
+make lint            # ruff, bandit, pip-audit, log-scrubber grep
+make conformance     # check.py --phase 5 --exclude-tier t2 --exclude-tier t3
+make conformance-7   # phase 7; U1 uncovered-only is allowed
+make review-round    # everyday mechanical gates (still phase 5 minus live)
 ```
 
 ## Layout (§D4 — the import rule is a test)
 
-`hub/` settings+celery+asgi · `core/` AuditEvent, Transport seam, auth ·
-`vault/ catalog/ scanner/ provision/ deploys/ reconcile/ monitor/ scaling/` empty
-shells — features land phase by phase · `providers/` interfaces + fakes (the ONLY
-home for boto3/azure/cloudflare imports) · `realtime/` the multiplexed socket
-contract + demo job · `conformance/` requirements registry + check ·
-`simulation/` seed fixtures (§F8).
+`hub/` settings+celery+asgi · `core/` models, actions, auth ·
+`vault/` secrets · `catalog/` · `scanner/` django + node-ts ·
+`provision/` · `deploys/` pipeline + preview · `reconcile/` ·
+`monitor/` findings, map, intake poll · `scaling/` ·
+`intake/` partner process (not `INSTALLED_APPS`) ·
+`providers/` interfaces + fakes (the ONLY home for boto3/azure/cloudflare) ·
+`realtime/` multiplexed socket · `conformance/` registry + check ·
+`simulation/` seed fixtures (§F8) · `frontend/` React operator UI
+(NAV is six: home, sites, targets, deploys, findings, settings).
 
 Sensitive paths (human-merge only) are listed in `conformance/paths.yaml`.

@@ -1589,3 +1589,12 @@ requirements:
     text_hash: sha256:7890c83fd0724e6dea5912a58845616c6c8f52a873078640423b9878a60d0693
     text: >
       Git Project + Site, injected visibility=private, T2 confirm parent name, ref feature/pr-12 yields 201; new Site mesh_only preview-…-feature-pr-12, preview_of set, no Deployment created; visibility=public is 4xx public repo refused; missing inject is 4xx.
+  - id: P7-DNS01-DEMO
+    phase: 7
+    verify: demo
+    demo:
+      - conformance/demos/phase-7.md
+    source: phase-7.4-design-note.md §3
+    text_hash: sha256:8e0b4bdbda3fb3922341ff5179bacc19f2d86369dddd2abaedff33916f957307
+    text: >
+      unproxied public site, injected dns01, Hub upserts TXT and pushes PEM mode hub_dns01; missing inject refuses with Finding unproxied-cert; Beat renew_due reissues due rows; no live Let's Encrypt; token never on the target.

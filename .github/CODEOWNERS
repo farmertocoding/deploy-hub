@@ -73,3 +73,4 @@
 /monitor/lan_ghosts.py @farmertocoding
 /deploys/preview.py @farmertocoding
 /deploys/preview_views.py @farmertocoding
+/deploys/dns01.py @farmertocoding

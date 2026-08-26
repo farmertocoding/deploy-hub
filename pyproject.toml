@@ -1,7 +1,7 @@
 [project]
 name = "deploy-hub"
 version = "0.0.1"
-description = "Deploy Hub — self-hosted deployment control plane (Phase 0 skeleton)"
+description = "Deploy Hub — self-hosted deployment control plane"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
