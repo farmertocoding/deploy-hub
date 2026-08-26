@@ -320,6 +320,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "monitor.tasks.scan_cert_expiry",
         "schedule": 86400.0,
     },
+    "hub-dns01-renew-daily": {
+        "task": "monitor.tasks.renew_hub_dns01",
+        "schedule": 86400.0,
+    },
     "alert-repeat-unacked": {
         "task": "monitor.tasks.repeat_unacked",
         "schedule": 300.0,

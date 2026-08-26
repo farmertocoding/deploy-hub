@@ -652,6 +652,8 @@ class CheckRun(models.Model):
         AWS_REAPER = "aws_reaper"
         PARTNER_REAPER = "partner_reaper"
         INTAKE_POLL = "intake_poll"
+        # Phase 7.4: Python-only kind (D-137). 0015 stays closed.
+        HUB_DNS01 = "hub_dns01"
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled"

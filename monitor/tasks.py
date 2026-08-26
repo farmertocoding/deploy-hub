@@ -240,3 +240,13 @@ def reap_stale_overflow_ephemerals(*, now=None):
     rows = body(now=now)
     return {"ok": True, "n": len(rows)}
 
+
+@shared_task(ignore_result=True)
+def renew_hub_dns01():
+    """Beat `hub-dns01-renew-daily`. Takes no args so nothing
+    credential-shaped can appear in task args or the result."""
+    from deploys.dns01 import renew_due
+
+    run = renew_due()
+    return {"ok": True, "status": run.status, "kind": run.kind}
+

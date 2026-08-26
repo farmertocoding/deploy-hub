@@ -36,6 +36,7 @@ _CHECKRUN_KINDS = {
     "aws_reaper",
     "partner_reaper",
     "intake_poll",
+    "hub_dns01",
 }
 
 _OPERATIONLOCK_KINDS = {"deploy", "provision", "reconcile", "collect"}

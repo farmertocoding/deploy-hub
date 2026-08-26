@@ -42,6 +42,8 @@ PINNED_KINDS = {
     # CheckRun. Partner reaper and intake poller write these kinds.
     "partner_reaper",
     "intake_poll",
+    # Phase 7.4 Task 1: Python-only kind (D-137). 0015 stays closed.
+    "hub_dns01",
 }
 
 _BACKUP_RESULT_KEYS = frozenset(

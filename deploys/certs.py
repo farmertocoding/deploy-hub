@@ -30,8 +30,15 @@ def tls_dir(slug):
     return f"/srv/sites/{slug}/tls"
 
 
+def issue_unproxied(desired, *, dns01=None):
+    """Delegate so tests can wrap ``deploys.certs.issue_unproxied``."""
+    from deploys.dns01 import issue_unproxied as _issue
+
+    return _issue(desired, dns01=dns01)
+
+
 def ensure_site_certificate(desired):
-    """Probe-then-act Origin-cert ensure. Unproxied public sites refuse."""
+    """Probe-then-act cert ensure. Unproxied public sites use issue_unproxied."""
     from core.models import TlsCertificate
     from vault import service as vault_service
     from vault.models import Secret
@@ -42,7 +49,7 @@ def ensure_site_certificate(desired):
     if _exposure(desired) == "mesh_only":
         return {"status": "skipped", "reason": "mesh_only"}
     if not _proxied(desired):
-        _refuse_unproxied(site)
+        return issue_unproxied(desired, dns01=desired.get("dns01"))
 
     existing = (
         TlsCertificate.objects.filter(site=site)
@@ -60,8 +67,6 @@ def ensure_site_certificate(desired):
     if existing is not None and _still_fresh(existing):
         return {"status": "skipped", "id": existing.pk}
 
-    transport = desired["transport"]
-    heartbeat = desired.get("heartbeat")
     hostnames = _hostnames(desired, site, slug)
 
     from vault.tls import generate_ec_keypair_and_csr, public_keys_match
@@ -89,7 +94,34 @@ def ensure_site_certificate(desired):
         raise CertKeyMismatch(
             "certificate public key does not match the vaulted private key"
         )
+    expires_at = issued.get("expires_at") or (
+        timezone.now() + timedelta(days=DEFAULT_VALIDITY_DAYS)
+    )
+    return push_tls_material(
+        desired,
+        cert_pem,
+        key_pem,
+        expires_at=expires_at,
+        mode=TlsCertificate.Mode.ORIGIN_CERT,
+        key_ref=key_ref,
+    )
 
+
+def push_tls_material(desired, cert_pem, key_pem, *, expires_at, mode, key_ref):
+    """Atomic PEM push + Caddy reload + TlsCertificate row."""
+    from core.models import TlsCertificate
+
+    site = desired["site"]
+    slug = desired.get("site_slug") or site.name
+    directory = tls_dir(slug)
+    desired["tls_files"] = {
+        "certificate": f"{directory}/cert.pem",
+        "key": f"{directory}/key.pem",
+    }
+    if isinstance(cert_pem, (bytes, bytearray)):
+        cert_pem = cert_pem.decode()
+    transport = desired["transport"]
+    heartbeat = desired.get("heartbeat")
     _ensure_tls_dir(transport, directory, heartbeat)
     had_previous = _remote_exists(transport, f"{directory}/cert.pem")
     if had_previous:
@@ -109,12 +141,9 @@ def ensure_site_certificate(desired):
         _rm(transport, f"{directory}/cert.pem.prev", heartbeat)
         _rm(transport, f"{directory}/key.pem.prev", heartbeat)
 
-    expires_at = issued.get("expires_at") or (
-        timezone.now() + timedelta(days=DEFAULT_VALIDITY_DAYS)
-    )
     row = TlsCertificate.objects.create(
         site=site,
-        mode=TlsCertificate.Mode.ORIGIN_CERT,
+        mode=mode,
         not_after=expires_at,
         fingerprint=hashlib.sha256(cert_pem.encode()).hexdigest(),
         key_ref=key_ref,
@@ -135,17 +164,13 @@ def _refuse_unproxied(site):
         title="Unproxied public site cannot get a Hub-issued certificate",
         body=(
             f"{site.domain or site.name} is a public site with proxied=false. "
-            "Hub-central DNS-01 is not built this phase (D-035); the pipeline "
-            "refuses rather than shipping a DNS token to the target."
+            "Hub-central DNS-01 is refuse-closed without an injected seam; "
+            "the pipeline refuses rather than shipping a DNS token to the target."
         ),
         fix_action=(
             "Enable Cloudflare proxy (proxied=true) for an Origin certificate, "
             "or wait for phase 4 Hub-central DNS-01."
         ),
-    )
-    raise UnproxiedCertUnsupported(
-        f"unproxied public site {site.name!r} cannot be issued a "
-        "certificate this phase"
     )
 
 
