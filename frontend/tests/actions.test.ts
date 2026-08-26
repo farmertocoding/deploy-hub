@@ -115,7 +115,7 @@ test("t1_overlay_performs_webauthn_touch_and_types_the_host", async () => {
     apiFn: async (path: string, body: any) => {
       calls.push({ path, body });
       if (path.includes("authentication/begin"))
-        return { status: 200, data: { challenge: "c" } };
+        return { status: 200, data: { challenge: "Y2hhbGxlbmdl" } };
       return { status: 200, data: { touched: true } };
     },
     getAssertion: async (opts: any) => {
@@ -125,9 +125,9 @@ test("t1_overlay_performs_webauthn_touch_and_types_the_host", async () => {
   });
   assert.equal(result.status, 200);
   assert.equal(calls[0].path, "auth/webauthn/authentication/begin/");
-  assert.deepEqual(calls[1].get, { challenge: "c" });
+  assert.equal(calls[1].get.challenge instanceof ArrayBuffer, true);
   assert.equal(calls[2].path, "auth/webauthn/touch/");
-  assert.deepEqual(calls[2].body, { id: "cred" });
+  assert.equal(calls[2].body.id, "cred");
 
   const tiers = readFileSync(join(root, "Tiers.jsx"), "utf8");
   assert.match(tiers, /performHardwareTouch/);

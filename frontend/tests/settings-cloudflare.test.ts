@@ -102,7 +102,7 @@ test("settings_add_passkey_runs_create_ceremony", async () => {
     apiFn: async (path: string, body: any) => {
       calls.push({ path, body });
       if (path.includes("registration/begin"))
-        return { status: 200, data: { challenge: "c" } };
+        return { status: 200, data: { challenge: "Y2hhbGxlbmdl" } };
       return { status: 200, data: { webauthn_count: 2 } };
     },
     createCredential: async (opts: any) => {
@@ -112,7 +112,7 @@ test("settings_add_passkey_runs_create_ceremony", async () => {
   });
   assert.equal(result.status, 200);
   assert.equal(calls[0].path, "auth/webauthn/registration/begin/");
-  assert.deepEqual(calls[1].create, { challenge: "c" });
+  assert.equal(calls[1].create.challenge instanceof ArrayBuffer, true);
   assert.equal(calls[2].path, "auth/webauthn/registration/complete/");
   assert.equal(calls[2].body.name, "phone");
   assert.equal(calls[2].body.id, "new-cred");

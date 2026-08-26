@@ -1,6 +1,7 @@
 // Extracted so ?sim=login can mount this without the Shell (C9 / UX-F8).
 import React, { useState } from "react";
 import { api } from "../api.js";
+import { parseRequestOptionsJSON, serializeCredential } from "../webauthn.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -32,7 +33,11 @@ export function Login({ onLogin }) {
     let assertion = { id: "sim", response: {} };
     if (typeof navigator !== "undefined" && navigator.credentials?.get) {
       try {
-        assertion = await navigator.credentials.get({ publicKey: begin.data });
+        assertion = serializeCredential(
+          await navigator.credentials.get({
+            publicKey: parseRequestOptionsJSON(begin.data),
+          }),
+        );
       } catch (err) {
         setBusy(false);
         setError(err?.message || "Passkey was cancelled");
