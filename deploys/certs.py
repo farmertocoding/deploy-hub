@@ -49,6 +49,13 @@ def ensure_site_certificate(desired):
     if _exposure(desired) == "mesh_only":
         return {"status": "skipped", "reason": "mesh_only"}
     if not _proxied(desired):
+        existing = (
+            TlsCertificate.objects.filter(site=site)
+            .order_by("-pushed_at", "-pk")
+            .first()
+        )
+        if existing is not None and _still_fresh(existing):
+            return {"status": "skipped", "id": existing.pk}
         return issue_unproxied(desired, dns01=desired.get("dns01"))
 
     existing = (

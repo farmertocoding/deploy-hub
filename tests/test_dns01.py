@@ -113,12 +113,14 @@ def test_missing_dns01_refuses_with_finding():
     putting PEM before the refuse-closed seam.
     """
     from core.models import Finding, TlsCertificate
-    from deploys.certs import ensure_site_certificate
+    from deploys.certs import UnproxiedCertUnsupported, ensure_site_certificate
     from deploys.dns01 import Dns01Error
 
     site = _site(slug="dns01-miss", proxied=False)
     transport = TlsTransport()
     desired, _dns = _unproxied_desired(site, transport)
+    assert issubclass(Dns01Error, RuntimeError)
+    assert not issubclass(Dns01Error, UnproxiedCertUnsupported)
     with pytest.raises(Dns01Error, match="dns01 refused"):
         ensure_site_certificate(desired)
 
@@ -230,6 +232,118 @@ def test_renew_due_reissues_inside_window():
     assert run.status == CheckRun.Status.SUCCEEDED
     assert run.results.get("schema_version") == 1
     assert CheckRun.objects.filter(kind=CheckRun.Kind.HUB_DNS01).exists()
+
+
+def test_unproxied_ensure_skips_when_hub_dns01_still_fresh():
+    """A second ensure of a still-fresh hub_dns01 does not create another row.
+
+    What would make this fail: every injected call create()-ing TlsCertificate
+    so renew_due later walks a pile of historical rows.
+    """
+    from core.models import TlsCertificate
+    from deploys.certs import ensure_site_certificate
+
+    site = _site(slug="dns01-fresh-skip", proxied=False)
+    transport = TlsTransport()
+    desired, _dns = _unproxied_desired(
+        site, transport, dns01=_dns01(site.dns_zone),
+    )
+    first = ensure_site_certificate(desired)
+    assert first["status"] == "issued"
+    transport.calls.clear()
+    second = ensure_site_certificate(desired)
+    assert second["status"] == "skipped"
+    assert second["id"] == first["id"]
+    assert TlsCertificate.objects.filter(site=site).count() == 1
+    assert transport.mutating_calls() == []
+
+
+def test_renew_due_default_writes_failed_when_refused():
+    """Default renew_due() (no issue=) on a due row is FAILED, not SUCCEEDED.
+
+    What would make this fail: writing SUCCEEDED with errors on total refuse,
+    so Beat hides that every row Dns01Error'd.
+    """
+    from datetime import timedelta
+
+    from core.models import CheckRun, TlsCertificate
+    from deploys.certs import RENEW_BEFORE_DAYS
+    from deploys.dns01 import renew_due
+
+    now = timezone.now()
+    site = _site(slug="dns01-beat-fail", proxied=False)
+    due = TlsCertificate.objects.create(
+        site=site,
+        mode=TlsCertificate.Mode.HUB_DNS01,
+        not_after=now + timedelta(days=RENEW_BEFORE_DAYS - 1),
+        fingerprint="d" * 64,
+        key_ref="site-beat-fail-tls",
+        pushed_at=now,
+    )
+    run = renew_due(now=now)
+    assert run.kind == CheckRun.Kind.HUB_DNS01
+    assert run.status == CheckRun.Status.FAILED
+    assert run.status != CheckRun.Status.SUCCEEDED
+    assert due.pk in run.results.get("errors", [])
+    assert run.results.get("renewed") == []
+
+
+def test_renew_due_uses_latest_hub_dns01_per_site():
+    """Only the latest hub_dns01 row per site is considered for renew.
+
+    What would make this fail: walking every historical hub_dns01 row so an
+    old due leaf reissues while the latest is still fresh.
+    """
+    from datetime import timedelta
+
+    from core.models import CheckRun, TlsCertificate
+    from deploys.certs import RENEW_BEFORE_DAYS
+    from deploys.dns01 import renew_due
+
+    now = timezone.now()
+    site = _site(slug="dns01-latest", proxied=False)
+    old = TlsCertificate.objects.create(
+        site=site,
+        mode=TlsCertificate.Mode.HUB_DNS01,
+        not_after=now + timedelta(days=2),
+        fingerprint="e" * 64,
+        key_ref="site-latest-tls",
+        pushed_at=now - timedelta(days=10),
+    )
+    TlsCertificate.objects.create(
+        site=site,
+        mode=TlsCertificate.Mode.HUB_DNS01,
+        not_after=now + timedelta(days=RENEW_BEFORE_DAYS + 10),
+        fingerprint="f" * 64,
+        key_ref="site-latest-tls",
+        pushed_at=now,
+    )
+    due_site = _site(slug="dns01-latest-due", proxied=False)
+    TlsCertificate.objects.create(
+        site=due_site,
+        mode=TlsCertificate.Mode.HUB_DNS01,
+        not_after=now + timedelta(days=1),
+        fingerprint="g" * 64,
+        key_ref="site-latest-due-tls",
+        pushed_at=now - timedelta(days=10),
+    )
+    latest_due = TlsCertificate.objects.create(
+        site=due_site,
+        mode=TlsCertificate.Mode.HUB_DNS01,
+        not_after=now + timedelta(days=2),
+        fingerprint="h" * 64,
+        key_ref="site-latest-due-tls",
+        pushed_at=now,
+    )
+    called = []
+
+    def issue(row):
+        called.append(row.pk)
+
+    run = renew_due(now=now, issue=issue)
+    assert old.pk not in called
+    assert called == [latest_due.pk]
+    assert run.status == CheckRun.Status.SUCCEEDED
 
 
 def test_module_has_no_acme_caddy_block():

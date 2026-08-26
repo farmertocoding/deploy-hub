@@ -13,16 +13,15 @@ from django.utils import timezone
 
 from deploys.certs import (
     DEFAULT_VALIDITY_DAYS,
-    RENEW_BEFORE_DAYS,
     CertKeyMismatch,
-    UnproxiedCertUnsupported,
     _hostnames,
     _refuse_unproxied,
+    _still_fresh,
     push_tls_material,
 )
 
 
-class Dns01Error(UnproxiedCertUnsupported):
+class Dns01Error(RuntimeError):
     """Refuse-closed dns01 seam or a failed Hub-central issue."""
 
 
@@ -89,17 +88,11 @@ def issue_unproxied(desired, *, dns01=None):
 
 
 def renew_due(*, now=None, issue=None):
-    """Reissue hub_dns01 rows inside RENEW_BEFORE_DAYS. Write CheckRun.HUB_DNS01."""
-    from core.models import CheckRun, TlsCertificate
+    """Reissue latest-per-site hub_dns01 rows inside RENEW_BEFORE_DAYS."""
+    from core.models import CheckRun
 
     clock = now or timezone.now()
-    horizon = clock + timedelta(days=RENEW_BEFORE_DAYS)
-    rows = list(
-        TlsCertificate.objects.filter(
-            mode=TlsCertificate.Mode.HUB_DNS01,
-            not_after__lte=horizon,
-        ).select_related("site").order_by("pk")
-    )
+    rows = _latest_hub_dns01_due(clock)
     act = issue if issue is not None else _ensure_row
     renewed = []
     errors = []
@@ -110,13 +103,36 @@ def renew_due(*, now=None, issue=None):
             errors.append(row.pk)
         else:
             renewed.append(row.pk)
+    status = (
+        CheckRun.Status.FAILED if errors else CheckRun.Status.SUCCEEDED
+    )
     return CheckRun.objects.create(
         kind=CheckRun.Kind.HUB_DNS01,
-        status=CheckRun.Status.SUCCEEDED,
+        status=status,
         results={"schema_version": 1, "renewed": renewed, "errors": errors},
         started=clock,
         finished=timezone.now(),
     )
+
+
+def _latest_hub_dns01_due(clock):
+    """Latest hub_dns01 row per site that is not still fresh."""
+    from core.models import TlsCertificate
+
+    seen = set()
+    due = []
+    for row in (
+        TlsCertificate.objects.filter(mode=TlsCertificate.Mode.HUB_DNS01)
+        .select_related("site")
+        .order_by("-pushed_at", "-pk")
+    ):
+        if row.site_id in seen:
+            continue
+        seen.add(row.site_id)
+        if not _still_fresh(row, now=clock):
+            due.append(row)
+    due.sort(key=lambda row: row.pk)
+    return due
 
 
 def _ensure_row(row):

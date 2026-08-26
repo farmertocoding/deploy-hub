@@ -246,11 +246,12 @@ def test_unproxied_refusal_is_a_finding_and_a_visible_site_state():
     from test_origin_certs import TlsTransport, _desired, _site
 
     from core.models import Finding
-    from deploys.certs import UnproxiedCertUnsupported, ensure_site_certificate
+    from deploys.certs import ensure_site_certificate
+    from deploys.dns01 import Dns01Error
 
     site = _site(slug="p3-bare", proxied=False)
     transport = TlsTransport()
-    with pytest.raises(UnproxiedCertUnsupported):
+    with pytest.raises(Dns01Error, match="dns01 refused"):
         ensure_site_certificate(_desired(site, transport))
 
     row = Finding.objects.get()

@@ -384,11 +384,12 @@ def test_unproxied_public_site_refusal_files_a_finding_with_a_fix_action():
     does not name phase 4 (Task 12/13 render this as the Sites-screen state).
     """
     from core.models import Finding
-    from deploys.certs import UnproxiedCertUnsupported, ensure_site_certificate
+    from deploys.certs import ensure_site_certificate
+    from deploys.dns01 import Dns01Error
 
     site = _site(slug="bare", proxied=False)
     transport = TlsTransport()
-    with pytest.raises(UnproxiedCertUnsupported):
+    with pytest.raises(Dns01Error, match="dns01 refused"):
         ensure_site_certificate(_desired(site, transport))
 
     row = Finding.objects.get()
@@ -586,10 +587,11 @@ def test_refusal_leaves_zero_mutating_calls():
     What would make this fail: mkdir/put of a half-written pair before the
     named refusal, leaving debris on the target.
     """
-    from deploys.certs import UnproxiedCertUnsupported, ensure_site_certificate
+    from deploys.certs import ensure_site_certificate
+    from deploys.dns01 import Dns01Error
 
     site = _site(slug="refuse", proxied=False)
     transport = TlsTransport()
-    with pytest.raises(UnproxiedCertUnsupported):
+    with pytest.raises(Dns01Error, match="dns01 refused"):
         ensure_site_certificate(_desired(site, transport))
     assert transport.mutating_calls() == []
