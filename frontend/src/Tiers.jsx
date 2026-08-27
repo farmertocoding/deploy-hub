@@ -81,6 +81,14 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
 // T3 renders a single button that runs on click and offers UndoToast; T2 renders a
 // button that opens ConfirmDialog with the caller's `summary`; T1 opens the
 // type-the-name + hardware-touch overlay (SEC-F5-T1-HARDWARE-TOUCH).
+export function UnavailableAction({ action, reason }) {
+  return (
+    <p style={{ color: "#8b949e", margin: "4px 0" }}>
+      {action} unavailable: {reason}
+    </p>
+  );
+}
+
 export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo }) {
   const [state, setState] = useState({ phase: "idle" });
   // The runner is one-shot (it owns the tier state machine for this control's

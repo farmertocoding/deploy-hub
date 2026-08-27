@@ -1538,11 +1538,11 @@ def test_issue_r11_a1_the_project_row_wire_output_is_unchanged(auth_client):
         {"id": first.pk, "name": "prod", "domain": "p.example.com",
          "latest_manifest_version": None, "manifest_current": None,
          "cert_refusal": None, "attack_state": None, "edge_owner": "host_caddy",
-         "scale_ready": False},
+         "scale_ready": False, "adopt": None, "preview_ready": False},
         {"id": first.pk + 1, "name": "staging", "domain": "",
          "latest_manifest_version": None, "manifest_current": None,
          "cert_refusal": None, "attack_state": None, "edge_owner": "host_caddy",
-         "scale_ready": False},
+         "scale_ready": False, "adopt": None, "preview_ready": False},
     ]
 
 

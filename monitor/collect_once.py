@@ -395,7 +395,8 @@ def _container_ip(docker, name):
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return ""
-    return (proc.stdout or "").strip().split()[0] if proc.stdout else ""
+    parts = (proc.stdout or "").strip().split()
+    return parts[0] if parts else ""
 
 
 def _curl_body(curl, url):

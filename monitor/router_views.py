@@ -1,8 +1,8 @@
 """Target list/detail and T3 Probe router. Not folded into core/views.py.
 
-Views call probe_nothing_forwarded(target, wan_probe=None). Tests wrap
-this module's callee to inject wan_probe=. The request body never binds
-a WAN scan.
+Views call probe_nothing_forwarded(target, wan_probe=wan_probe_for(target)).
+Tests wrap this module's callee to inject wan_probe=. The request body
+never binds a WAN scan.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from core.models import Target
 from monitor.router_advisor import probe_nothing_forwarded, router_advice_for
+from monitor.wan_probe import wan_probe_for
 
 
 def _tunnel_flag(target):
@@ -44,6 +45,7 @@ class RouterAdviceSerializer(serializers.Serializer):
 
 class TargetDetailSerializer(TargetListSerializer):
     router_advice = RouterAdviceSerializer()
+    wan_probe_configured = serializers.BooleanField()
 
 
 class RouterProbeSerializer(serializers.Serializer):
@@ -72,6 +74,7 @@ class TargetDetailView(APIView):
         target = get_object_or_404(Target, pk=pk)
         payload = _list_row(target)
         payload["router_advice"] = router_advice_for(target)
+        payload["wan_probe_configured"] = wan_probe_for(target) is not None
         return Response(TargetDetailSerializer(payload).data)
 
 
@@ -84,7 +87,9 @@ class RouterProbeView(APIView):
         target = get_object_or_404(Target, pk=pk)
         ser = RouterProbeSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
-        result = probe_nothing_forwarded(target, wan_probe=None)
+        result = probe_nothing_forwarded(
+            target, wan_probe=wan_probe_for(target),
+        )
         if result["mode"] == "no_seam":
             return Response(
                 {"detail": "wan probe refused"},

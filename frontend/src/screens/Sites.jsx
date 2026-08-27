@@ -9,16 +9,22 @@
 // {detail, finding_id}`, arrives with Task 4's regeneration — until then no site
 // carries it and the state renders for none, which is the truth.
 import React, { useEffect, useState } from "react";
-import { api } from "../api.js";
-import { ActionButton } from "../Tiers.jsx";
+import { api, simState } from "../api.js";
+import { ActionButton, UnavailableAction } from "../Tiers.jsx";
 import { ACTION_TIERS, tierFor } from "../actions.js";
 import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
+// Site-detail T3 ids only. Do not infer from a `site.` prefix: check.rerun
+// is a Site action, and target.router_probe is a Target action that shares T3.
+const SITE_T3_IDS = new Set(["site.rollback", "site.restart", "check.rerun"]);
+
 export function t3SiteActions() {
-  return ACTION_TIERS.filter((row) => row.tier === "T3").map((row) => row.id);
+  return ACTION_TIERS
+    .filter((row) => row.tier === "T3" && SITE_T3_IDS.has(row.id))
+    .map((row) => row.id);
 }
 
 export async function rollbackSite(siteId) {
@@ -52,9 +58,8 @@ export function adoptDiff(site, actionId) {
   throw new Error(`not an adopt action: ${actionId}`);
 }
 
-// HTTP start slipped 2026-08-23: MUST start is adopt_flow. This POST is the
-// Sites wiring so ?sim=plan can confirm the T2 diff; live 404s until a later
-// view owns the route. live_compose_path is sent only when the operator typed it.
+// Live start/cancel: POST /api/v1/sites/{id}/adopt/. live_compose_path is sent
+// only when the operator typed it. Simulation fixtures still intercept ?sim=.
 export async function startAdopt(siteId, opts = {}) {
   const body = {};
   if (opts.live_compose_path) body.live_compose_path = opts.live_compose_path;
@@ -224,8 +229,10 @@ export function AdoptPlan({
   const stage = site.adopt?.stage;
   const classified = site.adopt?.classified || {};
   const volumes = site.adopt?.volumes || [];
-  const showStart = !stage || stage === "plan" || stage === "abandoned";
+  const showStart = !stage || stage === "plan" || stage === "abandoned"
+    || stage === "cleanup" || site.adopt?.status === "failed";
   const showCancel = stage === "verify" || stage === "temp_dns";
+  const showFlipLocked = stage === "flip" || stage === "decommission";
   const roles = Object.entries(classified).filter(([, name]) => name);
   return (
     <div style={{ ...box, borderColor: "#3fb950" }}>
@@ -259,6 +266,11 @@ export function AdoptPlan({
             onRun={() => onRun("site.adopt.cancel", site)}
             onUndo={() => onUndo("site.adopt.cancel", site)} />
         )}
+        {showFlipLocked && (
+          <p style={{ color: "#8b949e", margin: "4px 0" }}>
+            Cancel adopt unavailable: refused — production flip already started; use rollback.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -266,13 +278,16 @@ export function AdoptPlan({
 
 // §F6 phone screen: site status + its T3 actions. Live Sites passes the T3
 // ids; only site.rollback has HTTP (pipeline.rollback). Restart / re-run
-// render so the table is visible; they do not invent engines.
+// are unavailable until they have engines. Preview is refuse-closed without
+// a visibility seam.
 export function SiteStatus({
   site, actions = [], onRun = () => {}, onUndo = () => {},
   backups: backupsProp, onTestNow,
 }) {
+  const simulated = Boolean(simState());
   const [liveComposePath, setLiveComposePath] = useState("");
   const [previewRef, setPreviewRef] = useState("");
+  const [adoptNotice, setAdoptNotice] = useState(null);
   const [backups, setBackups] = useState(backupsProp);
   useEffect(() => {
     if (backupsProp !== undefined) {
@@ -292,17 +307,33 @@ export function SiteStatus({
       if (refreshed.status === 200) setBackups(refreshed.data);
     }
   });
-  const run = (id, current) => {
-    if (id === "site.adopt.start") {
-      return onRun(id, {
-        ...current,
-        adopt: {
-          ...current.adopt,
-          live_compose_path: liveComposePath || current.adopt?.live_compose_path || undefined,
-        },
-      });
+  const classifyAdopt = (result) => {
+    if (!result) return;
+    const { status, data } = result;
+    if (status === 202 || status === 200) {
+      setAdoptNotice(null);
+      return;
     }
-    return onRun(id, current);
+    const detail = data?.detail || `HTTP ${status}`;
+    if (status === 409) setAdoptNotice({ kind: "refused", detail });
+    else if (status === 503) setAdoptNotice({ kind: "not configured", detail });
+    else setAdoptNotice({ kind: "failed", detail });
+  };
+  const run = (id, current) => {
+    const payload = id === "site.adopt.start"
+      ? {
+          ...current,
+          adopt: {
+            ...current.adopt,
+            live_compose_path: liveComposePath || current.adopt?.live_compose_path || undefined,
+          },
+        }
+      : current;
+    const pending = onRun(id, payload);
+    if (pending && typeof pending.then === "function") {
+      pending.then(classifyAdopt);
+    }
+    return pending;
   };
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%",
@@ -320,10 +351,20 @@ export function SiteStatus({
         <input aria-label="preview ref" style={box} value={previewRef}
           onChange={(e) => setPreviewRef(e.target.value)} />
       </label>
-      <ActionButton row={tierFor("site.preview_create")}
-        confirmName={site.name}
-        summary={`Create preview of ${site.name} at ${previewRef}`}
-        onRun={() => createPreview(site.id, previewRef, site.name)} />
+      {(simulated || site.preview_ready) ? (
+        <ActionButton row={tierFor("site.preview_create")}
+          confirmName={site.name}
+          summary={`Create preview of ${site.name} at ${previewRef}`}
+          onRun={() => createPreview(site.id, previewRef, site.name)} />
+      ) : (
+        <UnavailableAction action="Create preview"
+          reason="not configured — repository visibility is not resolved" />
+      )}
+      {adoptNotice && (
+        <p style={{ color: "#ff7b72", margin: "4px 0" }}>
+          Adopt {adoptNotice.kind}: {adoptNotice.detail}
+        </p>
+      )}
       {!isPartnerSite(site) && (site.edge_owner || site.adopt) && (
         <AdoptPlan site={site} liveComposePath={liveComposePath}
           onLiveComposePath={setLiveComposePath} onRun={run} onUndo={onUndo} />
@@ -343,8 +384,13 @@ export function SiteStatus({
       {actions.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {actions.map((id) => (
-            <ActionButton key={id} row={tierFor(id)}
-              onRun={() => onRun(id, site)} onUndo={() => onUndo(id, site)} />
+            !simulated && (id === "site.restart" || id === "check.rerun") ? (
+              <UnavailableAction key={id} action={tierFor(id).label}
+                reason="not implemented" />
+            ) : (
+              <ActionButton key={id} row={tierFor(id)}
+                onRun={() => onRun(id, site)} onUndo={() => onUndo(id, site)} />
+            )
           ))}
         </div>
       )}
@@ -354,6 +400,7 @@ export function SiteStatus({
 
 export function SitesView({
   phase, sites, selectedId, onSelect, onError, onNav, filter: filterProp,
+  onRefresh,
 }) {
   const [filter, setFilter] = useState(filterProp || "all");
   if (phase === "loading") return <LoadingLine what="sites" />;
@@ -400,9 +447,17 @@ export function SitesView({
             if (id === "site.adopt.start") {
               return startAdopt(site.id, {
                 live_compose_path: site.adopt?.live_compose_path,
+              }).then((result) => {
+                if (result.status === 200 || result.status === 202) onRefresh?.();
+                return result;
               });
             }
-            if (id === "site.adopt.cancel") return cancelAdopt(site.id);
+            if (id === "site.adopt.cancel") {
+              return cancelAdopt(site.id).then((result) => {
+                if (result.status === 200 || result.status === 202) onRefresh?.();
+                return result;
+              });
+            }
           }} />
       )}
     </div>
@@ -436,5 +491,5 @@ export default function Sites({ route, onNav }) {
   }));
   return <SitesView phase={phase} sites={sites}
     selectedId={route.id} onSelect={(id) => onNav("sites", id)}
-    onError={{ text: error, retry: load }} onNav={onNav} />;
+    onError={{ text: error, retry: load }} onNav={onNav} onRefresh={load} />;
 }

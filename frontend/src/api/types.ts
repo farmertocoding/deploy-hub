@@ -524,6 +524,22 @@ export interface paths {
         patch: operations["v1_sites_partial_update"];
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/adopt/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_sites_adopt_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/backups/": {
         parameters: {
             query?: never;
@@ -775,6 +791,18 @@ export interface components {
          * @enum {string}
          */
         ActionEnum: "ack" | "resolve" | "accept_risk";
+        AdoptOperation: {
+            checkrun_id: number;
+            site_id: number;
+            stage: string;
+            status: string;
+            queued: boolean;
+            temp_name: string;
+        };
+        AdoptRequest: {
+            live_compose_path?: string;
+            cancel?: boolean;
+        };
         AttackState: {
             detail: string;
             finding_id: number;
@@ -1246,6 +1274,8 @@ export interface components {
             attack_state?: components["schemas"]["AttackState"] | null;
             edge_owner?: components["schemas"]["EdgeOwnerEnum"];
             scale_ready?: boolean;
+            adopt?: unknown;
+            preview_ready?: boolean;
         };
         SshRotate: {
             confirm_name: string;
@@ -1273,6 +1303,7 @@ export interface components {
             kind: string;
             tunnel: boolean;
             router_advice: components["schemas"]["RouterAdvice"];
+            wan_probe_configured: boolean;
         };
         TargetList: {
             id: number;
@@ -2091,6 +2122,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteEdgeOwner"];
+                };
+            };
+        };
+    };
+    v1_sites_adopt_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AdoptRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["AdoptRequest"];
+                "multipart/form-data": components["schemas"]["AdoptRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdoptOperation"];
+                };
+            };
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdoptOperation"];
                 };
             };
         };

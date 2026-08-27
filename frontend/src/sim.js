@@ -1627,7 +1627,14 @@ function adoptStateFixture(site) {
     if (backups) return backups;
     if (path === "v1/projects/") return { status: 200, data: adoptProjectsPayload(site) };
     if (/^v1\/sites\/\d+\/adopt\/$/.test(path) && method !== "GET") {
-      return { status: 202, data: { stage: site.adopt?.stage, slipped: true } };
+      return { status: 202, data: {
+        checkrun_id: 11,
+        site_id: site.id,
+        stage: site.adopt?.stage || "",
+        status: "running",
+        queued: true,
+        temp_name: site.adopt?.temp_name || "",
+      } };
     }
     return { status: 404, data: {} };
   };

@@ -231,6 +231,8 @@ const SiteSummary = z
     attack_state: AttackState.nullish(),
     edge_owner: EdgeOwnerEnum.optional(),
     scale_ready: z.boolean().optional(),
+    adopt: z.unknown().nullish(),
+    preview_ready: z.boolean().optional(),
   })
   .passthrough();
 const ProjectSummary = z
@@ -296,6 +298,20 @@ const PatchedSiteEdgeOwner = z
   .partial()
   .passthrough();
 const SiteEdgeOwner = z.object({ edge_owner: EdgeOwnerEnum }).passthrough();
+const AdoptRequest = z
+  .object({ live_compose_path: z.string().max(4096), cancel: z.boolean() })
+  .partial()
+  .passthrough();
+const AdoptOperation = z
+  .object({
+    checkrun_id: z.number().int(),
+    site_id: z.number().int(),
+    stage: z.string(),
+    status: z.string(),
+    queued: z.boolean(),
+    temp_name: z.string(),
+  })
+  .passthrough();
 const BackupDump = z
   .object({
     id: z.number().int(),
@@ -423,6 +439,7 @@ const TargetDetail = z
     kind: z.string(),
     tunnel: z.boolean(),
     router_advice: RouterAdvice,
+    wan_probe_configured: z.boolean(),
   })
   .passthrough();
 const TargetDelete = z.object({ confirm_name: z.string() }).passthrough();
@@ -501,6 +518,8 @@ export const schemas = {
   OverflowScaleInResult,
   PatchedSiteEdgeOwner,
   SiteEdgeOwner,
+  AdoptRequest,
+  AdoptOperation,
   BackupDump,
   BackupUnit,
   BackupList,

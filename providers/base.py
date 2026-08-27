@@ -85,6 +85,14 @@ class OriginCertIssuer:
         raise NotImplementedError
 
 
+class GitVisibility:
+    """Read-only repository visibility. Never accepts a client claim."""
+
+    def visibility(self, git_url):
+        """Return ``"private"``, ``"public"``, or ``None`` if unknown."""
+        raise NotImplementedError
+
+
 class ImageRegistry:
     """Push images and issue per-target pull-only credentials (D-073)."""
 

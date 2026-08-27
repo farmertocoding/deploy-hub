@@ -275,6 +275,7 @@ def test_target_detail_returns_router_advice(client):
     assert by_id[box.pk]["kind"] == "ssh"
     assert by_id[box.pk]["tunnel"] is True
     assert by_id[plain.pk]["tunnel"] is False
+    assert "wan_probe_configured" not in by_id[box.pk]
 
     detail = client.get(DETAIL.format(pk=box.pk))
     assert detail.status_code == 200, detail.content
@@ -286,6 +287,7 @@ def test_target_detail_returns_router_advice(client):
     assert advice["title"] == TITLE
     assert "443" in advice["body"]
     assert "Cloudflare Tunnel" in advice["body"]
+    assert body["wan_probe_configured"] is False
 
     plain_detail = client.get(DETAIL.format(pk=plain.pk)).json()
     assert plain_detail["router_advice"]["mode"] == "not_tunnel"
@@ -384,6 +386,36 @@ def test_probe_http_non_tunnel_is_4xx(client, monkeypatch):
     response = _post_probe(client, box)
     assert 400 <= response.status_code < 500, response.content
     assert "not tunnel mode" in response.content.decode()
+    assert Finding.objects.filter(
+        fingerprint=f"router-forwarded:{box.pk}",
+    ).count() == 0
+
+
+def test_configured_empty_adapter_probes_without_inject(client):
+    """Allowlisted wan_probe_adapter=empty is a live seam; body still ignored.
+
+    What would make this fail: still requiring a test inject, or filing a
+    Finding from the missing-adapter path.
+    """
+    box = _target(_zone("router-empty"), "tun-empty.lan", tunnel=True)
+    box.collect_payload = {
+        **(box.collect_payload or {}),
+        "wan_probe_adapter": "empty",
+    }
+    box.save(update_fields=["collect_payload"])
+    _login(client)
+    detail = client.get(DETAIL.format(pk=box.pk)).json()
+    assert detail["wan_probe_configured"] is True
+    before = Finding.objects.count()
+    response = _post_probe(client, box)
+    assert response.status_code == 201, response.content
+    assert response.json()["forwarded"] is False
+    assert Finding.objects.count() == before
+    sneaky = _post_probe(
+        client, box,
+        body={"forwards": [{"port": 443, "proto": "tcp"}]},
+    )
+    assert sneaky.status_code == 201, sneaky.content
     assert Finding.objects.filter(
         fingerprint=f"router-forwarded:{box.pk}",
     ).count() == 0

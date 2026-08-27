@@ -346,3 +346,48 @@ def test_no_webhook_route(client):
     urls = (REPO / "deploys" / "urls.py").read_text(encoding="utf-8")
     assert "webhook" not in urls.lower()
     assert "github" not in urls.lower()
+
+
+def test_view_resolves_visibility_from_git_provider(client, monkeypatch):
+    """A configured FakeGitVisibility private repo creates the sibling.
+
+    What would make this fail: still calling create_preview without
+    visibility, or taking visibility from the JSON body.
+    """
+    from core.models import Site
+    from providers.fakes import FakeGitVisibility
+
+    fake = FakeGitVisibility("private")
+    monkeypatch.setattr("deploys.preview_views.git_visibility_for", lambda _p: fake)
+    _preview_user(client)
+    parent = _parent(name="resolved")
+    response = _post_preview(client, parent, ref="feature/from-provider")
+    assert response.status_code == 201, response.content
+    sibling = Site.objects.get(preview_of=parent)
+    assert sibling.exposure == Site.Exposure.MESH_ONLY
+    assert fake.calls == [GIT_URL]
+
+
+def test_preview_rejects_client_supplied_visibility(client, monkeypatch):
+    """A body visibility field is 400 even when a provider would allow private."""
+    from core.models import Site
+    from providers.fakes import FakeGitVisibility
+
+    monkeypatch.setattr(
+        "deploys.preview_views.git_visibility_for",
+        lambda _p: FakeGitVisibility("private"),
+    )
+    _preview_user(client)
+    parent = _parent(name="nosupply")
+    before = Site.objects.count()
+    response = client.post(
+        PREVIEW_URL.format(site_id=parent.pk),
+        data=json.dumps({
+            "ref": "main",
+            "confirm_name": parent.name,
+            "visibility": "private",
+        }),
+        content_type="application/json",
+    )
+    assert response.status_code == 400, response.content
+    assert Site.objects.count() == before

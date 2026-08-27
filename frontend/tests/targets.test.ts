@@ -30,11 +30,34 @@ const TARGET = {
   },
 };
 
+test("configured_wan_probe_shows_probe_router", () => {
+  const markup = render(TargetDetail, {
+    target: { ...TARGET, wan_probe_configured: true },
+    tab: "router",
+  });
+  const text = visibleText(markup);
+  assert.match(text, /Probe router/);
+  assert.doesNotMatch(text, /unavailable: not configured/);
+});
+
+test("simulation_still_offers_probe_router", () => {
+  const prev = (globalThis as any).window.location.search;
+  (globalThis as any).window.location.search = "?sim=live";
+  try {
+    const markup = render(TargetDetail, { target: TARGET, tab: "router" });
+    const text = visibleText(markup);
+    assert.match(text, /Probe router/);
+    assert.doesNotMatch(text, /unavailable: not configured/);
+  } finally {
+    (globalThis as any).window.location.search = prev;
+  }
+});
+
 test("router_tab_renders_advice_and_probe_router_label", () => {
   const markup = render(TargetDetail, { target: TARGET, tab: "router" });
   const text = visibleText(markup);
   assert.match(markup, /data-tab="router"/);
-  assert.match(text, /Probe router/);
+  assert.match(text, /Probe router unavailable: not configured/);
   assert.match(text, /Tunnel target has a WAN forward/);
   assert.match(text, /443\/tcp/);
   assert.match(markup, /href="#\/findings\/9"/);

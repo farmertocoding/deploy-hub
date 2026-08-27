@@ -80,6 +80,21 @@ def _noop(_seconds):
     return None
 
 
+def test_container_ip_blank_inspect_stdout_is_empty(monkeypatch):
+    """A container with no address must not crash the on-target collector.
+
+    What would make this fail: taking split()[0] of whitespace-only inspect
+    stdout (stopped / unnetworked containers) and raising IndexError.
+    """
+    import monitor.collect_once as producer
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(["docker"], 0, stdout="\n", stderr="")
+
+    monkeypatch.setattr(producer.subprocess, "run", fake_run)
+    assert producer._container_ip("/usr/bin/docker", "stopped") == ""
+
+
 def _script_executions(transport):
     """Independent session-equivalents: probe/run except test -f.
 

@@ -29,6 +29,8 @@
 /deploys/certs.py @farmertocoding
 /provision/adopt.py @farmertocoding
 /deploys/adopt_flow.py @farmertocoding
+/deploys/adopt_service.py @farmertocoding
+/deploys/adopt_views.py @farmertocoding
 /core/actions.py @farmertocoding
 /core/audit.py @farmertocoding
 /core/audit_ship.py @farmertocoding

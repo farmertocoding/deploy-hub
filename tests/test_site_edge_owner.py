@@ -221,7 +221,7 @@ def test_project_row_emits_edge_owner_so_adopt_plan_can_mount(auth_client):
     row = listed["sites"][0]
     assert "edge_owner" in row, "live site row omitted edge_owner"
     assert row["edge_owner"] == "host_caddy"
-    assert "adopt" not in row, "do not invent a second adopt blob on the list"
+    assert not row.get("adopt"), "an empty live row must not fake an active adopt"
 
 
 def test_patch_edge_owner_only_field(auth_client):

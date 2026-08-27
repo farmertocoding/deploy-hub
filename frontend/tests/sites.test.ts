@@ -90,8 +90,9 @@ test("live_site_status_renders_t3_actions_including_rollback", () => {
   const markup = render(SiteStatus, { site: SITE, actions: ids });
   const text = visibleText(markup);
   assert.match(text, /Roll back/);
-  assert.match(text, /Restart/);
-  assert.match(text, /Re-run check/);
+  assert.match(text, /Restart unavailable: not implemented/);
+  assert.match(text, /Re-run check unavailable: not implemented/);
+  assert.doesNotMatch(markup, /Probe router/);
   assert.doesNotMatch(markup, /role="dialog"/);
 });
 
@@ -103,6 +104,7 @@ test("sites_view_passes_t3_ids_into_the_selected_status", () => {
   const text = visibleText(markup);
   assert.match(text, /TLS refused/);
   assert.match(text, /Roll back/);
+  assert.doesNotMatch(text, /Probe router/);
 });
 
 test("rollback_site_posts_the_smallest_http", async () => {
@@ -185,11 +187,18 @@ test("test_backup_now_posts_the_test_route", async () => {
 test("create_preview_button_label", () => {
   const markup = render(SiteStatus, { site: SITE });
   const text = visibleText(markup);
-  assert.match(text, /Create preview/);
+  assert.match(text, /Create preview unavailable: not configured/);
   assert.match(markup, /aria-label="preview ref"/);
   const src = readFileSync(new URL("../src/screens/Sites.jsx", import.meta.url), "utf8");
   assert.match(src, /site\.preview_create/);
   assert.match(src, /confirmName=\{site\.name\}/);
+});
+
+test("preview_ready_shows_create_preview", () => {
+  const markup = render(SiteStatus, { site: { ...SITE, preview_ready: true } });
+  const text = visibleText(markup);
+  assert.match(text, /Create preview/);
+  assert.doesNotMatch(text, /Create preview unavailable/);
 });
 
 test("create_preview_posts_the_route", async () => {

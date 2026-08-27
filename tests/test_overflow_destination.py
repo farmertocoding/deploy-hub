@@ -11,10 +11,6 @@ from datetime import timedelta
 
 import pytest
 from django.test import override_settings
-
-from core.models import Partner, Target
-from scaling.destination import pick_overflow_home
-from scaling.pressure import has_headroom
 from test_scale_evaluator import (
     AST_PATHS,
     BANNED_IMPORTS,
@@ -28,6 +24,10 @@ from test_scale_evaluator import (
     _plant,
     _ready_site,
 )
+
+from core.models import Partner, Target
+from scaling.destination import pick_overflow_home
+from scaling.pressure import has_headroom
 
 pytestmark = pytest.mark.django_db
 

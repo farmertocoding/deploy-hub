@@ -6,6 +6,7 @@ from .base import (
     CloudProvider,
     DnsProvider,
     EdgeProtection,
+    GitVisibility,
     ImageRegistry,
     OriginCertIssuer,
     Pager,
@@ -362,6 +363,18 @@ class FakeImageRegistry(ImageRegistry):
     def _image_url(self, tag):
         host = self.url.split("://", 1)[-1].rstrip("/")
         return f"{host}/deploy-hub/{tag}"
+
+
+class FakeGitVisibility(GitVisibility):
+    """T1 visibility seam. Default private. ``None`` is unknown/unavailable."""
+
+    def __init__(self, visibility="private"):
+        self._visibility = visibility
+        self.calls = []
+
+    def visibility(self, git_url):
+        self.calls.append(git_url)
+        return self._visibility
 
 
 def _registry_target_ident(target):

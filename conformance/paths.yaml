@@ -73,6 +73,8 @@ sensitive:
   # Claimed before the file exists so the first line written there is already
   # human-merged. Custody parity is two-way with CODEOWNERS.
   - deploys/adopt_flow.py
+  - deploys/adopt_service.py
+  - deploys/adopt_views.py
   # Phase 4 (Task 0): the custody set the phase's tasks will land code into,
   # claimed before the first line of code. vault/** and providers/** already
   # listed. Do not broaden to scanner/** or wizard/** wholesale — name the

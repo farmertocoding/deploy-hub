@@ -376,3 +376,16 @@ def ssm_for(target):
         access_key_id=creds["access_key_id"],
         secret_access_key=creds["secret_access_key"],
     )
+
+
+def git_visibility_for(project):
+    """Read-only Git visibility adapter, or None if unconfigured.
+
+    No default SDK / GitHub credential chain. Tests inject this function.
+    A live GitHub client is not shipped this wave.
+    """
+    if getattr(project, "source_kind", None) != "git":
+        return None
+    if not getattr(project, "git_url", None):
+        return None
+    return None

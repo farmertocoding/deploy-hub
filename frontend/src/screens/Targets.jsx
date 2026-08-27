@@ -3,9 +3,9 @@
 // target (T1). Copy says Target, never "instance".
 import React, { useEffect, useState } from "react";
 import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
-import { ActionButton } from "../Tiers.jsx";
+import { ActionButton, UnavailableAction } from "../Tiers.jsx";
 import { tierFor } from "../actions.js";
-import { api } from "../api.js";
+import { api, simState } from "../api.js";
 
 const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
@@ -68,8 +68,13 @@ export function TargetDetail({ target, tab = "hardening", onTab, onProbe }) {
       {tab === "router" && (
         <div data-tab="router">
           <RouterAdvice advice={target?.router_advice} />
-          <ActionButton row={tierFor("target.router_probe")}
-            onRun={() => (onProbe || probeAndRefresh)(target.id)} />
+          {(simState() || target.wan_probe_configured) ? (
+            <ActionButton row={tierFor("target.router_probe")}
+              onRun={() => (onProbe || probeAndRefresh)(target.id)} />
+          ) : (
+            <UnavailableAction action="Probe router"
+              reason="not configured — no WAN probe adapter" />
+          )}
         </div>
       )}
     </div>

@@ -212,6 +212,8 @@ class SiteSummarySerializer(serializers.Serializer):
     # older sim rows still parse; omit is not the live shape. Do not alias
     # single_instance = not scale_ready; omit single_instance this wave.
     scale_ready = serializers.BooleanField(required=False)
+    adopt = serializers.JSONField(allow_null=True, required=False)
+    preview_ready = serializers.BooleanField(required=False)
 
 
 class ProjectSummarySerializer(serializers.Serializer):
@@ -271,6 +273,18 @@ def _attack_state_payload(site, attacks):
     }
 
 
+def _adopt_payload(site):
+    from deploys.adopt_service import adopt_state_for_site
+
+    return adopt_state_for_site(site)
+
+
+def _preview_ready(site):
+    from providers.registry import git_visibility_for
+
+    return git_visibility_for(site.project) is not None
+
+
 def project_row_body(project):
     """`GET /api/v1/projects/`'s row for one project — tiers, sites, manifest currency.
 
@@ -326,6 +340,8 @@ def project_row_body(project):
             "attack_state": _attack_state_payload(site, attacks),
             "edge_owner": site.edge_owner,
             "scale_ready": site.scale_ready,
+            "adopt": _adopt_payload(site),
+            "preview_ready": _preview_ready(site),
         })
     return ProjectSummarySerializer({
         "id": project.pk, "name": project.name, "slug": project.slug,

@@ -125,6 +125,8 @@ def test_phase_3_sensitive_modules_are_listed():
         "deploys/certs.py",
         "provision/adopt.py",
         "deploys/adopt_flow.py",
+        "deploys/adopt_service.py",
+        "deploys/adopt_views.py",
     ):
         assert entry in patterns, (
             f"{entry} is not a sensitive-path entry in conformance/paths.yaml")

@@ -37,3 +37,18 @@ def reap_adopt_temps():
     from deploys.adopt_reaper import reap
 
     return reap()
+
+
+@shared_task
+def run_adopt(site_id, checkrun_id, live_compose_path=""):
+    """IDs + optional path only. Vault/SSH stay inside the worker."""
+    from deploys.adopt_service import execute_adopt
+
+    return execute_adopt(site_id, checkrun_id, live_compose_path or None)
+
+
+@shared_task
+def cancel_adopt(site_id, checkrun_id):
+    from deploys.adopt_service import execute_cancel
+
+    return execute_cancel(site_id, checkrun_id)

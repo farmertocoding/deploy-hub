@@ -847,6 +847,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/SiteEdgeOwner'
           description: ''
+  /api/v1/sites/{site_id}/adopt/:
+    post:
+      operationId: v1_sites_adopt_create
+      parameters:
+      - in: path
+        name: site_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdoptRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdoptRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AdoptRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptOperation'
+          description: ''
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdoptOperation'
+          description: ''
   /api/v1/sites/{site_id}/backups/:
     get:
       operationId: v1_sites_backups_retrieve
@@ -1357,6 +1394,36 @@ components:
         * `ack` - ack
         * `resolve` - resolve
         * `accept_risk` - accept_risk
+    AdoptOperation:
+      type: object
+      properties:
+        checkrun_id:
+          type: integer
+        site_id:
+          type: integer
+        stage:
+          type: string
+        status:
+          type: string
+        queued:
+          type: boolean
+        temp_name:
+          type: string
+      required:
+      - checkrun_id
+      - queued
+      - site_id
+      - stage
+      - status
+      - temp_name
+    AdoptRequest:
+      type: object
+      properties:
+        live_compose_path:
+          type: string
+          maxLength: 4096
+        cancel:
+          type: boolean
     AttackState:
       type: object
       properties:
@@ -2463,6 +2530,10 @@ components:
           $ref: '#/components/schemas/EdgeOwnerEnum'
         scale_ready:
           type: boolean
+        adopt:
+          nullable: true
+        preview_ready:
+          type: boolean
       required:
       - domain
       - id
@@ -2516,12 +2587,15 @@ components:
           type: boolean
         router_advice:
           $ref: '#/components/schemas/RouterAdvice'
+        wan_probe_configured:
+          type: boolean
       required:
       - host
       - id
       - kind
       - router_advice
       - tunnel
+      - wan_probe_configured
     TargetList:
       type: object
       properties:

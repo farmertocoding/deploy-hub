@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from core.models import Site
 from deploys.preview import PreviewError, create_preview
+from providers.registry import git_visibility_for
 
 
 class PreviewCreateSerializer(serializers.Serializer):
@@ -33,6 +34,11 @@ class SitePreviewCreateView(APIView):
     )
     def post(self, request, site_id):
         parent = get_object_or_404(Site, pk=site_id)
+        raw = getattr(request, "data", None)
+        if isinstance(raw, dict) and "visibility" in raw:
+            raise serializers.ValidationError(
+                {"visibility": "visibility is resolved server-side"}
+            )
         ser = PreviewCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         if ser.validated_data["confirm_name"] != parent.name:
@@ -40,8 +46,14 @@ class SitePreviewCreateView(APIView):
                 {"detail": "Type the site name to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        provider = git_visibility_for(parent.project)
+        visibility = None if provider is None else provider.visibility(
+            parent.project.git_url,
+        )
         try:
-            created = create_preview(parent, ser.validated_data["ref"])
+            created = create_preview(
+                parent, ser.validated_data["ref"], visibility=visibility,
+            )
         except PreviewError as exc:
             return Response(
                 {"detail": exc.reason},
