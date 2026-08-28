@@ -123,6 +123,8 @@ test("proxied_public_path_requires_plant_before_done", async () => {
   const text = visibleText(markup);
   assert.match(text, /Plant the Origin-CA/);
   assert.match(text, /Plant Origin-CA/);
+  assert.match(text, /SSL and Certificates/);
+  assert.match(text, /service key/i);
   assert.doesNotMatch(text, /Fleet map/);
   assert.doesNotMatch(text, /Loading projects/);
   assert.ok(progress.owns_home, "empty fixture must still own Home");

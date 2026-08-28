@@ -50,7 +50,10 @@ def test_partner_and_partnersite_exist():
 
     slug_field = Partner._meta.get_field("slug")
     assert slug_field.max_length == 64
-    assert slug_field.unique is True
+    assert slug_field.unique is False
+    assert "uniq_partner_workspace_slug" in {
+        c.name for c in Partner._meta.constraints
+    }
     assert isinstance(Partner._meta.get_field("pubkey_current"), TextField)
     assert isinstance(Partner._meta.get_field("pubkey_previous"), TextField)
     dest = Partner._meta.get_field("destination_order")

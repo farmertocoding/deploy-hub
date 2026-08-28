@@ -734,6 +734,36 @@ def test_materialize_run_twice_zero_mutating_calls():
             _assert_no_intake_import(path)
 
 
+@pytest.mark.req("PART-ISOLATION")
+@override_settings(PARTNER_API_ENABLED=True)
+def test_materialize_uses_signed_body_not_unsigned_payload():
+    """H5: unsigned outbox payload keys cannot override signed body identity.
+
+    What would make this fail: _payload copying job['payload'] first and
+    setdefault-ing signed body keys so tenant_ref/domain/target_id from a
+    compromised intake win.
+    """
+    from core.partner_jobs import materialize
+
+    zone = _zone("signed-zone")
+    box = _target(zone, "signed.lan")
+    partner = _partner("signed-p", [box])
+    job = _job(partner, tenant_ref="honest", subdomain="honest")
+    signed = json.loads(job["body"])
+    job["payload"] = {
+        **signed,
+        "tenant_ref": "attacker",
+        "domain": "evil.example.test",
+        "hostname": "evil.example.test",
+        "subdomain": "evil",
+    }
+    result = materialize(partner, job)
+    assert result.partner_site.tenant_ref == "honest"
+    domain = (result.site.domain or "").casefold()
+    assert "evil" not in domain
+    assert "attacker" not in (result.site.name or "")
+
+
 @pytest.mark.req("PART-KILL-SWITCH")
 @override_settings(PARTNER_API_ENABLED=True)
 def test_suspended_partner_with_valid_pubkey_does_not_materialize():

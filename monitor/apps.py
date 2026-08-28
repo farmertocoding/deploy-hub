@@ -12,9 +12,13 @@ class MonitorConfig(AppConfig):
 
         from django.db.models.signals import post_delete, post_save
 
+        from core.hud.ports import register_topic
         from core.models import NetworkZone, Site, SiteInstance, Target
+        from monitor.hud_workers import probe_target
 
         from .map_graph import advise_topology, notify_graph_changed
+
+        register_topic("hud.target.probe", probe_target)
 
         # Collector/reconcile write cursors with update_fields; those are not
         # topology. collect_payload is the r3 T1 observation — re-evaluate

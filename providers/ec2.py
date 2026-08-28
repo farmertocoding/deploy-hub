@@ -17,6 +17,7 @@ import paramiko
 from botocore.exceptions import ClientError
 from django.conf import settings
 
+from core.models import default_workspace
 from core.test_mode import assert_test_aws
 
 from .base import CloudProvider
@@ -460,6 +461,7 @@ class Ec2CloudProvider(CloudProvider):
         raise_alert(
             "aws-host-key-timeout",
             f"aws:{name}",
+            workspace=default_workspace(),
             fingerprint=f"aws-host-key-timeout:{name}",
             source_engine="providers.ec2",
             title="EC2 host keys did not arrive in time",

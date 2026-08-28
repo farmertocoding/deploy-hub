@@ -15,36 +15,45 @@ ITEM_IDS = (
 )
 
 
-def first_run_progress():
+def first_run_progress(workspace=None):
     from core.models import DnsAccount, Project, Site, Target
 
-    first = Site.objects.order_by("pk").first()
+    sites = Site.objects.order_by("pk")
+    targets = Target.objects.all()
+    accounts = DnsAccount.objects.all()
+    projects = Project.objects.all()
+    if workspace is not None:
+        sites = sites.filter(project__workspace=workspace)
+        targets = targets.filter(zone__workspace=workspace)
+        accounts = accounts.filter(workspace=workspace)
+        projects = projects.filter(workspace=workspace)
+    first = sites.first()
     mesh_only_first = (
         first is not None and first.exposure == Site.Exposure.MESH_ONLY
     )
-    has_proxied_public = Site.objects.filter(
+    has_proxied_public = sites.filter(
         exposure=Site.Exposure.PUBLIC, proxied=True,
     ).exists()
     items = [
         {
             "id": "enroll_target",
             "applicable": True,
-            "done": Target.objects.exists(),
+            "done": targets.exists(),
         },
         {
             "id": "connect_cloudflare",
             "applicable": not mesh_only_first,
-            "done": DnsAccount.objects.exists(),
+            "done": accounts.exists(),
         },
         {
             "id": "plant_origin_ca",
             "applicable": (not mesh_only_first) and has_proxied_public,
-            "done": DnsAccount.objects.exclude(origin_ca_key_ref="").exists(),
+            "done": accounts.exclude(origin_ca_key_ref="").exists(),
         },
         {
             "id": "add_project",
             "applicable": True,
-            "done": Project.objects.exists(),
+            "done": projects.exists(),
         },
     ]
     return {

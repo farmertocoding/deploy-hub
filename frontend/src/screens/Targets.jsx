@@ -7,7 +7,7 @@ import { ActionButton, UnavailableAction } from "../Tiers.jsx";
 import { tierFor } from "../actions.js";
 import { api, simState } from "../api.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "../ui/surface.js";
 
 export const TARGET_TABS = [
   { id: "hardening", label: "Hardening" },
@@ -44,7 +44,7 @@ export function RouterAdvice({ advice }) {
       {advice.body ? <p>{advice.body}</p> : null}
       {advice.finding_id ? (
         <a href={routeHash("findings", advice.finding_id)}
-          style={{ color: "#79c0ff" }}>View finding</a>
+          style={{ color: "var(--hud-info)" }}>View finding</a>
       ) : null}
     </div>
   );
@@ -245,11 +245,11 @@ export default function Targets({ route, onNav }) {
         <p style={{ textAlign: "center" }}>created {createdHost}</p>
       )}
       {copied === "ok" && (
-        <p style={{ textAlign: "center", color: "#3fb950" }}>
+        <p style={{ textAlign: "center", color: "var(--hud-success)" }}>
           Copied ✔ — <code>{PROVISION_CMD}</code></p>
       )}
       {copied === "failed" && (
-        <p style={{ textAlign: "center", color: "#e3b341" }}>
+        <p style={{ textAlign: "center", color: "var(--hud-warning)" }}>
           Copy failed — run <code>{PROVISION_CMD}</code> yourself.</p>
       )}
     </div>

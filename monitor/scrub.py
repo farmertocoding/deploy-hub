@@ -1,8 +1,8 @@
-"""One scrubber for the nightly failure bundle and the pager (D-036).
+"""Shared runtime-safe redaction for pager and nightly failure output (D-036).
 
-Redacts assignment-like SECRET/KEY/TOKEN/PASSWORD/URL values, the vault
-test marker, Bearer headers, ntfy.sh/<topic> URLs, vault refs, and bare
-high-entropy token/base64-ish runs.
+This module is part of the production package.  Runtime code must not depend on
+``scripts_dev`` because that directory is deliberately excluded from container
+images.
 """
 from __future__ import annotations
 
@@ -38,4 +38,5 @@ def scrub(text):
     text = _NTFY_URL.sub("https://ntfy.sh/<redacted>", text)
     text = _VAULT_REF.sub("vault:<redacted>", text)
     return _TOKENISH.sub(
-        lambda m: "<redacted>" if _mixed_class(m.group(0)) else m.group(0), text)
+        lambda m: "<redacted>" if _mixed_class(m.group(0)) else m.group(0), text
+    )

@@ -77,6 +77,7 @@ def issue_unproxied(desired, *, dns01=None):
         key_ref=key_ref,
     )
     row = Finding.objects.filter(
+        workspace=site.project.workspace,
         fingerprint=f"unproxied-cert:{site.pk}",
         state__in=(Finding.State.OPEN, Finding.State.ACKED),
     ).first()

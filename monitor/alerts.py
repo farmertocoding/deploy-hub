@@ -40,7 +40,9 @@ def repeat_unacked(*, now=None):
     for row in Finding.objects.filter(
         severity=Finding.Severity.P1, state=Finding.State.OPEN,
     ):
-        state, _ = AlertState.objects.get_or_create(fingerprint=row.fingerprint)
+        state, _ = AlertState.objects.get_or_create(
+            workspace=row.workspace, fingerprint=row.fingerprint,
+        )
         due = (
             state.last_push_at is None
             or now - state.last_push_at >= timedelta(hours=1)
@@ -71,9 +73,17 @@ def raise_alert(kind, entity, **facts):
     severity = classify(kind, **facts)
     fingerprint = facts.get("fingerprint") or f"{kind}:{entity}"
     source_engine = facts.get("source_engine", "monitor.alerts")
+    workspace = facts.get("workspace")
+    if workspace is None:
+        from core.models import workspace_of
+
+        workspace = workspace_of(facts.get("obj"))
+    if workspace is None:
+        raise TypeError("raise_alert() requires workspace")
     row = finding(
         source_engine,
         fingerprint,
+        workspace=workspace,
         severity=severity,
         entity=entity,
         title=facts.get("title", ""),

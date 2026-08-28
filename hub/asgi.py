@@ -1,7 +1,7 @@
 """ASGI entrypoint — HTTP via Django, WebSocket via Channels with session auth (§A1/§D7)."""
 import os
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.prod")
 
 from django.core.asgi import get_asgi_application  # noqa: E402
 

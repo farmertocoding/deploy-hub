@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { api } from "../api.js";
 import { parseRequestOptionsJSON, serializeCredential } from "../webauthn.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "../ui/surface.js";
 
 export function Login({ onLogin }) {
   const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
@@ -11,13 +11,19 @@ export function Login({ onLogin }) {
   const [busy, setBusy] = useState(false);
   const [useTotp, setUseTotp] = useState(false);
 
+  async function hydrateUser(partial) {
+    const me = await api("auth/me/");
+    if (me.status === 200 && me.data?.authenticated) return me.data;
+    return { ...partial, authenticated: true };
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     const { status, data } = await api("auth/login/", form);
-    setBusy(false);
-    if (status === 200) onLogin({ ...data, authenticated: true });
+    if (status === 200) onLogin(await hydrateUser(data));
     else setError(data.detail || "Login failed");
+    setBusy(false);
   }
 
   async function passkey(e) {
@@ -47,9 +53,9 @@ export function Login({ onLogin }) {
     const { status, data } = await api("auth/login/", {
       username: form.username, password: form.password, webauthn: assertion,
     });
-    setBusy(false);
-    if (status === 200) onLogin({ ...data, authenticated: true });
+    if (status === 200) onLogin(await hydrateUser(data));
     else setError(data.detail || "Passkey sign-in failed");
+    setBusy(false);
   }
 
   return (
@@ -66,7 +72,7 @@ export function Login({ onLogin }) {
           value={form.otp_code}
           onChange={(e) => setForm({ ...form, otp_code: e.target.value })} />
       ) : (
-        <p style={{ color: "#8b949e", margin: 0 }}>
+        <p style={{ color: "var(--hud-muted)", margin: 0 }}>
           Sign in with a passkey / security key.
         </p>
       )}
@@ -77,7 +83,7 @@ export function Login({ onLogin }) {
         onClick={() => setUseTotp((v) => !v)}>
         {useTotp ? "Use a passkey instead" : "Use authenticator code instead"}
       </button>
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+      {error && <div style={{ color: "var(--hud-danger)" }}>{error}</div>}
     </form>
   );
 }

@@ -3,8 +3,7 @@
 // components, so tests/nav.test.ts pins the IA as data rather than by screenscraping.
 import React, { useEffect, useState } from "react";
 import { POLL_MS } from "./useEvents.js";
-
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box, danger, warning, muted } from "./ui/surface.js";
 
 // §F1 object-centric nav — these six, exactly, in this order. Advisors are TABS on
 // their objects (Settings carries Developer/Vault; readiness lives inside Home's
@@ -28,12 +27,22 @@ export const DESKTOP_MIN_PX = 768;
 // Hash routes, no router library: "#/sites/3" → {screen:"sites", id:"3"}. An unknown
 // or empty hash is Home — a deep link must never strand the operator on a blank shell.
 export function parseRoute(hash) {
-  const [screen, id] = (hash || "").replace(/^#\/?/, "").split("/");
-  if (!NAV.some((n) => n.id === screen)) return { screen: "home", id: undefined };
-  return { screen, id: id || undefined };
+  const raw = (hash || "").replace(/^#\/?/, "");
+  const qIndex = raw.indexOf("?");
+  const path = qIndex >= 0 ? raw.slice(0, qIndex) : raw;
+  const query = Object.fromEntries(new URLSearchParams(qIndex >= 0 ? raw.slice(qIndex + 1) : ""));
+  const extra = Object.keys(query).length ? { query } : {};
+  const [screenPart, ...rest] = path.split("/");
+  const screen = screenPart || "";
+  if (screen === "admin") {
+    return { screen: "admin", id: rest.filter(Boolean).join("/") || undefined, ...extra };
+  }
+  if (!NAV.some((n) => n.id === screen)) return { screen: "home", id: undefined, ...extra };
+  return { screen, id: rest[0] || undefined, ...extra };
 }
 
 export function routeHash(screen, id) {
+  if (screen === "admin") return id ? `#/admin/${id}` : "#/admin";
   return id === undefined ? `#/${screen}` : `#/${screen}/${id}`;
 }
 
@@ -73,8 +82,8 @@ export function StatusPill({ status, asOf }) {
       : status === "reconnecting" ? "↻ reconnecting…"
       : status === "auth-required" ? "⛔ session expired — reload and log in again"
       : "… connecting";
-  const color = status === "auth-required" ? "#ff7b72"
-    : status === "degraded" ? "#e3b341" : "#8b949e";
+  const color = status === "auth-required" ? danger
+    : status === "degraded" ? warning : muted;
   return (
     <span role="status" style={{ ...box, color, borderColor: color,
       borderRadius: 12, padding: "4px 10px" }}>{text}</span>
@@ -102,7 +111,7 @@ export function LoadingLine({ what }) {
 export function ErrorLine({ text, onRetry }) {
   return (
     <div style={{ padding: 16 }}>
-      <p style={{ color: "#ff7b72" }}>{text}</p>
+      <p style={{ color: danger }}>{text}</p>
       <button style={box} onClick={onRetry}>Retry</button>
     </div>
   );

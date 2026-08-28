@@ -174,12 +174,26 @@ def test_origin_ca_is_planted_from_a_hub_file_not_a_paste(
 
     import providers.cloudflare as cloudflare
     from core.models import DnsAccount, Finding
+    from tests.conftest import t1_ready_session
     from vault import service as vault_service
     from vault.models import Secret
 
     user = django_user_model.objects.create_user(username="op", password="pw-1234567890")
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     client.force_login(user)
+    t1_ready_session(client, user)
+    monkeypatch.setattr(
+        cloudflare,
+        "urlopen",
+        FakeCloudflare({
+            VERIFY: {"success": True, "result": {"id": "tok", "status": "active"}},
+            PROBE: {
+                "success": True,
+                "result": [{"id": "zid-plant", "name": "plant.example"}],
+                "result_info": {"total_count": 1},
+            },
+        }),
+    )
 
     account = _account(label="p35-plant")
     path = _allowlisted_file(tmp_path, monkeypatch)

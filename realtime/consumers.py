@@ -57,6 +57,13 @@ class EventsConsumer(AsyncWebsocketConsumer):
             await self.accept()
             await self.close(code=4403)
             return
+        if not await database_sync_to_async(_ws_verified)(self.scope):
+            await database_sync_to_async(audit)(
+                "ws_connect_rejected", source="ws", severity="security",
+                actor=user, reason="verification_required")
+            await self.accept()
+            await self.close(code=4403)
+            return
         self.authorized = True
         await self.accept()
 
@@ -79,7 +86,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
         user = self.scope["user"]
         if action == "subscribe":
             for topic in topics:
-                if authorize_topic(user, topic):
+                if await database_sync_to_async(authorize_topic)(user, topic):
                     self.topics.add(topic)
                     await self.channel_layer.group_add(topic, self.channel_name)
                     await self.send(_ws_json({"subscribed": topic}))
@@ -94,6 +101,11 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 await self.channel_layer.group_discard(topic, self.channel_name)
 
     async def topic_event(self, message):
+        if message.get("topic") == "findings":
+            ws_id = (message.get("event") or {}).get("workspace_id")
+            user = self.scope.get("user")
+            if ws_id and not await database_sync_to_async(_user_in_workspace)(user, ws_id):
+                return
         await self.send(_ws_json(
             {"topic": message["topic"], "seq": message["seq"], "event": message["event"]}
         ))
@@ -103,3 +115,24 @@ def _enrolled(user):
     from django_otp import devices_for_user
 
     return any(devices_for_user(user, confirmed=True))
+
+
+def _ws_verified(scope):
+    from django_otp import DEVICE_ID_SESSION_KEY
+
+    session = scope.get("session") or {}
+    if session.get(DEVICE_ID_SESSION_KEY):
+        return True
+    user = scope.get("user")
+    checker = getattr(user, "is_verified", None)
+    if callable(checker):
+        return bool(checker())
+    return False
+
+
+def _user_in_workspace(user, workspace_id):
+    from core.models import Workspace
+    from core.rbac import workspace_membership
+
+    workspace = Workspace.objects.filter(pk=workspace_id).first()
+    return bool(workspace_membership(user, workspace))

@@ -1,0 +1,102 @@
+html[data-theme="dark"] {
+  --hud-base: var(--palette-dark-base);
+  --hud-fog-start: var(--palette-dark-fog-start);
+  --hud-fog-end: var(--palette-dark-fog-end);
+  --hud-accent: var(--palette-dark-accent);
+  --hud-text: var(--palette-dark-text);
+  --hud-border: var(--palette-dark-border);
+  --hud-header: var(--palette-dark-header);
+  --hud-appearance: var(--palette-dark-appearance);
+  --hud-frame-corner: var(--palette-dark-corner);
+  --hud-frame-edge: var(--palette-dark-edge);
+  --hud-muted: var(--palette-dark-muted);
+  --hud-warning: var(--palette-dark-warning);
+  --hud-danger: var(--palette-dark-danger);
+  --hud-success: var(--palette-dark-success);
+  --hud-info: var(--palette-dark-info);
+  --hud-control-surface: var(--palette-dark-control);
+  --hud-selected-row: var(--palette-dark-selected);
+  --hud-focus: var(--palette-dark-focus);
+  --hud-table-rule: var(--palette-dark-table-rule);
+  --hud-chart-grid: var(--palette-dark-chart-grid);
+  --hud-critical-fill: var(--palette-dark-critical);
+  --hud-cover: url("../assets/theme/cover-dark.svg");
+  --hud-pattern: url("../assets/theme/pattern-dark.svg");
+  --hud-panel-fill: transparent;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --hud-base: var(--palette-light-base);
+  --hud-fog-start: var(--palette-light-fog-start);
+  --hud-fog-end: var(--palette-light-fog-end);
+  --hud-accent: var(--palette-light-accent);
+  --hud-text: var(--palette-light-text);
+  --hud-border: var(--palette-light-border);
+  --hud-header: var(--palette-light-header);
+  --hud-appearance: var(--palette-light-appearance);
+  --hud-frame-corner: var(--palette-light-corner);
+  --hud-frame-edge: var(--palette-light-edge);
+  --hud-muted: var(--palette-light-muted);
+  --hud-warning: var(--palette-light-warning);
+  --hud-danger: var(--palette-light-danger);
+  --hud-success: var(--palette-light-success);
+  --hud-info: var(--palette-light-info);
+  --hud-control-surface: var(--palette-light-control);
+  --hud-selected-row: var(--palette-light-selected);
+  --hud-focus: var(--palette-light-focus);
+  --hud-table-rule: var(--palette-light-table-rule);
+  --hud-chart-grid: var(--palette-light-chart-grid);
+  --hud-critical-fill: var(--palette-light-critical);
+  --hud-cover: url("../assets/theme/cover-light.svg");
+  --hud-pattern: url("../assets/theme/pattern-light.svg");
+  --hud-panel-fill: transparent;
+  color-scheme: light;
+}
+
+html {
+  background-color: var(--hud-base, #1d2835);
+}
+
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--hud-base);
+  background-image:
+    var(--hud-pattern),
+    linear-gradient(180deg, var(--hud-fog-start) 0%, var(--hud-fog-end) 100%),
+    var(--hud-cover);
+  background-size:
+    var(--hud-pattern-size) var(--hud-pattern-size),
+    100% 100%,
+    cover;
+  background-position: 0 0, 0 0, center;
+  background-repeat: repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed;
+}
+
+@media (prefers-reduced-data: reduce) {
+  html::before {
+    background-image:
+      var(--hud-pattern),
+      linear-gradient(180deg, var(--hud-fog-start) 0%, var(--hud-fog-end) 100%);
+    background-size:
+      var(--hud-pattern-size) var(--hud-pattern-size),
+      100% 100%;
+    background-position: 0 0, 0 0;
+    background-repeat: repeat, no-repeat;
+    background-attachment: fixed, fixed;
+  }
+}
+
+@media (max-width: 767px) {
+  html::before {
+    background-size:
+      var(--hud-pattern-size) var(--hud-pattern-size),
+      100% 100%,
+      auto 100%;
+  }
+}

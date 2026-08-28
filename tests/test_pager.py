@@ -36,8 +36,11 @@ def _reset_pager():
 def _file_p1(**overrides):
     from monitor.alerts import raise_alert
 
+    from core.models import default_workspace
+
     fields = dict(COPY)
     fields.update(overrides)
+    fields.setdefault("workspace", default_workspace())
     return raise_alert(
         "prod-site-hard-down",
         fields.pop("entity", "site:blog"),
@@ -182,6 +185,23 @@ def test_email_copy_carries_break_glass_marked_advisory_only():
     push = get_pager().published[-1]
     assert ADVISORY not in push["body"]
     assert "docker restart" not in push["body"]
+
+
+def test_p1_email_scrubs_tokenish_secrets():
+    """H8: P1 email must not echo a Finding body's token.
+
+    What would make this fail: _email_p1 sending finding.title/body without
+    scrub() while the ntfy path already scrubs.
+    """
+    mail.outbox.clear()
+    _file_p1(
+        fingerprint="site-down:email-secret-pager",
+        title=f"DOWN token={RAW_SECRET}",
+        body=f"Host leak token={RAW_SECRET}",
+    )
+    assert mail.outbox, "P1 must send an email copy"
+    blob = f"{mail.outbox[-1].subject}\n{mail.outbox[-1].body}"
+    assert RAW_SECRET not in blob
 
 
 def test_delivery_row_records_the_backend_and_the_outcome():

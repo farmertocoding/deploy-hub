@@ -71,9 +71,11 @@ def _file_finding(*, source_engine, severity, entity, title, body,
                   fix_action, fingerprint):
     """File through the one findings service so the inbox stream publishes."""
     from core.findings import finding
+    from core.models import default_workspace
 
     return finding(
         source_engine, fingerprint,
+        workspace=default_workspace(),
         severity=severity, entity=entity, title=title, body=body,
         fix_action=fix_action,
     )

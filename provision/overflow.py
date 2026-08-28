@@ -34,7 +34,10 @@ def enroll_overflow_target(
 
     from core.models import Finding
 
-    row = Finding.objects.filter(fingerprint=f"scale-out-proposal:{site.pk}").first()
+    row = Finding.objects.filter(
+        workspace=site.project.workspace,
+        fingerprint=f"scale-out-proposal:{site.pk}",
+    ).first()
     if row is None or row.state != Finding.State.ACCEPTED:
         raise EnrollError(FIX_ACTION)
 

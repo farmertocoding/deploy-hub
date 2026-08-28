@@ -16,6 +16,11 @@ const Me = z
     webauthn_count: z.number().int().optional(),
     totp_enrolled: z.boolean().optional(),
     t1_available: z.boolean().optional(),
+    role: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
+    is_system_admin: z.boolean().optional(),
+    hud_ui: z.boolean().optional(),
+    workspaces: z.array(z.object({}).partial().passthrough()).optional(),
   })
   .passthrough();
 const Confirm = z
@@ -111,6 +116,157 @@ const FirstRunProgress = z
 const FirstRunSnapshot = z
   .object({ seq: z.number().int(), data: FirstRunProgress })
   .passthrough();
+const DeploymentList = z
+  .object({
+    observed_at: z.string().datetime({ offset: true }),
+    results: z.array(z.unknown()),
+  })
+  .passthrough();
+const AllowedAction = z
+  .object({ id: z.string(), label: z.string() })
+  .passthrough();
+const DisabledAction = z
+  .object({
+    id: z.string(),
+    code: z.string(),
+    reason: z.string(),
+    label: z.string().optional(),
+  })
+  .passthrough();
+const DeploymentDetail = z
+  .object({
+    id: z.number().int(),
+    site: z.string(),
+    site_id: z.number().int(),
+    version: z.number().int(),
+    state: z.string(),
+    headline: z.string(),
+    live_release: z.string(),
+    desired_release: z.string(),
+    previous_release: z.string().nullable(),
+    target: z.string(),
+    observed_at: z.string().datetime({ offset: true }),
+    heartbeat_at: z.string().datetime({ offset: true }).nullable(),
+    safe_next: z.string(),
+    safe_next_reason: z.string(),
+    log_text: z.string(),
+    log_cursor: z.number().int(),
+    log_truncated: z.boolean(),
+    artifacts: z.array(z.unknown()),
+    steps: z.array(z.unknown()),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
+const DeploymentCommand = z.object({ action: z.string() }).passthrough();
+const ResourceEnum = z.enum(["log", "artifact"]);
+const StepEnum = z.enum([
+  "build",
+  "ship",
+  "migrate",
+  "start_green",
+  "health_check",
+  "dns",
+  "route_tls",
+  "smoke_test",
+  "cutover",
+]);
+const BlankEnum = z.unknown();
+const DownloadGrant = z
+  .object({
+    resource: ResourceEnum,
+    step: z.union([StepEnum, BlankEnum]).optional(),
+    artifact_id: z.number().int().gte(1).optional(),
+  })
+  .passthrough();
+const Command = z.object({ action: z.string() }).passthrough();
+const Overview = z
+  .object({
+    observed_at: z.string().datetime({ offset: true }),
+    version: z.number().int(),
+    findings: z.record(z.number().int()),
+    deployments: z.record(z.number().int()),
+    site_health: z.record(z.number().int()),
+    target_readiness: z.record(z.number().int()),
+    attention: z.array(z.unknown()),
+    active_deployments: z.array(z.unknown()),
+    integrations: z.object({}).partial().passthrough(),
+    setup: z.array(z.unknown()),
+    links: z.object({}).partial().passthrough(),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
+const SecretMeta = z
+  .object({
+    id: z.number().int(),
+    kind: z.string(),
+    owner_type: z.string(),
+    owner_id: z.string(),
+    fingerprint: z.string(),
+    created_at: z.string().datetime({ offset: true }),
+    last_used_at: z.string().datetime({ offset: true }).nullable(),
+    exportable: z.boolean(),
+    references: z.array(z.unknown()),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
+const SecretList = z
+  .object({
+    observed_at: z.string().datetime({ offset: true }),
+    results: z.array(SecretMeta),
+  })
+  .passthrough();
+const RotatePlan = z
+  .object({
+    secret_id: z.number().int(),
+    kind: z.string(),
+    owner_type: z.string(),
+    owner_id: z.string(),
+    fingerprint: z.string(),
+    affected: z.array(z.unknown()),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
+const SiteFleetRow = z
+  .object({
+    id: z.number().int(),
+    name: z.string(),
+    project: z.string(),
+    domain: z.string(),
+    health: z.string(),
+    environment: z.string(),
+    exposure: z.string(),
+    target: z.string(),
+    tls: z.string(),
+    backup: z.string(),
+    live_release: z.string(),
+    desired_release: z.string(),
+    active_deployment: z.number().int().nullable(),
+    copies: z.number().int(),
+    owner: z.string(),
+    findings: z.number().int(),
+    last_deploy_at: z.string().datetime({ offset: true }).nullable(),
+    last_deploy_actor: z.string(),
+    observed_at: z.string().datetime({ offset: true }),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
+const SiteFleetList = z
+  .object({
+    observed_at: z.string().datetime({ offset: true }),
+    results: z.array(SiteFleetRow),
+    next: z.string().nullable(),
+    page: z.number().int(),
+    sort: z.string(),
+    count: z.number().int(),
+    allowed_actions: z.array(AllowedAction),
+    disabled_actions: z.array(DisabledAction),
+  })
+  .passthrough();
 const InstanceCreateCost = z
   .object({ cost: z.number(), cost_display: z.string() })
   .passthrough();
@@ -146,7 +302,9 @@ const MapGraph = z
 const MapSnapshot = z
   .object({ seq: z.number().int(), data: MapGraph })
   .passthrough();
-const ConfirmName = z.object({ confirm_name: z.string() }).passthrough();
+const ConfirmName = z
+  .object({ confirm_name: z.string(), enabled: z.boolean().optional() })
+  .passthrough();
 const PartnerDestination = z
   .object({ id: z.number().int(), host: z.string(), kind: z.string() })
   .passthrough();
@@ -246,6 +404,8 @@ const ProjectSummary = z
   })
   .passthrough();
 const ExposureEnum = z.enum(["public", "mesh_only"]);
+const DeployStrategyEnum = z.enum(["blue_green", "recreate"]);
+const DeployPolicyEnum = z.enum(["auto", "confirm", "windowed"]);
 const ProjectCreate = z
   .object({
     name: z.string().max(128),
@@ -257,6 +417,11 @@ const ProjectCreate = z
     proxied: z.boolean().optional().default(true),
     dns_zone: z.number().int().nullish(),
     primary_target: z.number().int().nullish(),
+    site_name: z.string().optional().default(""),
+    environment: z.string().optional().default(""),
+    deploy_strategy: DeployStrategyEnum.optional().default("blue_green"),
+    deploy_policy: DeployPolicyEnum.optional().default("auto"),
+    deploy_window_cron: z.string().optional().default(""),
   })
   .passthrough();
 const Readiness = z
@@ -482,6 +647,22 @@ export const schemas = {
   FirstRunItem,
   FirstRunProgress,
   FirstRunSnapshot,
+  DeploymentList,
+  AllowedAction,
+  DisabledAction,
+  DeploymentDetail,
+  DeploymentCommand,
+  ResourceEnum,
+  StepEnum,
+  BlankEnum,
+  DownloadGrant,
+  Command,
+  Overview,
+  SecretMeta,
+  SecretList,
+  RotatePlan,
+  SiteFleetRow,
+  SiteFleetList,
   InstanceCreateCost,
   InstanceCreate,
   InstanceCreateResult,
@@ -508,6 +689,8 @@ export const schemas = {
   SiteSummary,
   ProjectSummary,
   ExposureEnum,
+  DeployStrategyEnum,
+  DeployPolicyEnum,
   ProjectCreate,
   Readiness,
   OverflowDeploy,

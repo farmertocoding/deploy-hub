@@ -6,11 +6,13 @@ never binds a WAN scan.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import Target
+from core.permissions import RequireAction, RequireWorkspace
+from core.rbac import TARGET_FIELD, request_workspace, scope_queryset, scoped_get
 from monitor.router_advisor import probe_nothing_forwarded, router_advice_for
 from monitor.wan_probe import wan_probe_for
 
@@ -60,18 +62,24 @@ class RouterProbeResultSerializer(serializers.Serializer):
 
 
 class TargetListView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
     @extend_schema(responses={200: TargetListSerializer(many=True)})
     def get(self, request):
-        rows = Target.objects.order_by("pk")
+        rows = scope_queryset(
+            Target.objects.order_by("pk"), request_workspace(request), TARGET_FIELD,
+        )
         return Response(TargetListSerializer(
             [_list_row(row) for row in rows], many=True,
         ).data)
 
 
 class TargetDetailView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
     @extend_schema(responses={200: TargetDetailSerializer})
     def get(self, request, pk):
-        target = get_object_or_404(Target, pk=pk)
+        target = scoped_get(request, Target.objects.all(), TARGET_FIELD, pk=pk)
         payload = _list_row(target)
         payload["router_advice"] = router_advice_for(target)
         payload["wan_probe_configured"] = wan_probe_for(target) is not None
@@ -79,12 +87,14 @@ class TargetDetailView(APIView):
 
 
 class RouterProbeView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "target.router_probe"
     @extend_schema(
         request=RouterProbeSerializer,
         responses={201: RouterProbeResultSerializer},
     )
     def post(self, request, pk):
-        target = get_object_or_404(Target, pk=pk)
+        target = scoped_get(request, Target.objects.all(), TARGET_FIELD, pk=pk)
         ser = RouterProbeSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
         result = probe_nothing_forwarded(

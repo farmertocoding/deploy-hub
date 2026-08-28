@@ -231,7 +231,7 @@ test("r10-ux-f6: with warnings, the checkbox names them", async () => {
   assert.ok(wizard.warnings.length >= 1, JSON.stringify(wizard.warnings));
 
   const text = visibleText(render(WarningsAck,
-    { warnings: wizard.warnings, checked: false }));
+    { warnings: wizard.warnings, checked: false, onChange: () => {} }));
 
   for (const w of wizard.warnings) {
     assert.ok(text.includes(w.title), `${w.title} is not named beside the consent`);
@@ -243,6 +243,7 @@ test("r10-ux-f6: one warning is not addressed as several", () => {
   const text = visibleText(render(WarningsAck, {
     warnings: [{ id: "node-ts.symlinked-files", title: "Symlinked files were not read" }],
     checked: false,
+    onChange: () => {},
   }));
   assert.ok(text.includes("this warning") && text.includes("accept it"), text);
 });
@@ -424,7 +425,7 @@ test("r11-ux-f5: a disabled control is visibly disabled", () => {
     "an inline style= overrides the browser's :disabled rendering, so a disabled " +
     "button drawn from the same object is pixel-identical to a live one");
   assert.match(style(off), /cursor:not-allowed/);
-  assert.match(style(off), /color:#6e7681/);
+  assert.match(style(off), /color:var\(--hud-muted\)/);
   assert.match(off, /disabled=""/);
 
   // …and `busy` disables it too — a request in flight is the other way this button

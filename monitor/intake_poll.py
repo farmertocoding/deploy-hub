@@ -13,12 +13,29 @@ from datetime import timezone as dt_tz
 from django.conf import settings
 from django.utils import timezone
 
+from core.models import default_workspace
+
 BATCH_CAP = 20
 FAIL_N = 3
 UNREACHABLE_AFTER = timedelta(minutes=5)
 RESULTS_SCHEMA_VERSION = 1
 TYPE_GIT_PUSH = "git-push"
 TYPE_PARTNER_JOB = "partner-job"
+
+
+def _item_authenticated(job):
+    """Every item type, including git-push, needs an authenticated envelope."""
+    import hashlib
+    import hmac
+
+    token = str(getattr(settings, "INTAKE_SERVICE_TOKEN", "") or "")
+    if not token:
+        return bool(getattr(settings, "DEBUG", False))
+    sig = str(job.get("hub_sig") or "")
+    expected = hmac.new(
+        token.encode(), str(job.get("id") or "").encode(), hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(sig, expected)
 
 
 class IntakeClientError(Exception):
@@ -72,17 +89,31 @@ class HttpIntakeClient:
         self.base_url = base_url.rstrip("/")
         self._opener = urllib.request.build_opener(_NoRedirect)
 
+    def _headers(self):
+        token = str(getattr(settings, "INTAKE_SERVICE_TOKEN", "") or "")
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
     def fetch(self, limit=BATCH_CAP):
         url = f"{self.base_url}/internal/outbox"
-        req = urllib.request.Request(url, method="GET")
+        req = urllib.request.Request(url, method="GET", headers=self._headers())
+        cap = int(getattr(settings, "INTAKE_MAX_BODY_BYTES", 1_000_000) or 1_000_000)
         try:
             # nosec B310 — scheme is http or https via intake_client_for;
             # redirects are refused above.
             with self._opener.open(req, timeout=5) as resp:  # nosec B310
-                payload = json.loads(resp.read().decode("utf-8"))
+                raw = resp.read(cap + 1)
         except IntakeClientError:
             raise
         except (OSError, ValueError, urllib.error.URLError) as exc:
+            raise IntakeClientError("fetch failed") from exc
+        if len(raw) > cap:
+            raise IntakeClientError("response too large")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (OSError, ValueError) as exc:
             raise IntakeClientError("fetch failed") from exc
         if isinstance(payload, list):
             items = payload
@@ -95,7 +126,9 @@ class HttpIntakeClient:
     def ack(self, job_id):
         url = f"{self.base_url}/internal/ack"
         body = json.dumps({"id": job_id}).encode("utf-8")
-        req = urllib.request.Request(url, data=body, method="POST")
+        req = urllib.request.Request(
+            url, data=body, method="POST", headers=self._headers(),
+        )
         try:
             # nosec B310 — scheme is http or https via intake_client_for;
             # redirects are refused above.
@@ -120,6 +153,11 @@ def intake_client_for(*, url=None, client=None):
     parsed = urllib.parse.urlparse(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise IntakeClientError("INTAKE_URL is not an http(s) URL")
+    if parsed.scheme != "https" and not bool(getattr(settings, "DEBUG", False)):
+        raise IntakeClientError("INTAKE_URL must be https in production")
+    token = str(getattr(settings, "INTAKE_SERVICE_TOKEN", "") or "")
+    if not token and not bool(getattr(settings, "DEBUG", False)):
+        raise IntakeClientError("INTAKE_SERVICE_TOKEN is required in production")
     return HttpIntakeClient(raw)
 
 
@@ -278,7 +316,9 @@ def _process(client, items, now):
     from core.partner_verify import ReplayRejected, SignatureRejected
 
     n = 0
-    enabled = bool(getattr(settings, "PARTNER_API_ENABLED", False))
+    from core.models import PartnerApiFlag
+
+    enabled = PartnerApiFlag.is_on()
     for job in _iter_jobs_git_first(items):
         try:
             if not isinstance(job, dict):
@@ -288,6 +328,17 @@ def _process(client, items, now):
             job_id = job.get("id")
             job_type = job.get("type") or TYPE_PARTNER_JOB
             if job_type == TYPE_GIT_PUSH:
+                injected = isinstance(client, FakeIntakeClient)
+                if not injected and not _item_authenticated(job):
+                    audit(
+                        "outbox-item-refused",
+                        source="celery",
+                        severity="security",
+                        type=TYPE_GIT_PUSH,
+                        job_id=str(job_id or ""),
+                        reason="unauthenticated",
+                    )
+                    continue
                 n += int(bool(_handle_git_push(job, now)))
                 _ack(client, job_id)
                 continue
@@ -398,6 +449,7 @@ def _record_failure(now):
         raise_alert(
             "hub-outbox-poll-failing",
             "intake",
+            workspace=default_workspace(),
             fingerprint="hub-outbox-poll-failing",
             source_engine="monitor.intake_poll",
             title="Hub outbox poll failing",
@@ -417,6 +469,7 @@ def _record_failure(now):
         raise_alert(
             "partner-intake-unreachable",
             "intake",
+            workspace=default_workspace(),
             fingerprint="partner-intake-unreachable",
             source_engine="monitor.intake_poll",
             title="Partner intake unreachable",

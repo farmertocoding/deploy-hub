@@ -8,6 +8,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
+import { box } from "../ui/surface.js";
 
 function filterFromSearch() {
   try {
@@ -17,8 +18,6 @@ function filterFromSearch() {
     return {};
   }
 }
-
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
 
 const SEVERITY = {
   p1: { icon: "⛔", label: "P1" },
@@ -62,7 +61,7 @@ export function SeverityChip({ severity }) {
 export function StateChip({ finding }) {
   if (finding.state === "accepted") {
     return (
-      <span style={{ background: "#6e7681", color: "#e6e6e6",
+      <span style={{ background: "var(--hud-muted)", color: "#e6e6e6",
         padding: "2px 8px", borderRadius: 12 }}>
         accepted — {safeText(finding.accepted_reason)}
       </span>
@@ -96,7 +95,7 @@ export function FindingDetail({ finding, onBack, onAck, onAccept }) {
   return (
     <div style={{ ...box, marginTop: 8, maxWidth: "100%", display: "grid", gap: 8 }}>
       <h3 style={{ margin: 0 }}>{safeText(finding.title)}</h3>
-      <div style={{ color: "#8b949e" }}>
+      <div style={{ color: "var(--hud-muted)" }}>
         <SeverityChip severity={finding.severity} />
         {site ? ` · ${site}` : ""}
         {finding.state ? <>{" · "}<StateChip finding={finding} /></> : null}
@@ -104,7 +103,7 @@ export function FindingDetail({ finding, onBack, onAck, onAccept }) {
       <p style={{ margin: 0, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
         {safeText(why)}</p>
       {fix && (
-        <p style={{ margin: 0, color: "#8b949e", whiteSpace: "pre-line",
+        <p style={{ margin: 0, color: "var(--hud-muted)", whiteSpace: "pre-line",
           overflowWrap: "anywhere" }}>Fix: {safeText(fix)}</p>
       )}
       {canAck && (
@@ -242,7 +241,7 @@ export default function Findings({ route, onNav, events }) {
         onAccept={(id, reason) => acceptRisk(id, reason).then(load)} />;
     return (
       <div style={{ padding: 16 }}>
-        <p style={{ color: "#8b949e" }}>Finding {route.id} was not found.</p>
+        <p style={{ color: "var(--hud-muted)" }}>Finding {route.id} was not found.</p>
         <button style={box} onClick={() => onNav("findings")}>Back to findings</button>
       </div>
     );

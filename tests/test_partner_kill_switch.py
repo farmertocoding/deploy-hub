@@ -106,7 +106,7 @@ def _touch(client, monkeypatch):
 
 
 def _t1_user(client):
-    user = User.objects.create_user("joseph", password="a-long-dev-password")
+    user = User.objects.create_superuser("joseph", password="a-long-dev-password")
     _make_cred(user, "yubikey")
     _make_cred(user, "phone")
     _login(client, user)
@@ -320,9 +320,9 @@ def test_enable_partner_api_is_t1_not_a_toggle(client, monkeypatch):
         assert listed.json().get("api_enabled") is True
         assert not Partner.objects.exists()
     finally:
-        from django.conf import settings as reset
+        from core.partner_views import set_partner_api_enabled
 
-        reset.PARTNER_API_ENABLED = False
+        set_partner_api_enabled(False)
 
 
 @pytest.mark.req("PART-KILL-SWITCH")
@@ -447,7 +447,7 @@ def test_suspend_overlay_names_stop_detach_revoke():
 
 
 @pytest.mark.req("PART-KILL-SWITCH")
-def test_site_takedown_is_t2_and_returns_410(client):
+def test_site_takedown_is_t2_and_returns_410(client, monkeypatch):
     """partner.site_takedown is T2; POST takes the route to 410.
 
     What would make this fail: RequireRecentTouch on takedown, a T1 row, or
@@ -472,6 +472,7 @@ def test_site_takedown_is_t2_and_returns_410(client):
 
     _t1_user(client)
     partner, site, _target = _partner_with_site()
+    _inject_transport(monkeypatch, FakeTransport())
     assert site_route_status(site) != 410
     response = client.post(
         _takedown_url(site),
@@ -503,7 +504,7 @@ def test_takedown_control_is_on_partner_site_detail():
 
 
 @pytest.mark.req("PART-KILL-SWITCH")
-def test_auto_trigger_files_partner_kill_switch_fingerprint():
+def test_auto_trigger_files_partner_kill_switch_fingerprint(monkeypatch):
     """Abuse/CSAM auto-suspend files P1 fingerprint partner-kill-switch:{pk}.
 
     What would make this fail: default {kind}:{entity}, skipping the file, or
@@ -513,6 +514,7 @@ def test_auto_trigger_files_partner_kill_switch_fingerprint():
     from core.partner_views import auto_trigger_kill_switch
 
     partner, _site, _target = _partner_with_site(slug="auto-kill")
+    _inject_transport(monkeypatch, FakeTransport())
     auto_trigger_kill_switch(partner, reason="csam")
     partner.refresh_from_db()
     assert partner.suspended is True
@@ -677,6 +679,126 @@ def test_destination_rank_own_server_is_t2_with_honesty_sentence():
     assert HONESTY in settings_src
     assert "kind === \"ssh\"" in settings_src or 'kind === "ssh"' in settings_src
     assert "kind=ssh" in settings_src or "kind === \"ssh\"" in settings_src
+
+
+@pytest.mark.req("PART-KILL-SWITCH")
+def test_kill_switch_survives_a_fresh_process_settings_read(client, monkeypatch):
+    """H4: T1 enable is visible when this process's settings flag is still off.
+
+    What would make this fail: set_partner_api_enabled only mutating
+    django.conf.settings so Beat/poller still reads the env default.
+    """
+    from django.test import override_settings
+
+    from core.partner_views import partner_api_enabled, set_partner_api_enabled
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    ok = client.post(
+        _kill_url(),
+        data=json.dumps({"confirm_name": CONFIRM_API}),
+        content_type="application/json",
+    )
+    assert ok.status_code == 200, ok.content
+    try:
+        with override_settings(PARTNER_API_ENABLED=False):
+            assert partner_api_enabled() is True
+    finally:
+        set_partner_api_enabled(False)
+
+
+@pytest.mark.req("PART-KILL-SWITCH")
+def test_suspend_stops_pipeline_container_name(client, monkeypatch):
+    """H12: docker stop uses site-{slug}-{deployment_id}, not site-{name} alone.
+
+    What would make this fail: partner_views._container_name staying
+    site-{site.name} while deploys/steps.py names site-{slug}-{pk}.
+    """
+    from deploys.models import Deployment, Manifest
+
+    _t1_user(client)
+    _touch(client, monkeypatch)
+    partner, site, _target = _partner_with_site(slug="pipe-name")
+    manifest = Manifest.objects.create(
+        site=site, version=1, body={"schema_version": 1, "runtime": "static"},
+    )
+    dep = Deployment.objects.create(manifest=manifest, status=Deployment.Status.SUCCEEDED)
+    transport = FakeTransport()
+    _inject_transport(monkeypatch, transport)
+    response = client.post(
+        _suspend_url(partner),
+        data=json.dumps({"confirm_name": partner.slug}),
+        content_type="application/json",
+    )
+    assert response.status_code == 200, response.content
+    expected = f"site-{site.name}-{dep.pk}"
+    runs = [c[1] for c in transport.calls if c[0] == "run"]
+    assert any(argv == ["docker", "stop", expected] for argv in runs), runs
+    assert not any(
+        argv == ["docker", "stop", f"site-{site.name}"] for argv in runs
+    ), runs
+
+
+@pytest.mark.req("PART-KILL-SWITCH")
+def test_takedown_without_siteinstance_does_not_claim_410(client, monkeypatch):
+    """H12: HTTP 410 only when the site is actually marked ABSENT.
+
+    What would make this fail: PartnerSiteTakedownView returning 410 after a
+    no-op update of zero SiteInstance rows (materialize never inserts one).
+    """
+    from core.models import Partner, PartnerSite, Project, Site
+    from core.partner_views import site_route_status
+
+    _t1_user(client)
+    _inject_transport(monkeypatch, FakeTransport())
+    partner = Partner.objects.create(slug="no-inst", name="no-inst")
+    project = Project.objects.create(name="no-inst", slug="no-inst")
+    target = _target(host="no-inst.partner.test")
+    site = Site.objects.create(
+        project=project,
+        name="no-inst-site",
+        domain="app.no-inst.test",
+        exposure=Site.Exposure.MESH_ONLY,
+        primary_target=target,
+    )
+    PartnerSite.objects.create(partner=partner, site=site, tenant_ref="t")
+    partner.destination_order = [target.pk]
+    partner.save(update_fields=["destination_order"])
+    assert site_route_status(site) != 410
+    response = client.post(
+        _takedown_url(site),
+        data=json.dumps({"confirm_name": site.domain}),
+        content_type="application/json",
+    )
+    # After the fix this is 410 only because a SiteInstance is now ABSENT.
+    from core.models import SiteInstance
+
+    assert SiteInstance.objects.filter(site=site).exists()
+    assert site_route_status(site) == 410
+    assert response.status_code == 410, response.content
+
+
+@pytest.mark.req("PART-KILL-SWITCH")
+def test_operator_ssh_transport_for_is_not_hardwired_fake():
+    """H12: operator destinations default to SshTransport like the pipeline.
+
+    What would make this fail: transport_for returning FakeTransport for
+    AWS_EC2 (the partner-destination kind) or SSH while deploys/pipeline.py
+    uses SshTransport for the same Target.
+    """
+    from core.models import Target
+    from core.partner_views import transport_for
+    from core.ssh import SshTransport
+    from core.transport import FakeTransport
+    from deploys.pipeline import _default_transport
+
+    ssh = _target(kind=Target.Kind.SSH)
+    aws = _target(kind=Target.Kind.AWS_EC2, host="aws.partner.test")
+    assert isinstance(transport_for(ssh), SshTransport)
+    assert isinstance(transport_for(aws), SshTransport)
+    assert not isinstance(transport_for(aws), FakeTransport)
+    site = type("S", (), {"primary_target": aws})()
+    assert type(transport_for(aws)) is type(_default_transport(site))
     tests = _frontend("tests", "settings-partners.test.ts")
     assert "destination" in tests.lower() or "honesty" in tests.lower()
     sim = _frontend("tests", "simulation-states.test.ts")

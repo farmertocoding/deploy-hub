@@ -16,7 +16,7 @@ import { api } from "./api.js";
 import { CHECK_FIELDS, TIER_GATES } from "./api/presentation.js";
 import { safePath, safeText } from "./safe-display.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "./ui/surface.js";
 
 // R11-UX-F5: a control that cannot be pressed has to LOOK like one.
 //
@@ -33,7 +33,7 @@ const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px 
 // Three signals rather than one, per §F9's never-color-only rule: dimmer text, a flatter
 // background, and `not-allowed` under the pointer.
 const disabledBox = (disabled) => disabled
-  ? { ...box, color: "#6e7681", background: "#15181e", borderColor: "#2a2e35",
+  ? { ...box, color: "var(--hud-muted)", background: "var(--hud-control-surface)", borderColor: "var(--hud-border)",
       cursor: "not-allowed" }
   : box;
 // R9-8: the plural is per tier, not `word + "s"`.
@@ -44,17 +44,17 @@ const disabledBox = (disabled) => disabled
 // singular is the one a reader would write; where they are the same, they are the same on
 // purpose and saying so here is cheaper than the next reader re-deriving it.
 const TIER_BADGE = {
-  blocker: { sym: "⛔", one: "Blocker", many: "Blockers", color: "#ff7b72" },
-  warning: { sym: "⚠", one: "Warning", many: "Warnings", color: "#e3b341" },
-  advice: { sym: "ℹ", one: "Advice", many: "Advice", color: "#79c0ff" },
+  blocker: { sym: "⛔", one: "Blocker", many: "Blockers", color: "var(--hud-danger)" },
+  warning: { sym: "⚠", one: "Warning", many: "Warnings", color: "var(--hud-warning)" },
+  advice: { sym: "ℹ", one: "Advice", many: "Advice", color: "var(--hud-info)" },
   pending_sandbox: { sym: "⏳", one: "Deferred to sandbox",
-                     many: "Deferred to sandbox", color: "#8b949e" },
+                     many: "Deferred to sandbox", color: "var(--hud-muted)" },
   // R12-F12-2: `ok` has no SECTION — the payload groups the four tiers the screens
   // render and `ok` appears in `summary` as a count and nowhere else — but it now has a
   // word, because the scope line below counts it. Here rather than in that component, so
   // there is still exactly one place this screen decides what a tier is called and how it
   // pluralizes (R9-8: the plural is per tier, not `word + "s"`).
-  ok: { sym: "✓", one: "OK", many: "OK", color: "#3fb950" },
+  ok: { sym: "✓", one: "OK", many: "OK", color: "var(--hud-success)" },
 };
 
 export function Badge({ tier, n }) {
@@ -114,7 +114,7 @@ export function ReportScope({ report }) {
   const counted = SCOPE_TIERS.filter((tier) => summary[tier]);
   if (!modules.length && !counted.length) return null;
   return (
-    <p style={{ color: "#8b949e", margin: "4px 0 12px" }}>
+    <p style={{ color: "var(--hud-muted)", margin: "4px 0 12px" }}>
       {!!modules.length && <span>Scanned by {modules.join(", ")}</span>}
       {!!modules.length && !!counted.length && <span> · </span>}
       {counted.map((tier, i) => (
@@ -317,7 +317,7 @@ export function CheckBody({ check }) {
         // single-line); prose uses `safeText` (keeps the server's `\n`).
         if (field.kind === "paths") {
           return (
-            <div key={field.key} style={{ margin: "6px 0", color: "#e3b341" }}>
+            <div key={field.key} style={{ margin: "6px 0", color: "var(--hud-warning)" }}>
               {field.label}
               <ul style={{ margin: "2px 0 0", paddingLeft: "1.4em",
                   overflowWrap: "anywhere" }}>
@@ -328,7 +328,7 @@ export function CheckBody({ check }) {
         }
         return (
           <p key={field.key}
-            style={field.key === "fix_hint" ? { ...PRE_LINE, color: "#8b949e" } : PRE_LINE}>
+            style={field.key === "fix_hint" ? { ...PRE_LINE, color: "var(--hud-muted)" } : PRE_LINE}>
             {field.label ? `${field.label} ` : ""}{safeText(value)}</p>
         );
       })}
@@ -402,7 +402,7 @@ export function MaterializeControl({ gate, busy, onClick, id = "materialize" }) 
         aria-describedby={shown ? reasonId : undefined}>
         {gate.label}</button>
       {shown &&
-        <p id={reasonId} style={{ color: "#e3b341", margin: "6px 0" }}>{reason}</p>}
+        <p id={reasonId} style={{ color: "var(--hud-warning)", margin: "6px 0" }}>{reason}</p>}
     </>
   );
 }
@@ -462,7 +462,7 @@ export function WarningsAck({ warnings, checked, onChange }) {
           (R16-SEC-1), so it goes through the display sanitizer like CheckBody's fields —
           the coverage rests on "every repo-controlled-class field reaching the DOM is
           escaped", not on this one happening to be ok-tier today. */}
-      <span style={{ color: "#e3b341" }}>{items.map((w) => safeText(w.title)).join("; ")}</span>
+      <span style={{ color: "var(--hud-warning)" }}>{items.map((w) => safeText(w.title)).join("; ")}</span>
     </label>
   );
 }
@@ -487,10 +487,10 @@ export function WarningsAck({ warnings, checked, onChange }) {
 export function OutcomeRegion({ msg }) {
   return (
     <div role="status" aria-live="polite">
-      {msg?.ok && <p style={{ color: "#3fb950" }}>{msg.text}</p>}
-      {msg?.ok === false && <p style={{ color: "#ff7b72" }}>{msg.text}</p>}
+      {msg?.ok && <p style={{ color: "var(--hud-success)" }}>{msg.text}</p>}
+      {msg?.ok === false && <p style={{ color: "var(--hud-danger)" }}>{msg.text}</p>}
       {msg?.problems && (
-        <div style={{ color: "#e3b341" }}>
+        <div style={{ color: "var(--hud-warning)" }}>
           <p>Materialization refused — every reason, not just the first:</p>
           {/* dom-bidi-display / F20-BIDI-1: `p.detail` and an item's `title`/`prompt` are
               server prose that can quote repo content (R16-SEC-1), so they go through
@@ -512,7 +512,7 @@ export function OutcomeRegion({ msg }) {
               into account. The re-read is the fact being explained, it happens on every
               409 regardless, and the clause naming a cause this component cannot know
               is gone. */}
-          <p style={{ color: "#8b949e" }}>The report and this form were re-read from the
+          <p style={{ color: "var(--hud-muted)" }}>The report and this form were re-read from the
             server, so what you see above is its current state.</p>
         </div>
       )}
@@ -521,8 +521,8 @@ export function OutcomeRegion({ msg }) {
 }
 
 function Stamp({ at }) {
-  if (!at) return <span style={{ color: "#8b949e" }}>never scanned</span>;
-  return <span style={{ color: "#8b949e" }}>data as of {new Date(at).toLocaleString()}</span>;
+  if (!at) return <span style={{ color: "var(--hud-muted)" }}>never scanned</span>;
+  return <span style={{ color: "var(--hud-muted)" }}>data as of {new Date(at).toLocaleString()}</span>;
 }
 
 // R10-UX-F1: the left column's row, and the same distinction R9-5 drew in the panel.
@@ -555,18 +555,18 @@ export function ProjectRow({ project: p }) {
       <strong>{p.name}</strong>
       <div>{Object.entries(p.tiers).map(([t, n]) => n > 0 && <Badge key={t} tier={t} n={n} />)}
         {nothingFound && (scanned
-          ? <span style={{ color: "#3fb950" }}>✓ clean</span>
-          : <span style={{ color: "#8b949e" }}>⏳ not scanned</span>)}
+          ? <span style={{ color: "var(--hud-success)" }}>✓ clean</span>
+          : <span style={{ color: "var(--hud-muted)" }}>⏳ not scanned</span>)}
       </div>
       <div><Stamp at={p.scanned_at} /></div>
       {p.sites.map((s) => (
         <div key={s.id} style={{ marginTop: 4, fontSize: "0.9em" }}>
           {s.name}{s.domain ? ` — ${s.domain}` : ""} ·{" "}
           {s.latest_manifest_version == null
-            ? <span style={{ color: "#8b949e" }}>no manifest yet</span>
+            ? <span style={{ color: "var(--hud-muted)" }}>no manifest yet</span>
             : s.manifest_current
-              ? <span style={{ color: "#3fb950" }}>✓ manifest v{s.latest_manifest_version} matches current scan</span>
-              : <span style={{ color: "#e3b341" }}>⚠ manifest v{s.latest_manifest_version} predates current scan</span>}
+              ? <span style={{ color: "var(--hud-success)" }}>✓ manifest v{s.latest_manifest_version} matches current scan</span>
+              : <span style={{ color: "var(--hud-warning)" }}>⚠ manifest v{s.latest_manifest_version} predates current scan</span>}
         </div>
       ))}
     </>
@@ -711,7 +711,7 @@ export default function ReadinessScreen() {
   if (error)
     return (
       <div style={{ padding: 16 }}>
-        <p ref={statusRef} tabIndex={-1} style={{ color: "#ff7b72" }}>{error}</p>
+        <p ref={statusRef} tabIndex={-1} style={{ color: "var(--hud-danger)" }}>{error}</p>
         <button style={box} onClick={() => { setRetried(true); load(); }}>Retry</button>
       </div>
     );
@@ -768,7 +768,7 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
     return () => { current = false; };
   }, [projectId, refreshKey]);
 
-  if (error) return <p style={{ color: "#ff7b72" }}>{error}</p>;
+  if (error) return <p style={{ color: "var(--hud-danger)" }}>{error}</p>;
   if (report === undefined) return <p>Loading report…</p>;
 
   const { kind, sections } = reportSummary(report);
@@ -778,9 +778,9 @@ function ReadinessPanel({ projectId, project, refreshKey, onChanged }) {
         {" "}<small><Stamp at={report.scanned_at} /></small></h3>
       <ReportScope report={report} />
       {kind === "clean" &&
-        <p style={{ color: "#3fb950" }}>✓ No findings. This project is ready to configure.</p>}
+        <p style={{ color: "var(--hud-success)" }}>✓ No findings. This project is ready to configure.</p>}
       {kind === "never-scanned" && (
-        <div style={{ color: "#8b949e" }}>
+        <div style={{ color: "var(--hud-muted)" }}>
           <p style={{ color: "#e6e6e6" }}>⏳ Not scanned yet — this project has no
             readiness report, which is not the same as having nothing to report.</p>
           <p>Run <code>python -m hub scan &lt;path&gt;</code> (or the scan endpoint) and
@@ -841,7 +841,7 @@ export function QuestionField({ siteId, question: q, prior, drafted, onChange })
     <div style={{ marginBottom: 8 }}>
       <label htmlFor={id}>{q.prompt}
         {q.kind === "secret" && prior?.answered &&
-          <em style={{ color: "#8b949e" }}> — set {new Date(prior.changed_at).toLocaleDateString()}; leave blank to keep</em>}
+          <em style={{ color: "var(--hud-muted)" }}> — set {new Date(prior.changed_at).toLocaleDateString()}; leave blank to keep</em>}
       </label><br />
       {q.kind === "choice"
         ? <select id={id} style={box} value={drafted ?? priorText}
@@ -981,7 +981,7 @@ function SiteWizard({ site, refreshKey, onChanged }) {
       Configure &amp; materialize — {site.name}</button>;
   if (state === undefined) return <p ref={openedRef} tabIndex={-1}>Loading wizard…</p>;
   if (state.error)
-    return <p ref={openedRef} tabIndex={-1} style={{ color: "#ff7b72" }}>{state.error}</p>;
+    return <p ref={openedRef} tabIndex={-1} style={{ color: "var(--hud-danger)" }}>{state.error}</p>;
 
   const unanswered = state.questions.filter((q) => !(q.id in (state.answered || {})));
   const gate = materializeGate(state);
@@ -1000,7 +1000,7 @@ function SiteWizard({ site, refreshKey, onChanged }) {
       <MaterializeControl gate={gate} busy={busy} onClick={materialize}
         id={questionFieldId(site.id, "materialize")} />
       {!!unanswered.length &&
-        <p style={{ color: "#8b949e" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
+        <p style={{ color: "var(--hud-muted)" }}>{unanswered.length} question{unanswered.length === 1 ? "" : "s"} unanswered</p>}
       <OutcomeRegion msg={msg} />
     </div>
   );

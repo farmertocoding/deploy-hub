@@ -12,7 +12,7 @@ export const CHECKLIST_COPY = {
     button: "Connect Cloudflare",
   },
   plant_origin_ca: {
-    sentence: "Plant the Origin-CA key from a Hub-local file — required before the first proxied public deploy.",
+    sentence: "Plant the Origin-CA API token from a Hub-local file — required before the first proxied public deploy. Use Zone SSL and Certificates Edit, not a service key.",
     button: "Plant Origin-CA",
   },
   add_project: {

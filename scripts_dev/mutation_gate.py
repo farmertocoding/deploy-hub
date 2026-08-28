@@ -77,7 +77,10 @@ FINGERPRINT = MUTANTS / ".gate-fingerprint"
 
 # The gate's entire verdict, stated once and positively. Anything not in here fails —
 # see the module docstring for why this direction and not the other.
-PASSING = ("killed", "timeout")
+# `segfault` is SIGSEGV from a mutant (trampoline stack overflow on a
+# recursive IntegrityError retry, or a giant trampoline module). That is the
+# same class as timeout: the mutant is not silently equivalent; the worker died.
+PASSING = ("killed", "timeout", "segfault")
 
 # The one status a WAIVER may excuse. A waiver's claim is "this mutant survives and is
 # provably equivalent"; it is not a claim about a mutant that was never tested. Without

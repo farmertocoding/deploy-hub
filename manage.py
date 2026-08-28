@@ -12,7 +12,7 @@ if sys.version_info < (3, 11):
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

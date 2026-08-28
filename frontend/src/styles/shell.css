@@ -1,0 +1,223 @@
+.hud-skip {
+  position: absolute;
+  left: -999px;
+  top: 8px;
+  z-index: 20;
+  padding: 8px 12px;
+  background: var(--hud-header);
+  color: var(--hud-text);
+  border: 1px solid var(--hud-border);
+}
+.hud-skip:focus {
+  left: 8px;
+}
+
+.hud-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  grid-template-rows: var(--hud-header-height) 1fr;
+  background: transparent;
+}
+
+.hud-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: var(--hud-header-height);
+  min-height: 0;
+  background: var(--hud-header);
+  border-bottom: 1px solid var(--hud-border);
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  min-width: 0;
+  overflow: visible;
+}
+
+.hud-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+}
+
+.hud-sidenav--compact button {
+  min-width: 40px;
+}
+.hud-sidenav__full {
+  position: absolute;
+  left: -999px;
+}
+.hud-sidenav--compact button:focus .hud-sidenav__full,
+.hud-sidenav--compact button:hover .hud-sidenav__full {
+  position: static;
+  left: auto;
+}
+
+.hud-more-actions {
+  display: inline-block;
+  margin-left: 8px;
+}
+.hud-more-actions summary {
+  cursor: pointer;
+}
+
+.hud-phone-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.hud-brand {
+  font-weight: 600;
+  letter-spacing: var(--hud-tracking);
+}
+
+.hud-crumb {
+  color: var(--hud-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hud-header-spacer { flex: 1; }
+
+.hud-sidenav {
+  border-right: 1px solid var(--hud-border);
+  padding: 16px 12px;
+  background: transparent;
+}
+
+.hud-sidenav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--hud-text);
+  border: 1px solid transparent;
+  border-radius: var(--hud-control-radius);
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.hud-sidenav button[aria-current="page"] {
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
+}
+
+.hud-main {
+  padding: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.hud-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.hud-facets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.hud-search {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  max-width: 280px;
+  flex: 1;
+}
+.hud-search input {
+  min-height: 32px;
+  padding: 4px 8px;
+  background: var(--hud-control-surface);
+  border: 1px solid var(--hud-border);
+  border-radius: var(--hud-control-radius);
+  color: var(--hud-text);
+}
+.hud-search__results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 12;
+  background: var(--hud-appearance);
+  padding: 8px;
+}
+.hud-live { position: relative; }
+.hud-live__popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 12;
+  min-width: 240px;
+}
+.hud-ops { position: relative; }
+.hud-ops__drawer {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 12;
+  min-width: 260px;
+}
+.hud-log {
+  white-space: pre-wrap;
+  font-size: 12px;
+  max-height: 240px;
+  overflow: auto;
+}
+.hud-workspace-menu { position: relative; }
+.hud-workspace-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 12;
+  min-width: 200px;
+}
+
+.hud-user {
+  color: var(--hud-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1023px) {
+  .hud-shell {
+    grid-template-columns: 56px 1fr;
+  }
+  .hud-sidenav button {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 767px) {
+  .hud-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--hud-header-height) auto 1fr;
+  }
+  .hud-sidenav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-right: 0;
+    border-bottom: 1px solid var(--hud-border);
+    padding: 8px;
+  }
+  .hud-sidenav button {
+    width: auto;
+    margin: 0;
+    min-height: 44px;
+  }
+}

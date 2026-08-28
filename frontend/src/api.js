@@ -11,21 +11,34 @@
 // three fetches in a chain, so a state that hangs the first one leaves the other two
 // spinners on screens the reviewer cannot get to.
 import { SIM_FIXTURES } from "./sim.js";
+import { hudSim } from "./hud-sim.js";
 
 function getCookie(name) {
   const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return m ? m[2] : "";
 }
 
-export function simState() {
-  return new URLSearchParams(window.location.search).get("sim");
+export function simAllowed(env) {
+  const resolved = env ?? (typeof import.meta !== "undefined" ? import.meta.env : undefined);
+  return !(resolved && resolved.PROD);
+}
+
+export function simState(search, env) {
+  if (!simAllowed(env)) return null;
+  const raw = search ?? (typeof window !== "undefined" ? window.location.search : "");
+  return new URLSearchParams(raw || "").get("sim");
 }
 
 export async function api(path, body, method) {
   const sim = simState();
   if (sim) {
+    if (String(path).startsWith("v1/hud/")) {
+      const hud = hudSim(sim, path, body, method);
+      if (hud) return hud;
+    }
     const fx = SIM_FIXTURES[sim];
     if (fx) return fx(path, body, method);
+    return { status: 404, data: { detail: "unknown simulation" } };
   }
   // A down/unreachable server must surface, never reject unhandled (Phase-0 round-1
   // UX finding): status 0 routes into every existing error branch via data.detail.

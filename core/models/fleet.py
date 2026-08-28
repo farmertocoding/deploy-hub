@@ -14,7 +14,9 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from .validators import validate_git_url
+from core.validators import validate_git_url
+
+from .workspace import Workspace, default_workspace_id
 
 
 class AuditEvent(models.Model):
@@ -52,9 +54,18 @@ class AuditEvent(models.Model):
         "Partner", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="audit_events",
     )
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.PROTECT, related_name="audit_events",
+        null=True, blank=True,
+    )
+    scope = models.CharField(max_length=16, default="workspace")
+    chain_version = models.PositiveSmallIntegerField(default=2)
 
     class Meta:
-        indexes = [models.Index(fields=["object_type", "object_id"])]
+        indexes = [
+            models.Index(fields=["object_type", "object_id"]),
+            models.Index(fields=["workspace", "ts"]),
+        ]
         ordering = ["-ts"]
 
     def __str__(self):
@@ -78,6 +89,7 @@ class RecoveryCode(models.Model):
         ]
 
 
+
 class Project(models.Model):
     """Code (§D9). A Project is a git URL or a local path — never a running thing."""
 
@@ -85,8 +97,13 @@ class Project(models.Model):
         GIT = "git"
         LOCAL_PATH = "local_path"   # dev + adopt-existing paths only
 
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="projects",
+        default=default_workspace_id,
+    )
+
     name = models.CharField(max_length=128)
-    slug = models.SlugField(max_length=128, unique=True)
+    slug = models.SlugField(max_length=128)
     source_kind = models.CharField(max_length=16, choices=Source.choices,
                                    default=Source.GIT)
     git_url = models.CharField(max_length=2048, blank=True,
@@ -105,8 +122,16 @@ class Project(models.Model):
                                    on_delete=models.SET_NULL,
                                    related_name="projects_created")
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "slug"], name="uniq_project_workspace_slug",
+            ),
+        ]
+
     def __str__(self):
         return self.name
+
 
 
 class NetworkZone(models.Model):
@@ -116,12 +141,24 @@ class NetworkZone(models.Model):
         PROD = "prod"
         TEST = "test"
 
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="network_zones",
+        default=default_workspace_id,
+    )
+
     name = models.CharField(max_length=128)
-    slug = models.SlugField(max_length=128, unique=True)
+    slug = models.SlugField(max_length=128)
     # Default prod: existing rows fail-closed under HUB_TEST_MODE (§B9).
     purpose = models.CharField(
         max_length=16, choices=Purpose.choices, default=Purpose.PROD,
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "slug"], name="uniq_networkzone_workspace_slug",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -135,6 +172,11 @@ class DnsAccount(models.Model):
     class Provider(models.TextChoices):
         CLOUDFLARE = "cloudflare"
         ROUTE53 = "route53"
+
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="dns_accounts",
+        default=default_workspace_id,
+    )
 
     provider = models.CharField(
         max_length=32, choices=Provider.choices, default=Provider.CLOUDFLARE,
@@ -244,12 +286,21 @@ class Site(models.Model):
         HOST_CADDY = "host_caddy"
         SITE_CADDY = "site_caddy"
 
+    class Environment(models.TextChoices):
+        PRODUCTION = "production"
+        STAGING = "staging"
+        DEVELOPMENT = "development"
+        PREVIEW = "preview"
+
     project = models.ForeignKey(Project, on_delete=models.CASCADE,
                                 related_name="sites")
     name = models.CharField(max_length=128)
     domain = models.CharField(max_length=253, blank=True)
     exposure = models.CharField(
         max_length=16, choices=Exposure.choices, default=Exposure.PUBLIC,
+    )
+    environment = models.CharField(
+        max_length=16, choices=Environment.choices, default=Environment.PRODUCTION,
     )
     deploy_strategy = models.CharField(
         max_length=16, choices=DeployStrategy.choices,
@@ -321,7 +372,11 @@ class Site(models.Model):
 class Partner(models.Model):
     """A partner tenant (§7 C2 / D-076). Public keys live here, not the vault."""
 
-    slug = models.SlugField(max_length=64, unique=True)
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="partners",
+        default=default_workspace_id,
+    )
+    slug = models.SlugField(max_length=64)
     name = models.CharField(max_length=128)
     pubkey_current = models.TextField(blank=True, default="")
     pubkey_previous = models.TextField(blank=True, default="")
@@ -347,6 +402,9 @@ class Partner(models.Model):
                 & models.Q(domains__gte=1),
                 name="partner_quotas_finite",
             ),
+            models.UniqueConstraint(
+                fields=["workspace", "slug"], name="uniq_partner_workspace_slug",
+            ),
         ]
 
     def clean(self):
@@ -360,6 +418,29 @@ class Partner(models.Model):
 
     def __str__(self):
         return self.slug
+
+
+class PartnerApiFlag(models.Model):
+    """Hub-authoritative partner-API enablement. One row (pk=1).
+
+    django.conf.settings mutation is not visible to Celery. A missing row
+    falls back to PARTNER_API_ENABLED so override_settings still works.
+    """
+
+    enabled = models.BooleanField(default=False)
+
+    @classmethod
+    def is_on(cls):
+        row = cls.objects.filter(pk=1).first()
+        if row is not None:
+            return bool(row.enabled)
+        return bool(getattr(settings, "PARTNER_API_ENABLED", False))
+
+    @classmethod
+    def set_on(cls, value):
+        value = bool(value)
+        cls.objects.update_or_create(pk=1, defaults={"enabled": value})
+        settings.PARTNER_API_ENABLED = value
 
 
 class PartnerSite(models.Model):
@@ -535,6 +616,11 @@ class OperationLock(models.Model):
         RECONCILE = "reconcile"
         COLLECT = "collect"
 
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="operation_locks",
+        default=default_workspace_id,
+    )
+
     scope = models.CharField(max_length=16, choices=Scope.choices)
     object_id = models.CharField(max_length=64)
     kind = models.CharField(max_length=16, choices=Kind.choices)
@@ -552,6 +638,7 @@ class OperationLock(models.Model):
 
     def __str__(self):
         return f"{self.scope}:{self.object_id}:{self.kind}"
+
 
 
 class DnsRecord(models.Model):
@@ -746,6 +833,10 @@ class Finding(models.Model):
         RESOLVED = "resolved"
         ACCEPTED = "accepted"
 
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="findings",
+    )
+
     source_engine = models.CharField(max_length=64)
     severity = models.CharField(max_length=8, choices=Severity.choices)
     entity = models.CharField(max_length=128)
@@ -756,10 +847,21 @@ class Finding(models.Model):
                              default=State.OPEN)
     first_seen = models.DateTimeField(default=timezone.now)
     last_seen = models.DateTimeField(default=timezone.now)
-    fingerprint = models.CharField(max_length=128, unique=True)
+    fingerprint = models.CharField(max_length=128)
     # Accept-risk requires a one-line reason and re-surfaces on fingerprint
     # change (§F2).
     accepted_reason = models.CharField(max_length=256, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "fingerprint"],
+                name="finding_workspace_fingerprint_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "state", "severity"]),
+        ]
 
     def __str__(self):
         return f"[{self.severity}] {self.title}"
@@ -769,7 +871,10 @@ class AlertState(models.Model):
     """Hysteresis/flap/storm counters (D-038), 1:1 with a Finding by the same
     fingerprint — kept off Finding so that model stays §F2-shaped."""
 
-    fingerprint = models.CharField(max_length=128, unique=True)
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, related_name="alert_states",
+    )
+    fingerprint = models.CharField(max_length=128)
     consecutive_fail = models.PositiveIntegerField(default=0)
     consecutive_ok = models.PositiveIntegerField(default=0)
     opened_at = models.DateTimeField(null=True, blank=True)
@@ -778,8 +883,40 @@ class AlertState(models.Model):
     acked_at = models.DateTimeField(null=True, blank=True)
     transitions = models.JSONField(default=list, blank=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "fingerprint"],
+                name="alertstate_workspace_fingerprint_uniq",
+            ),
+        ]
+
     def __str__(self):
         return f"alert-state {self.fingerprint}"
+
+
+class AuditChainHead(models.Model):
+    """Serialized audit-chain cursor per workspace or the system scope."""
+
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.PROTECT, related_name="audit_chain_heads",
+        null=True, blank=True,
+    )
+    scope = models.CharField(max_length=16, default="workspace")
+    last_hash = models.CharField(max_length=64, blank=True, default="")
+    last_event = models.ForeignKey(
+        "AuditEvent", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    version = models.PositiveSmallIntegerField(default=2)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope", "workspace"],
+                name="audit_chain_head_scope_workspace_uniq",
+            ),
+        ]
 
 
 class AlertDelivery(models.Model):

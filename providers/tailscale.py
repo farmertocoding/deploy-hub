@@ -195,12 +195,14 @@ def _matches_hub_target(device, targets):
 
 
 def _file_unknown(device, device_id):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     hostname = str(device.get("hostname") or "").strip() or device_id
     raise_alert(
         "tailscale-unknown-device",
         f"tailscale-device:{device_id}",
+        workspace=default_workspace(),
         fingerprint=f"{ALERT_KIND}:{device_id}",
         source_engine=SOURCE_ENGINE,
         title=f"Unknown Tailscale device {hostname}",

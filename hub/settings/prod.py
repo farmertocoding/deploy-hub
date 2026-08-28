@@ -1,5 +1,6 @@
 """Prod settings — the Hub must pass its own §5 scanner (§B10)."""
 import os
+from urllib.parse import urlparse
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -31,6 +32,20 @@ VAULT_ALLOW_FAKE_KEK = False
 # HUB_TEST_DATABASE rebind gate both key off it — two stray env vars on a prod
 # box must not be able to repoint a worker's database or open the test plane.
 HUB_TEST_MODE = False
+
+# WebAuthn RP ID / origins must be the real Hub hostname. base.py defaults
+# localhost for laptop pytest; a prod box inheriting that cannot complete
+# a hardware ceremony (H3).
+_raw_public_url = (os.environ.get("HUB_PUBLIC_URL") or "https://hub.local").strip()
+_public = urlparse(_raw_public_url)
+_host = (_public.hostname or "").lower()
+if _public.scheme != "https" or _host in {"localhost", "127.0.0.1", "::1"} or not _host:
+    raise ImproperlyConfigured(
+        "HUB_PUBLIC_URL must be https with a non-loopback host in prod "
+        f"(got {_raw_public_url!r})."
+    )
+OTP_WEBAUTHN_RP_ID = _host
+OTP_WEBAUTHN_ALLOWED_ORIGINS = [f"https://{_public.netloc}"]
 
 # D-066: do not default the AWS vault-ref or test-plane allowlists on. The
 # operator sets HUB_AWS_CREDENTIALS_REF; empty stays empty. Allowlists stay

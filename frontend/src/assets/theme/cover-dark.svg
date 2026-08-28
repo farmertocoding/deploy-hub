@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#263a47"/>
+      <stop offset="0.48" stop-color="#172631"/>
+      <stop offset="1" stop-color="#0d101b"/>
+    </linearGradient>
+    <linearGradient id="coldField" x1="0" y1="0" x2="0.92" y2="0.72">
+      <stop offset="0" stop-color="#8ab8c4" stop-opacity="0.42"/>
+      <stop offset="0.38" stop-color="#3c6a7a" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#14212c" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tealField" x1="0.15" y1="1" x2="0.85" y2="0">
+      <stop offset="0" stop-color="#18313b" stop-opacity="0"/>
+      <stop offset="0.48" stop-color="#4a8790" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#9bc8c2" stop-opacity="0.13"/>
+    </linearGradient>
+    <filter id="atmosphere" x="-25%" y="-35%" width="150%" height="170%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006 0.011" numOctaves="3" seed="41" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="92" xChannelSelector="R" yChannelSelector="B" result="warped"/>
+      <feGaussianBlur in="warped" stdDeviation="48"/>
+    </filter>
+    <filter id="haze" x="-20%" y="-35%" width="140%" height="170%" color-interpolation-filters="sRGB">
+      <feTurbulence type="turbulence" baseFrequency="0.003 0.016" numOctaves="2" seed="17" result="grain"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale="64" result="shifted"/>
+      <feGaussianBlur in="shifted" stdDeviation="70"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#base)"/>
+  <g filter="url(#atmosphere)">
+    <path d="M-180 30 C120 -120 310 28 510 12 C760 -8 870 -150 1080 -84 C1260 -28 1450 -118 1760 -18 L1760 310 C1515 370 1320 278 1115 330 C870 390 710 252 480 310 C238 370 80 278 -180 430 Z" fill="url(#coldField)"/>
+    <path d="M-160 430 C90 300 300 530 535 420 C760 315 880 470 1050 412 C1280 334 1475 420 1760 286 L1760 750 C1480 842 1240 660 1028 758 C820 854 604 662 418 752 C180 866 6 746 -160 858 Z" fill="url(#tealField)"/>
+  </g>
+  <g filter="url(#haze)" opacity="0.72">
+    <path d="M120 145 C330 70 426 212 622 154 C820 96 944 188 1060 246 C1180 306 1360 210 1518 254" fill="none" stroke="#a8ccd2" stroke-opacity="0.19" stroke-width="132" stroke-linecap="round"/>
+    <path d="M-40 690 C210 560 400 742 618 650 C846 552 1030 730 1222 620 C1395 522 1515 588 1660 552" fill="none" stroke="#29515d" stroke-opacity="0.35" stroke-width="176" stroke-linecap="round"/>
+  </g>
+  <path d="M0 0 H1600 V900 H0 Z" fill="none" stroke="#8ab8c4" stroke-opacity="0.025"/>
+</svg>

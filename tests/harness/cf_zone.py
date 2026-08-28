@@ -17,7 +17,7 @@ from django.conf import settings as dj_settings
 
 TOKEN_ENV = "HUB_TEST_CF_TOKEN"  # nosec B105 — the env var NAME
 ORIGIN_IPV4_ENV = "HUB_TEST_ORIGIN_IPV4"
-ORIGIN_CA_ENV = "HUB_TEST_ORIGIN_CA_KEY"  # nosec B105 — the env var NAME
+ORIGIN_CA_ENV = "HUB_TEST_ORIGIN_CA_KEY"  # nosec B105 — env var NAME; value is a Bearer token
 SKIP_REASON = (
     f"{TOKEN_ENV} not set: no test-zone credentials on this host "
     "(DNS-CF-T3-LIVE stays skipped-only; D-043 waiver)"
@@ -63,10 +63,14 @@ def origin_ipv4(vm=None):
 
 
 def _allowlist_zone(name):
+    """Require the observed zone to already be in HUB_TEST_ZONE_SLUGS (H10)."""
     dj_settings.HUB_TEST_MODE = True
     slugs = list(getattr(dj_settings, "HUB_TEST_ZONE_SLUGS", None) or [])
     if name not in slugs:
-        dj_settings.HUB_TEST_ZONE_SLUGS = [*slugs, name]
+        pytest.skip(
+            f"observed zone {name!r} is not pre-listed in HUB_TEST_ZONE_SLUGS; "
+            "refusing to rewrite the allowlist"
+        )
 
 
 def build_cf_test_plane():

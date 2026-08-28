@@ -206,7 +206,7 @@ def cleanup(desired):
                 transport.run(["docker", "stop", name])
         if run is not None:
             _write_checkrun(desired, stage="cleanup", status=CheckRun.Status.SUCCEEDED)
-        _resolve_fp(f"adopt-temp-orphan:{site.pk}:{temp}")
+        _resolve_fp(f"adopt-temp-orphan:{site.pk}:{temp}", site)
     except Exception:
         run = _find_checkrun(site)
         temp = (run.results.get("temp_name") if run else "") or ""
@@ -315,14 +315,14 @@ def _point_db_cache_volumes(desired):
         url = _obtain_env(desired, roles, services, tree, "db", ("DATABASE_URL",))
         if url:
             _vault_database_url(site, url)
-            _resolve_fp(DB_URL_MISSING_FP.format(site_id=site.pk))
+            _resolve_fp(DB_URL_MISSING_FP.format(site_id=site.pk), site)
         else:
             _file_missing_db(site)
     if roles.get("cache"):
         url, key = _obtain_cache(desired, roles, services, tree)
         if url:
             merge_env(site, {key: url})
-            _resolve_fp(CACHE_URL_MISSING_FP.format(site_id=site.pk))
+            _resolve_fp(CACHE_URL_MISSING_FP.format(site_id=site.pk), site)
         else:
             _file_missing_cache(site)
 
@@ -410,6 +410,7 @@ def _file_orphan(site, name):
     finding(
         "adopt",
         f"adopt-temp-orphan:{site.pk}:{name}",
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{site.pk}",
         title="Abandoned adopt temp was not cleaned up",
@@ -428,6 +429,7 @@ def _file_missing_db(site):
     finding(
         "adopt",
         DB_URL_MISSING_FP.format(site_id=site.pk),
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{site.pk}",
         title="Adopted database URL is missing from compose",
@@ -444,6 +446,7 @@ def _file_missing_cache(site):
     finding(
         "adopt",
         CACHE_URL_MISSING_FP.format(site_id=site.pk),
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{site.pk}",
         title="Adopted cache URL is missing from compose",
@@ -458,8 +461,11 @@ def _file_missing_cache(site):
     )
 
 
-def _resolve_fp(fingerprint):
-    row = Finding.objects.filter(fingerprint=fingerprint).first()
+def _resolve_fp(fingerprint, site):
+    row = Finding.objects.filter(
+        workspace=site.project.workspace,
+        fingerprint=fingerprint,
+    ).select_related("workspace").first()
     if row is not None and row.state in (Finding.State.OPEN, Finding.State.ACKED):
         resolve(row, source="system")
 

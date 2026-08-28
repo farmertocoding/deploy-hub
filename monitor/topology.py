@@ -249,7 +249,14 @@ def _clear_stale(active):
 
 
 def _file(fingerprint, **fields):
-    return finding(SOURCE_ENGINE, fingerprint, **fields)
+    from core.models import default_workspace, workspace_of
+
+    workspace = fields.pop("workspace", None) or workspace_of(fields.get("site"))
+    return finding(
+        SOURCE_ENGINE, fingerprint,
+        workspace=workspace or default_workspace(),
+        **fields,
+    )
 
 
 def _hub_hostname():

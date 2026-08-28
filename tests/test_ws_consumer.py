@@ -33,12 +33,86 @@ async def _make_user(enrolled=True, username="ws-tester"):
     return user
 
 
+async def _verified_session_header(user):
+    from django.conf import settings
+    from django.contrib.sessions.backends.db import SessionStore
+    from django_otp import DEVICE_ID_SESSION_KEY, devices_for_user
+
+    device = await sync_to_async(
+        lambda: next(devices_for_user(user, confirmed=True), None)
+    )()
+    if device is None:
+        return []
+
+    def _save():
+        store = SessionStore()
+        store[DEVICE_ID_SESSION_KEY] = device.persistent_id
+        store.save()
+        return store.session_key
+
+    key = await sync_to_async(_save)()
+    cookie = f"{settings.SESSION_COOKIE_NAME}={key}"
+    return [(b"cookie", cookie.encode("ascii"))]
+
+
 async def _connected_communicator():
-    comm = WebsocketCommunicator(APP, "/ws/events/")
-    comm.scope["user"] = await _make_user()
+    user = await _make_user()
+    headers = await _verified_session_header(user)
+    comm = WebsocketCommunicator(APP, "/ws/events/", headers=headers)
+    comm.scope["user"] = user
     connected, _ = await comm.connect()
     assert connected
     return comm
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
+@pytest.mark.asyncio
+async def test_enrolled_unverified_session_rejected_on_ws_plane():
+    comm = WebsocketCommunicator(APP, "/ws/events/")
+    comm.scope["user"] = await _make_user(username="ws-unverified")
+    connected, _ = await comm.connect()
+    assert connected
+    close = await comm.receive_output()
+    assert close["type"] == "websocket.close" and close["code"] == 4403
+    await comm.disconnect()
+
+
+@pytest.mark.req("P0-AUTHZ-TOPIC")
+@pytest.mark.asyncio
+async def test_site_topic_denied_across_workspaces():
+    from core.models import NetworkZone, Project, Site, Target, Workspace, WorkspaceMembership
+
+    user = await _make_user(username="ws-split")
+    alpha = await sync_to_async(Workspace.objects.create)(name="Alpha", slug="ws-alpha")
+    beta = await sync_to_async(Workspace.objects.create)(name="Beta", slug="ws-beta")
+    await sync_to_async(WorkspaceMembership.objects.create)(
+        workspace=alpha, user=user, role="owner",
+    )
+    zone = await sync_to_async(NetworkZone.objects.create)(
+        workspace=beta, name="beta-net", slug="ws-beta-net",
+    )
+    target = await sync_to_async(Target.objects.create)(
+        zone=zone, host="beta-ws.example.test",
+    )
+    project = await sync_to_async(Project.objects.create)(
+        workspace=beta, name="beta-app", slug="ws-beta-app",
+    )
+    site = await sync_to_async(Site.objects.create)(
+        project=project, name="beta-site", primary_target=target, exposure="mesh_only",
+    )
+    headers = await _verified_session_header(user)
+    comm = WebsocketCommunicator(APP, "/ws/events/", headers=headers)
+    comm.scope["user"] = user
+    connected, _ = await comm.connect()
+    assert connected
+    await comm.send_to(json.dumps({
+        "action": "subscribe",
+        "topics": [f"site.{site.pk}.status"],
+    }))
+    reply = json.loads(await comm.receive_from())
+    assert reply == {"denied": f"site.{site.pk}.status"}
+    await comm.disconnect()
 
 
 @pytest.mark.req("P0-2FA-TOTP")

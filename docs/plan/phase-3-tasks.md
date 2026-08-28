@@ -515,8 +515,8 @@ Task 13).
   and each publisher identity; **email assumption stated**: Django's mail
   backend — `locmem` in tests, env-configured SMTP (`HUB_SMTP_*`) in prod; a
   failed send files a Finding and never blocks the push path.
-- `scripts_dev/scrub.py` (extracted from `scripts_dev/file_nightly_failure.py`)
-  — one scrubber for both the nightly bundle and the pager; extended past the
+- `monitor/scrub.py` (extracted from `scripts_dev/file_nightly_failure.py`)
+  — one production-packaged scrubber for both the nightly bundle and the pager; extended past the
   single high-entropy class to bearer headers, `ntfy.sh/<topic>` URLs and vault
   refs.
 - `provision/service.py` + `catalog/entries.py` (sensitive) — when Hub-side

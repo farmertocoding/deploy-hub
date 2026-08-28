@@ -121,6 +121,7 @@ def test_phase_3_sensitive_modules_are_listed():
     owners_lines = _codeowners_lines()
     for entry in (
         "monitor/pager.py",
+        "monitor/scrub.py",
         "monitor/alert_rules.py",
         "deploys/certs.py",
         "provision/adopt.py",
@@ -132,6 +133,24 @@ def test_phase_3_sensitive_modules_are_listed():
             f"{entry} is not a sensitive-path entry in conformance/paths.yaml")
         assert f"/{entry} @farmertocoding" in owners_lines, (
             f"CODEOWNERS has no owners line `/{entry} @farmertocoding`")
+
+
+def test_runtime_pager_does_not_load_from_dockerignored_scripts_dev():
+    """The production image excludes scripts_dev, so pager imports must not reach it.
+
+    What would make this fail: reintroducing the dynamic
+    ``/app/scripts_dev/scrub.py`` load that let unit tests pass from the repository
+    while every scheduled delivery task crashed in the built image.
+    """
+    dockerignore = (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    ignored = {line.strip() for line in dockerignore}
+    assert "scripts_dev" in ignored
+    assert {".worktrees", ".stage-tmp", ".venv*", "mutants"} <= ignored
+
+    pager = (REPO / "monitor" / "pager.py").read_text(encoding="utf-8")
+    assert "from monitor.scrub import scrub" in pager
+    assert "scripts_dev" not in pager
+    assert (REPO / "monitor" / "scrub.py").is_file()
 
 
 def test_codeowners_lists_core_ssh_py():

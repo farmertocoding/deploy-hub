@@ -159,7 +159,14 @@ def test_ingest_publishes_to_the_site_traffic_topic(monkeypatch):
     blob = json.dumps(published)
     assert "/x" not in blob and "203.0.113.7" not in blob  # aggregates only
 
-    user = SimpleNamespace(is_authenticated=True)
+    from django.contrib.auth.models import User
+
+    from core.models import WorkspaceMembership, default_workspace
+
+    user = User.objects.create_user("traffic-authz", password="pw-1234567890")
+    WorkspaceMembership.objects.create(
+        workspace=default_workspace(), user=user, role="owner",
+    )
     assert authorize_topic(user, f"site.{site.pk}.traffic")
     assert authorize_topic(user, f"host.{target.pk}.metrics")
     assert not authorize_topic(SimpleNamespace(is_authenticated=False),

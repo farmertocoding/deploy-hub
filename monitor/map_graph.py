@@ -38,16 +38,19 @@ def notify_graph_changed():
     advise_topology()
 
 
-def graph_snapshot():
+def graph_snapshot(workspace=None):
     """Return {seq, nodes, edges} built from live rows.
 
     seq FIRST: an event racing the query is then delivered twice (harmless
     client upsert), never lost.
     """
     seq = events.current_seq(TOPIC)
-    nodes, edges = _derive()
+    nodes, edges = _derive(workspace)
+    targets = Target.objects.order_by("pk")
+    if workspace is not None:
+        targets = targets.filter(zone__workspace=workspace)
     nodes = attach_lan_ghosts(
-        nodes, list(Target.objects.order_by("pk")), lan_scan=None,
+        nodes, list(targets), lan_scan=None,
     )
     from monitor.topology import attach_findings
 
@@ -55,13 +58,19 @@ def graph_snapshot():
     return {"seq": seq, "nodes": nodes, "edges": edges}
 
 
-def _derive():
-    zones = list(NetworkZone.objects.order_by("pk"))
-    targets = list(Target.objects.select_related("zone").order_by("pk"))
-    instances = list(
-        SiteInstance.objects.select_related("site", "target").order_by("pk")
+def _derive(workspace=None):
+    zones = NetworkZone.objects.order_by("pk")
+    targets = Target.objects.select_related("zone").order_by("pk")
+    instances = SiteInstance.objects.select_related("site", "target").order_by("pk")
+    sites = Site.objects.select_related("primary_target").order_by("pk")
+    if workspace is not None:
+        zones = zones.filter(workspace=workspace)
+        targets = targets.filter(zone__workspace=workspace)
+        instances = instances.filter(site__project__workspace=workspace)
+        sites = sites.filter(project__workspace=workspace)
+    zones, targets, instances, sites = (
+        list(zones), list(targets), list(instances), list(sites),
     )
-    sites = list(Site.objects.select_related("primary_target").order_by("pk"))
 
     nodes = [
         _node("hub", "hub", "Hub", "ok"),

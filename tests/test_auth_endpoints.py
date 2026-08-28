@@ -74,6 +74,130 @@ def test_login_post_is_csrf_protected():
 
 @pytest.mark.req("P0-2FA-TOTP")
 @pytest.mark.req("SEC-610-MANDATORY-2FA")
+def test_admin_password_login_of_enrolled_staff_cannot_mutate_api():
+    """H2: Django admin password login must not skip Hub 2FA on mutating /api/.
+
+    What would make this fail: EnrollmentRequiredMiddleware only checking that
+    a confirmed device *exists*, not that this session is OTP-verified
+    (`user.is_verified()`), so POST /admin/login/ with a staff password yields
+    a cookie that can POST /api/demo-jobs/.
+    """
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    User.objects.create_superuser(
+        "staff", email="staff@example.test", password="a-long-dev-password",
+    )
+    user = User.objects.get(username="staff")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+
+    admin_client = Client()
+    admin_client.post(
+        "/admin/login/",
+        {"username": "staff", "password": "a-long-dev-password"},
+    )
+    r = admin_client.post(
+        "/api/demo-jobs/",
+        data=json.dumps({"name": "demo"}),
+        content_type="application/json",
+    )
+    assert r.status_code == 403, r.content
+    me = admin_client.get("/api/auth/me/").json()
+    if me.get("authenticated"):
+        detail = r.json().get("detail", "").lower()
+        assert "verification" in detail or "two-factor" in detail
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
+def test_enrolled_unverified_session_cannot_mutate_api(client):
+    """H2: a password-only session of an already-enrolled user is not Hub 2FA.
+
+    What would make this fail: the gate treating `devices_for_user(...,
+    confirmed=True)` as sufficient, so `force_login` without `otp_device_id`
+    can POST mutating APIs.
+    """
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user("enrolled", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    session = client.session
+    session.pop("otp_device_id", None)
+    session.save()
+
+    r = client.post(
+        "/api/demo-jobs/",
+        data=json.dumps({"name": "demo"}),
+        content_type="application/json",
+    )
+    assert r.status_code == 403, r.content
+    assert client.get("/api/auth/me/").status_code == 200
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
+def test_enrolled_unverified_session_cannot_register_another_passkey(client):
+    """Stolen pre-2FA cookie must not add the attacker's WebAuthn credential."""
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user("enroll-thief", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    session = client.session
+    session.pop("otp_device_id", None)
+    session.save()
+
+    r = client.post(
+        "/api/auth/webauthn/registration/begin/",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    assert r.status_code == 403, r.content
+    assert client.get("/api/auth/me/").status_code == 200
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
+def test_hub_login_with_totp_verifies_the_session_for_mutating_api(client):
+    """Hub /api/auth/login/ with a live TOTP must stamp OTP so later POSTs work.
+
+    What would make this fail: LoginView calling django.contrib.auth.login
+    without django_otp.login, leaving is_verified() false after a good OTP.
+    """
+    import time
+
+    from django.contrib.auth.models import User
+    from django_otp.oath import TOTP
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user("otp-ok", password="a-long-dev-password")
+    device = TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    totp = TOTP(device.bin_key, device.step, device.t0, device.digits, device.drift)
+    totp.time = time.time()
+    code = format(totp.token(), "06d")
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({
+            "username": "otp-ok",
+            "password": "a-long-dev-password",
+            "otp_code": code,
+        }),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    r = client.post(
+        "/api/demo-jobs/",
+        data=json.dumps({"name": "demo"}),
+        content_type="application/json",
+    )
+    assert r.status_code == 201, r.content
+
+
+@pytest.mark.req("P0-2FA-TOTP")
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
 def test_unenrolled_session_is_gated_to_enrollment(client):
     """Round-1 security finding: a password-only session of a not-yet-enrolled user
     had full API access. The middleware gate restricts it to /api/auth/*."""
@@ -90,7 +214,7 @@ def test_unenrolled_session_is_gated_to_enrollment(client):
     assert client.post("/api/auth/totp/enroll/").status_code == 201
     assert client.get("/api/auth/me/").status_code == 200
 
-    # Once a confirmed device exists, the gate opens.
+    # A confirmed device without this-session OTP is still gated (H2).
     from django.contrib.auth.models import User
     from django_otp.plugins.otp_totp.models import TOTPDevice
 
@@ -99,7 +223,8 @@ def test_unenrolled_session_is_gated_to_enrollment(client):
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     r = client.post("/api/demo-jobs/", data=json.dumps({"name": "demo"}),
                     content_type="application/json")
-    assert r.status_code == 201
+    assert r.status_code == 403
+    assert "verification" in r.json()["detail"].lower()
 
 
 @pytest.mark.req("P0-AUDIT")
@@ -181,3 +306,141 @@ def test_issue_r4_11_hub_auth_is_session_based_and_not_jwt():
                          + list(auth_classes)).lower()
     for token in ("jwt", "simplejwt", "knox", "oauth2_provider", "tokenauthentication"):
         assert token not in installed, f"{token} installed — auth is no longer session-only"
+
+
+def _assert_login_matches_me(client, login_body, *, staff):
+    """Login and GET /api/auth/me/ must be one canonical session-user shape."""
+    assert login_body["authenticated"] is True
+    assert "capabilities" in login_body
+    assert isinstance(login_body["capabilities"], list)
+    me = client.get("/api/auth/me/")
+    assert me.status_code == 200
+    me_body = me.json()
+    for key in (
+        "authenticated", "username", "otp_enrolled", "webauthn_count",
+        "totp_enrolled", "t1_available", "capabilities", "hud_ui", "role",
+    ):
+        assert key in login_body, key
+        assert login_body[key] == me_body[key], key
+    if staff:
+        assert "admin_read" in login_body["capabilities"]
+    else:
+        assert "admin_read" not in login_body["capabilities"]
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_password_login_matches_me_and_staff_gets_admin_read(client):
+    from django.contrib.auth.models import User
+
+    User.objects.create_user(
+        "staff-pw", password="a-long-dev-password", is_staff=True, is_superuser=True,
+    )
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({"username": "staff-pw", "password": "a-long-dev-password"}),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    _assert_login_matches_me(client, r.json(), staff=True)
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_password_login_of_non_staff_never_includes_admin_read(client):
+    from django.contrib.auth.models import User
+
+    User.objects.create_user("op-pw", password="a-long-dev-password")
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({"username": "op-pw", "password": "a-long-dev-password"}),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    _assert_login_matches_me(client, r.json(), staff=False)
+    assert "hud_ui_v1" not in r.json()["capabilities"]
+    assert r.json()["hud_ui"] is True
+    assert r.json()["role"] == ""
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_totp_login_matches_me_capabilities(client):
+    import time
+
+    from django.contrib.auth.models import User
+    from django_otp.oath import TOTP
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user(
+        "staff-totp", password="a-long-dev-password", is_staff=True,
+    )
+    device = TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    totp = TOTP(device.bin_key, device.step, device.t0, device.digits, device.drift)
+    totp.time = time.time()
+    code = format(totp.token(), "06d")
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({
+            "username": "staff-totp",
+            "password": "a-long-dev-password",
+            "otp_code": code,
+        }),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    _assert_login_matches_me(client, r.json(), staff=True)
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_recovery_code_login_matches_me_capabilities(client):
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from core.models import RecoveryCode
+    from core.otp import hash_recovery_code
+
+    user = User.objects.create_user(
+        "staff-rec", password="a-long-dev-password", is_superuser=True,
+    )
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    RecoveryCode.objects.create(user=user, code_hash=hash_recovery_code("rescue12345aaaa"))
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({
+            "username": "staff-rec",
+            "password": "a-long-dev-password",
+            "otp_code": "rescue12345aaaa",
+        }),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    _assert_login_matches_me(client, r.json(), staff=True)
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_passkey_login_matches_me_capabilities(client, monkeypatch):
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+    from test_webauthn_t1 import _make_cred, _patch_webauthn_helper
+
+    _patch_webauthn_helper(monkeypatch)
+    user = User.objects.create_user(
+        "staff-pk", password="a-long-dev-password", is_staff=True, is_superuser=True,
+    )
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    _make_cred(user, name="yubikey")
+    begin = client.post(
+        "/api/auth/webauthn/login/begin/",
+        data=json.dumps({"username": "staff-pk"}),
+        content_type="application/json",
+    )
+    assert begin.status_code == 200, begin.content
+    r = client.post(
+        "/api/auth/login/",
+        data=json.dumps({
+            "username": "staff-pk",
+            "password": "a-long-dev-password",
+            "webauthn": {"id": "cred-1", "response": {}},
+        }),
+        content_type="application/json",
+    )
+    assert r.status_code == 200, r.content
+    _assert_login_matches_me(client, r.json(), staff=True)

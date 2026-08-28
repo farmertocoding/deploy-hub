@@ -5,7 +5,13 @@ a stream of malformed requests from one source is an attack in progress. These r
 feed the Hub's own throttle/fail2ban machinery in Phase 3 (§6.5 Layer 4 turned on the
 Hub itself), so the row shape here must already carry what that will need.
 """
-from rest_framework.exceptions import ErrorDetail, ValidationError
+from rest_framework.exceptions import (
+    AuthenticationFailed,
+    ErrorDetail,
+    NotAuthenticated,
+    PermissionDenied,
+    ValidationError,
+)
 from rest_framework.views import exception_handler as drf_exception_handler
 
 from .audit import audit
@@ -117,5 +123,23 @@ def audited_exception_handler(exc, context):
         if response is not None:
             # DemoJobView already returns this wrap; raise_exception paths must too.
             response.data = {"errors": drf_errors_to_contract(exc.detail)}
+
+    if isinstance(exc, (AuthenticationFailed, NotAuthenticated, PermissionDenied)):
+        request = context.get("request")
+        view = context.get("view")
+        actor = getattr(request, "user", None)
+        if actor is not None and not getattr(actor, "is_authenticated", False):
+            actor = None
+        audit(
+            "authz_denied",
+            source="api",
+            severity="security",
+            actor=actor,
+            source_ip=client_ip(request) if request is not None else None,
+            path=getattr(request, "path", "") if request is not None else "",
+            method=getattr(request, "method", "") if request is not None else "",
+            view=type(view).__name__ if view is not None else "",
+            code=getattr(exc, "default_code", "") or type(exc).__name__,
+        )
 
     return response

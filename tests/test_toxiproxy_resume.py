@@ -169,6 +169,7 @@ def _spawn_worker(pk, db_path):
     env["HUB_TEST_ZONE_SLUGS"] = zone.slug
     env["HUB_TEST_DATABASE"] = str(db_path)
     env["CONFORMANCE_RUN_REPORT"] = "off"
+    env["HUB_TEST_FAKE_DNS"] = "1"
     env.pop("HUB_TEST_CRASH_AFTER_STEP", None)
     env.pop("HUB_TEST_CRASH_SIGNAL", None)
     env["PYTHONPATH"] = os.pathsep.join([str(REPO), env.get("PYTHONPATH", "")])

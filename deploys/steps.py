@@ -8,7 +8,6 @@ import base64
 import hashlib
 import io
 import json
-import os
 import tarfile
 import threading
 import time
@@ -1152,23 +1151,17 @@ def _dockerfile_from_body(manifest_body):
 
 
 def _context_tar(source_dir, dockerfile_text):
-    source = Path(source_dir)
+    from core.local_sources import LocalSourceError, iter_archive_members
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tf:
-        for dirpath, _dirnames, filenames in os.walk(source, followlinks=False):
-            for filename in filenames:
-                if filename == "Dockerfile" or _is_env_filename(filename):
-                    continue
-                path = Path(dirpath) / filename
-                if path.is_symlink():
-                    continue
-                try:
-                    data = path.read_bytes()
-                except OSError:
-                    continue
+        try:
+            for name, data in iter_archive_members(source_dir):
                 if data in VAULT_CONTEXT_MARKERS:
                     continue
-                _add_bytes(tf, path.relative_to(source).as_posix(), data)
+                _add_bytes(tf, name, data)
+        except LocalSourceError as exc:
+            raise RuntimeError(str(exc)) from exc
         _add_bytes(tf, "Dockerfile", dockerfile_text.encode())
     return buf.getvalue()
 

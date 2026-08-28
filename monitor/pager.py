@@ -5,33 +5,19 @@ never raw IPs). Break-glass lives only in the email copy, prefixed
 advisory-only. AlertDelivery records which backend delivered and whether
 it succeeded. A failed email files a Finding and never blocks the push.
 """
-import importlib.util
 import re
-from pathlib import Path
 
 from django.conf import settings
 from django.core import mail
 from django.utils import timezone
 
 from core.models import AlertDelivery, AlertState, Finding, Site, Target
+from monitor.scrub import scrub
 
 ADVISORY = "advisory only — re-read from the Findings inbox before typing"
 _IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 _pager = None
-
-
-def _scrub():
-    spec = importlib.util.spec_from_file_location(
-        "hub_scrub",
-        Path(__file__).resolve().parents[1] / "scripts_dev" / "scrub.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.scrub
-
-
-scrub = _scrub()
 
 
 def get_pager():
@@ -185,7 +171,9 @@ def _public_url():
 
 
 def _touch_last_push(finding, now):
-    state, _ = AlertState.objects.get_or_create(fingerprint=finding.fingerprint)
+    state, _ = AlertState.objects.get_or_create(
+        workspace=finding.workspace, fingerprint=finding.fingerprint,
+    )
     state.last_push_at = now
     state.save(update_fields=["last_push_at"])
 
@@ -204,7 +192,9 @@ def _release_failed_push_clock(finding):
     ).exists()
     if has_ok:
         return
-    state, _ = AlertState.objects.get_or_create(fingerprint=finding.fingerprint)
+    state, _ = AlertState.objects.get_or_create(
+        workspace=finding.workspace, fingerprint=finding.fingerprint,
+    )
     if state.last_push_at is None:
         return
     state.last_push_at = None
@@ -212,11 +202,11 @@ def _release_failed_push_clock(finding):
 
 
 def _email_p1(finding, backend, *, unacked):
-    subject = f"[HUB P1] {finding.title}"
+    subject = scrub(f"[HUB P1] {finding.title}")
     if unacked:
-        subject = f"[UNACKED] {subject}"
+        subject = scrub(f"[UNACKED] {subject}")
     alias = _object_label(finding)
-    body = (
+    body = scrub(
         f"{finding.title}\n\n{finding.body}\n\n"
         f"{ADVISORY}\n\n"
         f"ssh {alias}  # docker restart — re-read from the Findings inbox before typing\n"
@@ -250,6 +240,7 @@ def _file_email_failure(finding, exc):
         "pager-email-failed",
         finding.entity,
         fingerprint=f"pager-email-failed:{finding.pk}",
+        workspace=finding.workspace,
         source_engine="monitor.pager",
         title="Alert email failed",
         body=(

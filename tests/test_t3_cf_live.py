@@ -114,7 +114,7 @@ def test_origin_cert_serves_https_with_security_headers(
 
     plane = cf_test_zone
     if plane.issuer is None:
-        pytest.skip("origin CA key not present; DNS upsert still proves the live adapter")
+        pytest.skip("origin CA token not present; DNS upsert still proves the live adapter")
     slug = f"t17h{uuid.uuid4().hex[:6]}"
     origin = origin_ipv4(t3_ready)
     body = public_site_body(slug, plane.zone, origin=origin, ws=True)

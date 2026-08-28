@@ -130,6 +130,7 @@ def _file_replay(partner):
     raise_alert(
         "partner-replay",
         f"partner:{partner.pk}",
+        workspace=partner.workspace,
         fingerprint=f"partner-replay:{partner.pk}",
         source_engine="core.partner_verify",
         title="Partner request replayed",
@@ -245,6 +246,7 @@ def _file_quota_abuse(partner, reason):
     raise_alert(
         "budget-cap-hit",
         "partner",
+        workspace=partner.workspace,
         fingerprint="budget-cap-hit:partner",
         source_engine="core.partner_verify",
         title="Partner quota cap hit",

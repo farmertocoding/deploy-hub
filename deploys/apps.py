@@ -27,3 +27,15 @@ class DeploysConfig(AppConfig):
         register_join(overflow_join_thunk)
         register_scale_in(overflow_scale_in_thunk)
 
+        from core.hud.ports import register_deploys, register_topic
+        from deploys.hud_workers import enqueue_deployment
+        from deploys.models import Deployment, Manifest
+        from deploys.pipeline import release_deploy_locks
+
+        register_deploys(
+            Deployment=Deployment,
+            Manifest=Manifest,
+            release_deploy_locks=release_deploy_locks,
+        )
+        register_topic("hud.deployment.enqueue", enqueue_deployment)
+

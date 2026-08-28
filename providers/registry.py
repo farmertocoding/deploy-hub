@@ -26,6 +26,7 @@ re-verifies instead of inheriting the old token's pass — D-034's "no code
 path holds an over-scoped client" wins over any per-ref shortcut. A
 verification failure fails closed and files a Finding. Tokens are loaded
 from the vault by the owner-id ref on DnsAccount — refs, never values, live
+from core.models import default_workspace
 on the model.
 """
 import time
@@ -40,6 +41,7 @@ from .cloudflare import (
     CloudflareEdge,
     CloudflareError,
     refuse_global_api_key,
+    refuse_origin_ca_service_key,
 )
 
 VERIFY_TTL_S = 900.0  # 15 min: the fail-closed re-verify window
@@ -182,9 +184,10 @@ def _verify_scope(token, zone):
 def origin_cert_issuer_for(zone):
     """Build the Origin CA issuer for a DnsZone, or refuse.
 
-    The Origin CA key is a different credential from the DNS token and has
-    no zone-set probe (Cloudflare cannot observe an Origin CA key). Presence
-    of a vaulted ref is the fail-closed fact.
+    The Origin CA credential is a Bearer API token (Zone SSL and Certificates
+    Edit), not a deprecated service key. It is a different vault ref from the
+    DNS token. Presence of a vaulted ref is the fail-closed construction fact;
+    a v1.0- service key is shape-refused here, before a client exists.
     """
     from .cloudflare import CloudflareOriginCertIssuer
 
@@ -195,8 +198,14 @@ def origin_cert_issuer_for(zone):
             f"DnsAccount {account.label!r} has no origin_ca_key_ref; connect "
             "the account before issuing an Origin certificate"
         )
+    _purpose_wall(zone)
     _secret_pk, raw = _load_origin_ca_key(ref)
-    return CloudflareOriginCertIssuer(zone, origin_ca_key=raw)
+    try:
+        token = refuse_origin_ca_service_key(raw)
+        _verify_scope(token, zone)
+    except CloudflareError as error:
+        raise ScopeError(str(error)) from None
+    return CloudflareOriginCertIssuer(zone, origin_ca_key=token)
 
 
 def _load_origin_ca_key(ref):
@@ -286,6 +295,7 @@ def _file_scope_finding(zone, error, *, role="dns"):
         "cf-token-scope",
         f"dns_zone:{zone.name}",
         fingerprint=fingerprint,
+        workspace=zone.account.workspace,
         source_engine="dns_scope",
         title=f"Cloudflare scope verification failed for {zone.name}",
         body=str(error),

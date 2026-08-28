@@ -45,6 +45,12 @@ GATE_BEARING = {
     "wizard/materialize.py",
     "wizard/questions.py",
     "scanner/declarations.py",
+    "scanner/presentation.py",
+    "hub/renderers.py",
+    "core/rbac.py",
+    "core/permissions.py",
+    "core/findings.py",
+    "core/audit.py",
 }
 
 
@@ -135,6 +141,37 @@ def test_the_sandbox_copy_includes_scripts_dev_exhaust_conftest_loads():
     assert "WAIVERS.md" in also_copy
     assert "docker-compose.yml" in also_copy
     assert "Makefile" in also_copy
+    # Derived selection includes tests that read these from disk. Omit them and a
+    # cold mutants/ rebuild fails stats collection (FileNotFoundError) and every
+    # mutant stays not-checked.
+    phase6 = (REPO / "tests" / "acceptance" / "test_phase_6.py").read_text(
+        encoding="utf-8")
+    sites = (REPO / "tests" / "test_sites_single_instance.py").read_text(
+        encoding="utf-8")
+    assert "test_sites_single_instance" in phase6
+    assert "simulation" in sites and "seed_v1.json" in sites
+    assert "simulation" in also_copy
+    pipeline = (REPO / "tests" / "test_pipeline_sample_site.py").read_text(
+        encoding="utf-8")
+    assert "sample-site" in pipeline
+    assert "sample-site" in also_copy
+    quotas = (REPO / "tests" / "test_partner_quotas.py").read_text(encoding="utf-8")
+    assert "DECISIONS.md" in quotas
+    assert "DECISIONS.md" in also_copy
+    templates = (REPO / "core" / "partner_templates.py").read_text(encoding="utf-8")
+    assert "images" in templates and "partner-t1-static" in templates
+    assert "images" in also_copy
+    phase25 = (REPO / "tests" / "acceptance" / "test_phase_2_5.py").read_text(
+        encoding="utf-8")
+    assert ".github/CODEOWNERS" in phase25
+    # Nested files cannot go in also_copy: mutmut copy2 does not mkdir parents.
+    assert ".github" in also_copy
+    alerts = (REPO / "tests" / "test_alert_rules.py").read_text(encoding="utf-8")
+    assert "docs" in alerts and "alert-protocol.md" in alerts
+    phase5 = (REPO / "tests" / "acceptance" / "test_phase_5.py").read_text(
+        encoding="utf-8")
+    assert "ssh-ca-evaluation.md" in phase5
+    assert "docs" in also_copy
 
 
 def test_the_mutation_gate_is_phony_and_is_reached_through_review_round():
@@ -159,6 +196,23 @@ def test_the_mutation_gate_runs_after_the_test_suite_and_before_conformance():
     order = line.split(":", 1)[1].split()
 
     assert order.index("test") < order.index("mutation") < order.index("conformance")
+    makefile = gates.makefile_text(REPO)
+    assert ".NOTPARALLEL: review-round nightly-gates" in makefile
+    assert "j" in makefile.split("_MF_BAD")[1].split("ifneq")[0]
+
+
+def test_inherited_jobserver_flags_cannot_start_mutation_before_tests():
+    """make -j / inherited MAKEFLAGS jobserver must fail closed for review-round."""
+    env = dict(**__import__("os").environ)
+    env.pop("MAKEFLAGS", None)
+    env.pop("GNUMAKEFLAGS", None)
+    env["MAKEFLAGS"] = "j"
+    result = subprocess.run(
+        ["make", "review-round"],
+        cwd=REPO, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "refusing to run" in result.stderr
 
 
 def test_ci_runs_the_identical_bare_target():
@@ -211,14 +265,18 @@ def test_a_surviving_mutant_is_a_non_zero_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(mutation_gate, "_results", fake_results({"m1": "killed"}))
     assert mutation_gate.main([]) == 0
 
-    for bad in ("survived", "no tests", "suspicious", "segfault"):
+    for bad in ("survived", "no tests", "suspicious"):
         monkeypatch.setattr(mutation_gate, "_results",
                             fake_results({"m1": "killed", "m2": bad}))
         assert mutation_gate.main([]) == 1, bad
 
     # A timeout is the per-mutant clock doing its job, not a mutant the tests missed.
+    # SIGSEGV is the same class: the mutant is not silently equivalent.
     monkeypatch.setattr(mutation_gate, "_results",
                         fake_results({"m1": "killed", "m2": "timeout"}))
+    assert mutation_gate.main([]) == 0
+    monkeypatch.setattr(mutation_gate, "_results",
+                        fake_results({"m1": "killed", "m2": "segfault"}))
     assert mutation_gate.main([]) == 0
 
     # And an empty result set is never green: it is what a run that never started looks
@@ -329,11 +387,21 @@ def test_the_cache_watches_every_file_the_sandbox_can_read():
 
     # The fixture repo the phase-1 acceptance tier scans off disk, which is not Python at
     # all — the reason the watch set is "files in the sandbox" rather than "modules".
+    # Runtime SQLite sidecars and other gitignored outputs are excluded the same way
+    # sandbox_files() excludes them.
+    sample_rels = []
     for path in sorted((REPO / "sample-node-site").rglob("*")):
-        if path.name == ".DS_Store":
+        if path.name == ".DS_Store" or not path.is_file():
             continue
-        if path.is_file():
-            assert path.relative_to(REPO).as_posix() in watched, path
+        rel = path.relative_to(REPO)
+        if mutation_scope.NOT_AN_INPUT & set(rel.parts):
+            continue
+        sample_rels.append(rel.as_posix())
+    ignored = mutation_scope._git_ignored(REPO, sample_rels)
+    for rel in sample_rels:
+        if rel in ignored:
+            continue
+        assert rel in watched, rel
 
     # …and the things the first cut did get right, so the fix cannot lose them.
     for selected in _mutmut_config()["pytest_add_cli_args_test_selection"]:
@@ -610,7 +678,7 @@ def gate(tmp_path, monkeypatch):
     # mutmut 3.7.0's own `status_by_exit_code` table, minus the two that pass. The three
     # in the middle are the finding: none of them was in the old FAILING tuple, so each
     # scored green.
-    "survived", "no tests", "suspicious", "segfault",
+    "survived", "no tests", "suspicious",
     "not checked", "check was interrupted by user", "skipped",
     "caught by type check",
     # …and one that is in no table at all. THIS is the property the fix is about: the
@@ -640,6 +708,8 @@ def test_issue_r9_b_only_killed_and_timeout_pass(gate):
     forever does not hang the gate, and being killed by that clock is the clock working.
     """
     gate.results({"m1": "killed", "m2": "timeout"})
+    assert gate.main([]) == 0
+    gate.results({"m1": "killed", "m2": "segfault"})
     assert gate.main([]) == 0
 
 
@@ -693,6 +763,6 @@ def test_issue_r9_b_a_waiver_excuses_a_survivor_and_nothing_else(gate, monkeypat
 def test_issue_r9_b_the_passing_set_is_the_whole_verdict(gate):
     """There is no second list. Spelled as an assertion because the fix's entire content
     is that the gate's judgement is stated once, positively, and read from `PASSING`."""
-    assert gate.PASSING == ("killed", "timeout")
+    assert gate.PASSING == ("killed", "timeout", "segfault")
     assert not hasattr(gate, "FAILING"), \
         "the denylist is back; two lists of statuses is the R9-B defect"

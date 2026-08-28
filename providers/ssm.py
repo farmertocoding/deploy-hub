@@ -8,6 +8,8 @@ so a missed context cannot pick up a real profile.
 import os
 from contextlib import contextmanager
 
+from core.models import default_workspace
+
 from .aws_creds import boto3_client
 
 HUB_PREFIX = "/deploy-hub/"
@@ -76,6 +78,7 @@ def file_ssm_fail(target, *, names=(), reason=""):
     raise_alert(
         "ssm-fail",
         f"target:{pk}",
+        workspace=default_workspace(),
         fingerprint=f"ssm-fail:{pk}",
         source_engine="ssm",
         title=f"SSM parameter operation failed for target {pk}",

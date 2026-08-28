@@ -28,9 +28,12 @@ def _enrolled_client(client):
     from django.contrib.auth.models import User
     from django_otp.plugins.otp_totp.models import TOTPDevice
 
-    user = User.objects.create_user("joseph", password="a-long-dev-password")
+    from tests.conftest import t1_ready_session
+
+    user = User.objects.create_superuser("joseph", password="a-long-dev-password")
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     client.login(username="joseph", password="a-long-dev-password")
+    t1_ready_session(client, user)
     return user
 
 

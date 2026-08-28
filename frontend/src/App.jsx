@@ -1,7 +1,7 @@
 // The operator shell: login (WebAuthn primary, TOTP fallback) → forced passkey
 // enrollment → the §F1 object-centric nav. ?sim= mounts Shell (C9); login/enroll/t1
 // are named sim states so F8 can see them without a backend.
-import React, { useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import { useEvents } from "./useEvents.js";
 import { api, simState } from "./api.js";
 import { NAV, StatusPill, useRoute, useWidth } from "./Chrome.jsx";
@@ -14,8 +14,14 @@ import Settings from "./screens/Settings.jsx";
 import Login from "./screens/Login.jsx";
 import Enroll from "./screens/Enroll.jsx";
 import { T1Overlay } from "./Tiers.jsx";
+import { box, muted } from "./ui/surface.js";
+import { HudAppShell } from "./ui/AppShell.jsx";
+import { hudUiEnabled } from "./flags.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+// Administration is a separate workspace and a comparatively large route. Keep it
+// out of the operator bundle; direct AdminShell imports remain synchronous for the
+// existing server-rendered contract tests.
+const AdminShell = lazy(() => import("./screens/administration/AdminShell.jsx"));
 
 export { Login, Enroll };
 
@@ -33,8 +39,13 @@ export default function App() {
   // Other ?sim= states skip auth and mount the operator chrome so Login/Enroll
   // are not the only reviewable surfaces — Home still owns readiness.
   if (sim)
-    return <Shell user={{ username: "sim", otp_enrolled: true, webauthn_count: 2 }} />;
+    return <Shell user={{ username: "sim", otp_enrolled: true, webauthn_count: 2,
+      capabilities: ["hud_ui_v1", "admin_read"], hud_ui: true }} />;
 
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const [user, setUser] = useState(undefined); // undefined = loading
   const [unreachable, setUnreachable] = useState(false);
   const hydrate = () => {
@@ -47,6 +58,22 @@ export default function App() {
     });
   };
   useEffect(hydrate, []);
+  useEffect(() => {
+    if (!user?.authenticated) return undefined;
+    const id = setInterval(() => {
+      api("auth/me/").then(({ status, data }) => {
+        if (status === 401 || (status === 200 && data && !data.authenticated)) {
+          setUser(null);
+          return;
+        }
+        if (status !== 200 || !data?.authenticated) return;
+        const prev = [...(user.capabilities || [])].sort().join(",");
+        const next = [...(data.capabilities || [])].sort().join(",");
+        if (prev !== next) setUser({ ...data, capabilitiesChanged: true });
+      });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [user?.authenticated, user?.username, user?.capabilities]);
   if (unreachable)
     return (
       <div style={{ margin: "15vh auto", width: "fit-content", textAlign: "center" }}>
@@ -57,7 +84,7 @@ export default function App() {
   if (user === undefined) return <p style={{ margin: "15vh auto", width: "fit-content" }}>Loading…</p>;
   if (!user) return <Login onLogin={setUser} />;
   if (!user.otp_enrolled) return <Enroll onDone={() => setUser({ ...user, otp_enrolled: true })} />;
-  return <Shell user={user} />;
+  return <Shell user={user} onReloadIdentity={hydrate} />;
 }
 
 // The nav bar, extracted so tests/nav.test.ts renders the IA without mounting the
@@ -74,31 +101,70 @@ export function NavBar({ route, onNav, status, asOf, username }) {
       ))}
       <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
         <StatusPill status={status} asOf={asOf} />
-        <span style={{ color: "#8b949e" }}>{username}</span>
+        <span style={{ color: muted }}>{username}</span>
       </span>
     </nav>
   );
 }
 
-export function Shell({ user }) {
-  // ONE multiplexed socket for the whole shell (§3.5): screens subscribe through
-  // this client, and the pill beside the username is RT-35's visible state — every
-  // screen shows it because it is above all of them.
-  const events = useEvents();
-  const [route, onNav] = useRoute();
-  const width = useWidth();
+export function OperatorScreens({ route, onNav, width, events, user, onReloadIdentity }) {
+  if (route.screen === "admin") {
+    return (
+      <Suspense fallback={<p className="hud-route-loading" role="status">Loading Administration…</p>}>
+        <AdminShell
+          route={route}
+          onNav={onNav}
+          width={width}
+          events={events}
+          user={user}
+          onReloadPermissions={onReloadIdentity}
+        />
+      </Suspense>
+    );
+  }
   return (
-    <div>
-      <NavBar route={route} onNav={onNav} status={events.status} asOf={events.asOf}
-        username={user.username} />
+    <>
       {route.screen === "home" && <Home width={width} events={events} onNav={onNav} />}
       {route.screen === "sites" && <Sites route={route} onNav={onNav} />}
       {route.screen === "targets" && <Targets route={route} onNav={onNav} />}
       {route.screen === "deploys" && <Deploys onNav={onNav} />}
       {route.screen === "findings" && <Findings route={route} onNav={onNav} events={events} />}
       {route.screen === "settings" && <Settings user={user} events={events} />}
-    </div>
+    </>
   );
 }
 
-
+export function Shell({ user, onReloadIdentity }) {
+  // ONE multiplexed socket for the whole shell (§3.5): screens subscribe through
+  // this client, and the pill beside the username is RT-35's visible state — every
+  // screen shows it because it is above all of them. ThemeProvider wraps this
+  // component from main.jsx; appearance changes re-render consumers, not this
+  // socket-owning Shell.
+  const events = useEvents();
+  const [route, onNav] = useRoute();
+  const width = useWidth();
+  const screens = (
+    <OperatorScreens
+      route={route}
+      onNav={onNav}
+      width={width}
+      events={events}
+      user={user}
+      onReloadIdentity={onReloadIdentity}
+    />
+  );
+  if (hudUiEnabled(user)) {
+    return (
+      <HudAppShell user={user} events={events} route={route} onNav={onNav} width={width}>
+        {screens}
+      </HudAppShell>
+    );
+  }
+  return (
+    <div>
+      <NavBar route={route} onNav={onNav} status={events.status} asOf={events.asOf}
+        username={user.username} />
+      {screens}
+    </div>
+  );
+}

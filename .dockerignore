@@ -1,5 +1,10 @@
 .git
+.worktrees
+.stage-tmp
+.cursor
 .venv*
+mutants
+tmp
 node_modules
 frontend/node_modules
 frontend/dist

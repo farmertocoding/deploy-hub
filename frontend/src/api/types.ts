@@ -199,7 +199,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_findings_retrieve"];
+        get: operations["v1_findings_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -215,7 +215,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_findings_retrieve_2"];
+        get: operations["v1_findings_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -250,6 +250,472 @@ export interface paths {
         get: operations["v1_first_run_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/audit/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_audit_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/deployments/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_hud_deployments_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/deployments/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_hud_deployments_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/deployments/{id}/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_deployments_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/deployments/{id}/downloads/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_deployments_downloads_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/downloads/{token}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_hud_downloads_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/findings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_findings_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/findings/{id}/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_findings_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/integrations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_integrations_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/integrations/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_integrations_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/members/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_members_retrieve"];
+        put?: never;
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        post: operations["v1_hud_members_create"];
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        delete: operations["v1_hud_members_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/operations/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_operations_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/overview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_hud_overview_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/partners/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_partners_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/partners/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_partners_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/projects/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_projects_retrieve"];
+        put?: never;
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        post: operations["v1_hud_projects_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/projects/{id}/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_projects_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/projects/test-source/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_projects_test_source_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/search/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_search_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/secrets/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_secrets_retrieve"];
+        put?: never;
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        post: operations["v1_hud_secrets_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/secrets/{id}/rotate-plan/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read-only rotation plan: names affected objects. Does not write a new version. */
+        get: operations["v1_hud_secrets_rotate_plan_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/shell/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_shell_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/sites/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["v1_hud_sites_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/sites/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_sites_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/sites/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_sites_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/targets/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description APIView with explicit schema metadata so privileged routes stay in OpenAPI. */
+        get: operations["v1_hud_targets_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/targets/{id}/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_targets_item_commands_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hud/targets/commands/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["v1_hud_targets_collection_commands_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -300,7 +766,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description T1 partner.api_kill_switch: type partner-api. Enable when OFF, never a toggle. */
+        /** @description T1 partner.api_kill_switch: type partner-api. Explicit enabled, never XOR. */
         post: operations["v1_partner_api_kill_switch_create"];
         delete?: never;
         options?: never;
@@ -316,7 +782,7 @@ export interface paths {
             cookie?: never;
         };
         /** @description GET is the operator list (no secrets). POST is T1 partner.create. */
-        get: operations["v1_partners_retrieve"];
+        get: operations["v1_partners_list"];
         put?: never;
         /** @description GET is the operator list (no secrets). POST is T1 partner.create. */
         post: operations["v1_partners_create"];
@@ -334,7 +800,7 @@ export interface paths {
             cookie?: never;
         };
         /** @description GET never echoes hubk_ or whsec_. */
-        get: operations["v1_partners_retrieve_2"];
+        get: operations["v1_partners_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -803,6 +1269,10 @@ export interface components {
             live_compose_path?: string;
             cancel?: boolean;
         };
+        AllowedAction: {
+            id: string;
+            label: string;
+        };
         AttackState: {
             detail: string;
             finding_id: number;
@@ -856,6 +1326,8 @@ export interface components {
             schedule: string;
             dumps: components["schemas"]["BackupDump"][];
         };
+        /** @enum {unknown} */
+        BlankEnum: "";
         CandidateTarget: {
             id: number;
             host: string;
@@ -873,11 +1345,15 @@ export interface components {
             account: components["schemas"]["DnsAccountConnected"];
             zone: components["schemas"]["DnsZoneConnected"];
         };
+        Command: {
+            action: string;
+        };
         Confirm: {
             otp_code: string;
         };
         ConfirmName: {
             confirm_name: string;
+            enabled?: boolean;
         };
         DemoJob: {
             name: string;
@@ -889,8 +1365,60 @@ export interface components {
             /** @default false */
             confirm_warnings: boolean;
         };
+        /**
+         * @description * `auto` - Auto
+         *     * `confirm` - Confirm
+         *     * `windowed` - Windowed
+         * @enum {string}
+         */
+        DeployPolicyEnum: "auto" | "confirm" | "windowed";
+        /**
+         * @description * `blue_green` - Blue Green
+         *     * `recreate` - Recreate
+         * @enum {string}
+         */
+        DeployStrategyEnum: "blue_green" | "recreate";
+        DeploymentCommand: {
+            action: string;
+        };
+        DeploymentDetail: {
+            id: number;
+            site: string;
+            site_id: number;
+            version: number;
+            state: string;
+            headline: string;
+            live_release: string;
+            desired_release: string;
+            previous_release: string | null;
+            target: string;
+            /** Format: date-time */
+            observed_at: string;
+            /** Format: date-time */
+            heartbeat_at: string | null;
+            safe_next: string;
+            safe_next_reason: string;
+            log_text: string;
+            log_cursor: number;
+            log_truncated: boolean;
+            artifacts: unknown[];
+            steps: unknown[];
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
+        };
+        DeploymentList: {
+            /** Format: date-time */
+            observed_at: string;
+            results: unknown[];
+        };
         DestinationRank: {
             destination_order: number[];
+        };
+        DisabledAction: {
+            id: string;
+            code: string;
+            reason: string;
+            label?: string;
         };
         DnsAccountConnected: {
             readonly id: number;
@@ -902,6 +1430,11 @@ export interface components {
             name: string;
             provider_zone_id?: string;
             purpose?: components["schemas"]["PurposeEnum"];
+        };
+        DownloadGrant: {
+            resource: components["schemas"]["ResourceEnum"];
+            step?: components["schemas"]["StepEnum"] | components["schemas"]["BlankEnum"];
+            artifact_id?: number;
         };
         /**
          * @description * `host_caddy` - Host Caddy
@@ -1061,6 +1594,13 @@ export interface components {
             webauthn_count?: number;
             totp_enrolled?: boolean;
             t1_available?: boolean;
+            role?: string;
+            capabilities?: string[];
+            is_system_admin?: boolean;
+            hud_ui?: boolean;
+            workspaces?: {
+                [key: string]: unknown;
+            }[];
         };
         OriginCaPlant: {
             path: string;
@@ -1093,6 +1633,34 @@ export interface components {
         OverflowScaleInResult: {
             target: number;
             unjoined: string;
+        };
+        Overview: {
+            /** Format: date-time */
+            observed_at: string;
+            version: number;
+            findings: {
+                [key: string]: number;
+            };
+            deployments: {
+                [key: string]: number;
+            };
+            site_health: {
+                [key: string]: number;
+            };
+            target_readiness: {
+                [key: string]: number;
+            };
+            attention: unknown[];
+            active_deployments: unknown[];
+            integrations: {
+                [key: string]: unknown;
+            };
+            setup: unknown[];
+            links: {
+                [key: string]: unknown;
+            };
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
         };
         PartnerCreate: {
             slug: string;
@@ -1176,6 +1744,16 @@ export interface components {
             proxied: boolean;
             dns_zone?: number | null;
             primary_target?: number | null;
+            /** @default  */
+            site_name: string;
+            /** @default  */
+            environment: string;
+            /** @default blue_green */
+            deploy_strategy: components["schemas"]["DeployStrategyEnum"];
+            /** @default auto */
+            deploy_policy: components["schemas"]["DeployPolicyEnum"];
+            /** @default  */
+            deploy_window_cron: string;
         };
         ProjectSummary: {
             id: number;
@@ -1228,10 +1806,26 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * @description * `log` - log
+         *     * `artifact` - artifact
+         * @enum {string}
+         */
+        ResourceEnum: "log" | "artifact";
         RollbackResult: {
             deployment_id: number;
             original_id: number;
             status: string;
+        };
+        RotatePlan: {
+            secret_id: number;
+            kind: string;
+            owner_type: string;
+            owner_id: string;
+            fingerprint: string;
+            affected: unknown[];
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
         };
         RouterAdvice: {
             mode: components["schemas"]["RouterAdviceModeEnum"];
@@ -1253,6 +1847,26 @@ export interface components {
             forwarded: boolean;
             finding_id: number | null;
         };
+        SecretList: {
+            /** Format: date-time */
+            observed_at: string;
+            results: components["schemas"]["SecretMeta"][];
+        };
+        SecretMeta: {
+            id: number;
+            kind: string;
+            owner_type: string;
+            owner_id: string;
+            fingerprint: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            exportable: boolean;
+            references: unknown[];
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
+        };
         /**
          * @description * `p1` - P1
          *     * `p2` - P2
@@ -1263,6 +1877,42 @@ export interface components {
         /** @description PATCH /api/v1/sites/{id}/ — {edge_owner} only (design note §7 I-edge). */
         SiteEdgeOwner: {
             edge_owner: components["schemas"]["EdgeOwnerEnum"];
+        };
+        SiteFleetList: {
+            /** Format: date-time */
+            observed_at: string;
+            results: components["schemas"]["SiteFleetRow"][];
+            next: string | null;
+            page: number;
+            sort: string;
+            count: number;
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
+        };
+        SiteFleetRow: {
+            id: number;
+            name: string;
+            project: string;
+            domain: string;
+            health: string;
+            environment: string;
+            exposure: string;
+            target: string;
+            tls: string;
+            backup: string;
+            live_release: string;
+            desired_release: string;
+            active_deployment: number | null;
+            copies: number;
+            owner: string;
+            findings: number;
+            /** Format: date-time */
+            last_deploy_at: string | null;
+            last_deploy_actor: string;
+            /** Format: date-time */
+            observed_at: string;
+            allowed_actions: components["schemas"]["AllowedAction"][];
+            disabled_actions: components["schemas"]["DisabledAction"][];
         };
         SiteSummary: {
             id: number;
@@ -1294,6 +1944,19 @@ export interface components {
          * @enum {string}
          */
         StatusEnum: "degraded" | "error";
+        /**
+         * @description * `build` - build
+         *     * `ship` - ship
+         *     * `migrate` - migrate
+         *     * `start_green` - start_green
+         *     * `health_check` - health_check
+         *     * `dns` - dns
+         *     * `route_tls` - route_tls
+         *     * `smoke_test` - smoke_test
+         *     * `cutover` - cutover
+         * @enum {string}
+         */
+        StepEnum: "build" | "ship" | "migrate" | "start_green" | "health_check" | "dns" | "route_tls" | "smoke_test" | "cutover";
         TargetDelete: {
             confirm_name: string;
         };
@@ -1620,7 +2283,7 @@ export interface operations {
             };
         };
     };
-    v1_findings_retrieve: {
+    v1_findings_list: {
         parameters: {
             query?: {
                 entity?: string;
@@ -1654,7 +2317,7 @@ export interface operations {
             };
         };
     };
-    v1_findings_retrieve_2: {
+    v1_findings_retrieve: {
         parameters: {
             query?: never;
             header?: never;
@@ -1717,6 +2380,670 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FirstRunSnapshot"];
+                };
+            };
+        };
+    };
+    v1_hud_audit_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_deployments_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentList"];
+                };
+            };
+        };
+    };
+    v1_hud_deployments_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentDetail"];
+                };
+            };
+        };
+    };
+    v1_hud_deployments_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentCommand"];
+                "application/x-www-form-urlencoded": components["schemas"]["DeploymentCommand"];
+                "multipart/form-data": components["schemas"]["DeploymentCommand"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_deployments_downloads_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DownloadGrant"];
+                "application/x-www-form-urlencoded": components["schemas"]["DownloadGrant"];
+                "multipart/form-data": components["schemas"]["DownloadGrant"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadGrant"];
+                };
+            };
+        };
+    };
+    v1_hud_downloads_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_findings_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_findings_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_integrations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_integrations_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_members_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_members_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_members_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_operations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_overview_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Overview"];
+                };
+            };
+        };
+    };
+    v1_hud_partners_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_partners_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_projects_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_projects_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_projects_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_projects_test_source_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_search_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_secrets_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretList"];
+                };
+            };
+        };
+    };
+    v1_hud_secrets_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_secrets_rotate_plan_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotatePlan"];
+                };
+            };
+        };
+    };
+    v1_hud_shell_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_sites_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteFleetList"];
+                };
+            };
+        };
+    };
+    v1_hud_sites_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_sites_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_targets_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_hud_targets_item_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
+                };
+            };
+        };
+    };
+    v1_hud_targets_collection_commands_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Command"];
+                "application/x-www-form-urlencoded": components["schemas"]["Command"];
+                "multipart/form-data": components["schemas"]["Command"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Command"];
                 };
             };
         };
@@ -1808,7 +3135,7 @@ export interface operations {
             };
         };
     };
-    v1_partners_retrieve: {
+    v1_partners_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -1852,7 +3179,7 @@ export interface operations {
             };
         };
     };
-    v1_partners_retrieve_2: {
+    v1_partners_retrieve: {
         parameters: {
             query?: never;
             header?: never;

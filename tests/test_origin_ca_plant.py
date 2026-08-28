@@ -1,7 +1,8 @@
 """Origin-CA file plant (TLS-B2-ORIGIN-CA-PLANT / I-plant / S1 / S5).
 
-Hub-local path only. Vault shape matches origin_cert_issuer_for. Key bytes
-never enter the request, response, Finding, or Settings-connect form.
+Hub-local path only. Vault shape matches origin_cert_issuer_for. Token bytes
+never enter the request, response, Finding, or Settings-connect form. The
+planted file is a Bearer token, not a deprecated v1.0- service key.
 """
 from pathlib import Path
 
@@ -16,6 +17,21 @@ from vault.models import Secret
 
 pytestmark = pytest.mark.django_db
 
+
+@pytest.fixture(autouse=True)
+def _origin_ca_observe_http(monkeypatch):
+    import providers.cloudflare as cloudflare
+
+    http = FakeCloudflare({
+        VERIFY: {"success": True, "result": {"id": "tok", "status": "active"}},
+        PROBE: {
+            "success": True,
+            "result": [{"id": "zid-plant", "name": "plant.example"}],
+            "result_info": {"total_count": 1},
+        },
+    })
+    monkeypatch.setattr(cloudflare, "urlopen", http)
+
 KEY_BYTES = b"t1-plant-oca-key-bytes-not-a-credential"
 TOKEN = "t1-connect-dummy-token-not-a-credential"  # nosec B105 — test constant
 CONNECT = "/api/v1/cloudflare/connect/"
@@ -27,9 +43,12 @@ PROBE = ("GET", "/zones?per_page=50")
 def auth_client(client, django_user_model):
     from django_otp.plugins.otp_totp.models import TOTPDevice
 
+    from tests.conftest import t1_ready_session
+
     user = django_user_model.objects.create_user(username="op", password="pw-1234567890")
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     client.force_login(user)
+    t1_ready_session(client, user)
     return client
 
 
@@ -271,6 +290,60 @@ def test_seams_still_refuse_until_planted():
 
 
 @pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
+def test_plant_refuses_deprecated_origin_ca_service_key(
+        auth_client, tmp_path, monkeypatch):
+    """A v1.0- Origin CA service key file must not be vaulted.
+
+    What would make this fail: planting the deprecated X-Auth-User-Service-Key
+    credential, or quoting those bytes in the 400 body.
+    """
+    account = _account()
+    service_key = (
+        b"v1.0-144c9defac04969c7bfad8ef-631a41d003a32d25fe878081ef365c49503f7fada6"
+    )
+    path = _allowlisted_file(tmp_path, monkeypatch, data=service_key)
+    response = _plant(auth_client, account, path)
+    assert response.status_code == 400, response.content
+    raw = response.content.decode()
+    assert service_key.decode() not in raw
+    account.refresh_from_db()
+    assert account.origin_ca_key_ref == ""
+    assert not Secret.objects.filter(owner_type="dns_account").exists()
+
+
+@pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
+def test_origin_cert_issuer_for_refuses_vaulted_service_key():
+    """A leftover v1.0- key in the vault must not construct an issuer.
+
+    What would make this fail: origin_cert_issuer_for returning a client
+    when the secret is still a deprecated service key, so a deploy could
+    start and only fail at issue().
+    """
+    from providers.registry import ScopeError, origin_cert_issuer_for
+
+    account = _account(label="oca-legacy")
+    site = _public_site(account)
+    service_key = (
+        b"v1.0-144c9defac04969c7bfad8ef-631a41d003a32d25fe878081ef365c49503f7fada6"
+    )
+    vault_service.put(
+        kind=Secret.Kind.API_TOKEN,
+        owner_type="dns_account",
+        owner_id="legacy-oca-ref",
+        plaintext=service_key,
+    )
+    account.origin_ca_key_ref = "legacy-oca-ref"
+    account.save(update_fields=["origin_ca_key_ref"])
+    site.dns_zone.account.refresh_from_db()
+
+    with pytest.raises(ScopeError) as exc:
+        origin_cert_issuer_for(site.dns_zone)
+    message = str(exc.value)
+    assert service_key.decode() not in message
+    assert "deprecated" in message.lower() or "Bearer" in message
+
+
+@pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
 def test_seams_construct_issuer_after_plant(auth_client, tmp_path, monkeypatch):
     """After plant, a proxied public deploy constructs the Origin-CA issuer."""
     from providers.cloudflare import CloudflareOriginCertIssuer
@@ -290,3 +363,82 @@ def test_seams_construct_issuer_after_plant(auth_client, tmp_path, monkeypatch):
     dns, issuer = resolve_production_seams(site)
     assert dns is not None
     assert isinstance(issuer, CloudflareOriginCertIssuer)
+
+
+@pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
+def test_plant_unlinks_source_file(auth_client, tmp_path, monkeypatch):
+    """H7: a successful plant must not leave the plaintext token on disk.
+
+    What would make this fail: OriginCaPlantView vaulting bytes and returning
+    200 without unlinking the 0600 source file.
+    """
+    account = _account()
+    path = _allowlisted_file(tmp_path, monkeypatch)
+    assert path.is_file()
+    response = _plant(auth_client, account, path)
+    assert response.status_code == 200, response.content
+    assert not path.exists()
+
+
+@pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
+def test_plant_requires_session(tmp_path, monkeypatch):
+    """H11: anonymous plant is 403 and writes nothing.
+
+    What would make this fail: OriginCaPlantView AllowAny or empty
+    authentication_classes.
+    """
+    from django.test import Client
+
+    account = _account()
+    path = _allowlisted_file(tmp_path, monkeypatch)
+    response = Client().post(
+        _plant_url(account), {"path": str(path)}, content_type="application/json",
+    )
+    assert response.status_code == 403
+    account.refresh_from_db()
+    assert not account.origin_ca_key_ref
+    assert not Secret.objects.filter(owner_type="dns_account").exists()
+
+
+@pytest.mark.req("TLS-B2-ORIGIN-CA-PLANT")
+def test_plant_and_issuer_observe_origin_ca_token(
+        auth_client, tmp_path, monkeypatch):
+    """H6: plant and origin_cert_issuer_for observe the Bearer like DNS.
+
+    What would make this fail: construction only shape-refusing v1.0- with
+    no observe_token / one-zone wall.
+    """
+    from providers.registry import origin_cert_issuer_for
+
+    calls = []
+
+    def observe(token, timeout=20):
+        calls.append(bytes(token) if isinstance(token, (bytes, bytearray)) else token)
+        return {
+            "status": "active",
+            "zones": [{"id": "zid-plant", "name": "plant.example"}],
+            "zone_count": 1,
+        }
+
+    monkeypatch.setattr("providers.cloudflare.observe_token", observe)
+    account = _account()
+    site = _public_site(account)
+    path = _allowlisted_file(tmp_path, monkeypatch)
+    response = _plant(auth_client, account, path)
+    assert response.status_code == 200, response.content
+    assert calls, "plant did not observe the token"
+    site.dns_zone.account.refresh_from_db()
+    origin_cert_issuer_for(site.dns_zone)
+    assert len(calls) >= 2
+
+
+@pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
+def test_plant_connect_views_require_recent_touch():
+    """H11: Origin CA plant, Cloudflare connect, AWS connect POST are T1."""
+    from core.aws_views import AwsConnectView
+    from core.permissions import RequireRecentTouch
+    from core.zone_views import CloudflareConnectView, OriginCaPlantView
+
+    assert RequireRecentTouch in OriginCaPlantView.permission_classes
+    assert RequireRecentTouch in CloudflareConnectView.permission_classes
+    assert RequireRecentTouch in AwsConnectView.permission_classes

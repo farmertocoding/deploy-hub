@@ -1,12 +1,13 @@
 """T2 POST that creates a preview sibling Site."""
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import Site
+from core.permissions import RequireAction, RequireWorkspace
+from core.rbac import SITE_FIELD, scoped_get
 from deploys.preview import PreviewError, create_preview
 from providers.registry import git_visibility_for
 
@@ -26,14 +27,15 @@ class PreviewCreateResultSerializer(serializers.Serializer):
 class SitePreviewCreateView(APIView):
     """T2 site.preview_create: type the parent name."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "site.preview_create"
 
     @extend_schema(
         request=PreviewCreateSerializer,
         responses={201: PreviewCreateResultSerializer},
     )
     def post(self, request, site_id):
-        parent = get_object_or_404(Site, pk=site_id)
+        parent = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         raw = getattr(request, "data", None)
         if isinstance(raw, dict) and "visibility" in raw:
             raise serializers.ValidationError(

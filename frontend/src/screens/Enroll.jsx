@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { registerPasskey } from "../webauthn.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "../ui/surface.js";
 
 export function Enroll({ onDone }) {
   const [recovery, setRecovery] = useState(null);
@@ -60,7 +60,7 @@ export function Enroll({ onDone }) {
         <button style={{ padding: 8, marginRight: 8 }}
           onClick={() => register("phone")}>Register phone passkey</button>
         <button style={{ padding: 8 }} onClick={onDone}>Skip for now</button>
-        {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+        {error && <div style={{ color: "var(--hud-danger)" }}>{error}</div>}
       </div>
     );
 
@@ -72,7 +72,7 @@ export function Enroll({ onDone }) {
       <button style={{ padding: 8 }} onClick={() => register("security-key")}>
         Register a security key
       </button>
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+      {error && <div style={{ color: "var(--hud-danger)" }}>{error}</div>}
     </div>
   );
 }

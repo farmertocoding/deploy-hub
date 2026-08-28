@@ -61,6 +61,9 @@ def _refuse(target, hostname, presented, expected):
         "ssh-host-key-mismatch",
         f"target:{getattr(target, 'pk', '')}",
         fingerprint=f"ssh-host-key-mismatch:{getattr(target, 'pk', '')}",
+        workspace=getattr(target, "workspace", None) or getattr(
+            getattr(target, "zone", None), "workspace", None,
+        ),
         source_engine="core.ssh",
         title="SSH host-key mismatch",
         body=(

@@ -39,8 +39,8 @@ _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
 # injected one via MAKEFILES, which is caught below. A real override still shows origin
 # `command line` or `environment` and is still refused.
 _MF_BAD := $(strip \
-	$(foreach c,n i q t o,$(findstring $(c),$(_MF_SHORT))) \
-	$(filter --dry-run --just-print --recon --ignore-errors --question --touch,\
+	$(foreach c,n i q t o j,$(findstring $(c),$(_MF_SHORT))) \
+	$(filter --dry-run --just-print --recon --ignore-errors --question --touch --jobs% -j% --jobserver%,\
 		$(MAKEFLAGS)) \
 	$(filter --eval% .SHELLFLAGS=%,$(MAKEFLAGS)) \
 	$(filter-out file default undefined,$(origin SHELL))$(filter-out file default undefined,$(origin .SHELLFLAGS)) \
@@ -54,7 +54,9 @@ endif
 
 .PHONY: dev test test-all test-frontend test-t2 test-t3 nightly nightly-gates lint \
 	conformance conformance-3 conformance-3.5 conformance-4 conformance-5 conformance-5.5 conformance-6 conformance-7 review-round generate-client check-generated \
-	log-scrub py-roots mutation scripts-lint
+	log-scrub py-roots mutation scripts-lint frontend-quality js-audit python-dev-audit secret-scan
+
+.NOTPARALLEL: review-round nightly-gates
 
 # The Python packages every source-scanning gate must cover, derived from the tree rather
 # than typed out: a top-level directory with an __init__.py, minus the test suite itself.
@@ -137,10 +139,31 @@ test-all:
 test-frontend:
 	cd frontend && node --import tsx --test "tests/*.test.ts"
 
+python-dev-audit:
+	pip-audit --progress-spinner off -r requirements.txt
+	pip-audit --progress-spinner off -r requirements-dev.txt
+
+js-audit:
+	cd frontend && npm audit --audit-level=high
+	cd sample-node-site && pnpm audit --audit-level high
+
+frontend-quality:
+	cd frontend && npm run quality
+
+# Playwright a11y is an explicit reviewed policy: it is not a review-round
+# blocker because CI images may lack the pinned Chromium build. Run locally
+# with browsers installed. Visual snapshot updates are never silent in CI.
+frontend-a11y:
+	cd frontend && npm run test:a11y
+
+secret-scan:
+	python scripts_dev/secret_scan.py
+
 lint:
 	ruff check .
 	bandit -q -c pyproject.toml -r $(PY_ROOTS)
-	pip-audit --progress-spinner off -r requirements.txt || true   # advisory until Phase 1; blocking after
+	pip-audit --progress-spinner off -r requirements.txt
+	pip-audit --progress-spinner off -r requirements-dev.txt
 
 # shellcheck + shfmt -d + bash -n over scripts/** (HARD-Q8). Tools must be on
 # PATH; CI installs them as setup, then calls this target bare.
@@ -261,7 +284,7 @@ log-scrub:
 # `mutation` sits after `test` and before `conformance` (spec-mutation-gate.md §4): a red
 # suite makes every mutant "survive" meaninglessly, so mutmut needs a green baseline in
 # front of it, and the conformance read is the last thing that happens either way.
-review-round: lint log-scrub scripts-lint test test-frontend mutation check-generated conformance
+review-round: lint log-scrub scripts-lint secret-scan js-audit frontend-quality test test-frontend mutation check-generated conformance
 	@echo "mechanical gates green — run the agent review sweep against REVIEW_CHECKLIST.md"
 
 # Local T3 host of record (D-023). Not a review-round prerequisite. GHA is

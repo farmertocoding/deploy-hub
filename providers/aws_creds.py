@@ -19,6 +19,7 @@ from urllib.parse import unquote
 import boto3
 from django.conf import settings
 
+from core.models import default_workspace
 from core.test_mode import assert_test_aws
 
 _CRED_KEYS = frozenset({"access_key_id", "secret_access_key"})
@@ -591,6 +592,7 @@ def file_aws_scope(*, account_id, reasons, ref=""):
     raise_alert(
         "aws-scope",
         f"aws:{account_id}",
+        workspace=default_workspace(),
         fingerprint=f"aws-scope:{account_id}",
         source_engine="aws_scope",
         title=f"AWS IAM scope refused for account {account_id}",

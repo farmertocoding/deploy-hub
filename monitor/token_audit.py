@@ -48,6 +48,7 @@ def audit_cloudflare_credentials(*, timeout=20):
         for role, ref in (
             ("dns", account.dns_token_ref),
             ("edge", account.edge_token_ref),
+            ("origin_ca", account.origin_ca_key_ref),
         ):
             entry = _audit_credential(
                 account, role, ref, declared, timeout=timeout,
@@ -174,6 +175,7 @@ def _file_drift_finding(account, role, description):
     return finding(
         SOURCE_ENGINE,
         f"cf-token-scope:{account.pk}:{role}",
+        workspace=account.workspace,
         severity=Finding.Severity.P2,
         entity=f"dns_account:{account.label}",
         title=f"Cloudflare {role} token scope drift on {account.label}",

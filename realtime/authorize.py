@@ -24,4 +24,44 @@ def authorize_topic(user, topic):
         return False
     prefixes = tuple(p for p in ALLOWED_PREFIXES if p.endswith("."))
     exact = tuple(p for p in ALLOWED_PREFIXES if not p.endswith("."))
-    return topic in exact or topic.startswith(prefixes)
+    if not (topic in exact or topic.startswith(prefixes)):
+        return False
+    pk = getattr(user, "pk", None)
+    if pk is None:
+        parts = topic.split(".")
+        if len(parts) >= 2 and parts[0] in ("site", "host", "deploy") and parts[1].isdigit():
+            return False
+        return True
+    return _topic_visible(user, topic)
+
+
+def _topic_visible(user, topic):
+    if topic in ("findings", "map.graph") or topic.startswith("demo."):
+        return True
+    parts = topic.split(".")
+    if len(parts) < 2 or not parts[1].isdigit():
+        return True
+    obj_id = int(parts[1])
+    kind = parts[0]
+    from core.rbac import workspace_membership
+
+    if kind == "site":
+        from core.models import Site
+
+        site = Site.objects.filter(pk=obj_id).select_related("project").first()
+        return bool(site and workspace_membership(user, site.project.workspace))
+    if kind == "host":
+        from core.models import Target
+
+        target = Target.objects.filter(pk=obj_id).select_related("zone").first()
+        return bool(target and workspace_membership(user, target.zone.workspace))
+    if kind == "deploy":
+        from deploys.models import Deployment
+
+        dep = Deployment.objects.filter(pk=obj_id).select_related(
+            "manifest__site__project",
+        ).first()
+        return bool(
+            dep and workspace_membership(user, dep.manifest.site.project.workspace)
+        )
+    return True

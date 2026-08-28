@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.urls import include, path
+from django_otp.admin import OTPAdminSite
 from drf_spectacular.views import SpectacularAPIView
 
 from core.partner_views import (
@@ -17,6 +18,8 @@ from core.views import (
     SshRotateView,
     TargetDeleteView,
 )
+
+admin.site.__class__ = OTPAdminSite
 
 urlpatterns = [
     # §4.5: the schema is generated from serializers; the TS client + zod schemas
@@ -54,4 +57,6 @@ urlpatterns = [
     path("api/v1/", include("provision.urls")),
     path("api/v1/", include("monitor.urls")),
     path("api/v1/", include("core.zone_urls")),
+    path("api/v1/", include("core.hud.urls")),
+    path("api/v1/", include("deploys.hud_urls")),
 ]

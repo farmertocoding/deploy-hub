@@ -33,6 +33,7 @@ def test_project_row_emits_cert_refusal_from_open_unproxied_finding(client):
     row = finding(
         "tls",
         f"unproxied-cert:{site.pk}",
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{site.name}",
         title="Unproxied public site cannot get a Hub-issued certificate",

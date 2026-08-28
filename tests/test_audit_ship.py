@@ -149,3 +149,62 @@ def test_audit_write_does_not_block_on_s3_down(monkeypatch):
     dump = json.dumps([row.title, row.body, row.fix_action, event.detail], default=str)
     assert "BEGIN " not in dump
     assert "-----" not in dump
+
+
+def test_missing_object_lock_fails_closed():
+    from core.audit_ship import FakeAuditStore, ship
+
+    audit("lock-required", source="system")
+    store = FakeAuditStore()
+    store.object_lock = False
+    with override_settings(AUDIT_S3_BUCKET=BUCKET):
+        result = ship(store=store)
+    assert result["status"] == "failed"
+    from core.models import AuditEvent
+    assert AuditEvent.objects.filter(action="lock-required", shipped_at__isnull=True).exists()
+
+
+def test_retry_is_idempotent_and_partial_failure_leaves_pending():
+    from core.audit_ship import FakeAuditStore, ship, verify_shipped
+
+    first = audit("idem-1", source="system")
+    second = audit("idem-2", source="system")
+    store = FakeAuditStore()
+    with override_settings(AUDIT_S3_BUCKET=BUCKET):
+        assert ship(store=store)["n"] == 2
+        again = ship(store=store)
+    assert again["n"] == 0
+    assert len(store.objects) == 2
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.shipped_at is not None
+    store.objects[0] = (store.objects[0][0], store.objects[0][1].replace("idem-1", "tamper"))
+    from core.audit_ship import AuditShipError
+
+    with pytest.raises(AuditShipError):
+        verify_shipped(store=store)
+
+
+def test_beat_schedules_audit_shipping():
+    from django.conf import settings
+
+    entry = settings.CELERY_BEAT_SCHEDULE["ship-audit-trail"]
+    assert entry["task"] == "core.tasks.ship_audit_trail"
+
+
+def test_ship_without_store_uses_production_append_only_provider(monkeypatch):
+    """Beat calls ship() with no store=; a configured bucket must still put.
+
+    What would make this fail: ship() treating missing store as fail-closed
+    even when AUDIT_S3_BUCKET is set, so the Beat task can only skip.
+    """
+    from core.audit_ship import FakeAuditStore, ship
+
+    audit("prod-store", source="system")
+    fake = FakeAuditStore()
+    monkeypatch.setattr("core.audit_ship.production_store", lambda: fake)
+    with override_settings(AUDIT_S3_BUCKET=BUCKET):
+        result = ship()
+    assert result["status"] == "shipped"
+    assert result["n"] == 1
+    assert fake.objects

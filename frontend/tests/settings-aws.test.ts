@@ -23,7 +23,11 @@ test("aws_tab_exists_paste_is_write_only_degraded_empty_and_error", async () => 
   const aws = SETTINGS_TABS.findIndex((t) => t.id === "aws");
   assert.equal(aws, cf + 1, "AWS sits beside Cloudflare");
 
-  const markup = render(AwsPanel);
+  const tenant = render(AwsPanel);
+  assert.doesNotMatch(tenant, /type="password"/);
+  assert.match(visibleText(tenant), /system-administrator/);
+
+  const markup = render(AwsPanel, { systemAdmin: true });
   const text = visibleText(markup);
   assert.match(text, /not connected/i, text);
   assert.ok(!/\bConnected\b/.test(text), text);

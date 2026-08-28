@@ -14,7 +14,7 @@ import { safeText } from "../safe-display.js";
 import { findingsSnapshot } from "./Findings.jsx";
 import { PROVISION_CMD } from "./Targets.jsx";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box, muted } from "../ui/surface.js";
 
 export function MapPanel({ width, graph, events, sites }) {
   if (width < DESKTOP_MIN_PX) {
@@ -22,7 +22,7 @@ export function MapPanel({ width, graph, events, sites }) {
     // squashed unusable one — the phone screens are Sites, Deploys and the finding
     // detail, and this line points at the nearest of them.
     return (
-      <p style={{ color: "#8b949e", padding: "0 16px" }}>
+      <p style={{ color: muted, padding: "0 16px" }}>
         Map is desktop-only — use Sites for status on a phone.</p>
     );
   }
@@ -30,14 +30,14 @@ export function MapPanel({ width, graph, events, sites }) {
   // FleetMap (Task 14) is the graph.
   if (Array.isArray(sites) && sites.length === 0) {
     return (
-      <div style={{ ...box, margin: 16, minHeight: 160, color: "#8b949e" }}>
+      <div style={{ ...box, margin: 16, minHeight: 160, color: muted }}>
         Map is empty — no sites to place.
       </div>
     );
   }
   if (Array.isArray(sites) && sites.length > 0) {
     return (
-      <div style={{ ...box, margin: 16, minHeight: 160, color: "#8b949e" }}>
+      <div style={{ ...box, margin: 16, minHeight: 160, color: muted }}>
         Map is populated — {sites.length} sites.
       </div>
     );
@@ -131,7 +131,7 @@ function AddProjectForm({ onProgress }) {
       <button style={{ padding: 8 }} disabled={busy}>
         {CHECKLIST_COPY.add_project.button}
       </button>
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+      {error && <div style={{ color: "var(--hud-danger)" }}>{error}</div>}
     </form>
   );
 }
@@ -174,9 +174,9 @@ export function AttackBanner({ findings }) {
   if (!open.length) return null;
   const first = open[0];
   return (
-    <p role="status" style={{ ...box, color: "#ff7b72", margin: 16 }}>
+    <p role="status" style={{ ...box, color: "var(--hud-danger)", margin: 16 }}>
       ⛔ Under attack — {safeText(first.title)}{" "}
-      <a href={routeHash("findings", first.id)} style={{ color: "#79c0ff" }}>
+      <a href={routeHash("findings", first.id)} style={{ color: "var(--hud-info)" }}>
         View finding
       </a>
     </p>

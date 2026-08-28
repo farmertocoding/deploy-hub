@@ -653,9 +653,12 @@ def test_intake_as_of_is_last_success_not_now(client):
     from monitor.alerts import raise_alert
 
     _t1_user(client)
+    from core.models import default_workspace
+
     raise_alert(
         "partner-intake-unreachable",
         "intake",
+        workspace=default_workspace(),
         fingerprint="partner-intake-unreachable",
         source_engine="monitor.intake_poll",
         title="Partner intake unreachable",
@@ -695,9 +698,12 @@ def test_intake_as_of_is_null_when_never_succeeded(client):
     from monitor.alerts import raise_alert
 
     _t1_user(client)
+    from core.models import default_workspace
+
     raise_alert(
         "partner-intake-unreachable",
         "intake",
+        workspace=default_workspace(),
         fingerprint="partner-intake-unreachable",
         source_engine="monitor.intake_poll",
         title="Partner intake unreachable",
@@ -774,7 +780,9 @@ def test_partners_list_includes_ready_candidate_targets(client):
     assert empty.destination_order == []
     view = PartnerListCreateView()
     view.request = APIRequestFactory().get(CREATE_URL)
-    assert [type(p).__name__ for p in view.get_permissions()] == ["IsAuthenticated"]
+    assert [type(p).__name__ for p in view.get_permissions()] == [
+        "IsAuthenticated", "RequireWorkspace",
+    ]
     response = client.get(CREATE_URL)
     assert response.status_code == 200
     body = response.json()

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820" role="img" aria-labelledby="title desc">
+  <title id="title">Foolproof deployment journey</title>
+  <desc id="desc">Three-lane flow from application setup through preflight and deployment to success or recovery.</desc>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L0 6 L9 3 z" fill="#475569"/></marker>
+    <style>.bg{fill:#f8fafc}.lane{fill:#fff;stroke:#cbd5e1;stroke-width:2}.b{fill:#eff6ff;stroke:#60a5fa;stroke-width:2}.g{fill:#f0fdf4;stroke:#4ade80;stroke-width:2}.y{fill:#fffbeb;stroke:#f59e0b;stroke-width:2}.r{fill:#fff1f2;stroke:#fb7185;stroke-width:2}.t{font:600 16px system-ui,sans-serif;fill:#0f172a}.h{font:700 22px system-ui,sans-serif;fill:#1e293b}.s{font:13px system-ui,sans-serif;fill:#475569}.l{stroke:#475569;stroke-width:2.5;fill:none;marker-end:url(#a)}</style>
+  </defs>
+  <rect class="bg" width="1600" height="820"/><text class="h" x="40" y="42">Foolproof deployment journey</text>
+  <rect class="lane" x="30" y="70" width="1540" height="190" rx="18"/><text class="t" x="50" y="102">1. Prepare</text>
+  <rect class="b" x="80" y="135" width="190" height="72" rx="12"/><text class="t" x="111" y="178">Add application</text>
+  <rect class="b" x="330" y="135" width="190" height="72" rx="12"/><text class="t" x="363" y="178">Verify source</text>
+  <rect class="b" x="580" y="135" width="190" height="72" rx="12"/><text class="t" x="626" y="168">Automatic scan</text><text class="s" x="625" y="190">nothing deployed</text>
+  <rect class="y" x="830" y="135" width="190" height="72" rx="12"/><text class="t" x="870" y="168">Fix blockers</text><text class="s" x="865" y="190">then rescan</text>
+  <rect class="b" x="1080" y="135" width="190" height="72" rx="12"/><text class="t" x="1122" y="168">Configure Site</text><text class="s" x="1110" y="190">save revision</text>
+  <rect class="g" x="1330" y="135" width="190" height="72" rx="12"/><text class="t" x="1360" y="168">Freeze Release</text><text class="s" x="1366" y="190">immutable Manifest</text>
+  <path class="l" d="M270 171 H330"/><path class="l" d="M520 171 H580"/><path class="l" d="M770 171 H830"/><path class="l" d="M1020 171 H1080"/><path class="l" d="M1270 171 H1330"/>
+  <path class="l" d="M925 207 C925 238 675 238 675 207"/><text class="s" x="785" y="247">rescan</text>
+
+  <rect class="lane" x="30" y="290" width="1540" height="210" rx="18"/><text class="t" x="50" y="322">2. Decide</text>
+  <rect class="b" x="80" y="365" width="210" height="76" rx="12"/><text class="t" x="112" y="397">Fresh preflight</text><text class="s" x="109" y="420">all blockers at once</text>
+  <polygon class="y" points="395,350 505,403 395,456 285,403"/><text class="t" x="338" y="398">Policy and</text><text class="t" x="355" y="419">readiness</text>
+  <rect class="r" x="560" y="335" width="220" height="64" rx="12"/><text class="t" x="599" y="374">Refused reasons</text>
+  <rect class="y" x="560" y="415" width="220" height="64" rx="12"/><text class="t" x="594" y="454">Await approval</text>
+  <rect class="y" x="840" y="415" width="220" height="64" rx="12"/><text class="t" x="901" y="454">Scheduled</text>
+  <rect class="g" x="1120" y="365" width="190" height="76" rx="12"/><text class="t" x="1180" y="410">Queued</text>
+  <rect class="g" x="1370" y="365" width="150" height="76" rx="12"/><text class="t" x="1392" y="399">Lease</text><text class="t" x="1386" y="421">acquired</text>
+  <path class="l" d="M290 403 H285"/><path class="l" d="M505 382 H560"/><text class="s" x="515" y="372">blocked</text>
+  <path class="l" d="M505 423 H560"/><text class="s" x="513" y="445">approval</text>
+  <path class="l" d="M780 447 H840"/><path class="l" d="M1060 447 C1090 447 1090 403 1120 403"/>
+  <path class="l" d="M505 403 C780 403 900 403 1120 403"/><text class="s" x="800" y="390">ready</text>
+  <path class="l" d="M1310 403 H1370"/>
+
+  <rect class="lane" x="30" y="530" width="1540" height="250" rx="18"/><text class="t" x="50" y="562">3. Execute and recover</text>
+  <rect class="g" x="90" y="625" width="240" height="82" rx="12"/><text class="t" x="133" y="659">Nine-step timeline</text><text class="s" x="136" y="683">build → cutover</text>
+  <polygon class="y" points="475,610 600,666 475,722 350,666"/><text class="t" x="428" y="660">Outcome</text><text class="s" x="427" y="682">impact first</text>
+  <rect class="g" x="660" y="580" width="215" height="75" rx="12"/><text class="t" x="713" y="612">Release live</text><text class="s" x="704" y="635">previous retained</text>
+  <rect class="r" x="660" y="685" width="215" height="75" rx="12"/><text class="t" x="705" y="718">Failure detail</text><text class="s" x="695" y="741">what remains safe</text>
+  <rect class="b" x="950" y="580" width="180" height="75" rx="12"/><text class="t" x="978" y="612">Open live Site</text><text class="s" x="997" y="635">verify result</text>
+  <rect class="y" x="950" y="685" width="180" height="75" rx="12"/><text class="t" x="983" y="718">Retry step</text><text class="s" x="977" y="741">new attempt</text>
+  <rect class="y" x="1190" y="685" width="180" height="75" rx="12"/><text class="t" x="1213" y="718">Rollback to N</text><text class="s" x="1225" y="741">explicit Release</text>
+  <rect class="y" x="1415" y="685" width="145" height="75" rx="12"/><text class="t" x="1438" y="718">Abort and</text><text class="t" x="1441" y="741">clean up</text>
+  <path class="l" d="M330 666 H350"/><path class="l" d="M600 642 C625 642 625 618 660 618"/><text class="s" x="612" y="612">success</text>
+  <path class="l" d="M600 690 C625 690 625 722 660 722"/><text class="s" x="610" y="711">failure</text>
+  <path class="l" d="M875 618 H950"/><path class="l" d="M875 722 H950"/><path class="l" d="M1130 722 H1190"/><path class="l" d="M1370 722 H1415"/>
+</svg>

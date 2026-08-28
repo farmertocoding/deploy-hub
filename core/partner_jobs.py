@@ -109,7 +109,9 @@ def refuse_scheduled_job(site, action="create"):
 
 def materialize(partner, job, *, transport=None, registry=None, now=None):
     """Turn a validated partner-job into an ordinary Deployment + PartnerSite."""
-    if not getattr(settings, "PARTNER_API_ENABLED", False):
+    from core.models import PartnerApiFlag
+
+    if not PartnerApiFlag.is_on():
         return None
     if partner.suspended:
         raise PartnerRefuse("suspended")
@@ -146,7 +148,7 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
 
 
 def _payload(job):
-    payload = dict(job.get("payload") or {})
+    """Identity/destination come from the signed body only (H5)."""
     body = job.get("body")
     if isinstance(body, (bytes, bytearray)):
         body = body.decode("utf-8")
@@ -156,9 +158,8 @@ def _payload(job):
         except ValueError:
             parsed = {}
         if isinstance(parsed, dict):
-            for key, value in parsed.items():
-                payload.setdefault(key, value)
-    return payload
+            return dict(parsed)
+    return {}
 
 
 def _refuse_source(payload):
@@ -256,6 +257,7 @@ def _require_tunnel(target):
     finding(
         "core.partner_jobs",
         f"partner-tunnel-required:{target.pk}",
+        workspace=target.zone.workspace,
         severity="p2",
         entity=f"target:{target.pk}",
         title="Own-server partner destination requires a tunnel",
@@ -347,6 +349,7 @@ def _create(partner, job, payload, target, domain, digest, *, now=None):
     if binding is None:
         slug = f"p-{partner.slug}-{tenant_ref}"[:128]
         project = Project.objects.create(
+            workspace=partner.workspace,
             name=slug,
             slug=slug,
             source_kind=Project.Source.LOCAL_PATH,

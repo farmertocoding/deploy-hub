@@ -38,7 +38,7 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.prod")
     import django
 
     django.setup()
@@ -52,6 +52,15 @@ def main(argv=None):
         from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
         kwargs["transport"] = PipelineTransport()
+        kwargs["dns"] = FakeDnsProvider()
+        kwargs["cert_issuer"] = FakeOriginCertIssuer()
+    elif os.environ.get("HUB_TEST_FAKE_DNS"):
+        from django.conf import settings
+
+        from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
+
+        if not getattr(settings, "HUB_TEST_MODE", False):
+            raise SystemExit("refusing HUB_TEST_FAKE_DNS outside HUB_TEST_MODE")
         kwargs["dns"] = FakeDnsProvider()
         kwargs["cert_issuer"] = FakeOriginCertIssuer()
     execute(args.pk, **kwargs)

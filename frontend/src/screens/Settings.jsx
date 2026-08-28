@@ -17,7 +17,7 @@ import { presentation, tierFor } from "../actions.js";
 import { ActionButton, ConfirmDialog } from "../Tiers.jsx";
 import { registerPasskey } from "../webauthn.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "../ui/surface.js";
 
 export const SETTINGS_TABS = [
   { id: "security", label: "Security" },
@@ -60,8 +60,8 @@ export async function suspendPartner(partnerId, confirmName) {
   return api(`v1/partners/${partnerId}/suspend/`, { confirm_name: confirmName });
 }
 
-export async function killPartnerApi(confirmName) {
-  return api("v1/partner-api/kill-switch/", { confirm_name: confirmName });
+export async function killPartnerApi(confirmName, enabled) {
+  return api("v1/partner-api/kill-switch/", { confirm_name: confirmName, enabled });
 }
 
 export async function rankPartnerDestination(partnerId, destinationOrder) {
@@ -140,6 +140,7 @@ export function PartnersPanel({
   apiEnabled: apiEnabledProp,
   candidateTargets: candidateTargetsProp,
   rankDrafts: rankDraftsProp,
+  systemAdmin = false,
 }) {
   const [partners, setPartners] = useState(partnersProp ?? []);
   const [intake, setIntake] = useState(
@@ -200,7 +201,10 @@ export function PartnersPanel({
   }
 
   async function runKillSwitch(args) {
-    const { status, data } = await killPartnerApi(args?.name || "partner-api");
+    const { status, data } = await killPartnerApi(
+      args?.name || "partner-api",
+      !apiEnabled,
+    );
     if (status === 200) setApiEnabled(Boolean(data?.api_enabled));
   }
 
@@ -223,7 +227,7 @@ export function PartnersPanel({
   return (
     <div style={{ maxWidth: 720 }}>
       <h2>Partners</h2>
-      <p style={{ color: "#e3b341" }}>{intakeLine(intake)}</p>
+      <p style={{ color: "var(--hud-warning)" }}>{intakeLine(intake)}</p>
       <p>Fake / empty INTAKE_URL is degraded. Partner intake SLA is
         response-time, not uptime.</p>
       {minted && (
@@ -307,8 +311,10 @@ export function PartnersPanel({
         <ActionButton row={tierFor("partner.create")}
           onRun={runCreate} />
       )}
-      <ActionButton row={killRow} confirmName="partner-api"
-        onRun={runKillSwitch} />
+      {systemAdmin ? (
+        <ActionButton row={killRow} confirmName="partner-api"
+          onRun={runKillSwitch} />
+      ) : null}
       {/* Create partner — mint keys, not a paste form. Enable is T1 not a toggle. */}
     </div>
   );
@@ -318,19 +324,19 @@ export function AwsStatusBanner({ connected, reason, accountLast4, region }) {
   if (connected || accountLast4) {
     if (!accountLast4 || !region) return null;
     return (
-      <div style={{ color: "#7ee787", marginTop: 8 }}>
+      <div style={{ color: "var(--hud-success)", marginTop: 8 }}>
         Account ···{accountLast4} in {region}.
       </div>
     );
   }
   return (
-    <div style={{ color: "#f0b72f", marginBottom: 8 }}>
+    <div style={{ color: "var(--hud-warning)", marginBottom: 8 }}>
       AWS is not connected. {reason}
     </div>
   );
 }
 
-export function AwsPanel() {
+export function AwsPanel({ systemAdmin = false }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [awsOk, setAwsOk] = useState(false);
@@ -387,24 +393,31 @@ export function AwsPanel() {
         accountLast4={result?.account_id_last4}
         region={result?.region}
       />
-      <form onSubmit={handleSubmit(submit)}
-        style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
-        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
-          <small>access key id</small>
-          <input type="password" {...register("access_key_id")} style={box}
-            autoComplete="off" aria-invalid={!!errors.access_key_id} />
-        </label>
-        <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
-          <small>secret access key</small>
-          <input type="password" {...register("secret_access_key")} style={box}
-            autoComplete="off" aria-invalid={!!errors.secret_access_key} />
-        </label>
-        <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
-          {busy ? "Connecting…" : "Connect"}
-        </button>
-      </form>
-      {errors.root && (
-        <div style={{ color: "#ff7b72", marginTop: 8 }}>{errors.root.message}</div>
+      {!systemAdmin && (
+        <p>Connecting AWS credentials is a system-administrator action.</p>
+      )}
+      {systemAdmin && (
+        <>
+          <form onSubmit={handleSubmit(submit)}
+            style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+            <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+              <small>access key id</small>
+              <input type="password" {...register("access_key_id")} style={box}
+                autoComplete="off" aria-invalid={!!errors.access_key_id} />
+            </label>
+            <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
+              <small>secret access key</small>
+              <input type="password" {...register("secret_access_key")} style={box}
+                autoComplete="off" aria-invalid={!!errors.secret_access_key} />
+            </label>
+            <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </form>
+          {errors.root && (
+            <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>{errors.root.message}</div>
+          )}
+        </>
       )}
     </div>
   );
@@ -475,7 +488,9 @@ export function CloudflarePanel() {
       <p>Paste a single-zone API token. The Hub verifies it and stores it in the
         vault — the token never comes back. This screen stores a DNS token only;
         Origin certificates refuse until <code>origin_ca_key_ref</code> is set
-        on the account in the vault. It does not accept an Origin CA key.</p>
+        on the account in the vault. Plant a Bearer API token with Zone → SSL
+        and Certificates → Edit; it does not accept a paste, and it does not
+        accept a deprecated Origin CA service key.</p>
       <form onSubmit={handleSubmit(submit)}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
@@ -488,10 +503,10 @@ export function CloudflarePanel() {
         </button>
       </form>
       {errors.token && (
-        <div style={{ color: "#ff7b72", marginTop: 8 }}>{errors.token.message}</div>
+        <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>{errors.token.message}</div>
       )}
       {result && (
-        <div style={{ color: "#7ee787", marginTop: 8 }}>
+        <div style={{ color: "var(--hud-success)", marginTop: 8 }}>
           Connected {result.account?.label} — zone {result.zone?.name}
           {result.zone?.purpose ? ` (${result.zone.purpose})` : ""}.
         </div>
@@ -499,8 +514,9 @@ export function CloudflarePanel() {
       <h3 style={{ marginTop: 24 }}>Origin-CA plant</h3>
       <p>Plant status: {planted ? "planted" : "not planted"}. Hub-local path
         only — under <code>/etc/deploy-hub/origin-ca/</code> or
-        <code>/var/lib/deploy-hub/origin-ca/</code>. The Hub reads the file;
-        do not paste key bytes here.</p>
+        <code>/var/lib/deploy-hub/origin-ca/</code>. The file must be a Bearer
+        token with Zone SSL and Certificates Edit, not a v1.0- service key.
+        The Hub reads the file; do not paste token bytes here.</p>
       <form onSubmit={plantForm.handleSubmit(submitPlant)}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
@@ -513,7 +529,7 @@ export function CloudflarePanel() {
         </button>
       </form>
       {plantForm.formState.errors.path && (
-        <div style={{ color: "#ff7b72", marginTop: 8 }}>
+        <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>
           {plantForm.formState.errors.path.message}
         </div>
       )}
@@ -549,7 +565,7 @@ export function SecurityPanel({ user }) {
     <div style={{ maxWidth: 520 }}>
       <h2>Security</h2>
       <p>Passkeys are primary. TOTP is a fallback for login, never for T1.</p>
-      <p style={{ color: "#8b949e" }}>
+      <p style={{ color: "var(--hud-muted)" }}>
         Signed in as {user?.username}. T1 needs two passkeys
         {user?.webauthn_count != null ? ` (enrolled: ${user.webauthn_count})` : ""}.
       </p>
@@ -571,7 +587,7 @@ export function SecurityPanel({ user }) {
       {recovery && (
         <pre style={{ ...box, lineHeight: 1.8 }}>{recovery.join("\n")}</pre>
       )}
-      {error && <div style={{ color: "#ff7b72" }}>{error}</div>}
+      {error && <div style={{ color: "var(--hud-danger)" }}>{error}</div>}
     </div>
   );
 }
@@ -588,11 +604,11 @@ export default function Settings({ user, events }) {
       </nav>
       {tab === "security" && <SecurityPanel user={user} />}
       {tab === "cloudflare" && <CloudflarePanel />}
-      {tab === "aws" && <AwsPanel />}
-      {tab === "partners" && <PartnersPanel />}
+      {tab === "aws" && <AwsPanel systemAdmin={Boolean(user?.is_system_admin)} />}
+      {tab === "partners" && <PartnersPanel systemAdmin={Boolean(user?.is_system_admin)} />}
       {tab === "developer" && <DemoPanel user={user} events={events} />}
       {tab === "vault" && (
-        <p style={{ color: "#8b949e" }}>Vault management gets its screen in Phase 4;
+        <p style={{ color: "var(--hud-muted)" }}>Vault management gets its screen in Phase 4;
             until then secrets stay CLI-managed and this tab says so.</p>
       )}
     </div>
@@ -737,11 +753,11 @@ export function DemoPanel({ user, events }) {
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       <h2>
         Demo job{" "}
-        <small style={{ color: status === "live" ? "#7ee787" : "#f0b72f" }}>({status})</small>
+        <small style={{ color: status === "live" ? "var(--hud-success)" : "var(--hud-warning)" }}>({status})</small>
       </h2>
       <p>Signed in as {user.username}.</p>
       {status === "auth-required" && (
-        <div style={{ color: "#ff7b72" }}>
+        <div style={{ color: "var(--hud-danger)" }}>
           Session expired or enrollment required — reload and log in again.
         </div>
       )}
@@ -771,12 +787,12 @@ export function DemoPanel({ user, events }) {
           onDismiss={() => setPending(null)} />
       )}
       {Object.entries(errors).map(([field, e]) => (
-        <div key={field} style={{ color: "#ff7b72", marginTop: 8 }}>
+        <div key={field} style={{ color: "var(--hud-danger)", marginTop: 8 }}>
           {field === "root" ? "" : `${field}: `}{e.message}
         </div>
       ))}
       {warnings && (
-        <div style={{ color: "#f0b72f", marginTop: 8 }}>
+        <div style={{ color: "var(--hud-warning)", marginTop: 8 }}>
           {warnings.body.map((w) => <div key={w.code}>⚠ {w.message} {w.hint}</div>)}
           <button onClick={() => launch(warnings.values, true)} style={{ marginTop: 8 }}
             disabled={busy}>

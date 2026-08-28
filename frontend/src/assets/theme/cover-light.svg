@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#edf4f1"/>
+      <stop offset="0.5" stop-color="#f7faf8"/>
+      <stop offset="1" stop-color="#e7eeeb"/>
+    </linearGradient>
+    <linearGradient id="sageField" x1="0" y1="0" x2="0.9" y2="0.8">
+      <stop offset="0" stop-color="#90afa7" stop-opacity="0.42"/>
+      <stop offset="0.42" stop-color="#c5d8d1" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="blueField" x1="0.12" y1="1" x2="0.88" y2="0">
+      <stop offset="0" stop-color="#d9e6e4" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#9cb9be" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#718f99" stop-opacity="0.16"/>
+    </linearGradient>
+    <filter id="atmosphere" x="-25%" y="-35%" width="150%" height="170%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006 0.012" numOctaves="3" seed="53" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="86" xChannelSelector="B" yChannelSelector="R" result="warped"/>
+      <feGaussianBlur in="warped" stdDeviation="52"/>
+    </filter>
+    <filter id="haze" x="-20%" y="-35%" width="140%" height="170%" color-interpolation-filters="sRGB">
+      <feTurbulence type="turbulence" baseFrequency="0.003 0.014" numOctaves="2" seed="23" result="grain"/>
+      <feDisplacementMap in="SourceGraphic" in2="grain" scale="58" result="shifted"/>
+      <feGaussianBlur in="shifted" stdDeviation="72"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="900" fill="url(#base)"/>
+  <g filter="url(#atmosphere)">
+    <path d="M-190 24 C80 -94 286 28 468 4 C722 -30 838 -122 1042 -64 C1250 0 1430 -106 1760 -8 L1760 340 C1510 390 1328 296 1092 354 C866 410 690 278 462 336 C224 398 42 296 -190 440 Z" fill="url(#sageField)"/>
+    <path d="M-170 448 C74 330 286 532 526 432 C750 338 884 478 1054 424 C1280 350 1472 432 1760 306 L1760 760 C1472 848 1250 680 1024 770 C800 858 616 682 410 774 C182 874 -10 762 -170 860 Z" fill="url(#blueField)"/>
+  </g>
+  <g filter="url(#haze)" opacity="0.7">
+    <path d="M96 154 C302 82 426 216 610 164 C810 108 936 192 1060 250 C1190 312 1348 224 1532 268" fill="none" stroke="#ffffff" stroke-opacity="0.68" stroke-width="138" stroke-linecap="round"/>
+    <path d="M-54 688 C198 566 390 742 616 654 C836 566 1022 724 1226 626 C1392 548 1524 590 1660 558" fill="none" stroke="#9db7b3" stroke-opacity="0.27" stroke-width="180" stroke-linecap="round"/>
+  </g>
+  <path d="M0 0 H1600 V900 H0 Z" fill="none" stroke="#607d78" stroke-opacity="0.025"/>
+</svg>

@@ -206,11 +206,13 @@ def _budget_or_refuse(cost):
         raise EnrollError("unconfigured hourly cost estimate") from exc
     if float(cost) <= cap:
         return
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "budget-cap-hit",
         "aws",
+        workspace=default_workspace(),
         fingerprint="budget-cap-hit:aws",
         source_engine=SOURCE,
         title="AWS hourly budget cap would be exceeded",
@@ -224,11 +226,13 @@ def _budget_or_refuse(cost):
 
 
 def _file_create_failed(name):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-create-failed",
         f"aws:{name}",
+        workspace=default_workspace(),
         fingerprint=f"aws-create:{name}",
         source_engine=SOURCE,
         title=f"EC2 create failed for {name}",
@@ -238,11 +242,13 @@ def _file_create_failed(name):
 
 
 def _file_terminate_failed(target):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-terminate-failed",
         f"aws:{target.pk}",
+        workspace=default_workspace(),
         fingerprint=f"aws-terminate:{target.pk}",
         source_engine=SOURCE,
         title=f"EC2 terminate failed for {target.host}",
@@ -255,11 +261,13 @@ def _file_terminate_failed(target):
 
 
 def _file_host_key_timeout(name):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-host-key-timeout",
         f"aws:{name}",
+        workspace=default_workspace(),
         fingerprint=f"aws-host-key-timeout:{name}",
         source_engine=SOURCE,
         title="EC2 host keys did not arrive in time",

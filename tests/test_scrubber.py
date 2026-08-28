@@ -5,17 +5,11 @@ class already covered by tests/test_nightly_failure_bundle.py.
 """
 from __future__ import annotations
 
-import pathlib
-import sys
-
-REPO = pathlib.Path(__file__).resolve().parent.parent
-
 
 def _scrub():
-    sys.path.insert(0, str(REPO / "scripts_dev"))
-    import scrub
+    from monitor.scrub import scrub
 
-    return scrub.scrub
+    return scrub
 
 
 def test_bearer_header_is_redacted():

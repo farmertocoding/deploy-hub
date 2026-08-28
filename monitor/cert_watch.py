@@ -47,6 +47,7 @@ def scan_cert_expiry(*, now=None):
             finding(
                 SOURCE_ENGINE,
                 f"cert-expiry:{site.pk}",
+                workspace=site.project.workspace,
                 severity=severity,
                 entity=f"site:{site.name}",
                 title=(

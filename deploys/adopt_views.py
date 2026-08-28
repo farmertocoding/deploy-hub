@@ -1,12 +1,13 @@
 """Authenticated start/cancel for Site adoption."""
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import Site
+from core.permissions import RequireAction, RequireWorkspace
+from core.rbac import SITE_FIELD, scoped_get
 from deploys.adopt_service import (
     AdoptHttpError,
     cancel_adopt,
@@ -34,7 +35,8 @@ class AdoptOperationSerializer(serializers.Serializer):
 
 
 class SiteAdoptView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "site.adopt"
 
     @extend_schema(
         request=AdoptRequestSerializer,
@@ -44,7 +46,7 @@ class SiteAdoptView(APIView):
         },
     )
     def post(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         data = getattr(request, "data", None)
         if not isinstance(data, dict):
             raise serializers.ValidationError({"detail": "body must be an object"})

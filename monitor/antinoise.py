@@ -26,34 +26,50 @@ STORM_FINDING_FP = "alert-storm"
 _after_raise_depth = 0
 
 
-def observe(fingerprint, ok, *, now=None):
+def _workspace(workspace=None, obj=None):
+    from core.models import default_workspace, workspace_of
+
+    return workspace or workspace_of(obj) or default_workspace()
+
+
+def observe(fingerprint, ok, *, workspace=None, now=None):
     """Open after 3 consecutive failures; close after 2 consecutive successes."""
+    from core.models import default_workspace
+
+    workspace = workspace or default_workspace()
     now = now or timezone.now()
-    _maybe_resolve_flap(fingerprint, now)
-    state, _ = AlertState.objects.get_or_create(fingerprint=fingerprint)
+    _maybe_resolve_flap(fingerprint, now, workspace=workspace)
+    state, _ = AlertState.objects.get_or_create(
+        workspace=workspace, fingerprint=fingerprint,
+    )
     if ok:
         state.consecutive_ok += 1
         state.consecutive_fail = 0
         state.save(update_fields=["consecutive_ok", "consecutive_fail"])
         if _is_open(state) and state.consecutive_ok >= CLOSE_AFTER:
-            return _close(state, fingerprint, now)
+            return _close(state, fingerprint, now, workspace=workspace)
         return None
     state.consecutive_fail += 1
     state.consecutive_ok = 0
     state.save(update_fields=["consecutive_fail", "consecutive_ok"])
     if state.consecutive_fail >= OPEN_AFTER and not _is_open(state):
-        return _open(state, fingerprint, now)
+        return _open(state, fingerprint, now, workspace=workspace)
     return None
 
 
-def flap_check(fingerprint, *, now=None):
+def flap_check(fingerprint, *, workspace=None, now=None):
     """≥3 open/close cycles in 30 min → one P2 FLAPPING."""
+    workspace = _workspace(workspace)
     now = now or timezone.now()
-    state = AlertState.objects.filter(fingerprint=fingerprint).first()
+    state = AlertState.objects.filter(
+        workspace=workspace, fingerprint=fingerprint,
+    ).first()
     if state is None or _cycle_count(state, now) < FLAP_CYCLES:
         return None
     flap_fp = _flap_fp(fingerprint)
-    existing = Finding.objects.filter(fingerprint=flap_fp).first()
+    existing = Finding.objects.filter(
+        workspace=workspace, fingerprint=flap_fp,
+    ).first()
     if existing is not None and existing.state != Finding.State.RESOLVED:
         return existing
     entity = _entity_of(fingerprint)
@@ -62,6 +78,7 @@ def flap_check(fingerprint, *, now=None):
         "FLAPPING",
         entity,
         fingerprint=flap_fp,
+        workspace=workspace,
         source_engine="monitor.antinoise",
         title="FLAPPING",
         body=(
@@ -122,10 +139,14 @@ def group_p2(window=GROUP_P2_WINDOW_S, *, now=None, mark=True):
     seen = set()
     for event in pending:
         fp = event["fingerprint"]
-        if fp in seen:
+        ws_id = event.get("workspace_id")
+        if ws_id is None:
             continue
-        seen.add(fp)
-        row = Finding.objects.filter(fingerprint=fp).first()
+        key = (ws_id, fp)
+        if key in seen:
+            continue
+        seen.add(key)
+        row = Finding.objects.filter(workspace_id=ws_id, fingerprint=fp).first()
         if row is not None:
             findings.append(row)
     pending_fps = {event["fingerprint"] for event in pending}
@@ -154,7 +175,10 @@ def storm_breaker(now):
     """>10 pushes/10 min → one P1 ALERT STORM (n); exit when the rate drops."""
     now = now or timezone.now()
     recent = _recent_pushes(now)
-    storm, _ = AlertState.objects.get_or_create(fingerprint=STORM_STATE_FP)
+    workspace = _workspace()
+    storm, _ = AlertState.objects.get_or_create(
+        workspace=workspace, fingerprint=STORM_STATE_FP,
+    )
     if len(recent) > STORM_LIMIT:
         if not _is_open(storm):
             storm.opened_at = now
@@ -165,6 +189,7 @@ def storm_breaker(now):
                 "ALERT STORM (n)",
                 "fleet",
                 fingerprint=STORM_FINDING_FP,
+                workspace=workspace,
                 source_engine="monitor.antinoise",
                 title=f"ALERT STORM ({len(recent)})",
                 body=(
@@ -180,6 +205,7 @@ def storm_breaker(now):
                 "ALERT STORM (n)",
                 "fleet",
                 fingerprint=STORM_FINDING_FP,
+                workspace=workspace,
                 source_engine="monitor.antinoise",
                 title=f"ALERT STORM ({len(recent)})",
                 body=(
@@ -188,11 +214,15 @@ def storm_breaker(now):
                 ),
                 fix_action="Find the noisy source; do not ack individual pages.",
             )
-        return Finding.objects.filter(fingerprint=STORM_FINDING_FP).first()
+        return Finding.objects.filter(
+            workspace=workspace, fingerprint=STORM_FINDING_FP,
+        ).first()
     if _is_open(storm):
         storm.closed_at = now
         storm.save(update_fields=["closed_at"])
-        row = Finding.objects.filter(fingerprint=STORM_FINDING_FP).first()
+        row = Finding.objects.filter(
+            workspace=workspace, fingerprint=STORM_FINDING_FP,
+        ).first()
         if row is not None and row.state != Finding.State.RESOLVED:
             _resolve_engine_finding(row, now)
     return None
@@ -202,7 +232,9 @@ def recovery_notice(finding, *, now=None):
     """Mandatory UP-after-N-min notice when an opened alert closes."""
     now = now or timezone.now()
     start = finding.first_seen
-    state = AlertState.objects.filter(fingerprint=finding.fingerprint).first()
+    state = AlertState.objects.filter(
+        workspace=finding.workspace, fingerprint=finding.fingerprint,
+    ).first()
     if state is not None and state.opened_at is not None:
         start = state.opened_at
     minutes = max(0, int((now - start).total_seconds() // 60))
@@ -228,7 +260,7 @@ def after_raise(row, *, now=None):
         return row
     _after_raise_depth += 1
     try:
-        _maybe_resolve_flap(row.fingerprint, now)
+        _maybe_resolve_flap(row.fingerprint, now, workspace=row.workspace)
         storm_breaker(now)
         _annotate_delivery(row, now)
         return _after_raise_body(row, now)
@@ -237,7 +269,9 @@ def after_raise(row, *, now=None):
 
 
 def _after_raise_body(row, now):
-    state, _ = AlertState.objects.get_or_create(fingerprint=row.fingerprint)
+    state, _ = AlertState.objects.get_or_create(
+        workspace=row.workspace, fingerprint=row.fingerprint,
+    )
     if row.state == Finding.State.ACKED:
         if state.acked_at is None:
             state.acked_at = now
@@ -274,35 +308,42 @@ def _storming_except(row, now):
     return len(_recent_pushes(now)) > STORM_LIMIT
 
 
-def _open(state, fingerprint, now):
+def _open(state, fingerprint, now, *, workspace=None):
+    workspace = _workspace(workspace, state)
     entity = _entity_of(fingerprint)
-    if _flap_holds(fingerprint, now) or suppressed_by(entity):
+    if _flap_holds(fingerprint, now, workspace=workspace) or suppressed_by(entity):
         return None
     state.opened_at = now
     state.closed_at = None
     _note_transition(state, "open", now)
     state.save()
     title, body, fix_action = _open_copy(fingerprint, entity)
-    return _file_open(fingerprint, entity, title, body, fix_action)
+    return _file_open(
+        fingerprint, entity, title, body, fix_action, workspace=workspace,
+    )
 
 
-def _close(state, fingerprint, now):
-    row = Finding.objects.filter(fingerprint=fingerprint).first()
+def _close(state, fingerprint, now, *, workspace=None):
+    workspace = _workspace(workspace, state)
+    row = Finding.objects.filter(
+        workspace=workspace, fingerprint=fingerprint,
+    ).first()
     state.closed_at = now
     _note_transition(state, "close", now)
     state.save()
     if row is not None and row.state != Finding.State.RESOLVED:
         resolve(row)
         row.refresh_from_db()
-    flap_check(fingerprint, now=now)
+    flap_check(fingerprint, workspace=workspace, now=now)
     if row is not None:
         return recovery_notice(row, now=now)
     return {"title": "UP after 0 min", "finding": None, "minutes": 0}
 
 
-def _file_open(fingerprint, entity, title, body, fix_action):
+def _file_open(fingerprint, entity, title, body, fix_action, *, workspace=None):
     kwargs = dict(
         fingerprint=fingerprint,
+        workspace=_workspace(workspace),
         title=title,
         body=body,
         fix_action=fix_action,
@@ -379,7 +420,7 @@ def _maybe_file_partner_aggregate(entity):
         return None
     fp = f"partner-aggregate-down:{partner.pk}"
     existing = (
-        Finding.objects.filter(fingerprint=fp)
+        Finding.objects.filter(workspace=partner.workspace, fingerprint=fp)
         .exclude(state=Finding.State.RESOLVED)
         .first()
     )
@@ -389,6 +430,7 @@ def _maybe_file_partner_aggregate(entity):
         "partner-aggregate-down",
         f"partner:{partner.pk}",
         fingerprint=fp,
+        workspace=partner.workspace,
         source_engine="monitor.antinoise",
         title=f"Partner {partner.slug} aggregate down",
         body=f"{down} partner sites are down.",
@@ -472,8 +514,10 @@ def _is_open(state):
     return state.opened_at is not None and state.closed_at is None
 
 
-def _fingerprint_open(fingerprint):
-    state = AlertState.objects.filter(fingerprint=fingerprint).first()
+def _fingerprint_open(fingerprint, *, workspace=None):
+    state = AlertState.objects.filter(
+        workspace=_workspace(workspace), fingerprint=fingerprint,
+    ).first()
     return state is not None and _is_open(state)
 
 
@@ -498,24 +542,30 @@ def _cycle_count(state, now):
     return cycles
 
 
-def _flap_holds(fingerprint, now):
+def _flap_holds(fingerprint, now, *, workspace=None):
+    workspace = _workspace(workspace)
     if fingerprint.startswith("FLAPPING:"):
         return False
     flap = (
-        Finding.objects.filter(fingerprint=_flap_fp(fingerprint))
+        Finding.objects.filter(
+            workspace=workspace, fingerprint=_flap_fp(fingerprint),
+        )
         .exclude(state=Finding.State.RESOLVED)
         .first()
     )
     if flap is None:
         return False
-    state = AlertState.objects.filter(fingerprint=fingerprint).first()
+    state = AlertState.objects.filter(
+        workspace=workspace, fingerprint=fingerprint,
+    ).first()
     if state is None or not state.transitions:
         return True
     last = _parse_dt(state.transitions[-1]["at"])
     return now - last < FLAP_WINDOW
 
 
-def _maybe_resolve_flap(fingerprint, now):
+def _maybe_resolve_flap(fingerprint, now, *, workspace=None):
+    workspace = _workspace(workspace)
     if fingerprint.startswith("FLAPPING:"):
         base = fingerprint[len("FLAPPING:"):]
         flap_fp = fingerprint
@@ -523,13 +573,15 @@ def _maybe_resolve_flap(fingerprint, now):
         base = fingerprint
         flap_fp = _flap_fp(fingerprint)
     flap = (
-        Finding.objects.filter(fingerprint=flap_fp)
+        Finding.objects.filter(workspace=workspace, fingerprint=flap_fp)
         .exclude(state=Finding.State.RESOLVED)
         .first()
     )
     if flap is None:
         return
-    state = AlertState.objects.filter(fingerprint=base).first()
+    state = AlertState.objects.filter(
+        workspace=workspace, fingerprint=base,
+    ).first()
     if state is None or not state.transitions:
         return
     last = _parse_dt(state.transitions[-1]["at"])
@@ -545,8 +597,10 @@ def _resolve_engine_finding(row, now):
     recovery_notice(row, now=now)
 
 
-def _push_log():
-    state, _ = AlertState.objects.get_or_create(fingerprint=PUSH_LOG_FP)
+def _push_log(*, workspace=None):
+    state, _ = AlertState.objects.get_or_create(
+        workspace=_workspace(workspace), fingerprint=PUSH_LOG_FP,
+    )
     return state
 
 
@@ -556,6 +610,7 @@ def _record_push(row, now, title=None, *, counts_for_storm=True):
     event = {
         "at": now.isoformat(),
         "fingerprint": row.fingerprint,
+        "workspace_id": row.workspace_id,
         "severity": row.severity,
         "delivered": False,
         "title": title or row.title,
@@ -569,7 +624,9 @@ def _record_push(row, now, title=None, *, counts_for_storm=True):
 
 
 def _recent_pushes(now):
-    log = AlertState.objects.filter(fingerprint=PUSH_LOG_FP).first()
+    log = AlertState.objects.filter(
+        workspace=_workspace(), fingerprint=PUSH_LOG_FP,
+    ).first()
     if log is None:
         return []
     recent = []

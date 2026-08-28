@@ -51,18 +51,21 @@ def _refuse(site, missing):
     finding(
         "deploys",
         f"deploy-seam:{site.pk}",
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{getattr(site, 'name', site)}",
         title=f"Deploy refused: missing {names}",
         body=(
             f"Site {getattr(site, 'name', site)} cannot deploy without {names}. "
             "Settings-connect stores a DNS token only; Origin certificates "
-            "require origin_ca_key_ref on the DnsAccount (vault). The pipeline "
+            "require origin_ca_key_ref on the DnsAccount (vault) planted as a "
+            "Bearer token with Zone SSL and Certificates Edit. The pipeline "
             "refuses rather than using an in-memory Fake."
         ),
         fix_action=(
             f"Set {names} on the DnsAccount in the vault. "
-            "Settings-connect does not accept an Origin CA key."
+            "Settings-connect does not accept an Origin CA token; plant a "
+            "Bearer token with Zone SSL and Certificates Edit."
         ),
     )
     raise DeploySeamRefused(f"missing {names}")

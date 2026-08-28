@@ -10,15 +10,19 @@ publishes the transition.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 # seq comes through core's stream port (findings_seq), not a realtime import:
 # monitor must stay scanner-free (ARCH-V6) and realtime reaches scanner.
 from core import findings as findings_service
+from core.audit import audit
+from core.exception_handlers import client_ip
 from core.findings import findings_seq
 from core.models import Finding
+from core.permissions import RequireWorkspace
+from core.rbac import has_operator_capability, request_workspace, scope_queryset, scoped_get
 
 from .map_graph import graph_snapshot
 
@@ -67,33 +71,69 @@ class TransitionSerializer(serializers.Serializer):
 
 
 class FindingListView(APIView):
-    @extend_schema(parameters=[FindingFilterSerializer],
-                   responses={200: FindingListSnapshotSerializer})
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
+    @extend_schema(
+        operation_id="v1_findings_list",
+        parameters=[FindingFilterSerializer],
+        responses={200: FindingListSnapshotSerializer},
+    )
     def get(self, request):
         filters = FindingFilterSerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
         seq = findings_seq()
-        rows = Finding.objects.filter(**filters.validated_data).order_by(
-            "severity", "-last_seen")
+        rows = scope_queryset(Finding.objects.all(), request_workspace(request)).filter(
+            **filters.validated_data).order_by("severity", "-last_seen")
         return Response({"seq": seq, "data": FindingSerializer(rows, many=True).data})
 
 
 class FindingDetailView(APIView):
-    @extend_schema(responses={200: FindingDetailSnapshotSerializer})
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
+    @extend_schema(
+        operation_id="v1_findings_retrieve",
+        responses={200: FindingDetailSnapshotSerializer},
+    )
     def get(self, request, pk):
         seq = findings_seq()
-        row = get_object_or_404(Finding, pk=pk)
+        row = scoped_get(request, Finding.objects.all(), pk=pk)
         return Response({"seq": seq, "data": FindingSerializer(row).data})
 
 
+_FINDING_TRANSITION_CAP = {
+    "ack": "findings.manage",
+    "resolve": "findings.manage",
+    "accept_risk": "findings.accept_risk",
+}
+
+
 class FindingTransitionView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
     @extend_schema(request=TransitionSerializer,
                    responses={200: FindingDetailSnapshotSerializer})
     def post(self, request, pk):
-        row = get_object_or_404(Finding, pk=pk)
         ser = TransitionSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         action = ser.validated_data["action"]
+        cap = _FINDING_TRANSITION_CAP[action]
+        workspace = request_workspace(request)
+        if not has_operator_capability(request.user, cap, workspace):
+            audit(
+                "finding.transition_denied",
+                actor=request.user,
+                source="api",
+                severity="security",
+                source_ip=client_ip(request),
+                workspace=workspace,
+                finding_id=pk,
+                requested=action,
+            )
+            return Response(
+                {"detail": f"{cap} required.", "code": "not_permitted", "capability": cap},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        row = scoped_get(request, Finding.objects.all(), pk=pk)
         try:
             if action == "ack":
                 findings_service.ack(row, actor=request.user, source="api")
@@ -142,9 +182,11 @@ class MapSnapshotSerializer(serializers.Serializer):
 class MapSnapshotView(APIView):
     """Table-backed map.graph snapshot (§D7 / MAP-96-GRAPH-V1)."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
     @extend_schema(responses={200: MapSnapshotSerializer})
     def get(self, request):
-        snap = graph_snapshot()
+        snap = graph_snapshot(workspace=request_workspace(request))
         return Response({
             "seq": snap["seq"],
             "data": {"nodes": snap["nodes"], "edges": snap["edges"]},

@@ -4,12 +4,23 @@ Public create binds one matching-purpose eligible zone. Zero eligible is
 409 with zero Project, zero Site, zero Finding — site-dns-unbound is illegal
 because an unbound public Site cannot exist (C1 / I-purpose / I-target).
 """
+from pathlib import Path
+
 import pytest
 from django.test import override_settings
 
 pytestmark = pytest.mark.django_db
 
 PROJECTS = "/api/v1/projects/"
+
+
+@pytest.fixture(autouse=True)
+def _allow_tmp_local_sources(tmp_path, settings):
+    root = tmp_path / "sources"
+    root.mkdir()
+    settings.HUB_ALLOW_LOCAL_SOURCES = True
+    settings.HUB_LOCAL_SOURCE_ROOT = str(root)
+    return root
 
 
 @pytest.fixture
@@ -38,9 +49,15 @@ def _zone(name, *, purpose="prod"):
 
 
 def _public_body(name, **extra):
+    from django.conf import settings as dj_settings
+
+    root = Path(dj_settings.HUB_LOCAL_SOURCE_ROOT)
+    local = root / name
+    local.mkdir(parents=True, exist_ok=True)
+    (local / "app.py").write_text("# fixture\n")
     body = {
         "name": name,
-        "local_path": f"/tmp/{name}",
+        "local_path": str(local),
         "domain": f"{name}.example.com",
         "exposure": "public",
         "proxied": True,
@@ -268,14 +285,10 @@ def test_mesh_only_site_may_omit_dns_zone(auth_client):
 
     _target()
     before = _counts()
+    body = _public_body("bind-mesh", exposure="mesh_only", domain="")
     response = auth_client.post(
         PROJECTS,
-        {
-            "name": "bind-mesh",
-            "local_path": "/tmp/bind-mesh",
-            "exposure": "mesh_only",
-            "proxied": True,
-        },
+        body,
         content_type="application/json",
     )
     assert response.status_code == 201, response.content

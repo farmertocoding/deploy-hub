@@ -12,7 +12,6 @@ import secrets
 
 from django.conf import settings
 from django.db import transaction
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -21,9 +20,19 @@ from rest_framework.views import APIView
 
 from core.audit import audit
 from core.findings import finding
-from core.models import AuditEvent, Finding, Partner, PartnerSite, Site, SiteInstance, Target
-from core.permissions import RequireRecentTouch
-from core.transport import FakeTransport
+from core.models import (
+    AuditEvent,
+    Finding,
+    Partner,
+    PartnerApiFlag,
+    PartnerSite,
+    Site,
+    SiteInstance,
+    Target,
+    default_workspace,
+)
+from core.permissions import RequireAction, RequireRecentTouch, RequireSystemAdmin, RequireWorkspace
+from core.rbac import SITE_FIELD, TARGET_FIELD, request_workspace, scoped_get
 from vault import service as vault_service
 from vault.models import Secret
 from vault.ssh import generate_ed25519_raw
@@ -93,6 +102,7 @@ class PartnerListSerializer(serializers.Serializer):
 
 class ConfirmNameSerializer(serializers.Serializer):
     confirm_name = serializers.CharField()
+    enabled = serializers.BooleanField(required=False)
 
 
 class DestinationRankSerializer(serializers.Serializer):
@@ -122,6 +132,7 @@ def _intake_payload():
 
     url = str(getattr(settings, "INTAKE_URL", "") or "").strip()
     error = Finding.objects.filter(
+        workspace=default_workspace(),
         fingerprint="partner-intake-unreachable",
     ).exclude(state=Finding.State.RESOLVED).exists()
     latest = (
@@ -140,10 +151,14 @@ def _intake_payload():
     }
 
 
-def _candidate_targets():
+def _candidate_targets(workspace=None):
     from core.models import Target
+    from core.rbac import scope_queryset
+
+    rows = Target.objects.filter(status=Target.Status.READY).order_by("pk")
+    rows = scope_queryset(rows, workspace, TARGET_FIELD)
     out = []
-    for row in Target.objects.filter(status=Target.Status.READY).order_by("pk"):
+    for row in rows:
         payload = row.collect_payload or {}
         out.append({
             "id": row.pk,
@@ -155,20 +170,36 @@ def _candidate_targets():
 
 
 def partner_api_enabled():
-    return bool(getattr(settings, "PARTNER_API_ENABLED", False))
+    return PartnerApiFlag.is_on()
 
 
 def set_partner_api_enabled(value):
-    settings.PARTNER_API_ENABLED = bool(value)
+    PartnerApiFlag.set_on(value)
 
 
 def transport_for(target):
-    """T1 Fake Transport by default; tests inject a recording double."""
-    return FakeTransport()
+    """Same factory as deploys.pipeline._default_transport. T1 tests inject Fake."""
+    from core.ssh import SshTransport
+
+    return SshTransport(target)
+
+
+def _container_names(site):
+    """Match deploys/steps.py: site-{slug}-{deployment_id} when a Deployment exists."""
+    from django.apps import apps
+
+    Deployment = apps.get_model("deploys", "Deployment")
+    pks = list(
+        Deployment.objects.filter(manifest__site=site).values_list("pk", flat=True)
+    )
+    if pks:
+        return [f"site-{site.name}-{pk}" for pk in pks]
+    return [f"site-{site.name}"]
 
 
 def _container_name(site):
-    return f"site-{site.name}"
+    names = _container_names(site)
+    return names[0]
 
 
 def _route_id(site):
@@ -185,16 +216,40 @@ def site_route_status(site):
     return 200
 
 
-def stop_partner_site(site, transport):
-    name = _container_name(site)
-    transport.run(["docker", "stop", name])
+def stop_partner_site(site, transport, *, desired_state=None):
+    for name in _container_names(site):
+        transport.run(["docker", "stop", name])
     transport.run([
         "curl", "-sf", "-X", "DELETE",
         f"http://127.0.0.1:2019/id/{_route_id(site)}",
     ])
+    if desired_state is None:
+        desired_state = SiteInstance.DesiredState.STOPPED
+    observed = (
+        SiteInstance.ObservedState.ABSENT
+        if desired_state == SiteInstance.DesiredState.ABSENT
+        else SiteInstance.ObservedState.STOPPED
+    )
     SiteInstance.objects.filter(site=site).update(
-        desired_state=SiteInstance.DesiredState.STOPPED,
-        observed_state=SiteInstance.ObservedState.STOPPED,
+        desired_state=desired_state,
+        observed_state=observed,
+    )
+
+
+def _mark_site_absent(site):
+    qs = SiteInstance.objects.filter(site=site)
+    if qs.exists():
+        qs.update(desired_state=SiteInstance.DesiredState.ABSENT)
+        return
+    if not site.primary_target_id:
+        return
+    port = 20000 + (int(site.pk) % 9000)
+    SiteInstance.objects.create(
+        site=site,
+        target=site.primary_target,
+        desired_state=SiteInstance.DesiredState.ABSENT,
+        observed_state=SiteInstance.ObservedState.ABSENT,
+        internal_port=port,
     )
 
 
@@ -225,6 +280,7 @@ def auto_trigger_kill_switch(partner, *, reason="abuse"):
     return raise_alert(
         "partner-kill-switch",
         f"partner:{partner.pk}",
+        workspace=default_workspace(),
         fingerprint=f"partner-kill-switch:{partner.pk}",
         source_engine="core.partner",
         title="Partner API kill-switch auto-triggered",
@@ -267,18 +323,20 @@ def _public_partner(partner):
 class PartnerListCreateView(APIView):
     """GET is the operator list (no secrets). POST is T1 partner.create."""
 
-    permission_classes = [IsAuthenticated, RequireRecentTouch]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction, RequireRecentTouch]
+    action_id = "partner.create"
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), RequireRecentTouch()]
+            return [IsAuthenticated(), RequireWorkspace()]
+        return [IsAuthenticated(), RequireWorkspace(), RequireAction(), RequireRecentTouch()]
 
-    @extend_schema(responses={200: PartnerListSerializer})
+    @extend_schema(operation_id="v1_partners_list", responses={200: PartnerListSerializer})
     def get(self, request):
+        workspace = request_workspace(request)
         partners = [
             _public_partner(row)
-            for row in Partner.objects.order_by("pk")
+            for row in Partner.objects.filter(workspace=workspace).order_by("pk")
         ]
         return Response(
             PartnerListSerializer(
@@ -286,7 +344,7 @@ class PartnerListCreateView(APIView):
                     "partners": partners,
                     "intake": _intake_payload(),
                     "api_enabled": partner_api_enabled(),
-                    "candidate_targets": _candidate_targets(),
+                    "candidate_targets": _candidate_targets(workspace),
                 }
             ).data
         )
@@ -305,7 +363,12 @@ class PartnerListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         name = (ser.validated_data.get("name") or "").strip() or slug
-        if Partner.objects.filter(slug=slug).exists():
+        workspace = request_workspace(request)
+        if workspace is None:
+            return Response(
+                {"detail": "Workspace required."}, status=status.HTTP_403_FORBIDDEN,
+            )
+        if Partner.objects.filter(workspace=workspace, slug=slug).exists():
             return Response(
                 {"detail": "Partner slug already exists."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -314,6 +377,7 @@ class PartnerListCreateView(APIView):
         whsec = _mint_whsec()
         with transaction.atomic():
             partner = Partner.objects.create(
+                workspace=workspace,
                 slug=slug,
                 name=name,
                 pubkey_current=pubkey,
@@ -349,22 +413,23 @@ class PartnerListCreateView(APIView):
 class PartnerDetailView(APIView):
     """GET never echoes hubk_ or whsec_."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireWorkspace]
 
-    @extend_schema(responses={200: PartnerPublicSerializer})
+    @extend_schema(operation_id="v1_partners_retrieve", responses={200: PartnerPublicSerializer})
     def get(self, request, pk):
-        partner = get_object_or_404(Partner, pk=pk)
+        partner = scoped_get(request, Partner.objects.all(), pk=pk)
         return Response(PartnerPublicSerializer(_public_partner(partner)).data)
 
 
 class PartnerSuspendView(APIView):
     """T1 partner.suspend: type the slug, then stop + detach + revoke."""
 
-    permission_classes = [IsAuthenticated, RequireRecentTouch]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction, RequireRecentTouch]
+    action_id = "partner.suspend"
 
     @extend_schema(request=ConfirmNameSerializer, responses={200: PartnerPublicSerializer})
     def post(self, request, pk):
-        partner = get_object_or_404(Partner, pk=pk)
+        partner = scoped_get(request, Partner.objects.all(), pk=pk)
         ser = ConfirmNameSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         if ser.validated_data["confirm_name"] != partner.slug:
@@ -386,9 +451,10 @@ class PartnerSuspendView(APIView):
 
 
 class PartnerApiKillSwitchView(APIView):
-    """T1 partner.api_kill_switch: type partner-api. Enable when OFF, never a toggle."""
+    """T1 partner.api_kill_switch: type partner-api. Explicit enabled, never XOR."""
 
-    permission_classes = [IsAuthenticated, RequireRecentTouch]
+    permission_classes = [IsAuthenticated, RequireSystemAdmin, RequireRecentTouch]
+    action_id = "partner.api_kill_switch"
 
     @extend_schema(request=ConfirmNameSerializer, responses={200: None})
     def post(self, request):
@@ -399,26 +465,40 @@ class PartnerApiKillSwitchView(APIView):
                 {"detail": "Type partner-api to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        enabled = not partner_api_enabled()
-        set_partner_api_enabled(enabled)
+        current = partner_api_enabled()
+        if "enabled" in ser.validated_data:
+            want = bool(ser.validated_data["enabled"])
+        else:
+            want = True
+        if want == current:
+            return Response(
+                {
+                    "detail": "Partner API is already in that state.",
+                    "code": "already_set",
+                    "api_enabled": current,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        set_partner_api_enabled(want)
         audit(
             "partner.api_kill_switch",
             actor=request.user,
             source="api",
             severity="security",
-            enabled=enabled,
+            enabled=want,
         )
-        return Response({"api_enabled": enabled})
+        return Response({"api_enabled": want})
 
 
 class PartnerSiteTakedownView(APIView):
     """T2 partner.site_takedown: {domain} route → 410."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "partner.site_takedown"
 
     @extend_schema(request=ConfirmNameSerializer, responses={410: None})
     def post(self, request, pk):
-        site = get_object_or_404(Site, pk=pk)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=pk)
         if not PartnerSite.objects.filter(site=site).exists():
             return Response(status=status.HTTP_404_NOT_FOUND)
         ser = ConfirmNameSerializer(data=request.data)
@@ -428,9 +508,13 @@ class PartnerSiteTakedownView(APIView):
                 {"detail": "Type the site domain to confirm."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        SiteInstance.objects.filter(site=site).update(
-            desired_state=SiteInstance.DesiredState.ABSENT,
-        )
+        _mark_site_absent(site)
+        if site.primary_target_id:
+            stop_partner_site(
+                site,
+                transport_for(site.primary_target),
+                desired_state=SiteInstance.DesiredState.ABSENT,
+            )
         audit(
             "partner.site_takedown",
             obj=site,
@@ -439,24 +523,33 @@ class PartnerSiteTakedownView(APIView):
             severity="security",
             domain=site.domain,
         )
+        if site_route_status(site) != 410:
+            return Response({"status": 200, "detail": "takedown queued"})
         return Response({"status": 410}, status=status.HTTP_410_GONE)
 
 
 class PartnerDestinationRankView(APIView):
     """T2 partner.destination_rank. Own-server without tunnel is a Finding."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "partner.destination_rank"
 
     @extend_schema(
         request=DestinationRankSerializer,
         responses={200: PartnerPublicSerializer},
     )
     def post(self, request, pk):
-        partner = get_object_or_404(Partner, pk=pk)
+        partner = scoped_get(request, Partner.objects.all(), pk=pk)
         ser = DestinationRankSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         order = list(ser.validated_data["destination_order"])
-        targets = {row.pk: row for row in Target.objects.filter(pk__in=order)}
+        from core.rbac import scope_queryset
+
+        workspace = request_workspace(request)
+        scoped_targets = scope_queryset(
+            Target.objects.filter(pk__in=order), workspace, TARGET_FIELD,
+        )
+        targets = {row.pk: row for row in scoped_targets}
         for target_id in order:
             target = targets.get(target_id)
             if target is None:
@@ -470,6 +563,7 @@ class PartnerDestinationRankView(APIView):
                     finding(
                         "core.partner",
                         f"partner-tunnel-required:{target.pk}",
+                        workspace=target.zone.workspace,
                         severity="p2",
                         entity=f"target:{target.host}",
                         title="Own-server partner destination requires a tunnel",

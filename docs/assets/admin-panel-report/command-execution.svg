@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="500" viewBox="0 0 1700 500" role="img" aria-labelledby="title desc">
+  <title id="title">Administrative command execution flow</title><desc id="desc">A two-lane sequence from button click and authorization through preflight, confirmation, durable command creation, worker execution, events, and UI refresh.</desc>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L0 6 L9 3 z" fill="#475569"/></marker><style>.bg{fill:#f8fafc}.lane{fill:#fff;stroke:#cbd5e1;stroke-width:2}.b{fill:#eff6ff;stroke:#60a5fa;stroke-width:2}.g{fill:#f0fdf4;stroke:#22c55e;stroke-width:2}.y{fill:#fffbeb;stroke:#f59e0b;stroke-width:2}.p{fill:#fdf4ff;stroke:#d946ef;stroke-width:2}.t{font:600 14px system-ui,sans-serif;fill:#0f172a}.h{font:700 22px system-ui,sans-serif;fill:#1e293b}.s{font:12px system-ui,sans-serif;fill:#475569}.l{stroke:#475569;stroke-width:2;fill:none;marker-end:url(#a)}</style></defs>
+  <rect class="bg" width="1700" height="500"/><text class="h" x="40" y="43">Administrative command execution</text>
+  <rect class="lane" x="30" y="75" width="1640" height="150" rx="18"/><text class="t" x="50" y="104">Request and decision</text>
+  <rect class="b" x="70" y="130" width="155" height="62" rx="10"/><text class="t" x="103" y="167">Button click</text>
+  <rect class="b" x="275" y="130" width="190" height="62" rx="10"/><text class="t" x="294" y="155">Permission + allowed</text><text class="t" x="326" y="176">action check</text>
+  <rect class="b" x="515" y="130" width="190" height="62" rx="10"/><text class="t" x="540" y="155">Server-computed</text><text class="t" x="554" y="176">preflight / diff</text>
+  <rect class="y" x="755" y="130" width="180" height="62" rx="10"/><text class="t" x="790" y="155">T1 / T2</text><text class="t" x="785" y="176">confirmation</text>
+  <rect class="g" x="985" y="130" width="215" height="62" rx="10"/><text class="t" x="1009" y="155">Command + revision</text><text class="t" x="1019" y="176">+ idempotency key</text>
+  <path class="l" d="M225 161 H275"/><path class="l" d="M465 161 H515"/><path class="l" d="M705 161 H755"/><path class="l" d="M935 161 H985"/>
+
+  <rect class="lane" x="30" y="255" width="1640" height="205" rx="18"/><text class="t" x="50" y="285">Durable execution and feedback</text>
+  <rect class="g" x="70" y="330" width="190" height="70" rx="10"/><text class="t" x="105" y="360">DB transaction</text><text class="s" x="94" y="382">domain + audit + outbox</text>
+  <rect class="p" x="320" y="330" width="190" height="70" rx="10"/><text class="t" x="343" y="360">Outbox dispatcher</text><text class="s" x="353" y="382">retries until accepted</text>
+  <rect class="p" x="570" y="330" width="190" height="70" rx="10"/><text class="t" x="591" y="360">Worker fenced lease</text><text class="s" x="604" y="382">heartbeat + expiry</text>
+  <rect class="g" x="820" y="330" width="210" height="70" rx="10"/><text class="t" x="845" y="360">Persisted transitions</text><text class="s" x="850" y="382">attempt + step + logs</text>
+  <rect class="b" x="1090" y="330" width="190" height="70" rx="10"/><text class="t" x="1111" y="360">Realtime sequence</text><text class="s" x="1114" y="382">projection, not truth</text>
+  <rect class="b" x="1340" y="330" width="250" height="70" rx="10"/><text class="t" x="1378" y="360">Authoritative snapshot</text><text class="s" x="1396" y="382">UI refetch and render</text>
+  <path class="l" d="M1092 192 C1092 260 165 260 165 330"/><path class="l" d="M260 365 H320"/><path class="l" d="M510 365 H570"/><path class="l" d="M760 365 H820"/><path class="l" d="M1030 365 H1090"/><path class="l" d="M1280 365 H1340"/>
+</svg>

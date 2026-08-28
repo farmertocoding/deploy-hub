@@ -30,6 +30,7 @@ def _qr_svg(text):
 
 class EnrollView(APIView):
     permission_classes = [IsAuthenticated]
+    serializer_class = serializers.Serializer
 
     def post(self, request):
         from django_otp.plugins.otp_totp.models import TOTPDevice

@@ -34,7 +34,7 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 _spec = importlib.util.spec_from_file_location(
-    "hub_scrub", pathlib.Path(__file__).with_name("scrub.py"),
+    "hub_scrub", REPO / "monitor" / "scrub.py",
 )
 _scrub_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_scrub_mod)

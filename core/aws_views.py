@@ -12,9 +12,11 @@ import json
 from django.conf import settings
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.permissions import RequireRecentTouch, RequireSystemAdmin, RequireWorkspace
 from core.test_mode import TestModeError
 from providers import aws_creds
 from vault import service as vault_service
@@ -52,6 +54,14 @@ def _ref():
 
 
 class AwsConnectView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireRecentTouch]
+    action_id = "aws.connect"
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAuthenticated(), RequireWorkspace()]
+        return [IsAuthenticated(), RequireSystemAdmin(), RequireRecentTouch()]
+
     @extend_schema(responses={200: AwsStatusSerializer})
     def get(self, request):
         ref = _ref()

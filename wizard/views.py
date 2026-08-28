@@ -1,21 +1,21 @@
 """Wizard API (§4.5: serializers are the source of truth; the TS client + zod schemas
 are generated from them and `make check-generated` keeps the mirror honest)."""
-from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
-from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.exceptions import ValidationError
-from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.exception_handlers import django_validation_to_drf_detail
-from core.models import DnsZone, Project, Site, Target
+from core.models import Project, Site
+from core.permissions import RequireAction, RequireWorkspace
+from core.rbac import SITE_FIELD, request_workspace, scoped_get
 from core.validators import validate_domain
 
 from . import service
+from .create import FleetRefuse, create_project
 from .materialize import MaterializeRefused, materialize, preflight, warnings_for
 from .questions import question_set
 
@@ -83,14 +83,17 @@ def _state(site):
 class WizardView(APIView):
     """GET the question set and current answers; PATCH a partial answer set."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "wizard.answers"
+
     @extend_schema(responses={200: WizardStateSerializer})
     def get(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         return Response(WizardStateSerializer(_state(site)).data)
 
     @extend_schema(request=AnswersSerializer, responses={200: WizardStateSerializer})
     def patch(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         payload = AnswersSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         try:
@@ -105,9 +108,12 @@ class WizardView(APIView):
 class ManifestView(APIView):
     """POST materializes version N+1; GET returns the latest frozen manifest."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "wizard.materialize"
+
     @extend_schema(request=MaterializeSerializer, responses={201: ManifestSerializer})
     def post(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         payload = MaterializeSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         try:
@@ -123,7 +129,7 @@ class ManifestView(APIView):
 
     @extend_schema(responses={200: ManifestSerializer})
     def get(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         manifest = site.manifests.first()
         if manifest is None:
             return Response({"detail": "no manifest materialized yet"},
@@ -232,10 +238,13 @@ def _open_cert_refusals(sites):
     fingerprints = [f"unproxied-cert:{site.pk}" for site in sites]
     if not fingerprints:
         return {}
+    workspace_ids = {site.project.workspace_id for site in sites}
     return {
         row.fingerprint: row
         for row in Finding.objects.filter(
-            fingerprint__in=fingerprints, state=Finding.State.OPEN,
+            workspace_id__in=workspace_ids,
+            fingerprint__in=fingerprints,
+            state=Finding.State.OPEN,
         )
     }
 
@@ -250,9 +259,12 @@ def _open_attack_states(sites):
     ]
     if not fingerprints:
         return {}
+    workspace_ids = {site.project.workspace_id for site in sites}
     return {
         row.fingerprint: row
-        for row in Finding.objects.filter(fingerprint__in=fingerprints)
+        for row in Finding.objects.filter(
+            workspace_id__in=workspace_ids, fingerprint__in=fingerprints,
+        )
         .exclude(state=Finding.State.RESOLVED)
     }
 
@@ -369,6 +381,17 @@ class ProjectCreateSerializer(serializers.Serializer):
     proxied = serializers.BooleanField(required=False, default=True)
     dns_zone = serializers.IntegerField(required=False, allow_null=True, default=None)
     primary_target = serializers.IntegerField(required=False, allow_null=True, default=None)
+    site_name = serializers.CharField(required=False, allow_blank=True, default="")
+    environment = serializers.CharField(required=False, allow_blank=True, default="")
+    deploy_strategy = serializers.ChoiceField(
+        choices=Site.DeployStrategy.choices, required=False,
+        default=Site.DeployStrategy.BLUE_GREEN,
+    )
+    deploy_policy = serializers.ChoiceField(
+        choices=Site.DeployPolicy.choices, required=False,
+        default=Site.DeployPolicy.AUTO,
+    )
+    deploy_window_cron = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         git_url = (attrs.get("git_url") or "").strip()
@@ -377,6 +400,13 @@ class ProjectCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"non_field_errors": "provide git_url or local_path, not both"}
             )
+        if local_path:
+            from core.local_sources import LocalSourceError, refuse_api_local_path
+
+            try:
+                local_path = str(refuse_api_local_path(local_path))
+            except LocalSourceError as exc:
+                raise serializers.ValidationError({"local_path": str(exc)}) from exc
         attrs["git_url"] = git_url
         attrs["local_path"] = local_path
         if not (attrs.get("git_ref") or "").strip():
@@ -398,65 +428,7 @@ class ProjectCreateSerializer(serializers.Serializer):
         return attrs
 
 
-def _fleet_refuse(field, message):
-    """409 = well-formed body, fleet state cannot bind (I-target)."""
-    return Response(
-        {"errors": {field: [{"code": "conflict", "message": message, "hint": ""}]}},
-        status=status.HTTP_409_CONFLICT,
-    )
 
-
-def eligible_dns_zones():
-    """purpose=prod, or purpose=test under the test-plane triple key (I-purpose)."""
-    from django.db.models import Q
-
-    prod = Q(purpose=DnsZone.Purpose.PROD)
-    if getattr(settings, "HUB_TEST_MODE", False):
-        slugs = list(getattr(settings, "HUB_TEST_ZONE_SLUGS", None) or [])
-        return DnsZone.objects.filter(
-            prod | Q(purpose=DnsZone.Purpose.TEST, name__in=slugs)
-        )
-    return DnsZone.objects.filter(prod)
-
-
-def _bind_dns_zone(exposure, requested_pk):
-    eligible = list(eligible_dns_zones())
-    if requested_pk is not None:
-        match = next((zone for zone in eligible if zone.pk == requested_pk), None)
-        if match is None:
-            return None, _fleet_refuse(
-                "dns_zone", "requested zone is not an eligible public zone",
-            )
-        return match, None
-    if exposure == Site.Exposure.MESH_ONLY:
-        return None, None
-    if len(eligible) == 1:
-        return eligible[0], None
-    if not eligible:
-        return None, _fleet_refuse(
-            "dns_zone", "no eligible DNS zone is connected",
-        )
-    return None, _fleet_refuse(
-        "dns_zone", "several eligible zones; dns_zone is required",
-    )
-
-
-def _bind_primary_target(requested_pk):
-    enrolled = list(Target.objects.all())
-    if requested_pk is not None:
-        match = next((row for row in enrolled if row.pk == requested_pk), None)
-        if match is None:
-            raise ValidationError(
-                {"primary_target": "primary_target must be an enrolled Target"}
-            )
-        return match, None
-    if len(enrolled) == 1:
-        return enrolled[0], None
-    if not enrolled:
-        return None, _fleet_refuse("primary_target", "no enrolled target")
-    return None, _fleet_refuse(
-        "primary_target", "several targets; primary_target is required",
-    )
 
 
 class ProjectListView(APIView):
@@ -472,12 +444,18 @@ class ProjectListView(APIView):
     primary_target from the eligible fleet (I-purpose / I-target).
     """
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "project.create"
+
     @extend_schema(responses={200: ProjectSummarySerializer(many=True)})
     def get(self, request):
-        return Response([
-            project_row_body(project)
-            for project in Project.objects.order_by("name").prefetch_related("sites")
-        ])
+        from core.rbac import scope_queryset
+
+        qs = scope_queryset(
+            Project.objects.order_by("name").prefetch_related("sites"),
+            request_workspace(request),
+        )
+        return Response([project_row_body(project) for project in qs])
 
     @extend_schema(
         request=ProjectCreateSerializer, responses={201: ProjectSummarySerializer},
@@ -485,47 +463,19 @@ class ProjectListView(APIView):
     def post(self, request):
         ser = ProjectCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-        zone, refuse = _bind_dns_zone(data["exposure"], data.get("dns_zone"))
-        if refuse is not None:
-            return refuse
-        target, refuse = _bind_primary_target(data.get("primary_target"))
-        if refuse is not None:
-            return refuse
-
-        slug = slugify(data["name"])
-        if not slug:
-            raise ValidationError({"name": "name must produce a slug"})
-        source_kind = (
-            Project.Source.LOCAL_PATH if data["local_path"] else Project.Source.GIT
-        )
+        workspace = request_workspace(request)
+        if workspace is None:
+            return Response(
+                {"detail": "Workspace required."}, status=status.HTTP_403_FORBIDDEN,
+            )
         try:
-            with transaction.atomic():
-                project = Project(
-                    name=data["name"],
-                    slug=slug,
-                    source_kind=source_kind,
-                    git_url=data["git_url"],
-                    git_ref=data["git_ref"],
-                    local_path=data["local_path"],
-                    created_by=request.user,
-                )
-                project.full_clean()
-                project.save()
-                site = Site(
-                    project=project,
-                    name=data["name"],
-                    domain=data["domain"],
-                    exposure=data["exposure"],
-                    proxied=data["proxied"],
-                    dns_zone=zone,
-                    primary_target=target,
-                    created_by=request.user,
-                )
-                site.full_clean()
-                site.save()
-        except DjangoValidationError as exc:
-            raise ValidationError(django_validation_to_drf_detail(exc)) from exc
+            project = create_project(
+                ser.validated_data,
+                user=request.user,
+                workspace=workspace,
+            )
+        except FleetRefuse as exc:
+            return exc.response
         return Response(project_row_body(project), status=status.HTTP_201_CREATED)
 
 
@@ -536,9 +486,11 @@ class ReadinessView(APIView):
     all agree on what counts as a blocker.
     """
 
+    permission_classes = [IsAuthenticated, RequireWorkspace]
+
     @extend_schema(responses={200: ReadinessSerializer})
     def get(self, request, project_id):
-        project = get_object_or_404(Project, pk=project_id)
+        project = scoped_get(request, Project.objects.all(), pk=project_id)
         return Response(readiness_body(project.scan_report, project.scanned_at))
 
 
@@ -559,6 +511,9 @@ class SiteEdgeOwnerSerializer(serializers.Serializer):
 class SiteEdgeOwnerView(APIView):
     """Record the operator's Caddy-ownership decision. Never writes dns_zone."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "site.edge_owner"
+
     @extend_schema(
         request=SiteEdgeOwnerSerializer,
         responses={200: SiteEdgeOwnerSerializer},
@@ -566,7 +521,7 @@ class SiteEdgeOwnerView(APIView):
     def patch(self, request, site_id):
         from provision.adopt import apply_edge_owner
 
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         payload = SiteEdgeOwnerSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         apply_edge_owner(

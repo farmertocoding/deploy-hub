@@ -5,7 +5,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from core.models import BackupUnit, CheckRun, Site, Target
+from core.models import BackupUnit, CheckRun, Site, Target, default_workspace
 from monitor.uptime import http_probe, probe_url
 
 RESULTS_SCHEMA_VERSION = 1
@@ -127,6 +127,7 @@ def _skip_no_eligible_site(duration_s):
     raise_alert(
         "drill-missed",
         "check:hub_down",
+        workspace=default_workspace(),
         fingerprint="drill-missed:hub_down:no-eligible-site",
         source_engine="monitor.drills",
         title="Hub-down drill skipped: no eligible site",
@@ -163,6 +164,7 @@ def _fail_hub_not_stopped(duration_s):
     raise_alert(
         "drill-missed",
         "check:hub_down",
+        workspace=default_workspace(),
         fingerprint="drill-missed:hub_down:hub-not-stopped",
         source_engine="monitor.drills",
         title="Hub-down drill did not stop Hub workers",
@@ -408,6 +410,7 @@ def run_pager_drill(*, now=None):
     raise_alert(
         "pager-drill",
         "check:pager",
+        workspace=default_workspace(),
         fingerprint=fingerprint,
         source_engine="monitor.drills",
         title="TEST — ack me",
@@ -420,7 +423,9 @@ def run_pager_drill(*, now=None):
     results = {"schema_version": RESULTS_SCHEMA_VERSION, "backend": backend}
     if backend == "fake":
         return record_run(CheckRun.Kind.PAGER, CheckRun.Status.SKIPPED, results)
-    finding = Finding.objects.get(fingerprint=fingerprint)
+    finding = Finding.objects.get(
+        workspace=default_workspace(), fingerprint=fingerprint,
+    )
     latest = (
         AlertDelivery.objects.filter(
             finding=finding,
@@ -448,6 +453,7 @@ def alert_missed_drill(kind):
     raise_alert(
         "drill-missed",
         f"check:{kind}",
+        workspace=default_workspace(),
         drill_kind=kind,
         fingerprint=f"drill-missed:{kind}",
         source_engine="monitor.drills",

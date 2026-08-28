@@ -6,8 +6,7 @@
 import React, { useRef, useState } from "react";
 import { makeTierRunner, presentation } from "./actions.js";
 import { performHardwareTouch } from "./webauthn.js";
-
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box, warning, success, danger } from "./ui/surface.js";
 
 // T2's confirm: the body is the caller's DIFF SUMMARY, verbatim — this component
 // composes no copy about what the action will do, because the screen wiring it is the
@@ -16,7 +15,7 @@ const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px 
 export function ConfirmDialog({ label, summary, onConfirm, onDismiss }) {
   return (
     <div role="dialog" aria-label={label}
-      style={{ ...box, marginTop: 8, borderColor: "#e3b341" }}>
+      style={{ ...box, marginTop: 8, borderColor: warning }}>
       <p style={{ marginTop: 0 }}>{summary}</p>
       <button style={{ ...box, marginRight: 8 }} onClick={onConfirm}>
         Confirm — {label}</button>
@@ -32,7 +31,7 @@ export function ConfirmDialog({ label, summary, onConfirm, onDismiss }) {
 export function UndoToast({ label, seconds, onUndo }) {
   return (
     <div role="status"
-      style={{ ...box, marginTop: 8, borderColor: "#7ee787", display: "inline-block" }}>
+      style={{ ...box, marginTop: 8, borderColor: success, display: "inline-block" }}>
       ✓ {label} — <button style={box} onClick={onUndo}>Undo ({seconds} s)</button>
     </div>
   );
@@ -55,7 +54,7 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
   const costText = costLine(cost);
   return (
     <div role="dialog" aria-label={`${label} step-up`}
-      style={{ ...box, marginTop: 8, borderColor: "#ff7b72", maxWidth: "100%" }}>
+      style={{ ...box, marginTop: 8, borderColor: danger, maxWidth: "100%" }}>
       <p style={{ marginTop: 0 }}>
         Type the name and touch a security key. TOTP cannot satisfy this.
       </p>
@@ -83,7 +82,7 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
 // type-the-name + hardware-touch overlay (SEC-F5-T1-HARDWARE-TOUCH).
 export function UnavailableAction({ action, reason }) {
   return (
-    <p style={{ color: "#8b949e", margin: "4px 0" }}>
+    <p style={{ color: "var(--hud-muted)", margin: "4px 0" }}>
       {action} unavailable: {reason}
     </p>
   );
@@ -126,7 +125,7 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
             onDismiss={() => runner.dismiss()} />
         )}
         {state.phase === "refused" && (
-          <small style={{ color: "#ff7b72" }}> {state.reason}</small>
+          <small style={{ color: "var(--hud-danger)" }}> {state.reason}</small>
         )}
       </span>
     );

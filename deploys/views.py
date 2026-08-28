@@ -5,11 +5,13 @@ with a deployment id only. Restart / re-run engines are not invented here.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import Site
+from core.permissions import RequireAction, RequireWorkspace
+from core.rbac import SITE_FIELD, scoped_get
 from deploys.env import apply_env, list_env_names, merge_env, put_env
 from deploys.models import Deployment
 from deploys.pipeline import rollback
@@ -44,14 +46,17 @@ def _names_body(site):
 class EnvView(APIView):
     """GET names; PUT replaces / PATCH merges values; POST applies the current env."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "site.env"
+
     @extend_schema(responses={200: EnvNamesSerializer})
     def get(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         return Response(_names_body(site))
 
     @extend_schema(request=EnvWriteSerializer, responses={200: EnvNamesSerializer})
     def put(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         payload = EnvWriteSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         put_env(site, payload.validated_data["env"])
@@ -59,7 +64,7 @@ class EnvView(APIView):
 
     @extend_schema(request=EnvWriteSerializer, responses={200: EnvNamesSerializer})
     def patch(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         payload = EnvWriteSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         merge_env(site, payload.validated_data["env"])
@@ -67,7 +72,7 @@ class EnvView(APIView):
 
     @extend_schema(request=None, responses={201: EnvApplySerializer})
     def post(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         try:
             deployment = apply_env(site)
         except ValueError as exc:
@@ -87,9 +92,12 @@ class RollbackResultSerializer(serializers.Serializer):
 class SiteRollbackView(APIView):
     """POST: roll the site back to its latest succeeded Deployment."""
 
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction]
+    action_id = "site.rollback"
+
     @extend_schema(request=None, responses={201: RollbackResultSerializer})
     def post(self, request, site_id):
-        site = get_object_or_404(Site, pk=site_id)
+        site = scoped_get(request, Site.objects.all(), SITE_FIELD, pk=site_id)
         original = (
             Deployment.objects.filter(
                 manifest__site=site,

@@ -7,6 +7,10 @@ from celery.schedules import crontab
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = os.environ.get("HUB_SECRET_KEY", "dev-only-insecure-key")
+# HUD-D7 / D-146: disable to restore the previous operator shell without
+# rolling back Deployment, audit, or secret-version records.
+HUD_UI_V1 = os.environ.get("HUB_HUD_UI_V1", "1") not in ("0", "false", "False")
+HUD_BUILD_ID = os.environ.get("HUB_BUILD_ID") or os.environ.get("GITHUB_SHA") or ""
 DEBUG = False
 ALLOWED_HOSTS = os.environ.get("HUB_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -127,6 +131,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/min",
+    },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_RENDERER_CLASSES": [
         # R18-SEC-1: JSONRenderer with the containment class escaped on the way out.
@@ -152,6 +159,12 @@ SPECTACULAR_SETTINGS = {
 # X-Forwarded-For is caller-controlled, so we count hops from the right rather than
 # trusting the leftmost entry — otherwise any client can forge its own source IP.
 HUB_TRUSTED_PROXY_HOPS = int(os.environ.get("HUB_TRUSTED_PROXY_HOPS", "0"))
+
+# API-created local_path projects are off unless an operator sets a source root.
+HUB_ALLOW_LOCAL_SOURCES = os.environ.get("HUB_ALLOW_LOCAL_SOURCES", "") in (
+    "1", "true", "True",
+)
+HUB_LOCAL_SOURCE_ROOT = os.environ.get("HUB_LOCAL_SOURCE_ROOT", "")
 
 # --- Vault (§6.9 envelope encryption) ---
 # Rung ① (local keyfile) is test/dev and does not defeat a stolen Hub disk.
@@ -199,6 +212,9 @@ AWS_HOURLY_BUDGET_USD = os.environ.get("HUB_AWS_HOURLY_BUDGET_USD", "")
 # --- Partner intake (phase 5.5 C6). Empty URL = poll no-op / SKIPPED. ---
 # Pinned env names only. Do not invent extra token env.
 INTAKE_URL = os.environ.get("HUB_INTAKE_URL", "")
+INTAKE_SERVICE_TOKEN = os.environ.get("HUB_INTAKE_SERVICE_TOKEN", "")
+INTAKE_MAX_BODY_BYTES = int(os.environ.get("HUB_INTAKE_MAX_BODY_BYTES", "1000000") or "1000000")
+HUB_TASK_ENVELOPE_SECRET = os.environ.get("HUB_TASK_ENVELOPE_SECRET", "") or SECRET_KEY
 PARTNER_API_ENABLED = os.environ.get(
     "HUB_PARTNER_API_ENABLED", "",
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -217,6 +233,15 @@ HUB_TAILSCALE_API_TOKEN_REF = os.environ.get("HUB_TAILSCALE_API_TOKEN_REF", "")
 # --- Audit off-host ship (SLIP, C6). Skip unless bucket configured. ---
 # T1 fake lives in core/ with no AWS SDK. Live Object Lock is a Joseph interrupt.
 AUDIT_S3_BUCKET = os.environ.get("HUB_AUDIT_S3_BUCKET", "")
+AUDIT_S3_REGION = os.environ.get("HUB_AUDIT_S3_REGION", "us-east-1")
+AUDIT_S3_ACCESS_KEY_ID = os.environ.get("HUB_AUDIT_S3_ACCESS_KEY_ID", "")
+AUDIT_S3_SECRET_ACCESS_KEY = os.environ.get("HUB_AUDIT_S3_SECRET_ACCESS_KEY", "")
+AUDIT_S3_OBJECT_LOCK = os.environ.get("HUB_AUDIT_S3_OBJECT_LOCK", "1") not in (
+    "0", "false", "False",
+)
+AUDIT_S3_VERSIONING = os.environ.get("HUB_AUDIT_S3_VERSIONING", "1") not in (
+    "0", "false", "False",
+)
 
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
@@ -244,9 +269,18 @@ CELERY_TASK_ROUTES = {
     "monitor.*": {"queue": "probes"},
     "reconcile.*": {"queue": "probes"},
     "scaling.*": {"queue": "control"},
+    "core.tasks.*": {"queue": "control"},
     "deploys.tasks.poll_git": {"queue": "probes"},
 }
 CELERY_BEAT_SCHEDULE = {
+    "drain-hud-command-outbox": {
+        "task": "core.tasks.drain_hud_outbox",
+        "schedule": 5.0,
+    },
+    "ship-audit-trail": {
+        "task": "core.tasks.ship_audit_trail",
+        "schedule": 60.0,
+    },
     "sweep-stale-deployments": {
         "task": "deploys.tasks.sweep_stale_deployments",
         "schedule": 30.0,
@@ -374,6 +408,13 @@ HUB_NTFY_SUBSCRIBER_REF = os.environ.get("HUB_NTFY_SUBSCRIBER_REF", "ntfy-sub")
 # files a P2 Finding with the one manual step.
 HUB_NTFY_ACCOUNT_TOKEN_REF = os.environ.get("HUB_NTFY_ACCOUNT_TOKEN_REF", "")
 HUB_PUBLIC_URL = os.environ.get("HUB_PUBLIC_URL", "https://hub.local")
+HUD_SIGNED_DOWNLOAD_TTL_SECONDS = int(
+    os.environ.get("HUD_SIGNED_DOWNLOAD_TTL_SECONDS", "60")
+)
+HUD_DOWNLOAD_MAX_BYTES = int(os.environ.get("HUD_DOWNLOAD_MAX_BYTES", str(10 * 1024 * 1024)))
+HUD_OUTBOX_CLAIM_TIMEOUT_SECONDS = int(
+    os.environ.get("HUD_OUTBOX_CLAIM_TIMEOUT_SECONDS", "300")
+)
 
 # Email assumption (D-037): Django's mail backend — locmem in tests (the
 # test runner swaps EMAIL_BACKEND), env-configured SMTP (HUB_SMTP_*) in

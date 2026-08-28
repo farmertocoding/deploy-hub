@@ -36,6 +36,8 @@ jobs:
         run: make log-scrub
       - name: scripts lint
         run: make scripts-lint
+      - name: secret scan
+        run: make secret-scan
       - name: T1 unit tests
         run: make test
       # The mutation gate (spec-mutation-gate.md §4). Bare `make mutation`, same as the
@@ -51,11 +53,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: frontend deps
-        run: cd frontend && npm ci
+        run: |
+          cd frontend && npm ci
+          corepack enable
+          cd ../sample-node-site && pnpm install --frozen-lockfile
       - name: generated client not stale (§4.5)
         run: make check-generated
       - name: frontend contract tests
         run: make test-frontend
+      - name: frontend quality
+        run: make frontend-quality
+      - name: js advisory audit
+        run: make js-audit
       - name: frontend build
         run: cd frontend && npx vite build
 

@@ -65,6 +65,7 @@ sensitive:
   # now: every CODEOWNERS entry has its counterpart here, and vice versa
   # (tests/test_proc_rules.py, both directions).
   - monitor/pager.py
+  - monitor/scrub.py
   - monitor/alert_rules.py
   - deploys/certs.py
   - provision/adopt.py

@@ -23,7 +23,10 @@ def fingerprint_for(zone):
 def engaged_finding(zone):
     if zone is None:
         return None
-    row = Finding.objects.filter(fingerprint=fingerprint_for(zone)).first()
+    workspace = getattr(getattr(zone, "account", None), "workspace", None)
+    row = Finding.objects.filter(
+        workspace=workspace, fingerprint=fingerprint_for(zone),
+    ).first()
     if row is None or row.state == Finding.State.RESOLVED:
         return None
     return row
@@ -74,6 +77,7 @@ def engage(site, edge, *, ips=()):
     return raise_alert(
         "attack-playbook-engaged",
         f"dns_zone:{zone.name}",
+        workspace=zone.account.workspace,
         fingerprint=fingerprint_for(zone),
         source_engine=SOURCE,
         title="Attack playbook engaged",

@@ -14,8 +14,7 @@ import { ActionButton, UnavailableAction } from "../Tiers.jsx";
 import { ACTION_TIERS, tierFor } from "../actions.js";
 import { EmptyState, ErrorLine, LoadingLine, routeHash } from "../Chrome.jsx";
 import { safeText } from "../safe-display.js";
-
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box, muted, success, warning, danger, info } from "../ui/surface.js";
 
 // Site-detail T3 ids only. Do not infer from a `site.` prefix: check.rerun
 // is a Site action, and target.router_probe is a Target action that shares T3.
@@ -96,10 +95,10 @@ const SITE_FILTERS = [
 
 export function ManifestLine({ site }) {
   if (site.latest_manifest_version == null)
-    return <span style={{ color: "#8b949e" }}>no manifest yet</span>;
+    return <span style={{ color: muted }}>no manifest yet</span>;
   return site.manifest_current
-    ? <span style={{ color: "#3fb950" }}>✓ manifest v{site.latest_manifest_version} matches current scan</span>
-    : <span style={{ color: "#e3b341" }}>⚠ manifest v{site.latest_manifest_version} predates current scan</span>;
+    ? <span style={{ color: success }}>✓ manifest v{site.latest_manifest_version} matches current scan</span>
+    : <span style={{ color: warning }}>⚠ manifest v{site.latest_manifest_version} predates current scan</span>;
 }
 
 // The unproxied-cert refusal as a SITE STATE, not a buried log line: the pipeline
@@ -129,10 +128,10 @@ export function SiteObserved({ site }) {
 export function CertState({ site }) {
   if (!site.cert_refusal) return null;
   return (
-    <p style={{ color: "#ff7b72", margin: "4px 0" }}>
+    <p style={{ color: danger, margin: "4px 0" }}>
       ⛔ TLS refused: {safeText(site.cert_refusal.detail)}{" "}
       <a href={routeHash("findings", site.cert_refusal.finding_id)}
-        style={{ color: "#79c0ff" }}>View finding</a>
+        style={{ color: info }}>View finding</a>
     </p>
   );
 }
@@ -147,10 +146,10 @@ export function AttackState({ site }) {
     ? `⚠ Attack playbook notify-only: ${safeText(site.attack_state.detail)}`
     : `⛔ Under attack: ${safeText(site.attack_state.detail)}`;
   return (
-    <p style={{ color: degraded ? "#e3b341" : "#ff7b72", margin: "4px 0" }}>
+    <p style={{ color: degraded ? warning : danger, margin: "4px 0" }}>
       {label}{" "}
       <a href={routeHash("findings", site.attack_state.finding_id)}
-        style={{ color: "#79c0ff" }}>View finding</a>
+        style={{ color: info }}>View finding</a>
     </p>
   );
 }
@@ -180,10 +179,10 @@ export function BackupPanel({ site, backups, onTestNow = () => {}, onRestore }) 
     });
   });
   return (
-    <div style={{ ...box, borderColor: "#3fb950" }}>
+    <div style={{ ...box, borderColor: "var(--hud-success)" }}>
       <h4 style={{ margin: "0 0 8px" }}>Backups</h4>
       {dumps.length === 0
-        ? <div style={{ color: "#8b949e" }}>No dumps yet</div>
+        ? <div style={{ color: "var(--hud-muted)" }}>No dumps yet</div>
         : dumps.map((d) => (
           <div key={d.id}>
             {d.kind} · {d.bytes} bytes · {safeText(String(d.digest || "").slice(0, 12))}
@@ -235,7 +234,7 @@ export function AdoptPlan({
   const showFlipLocked = stage === "flip" || stage === "decommission";
   const roles = Object.entries(classified).filter(([, name]) => name);
   return (
-    <div style={{ ...box, borderColor: "#3fb950" }}>
+    <div style={{ ...box, borderColor: "var(--hud-success)" }}>
       <h4 style={{ margin: "0 0 8px" }}>Adopt plan</h4>
       <div>edge owner: {site.edge_owner || "host_caddy"}</div>
       {stage && <div>stage: {stage}</div>}
@@ -267,7 +266,7 @@ export function AdoptPlan({
             onUndo={() => onUndo("site.adopt.cancel", site)} />
         )}
         {showFlipLocked && (
-          <p style={{ color: "#8b949e", margin: "4px 0" }}>
+          <p style={{ color: "var(--hud-muted)", margin: "4px 0" }}>
             Cancel adopt unavailable: refused — production flip already started; use rollback.
           </p>
         )}
@@ -339,7 +338,7 @@ export function SiteStatus({
     <div style={{ ...box, marginTop: 8, maxWidth: "100%",
       display: "grid", gap: 8 }}>
       <h3 style={{ margin: 0 }}>{site.name}{site.domain ? ` — ${site.domain}` : ""}</h3>
-      <div style={{ color: "#8b949e" }}>project: {site.project}</div>
+      <div style={{ color: "var(--hud-muted)" }}>project: {site.project}</div>
       <div><ManifestLine site={site} /></div>
       <div><SiteObserved site={site} /></div>
       <div><PartnerBadge site={site} /></div>
@@ -361,7 +360,7 @@ export function SiteStatus({
           reason="not configured — repository visibility is not resolved" />
       )}
       {adoptNotice && (
-        <p style={{ color: "#ff7b72", margin: "4px 0" }}>
+        <p style={{ color: "var(--hud-danger)", margin: "4px 0" }}>
           Adopt {adoptNotice.kind}: {adoptNotice.detail}
         </p>
       )}
@@ -429,7 +428,7 @@ export function SitesView({
           role="button" tabIndex={0} onClick={() => onSelect(s.id)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(s.id); } }}>
           <strong>{s.name}</strong>{s.domain ? ` — ${s.domain}` : ""}{" "}
-          <span style={{ color: "#8b949e" }}>({s.project})</span>{" "}
+          <span style={{ color: "var(--hud-muted)" }}>({s.project})</span>{" "}
           <PartnerBadge site={s} />{" "}
           <ManifestLine site={s} />{" "}
           <SiteObserved site={s} />

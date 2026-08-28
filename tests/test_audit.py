@@ -1,5 +1,4 @@
 """AuditEvent hash chain (SEC-B3 local MUST, D-056). S3 ship is not this helper."""
-import json
 import sys
 from hashlib import sha256
 
@@ -9,19 +8,9 @@ pytestmark = pytest.mark.django_db
 
 
 def _canonical_row(event):
-    """Spec canonical JSON: sorted keys, no whitespace, the nine chained fields."""
-    payload = {
-        "action": event.action,
-        "actor_id": event.actor_id,
-        "detail": event.detail,
-        "object_id": event.object_id,
-        "object_type": event.object_type,
-        "severity": event.severity,
-        "source": event.source,
-        "source_ip": event.source_ip,
-        "ts": event.ts.isoformat(timespec="microseconds"),
-    }
-    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    from core.audit import _canonical_row as shipped
+
+    return shipped(event)
 
 
 @pytest.mark.req("SEC-B3-AUDIT-HASH-CHAIN")
@@ -99,3 +88,112 @@ def test_audit_does_not_call_s3(monkeypatch):
     assert event.shipped_at is None
     assert AuditEvent.objects.filter(pk=event.pk, action="local-chain").exists()
     assert event.prev_hash == ""
+
+
+def test_audit_omitted_workspace_on_tenant_object_is_inferred_or_rejected():
+    from core.audit import AuditWorkspaceRequired, audit
+    from core.models import Project, Workspace
+
+    workspace = Workspace.objects.create(name="Audit A", slug="audit-a")
+    project = Project.objects.create(
+        workspace=workspace, name="a", slug="a-audit",
+    )
+    event = audit("project.touched", project, source="api")
+    assert event.workspace_id == workspace.pk
+    assert event.scope == "workspace"
+    with pytest.raises(AuditWorkspaceRequired):
+        audit("ambiguous", object(), source="api", scope="workspace")
+
+
+def test_tenant_audit_stays_in_that_workspace():
+    from core.audit import audit
+    from core.models import AuditEvent, Project, Workspace
+
+    a = Workspace.objects.create(name="A", slug="trail-a")
+    b = Workspace.objects.create(name="B", slug="trail-b")
+    pa = Project.objects.create(workspace=a, name="pa", slug="pa")
+    pb = Project.objects.create(workspace=b, name="pb", slug="pb")
+    audit("project.create", pa, source="api", workspace=a)
+    audit("project.create", pb, source="api", workspace=b)
+    assert AuditEvent.objects.filter(workspace=a, action="project.create").count() == 1
+    assert AuditEvent.objects.filter(workspace=b, action="project.create").count() == 1
+
+
+def test_editing_workspace_or_partner_breaks_verification():
+    from core.audit import audit, verify_chain
+    from core.models import Partner, Project, Workspace
+
+    workspace = Workspace.objects.create(name="Hash", slug="hash-ws")
+    other = Workspace.objects.create(name="Other", slug="hash-other")
+    project = Project.objects.create(workspace=workspace, name="p", slug="p-hash")
+    partner = Partner.objects.create(
+        workspace=workspace, name="hash partner", slug="hash-partner",
+    )
+    first = audit("project.create", project, source="api", workspace=workspace)
+    second = audit(
+        "partner.create", partner, source="api", workspace=workspace, partner=partner,
+    )
+    third = audit("project.scan", project, source="api", workspace=workspace)
+    assert verify_chain([first, second, third]) is True
+    second.workspace = other
+    second.save(update_fields=["workspace"])
+    second.refresh_from_db()
+    assert verify_chain([first, second, third]) is False
+
+
+def test_verify_chain_none_reads_db_pk_order_and_rejects_genesis_prev():
+    """Calling verify_chain() with no list must use AuditEvent.order_by("pk").
+
+    What would make this fail: `events is None` inverted (list(None)), or
+    order_by("XXpkXX"), or returning True when genesis already has a prev_hash.
+    """
+    from core.audit import audit, verify_chain
+    from core.models import AuditEvent, Workspace
+
+    workspace = Workspace.objects.create(name="Verify", slug="verify-none")
+    audit("one", source="system", workspace=workspace)
+    audit("two", source="system", workspace=workspace)
+    assert verify_chain() is True
+    first = AuditEvent.objects.filter(workspace=workspace).order_by("pk").first()
+    first.prev_hash = "a" * 64
+    first.save(update_fields=["prev_hash"])
+    assert verify_chain() is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_audit_writers_produce_one_linear_chain():
+    from concurrent.futures import ThreadPoolExecutor
+
+    from core.audit import audit, verify_chain
+    from core.models import AuditEvent, Workspace
+
+    workspace = Workspace.objects.create(name="Race", slug="audit-race")
+
+    def _write(n):
+        from django.db import connections
+
+        connections.close_all()
+        return audit("race", source="api", workspace=workspace, n=n).pk
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(_write, range(8)))
+    rows = list(AuditEvent.objects.filter(workspace=workspace).order_by("pk"))
+    assert len(rows) == 8
+    assert verify_chain(rows) is True
+    hashes = [row.prev_hash for row in rows]
+    assert hashes[0] == ""
+    assert len(set(hashes)) == len(hashes)
+
+
+def test_workspace_delete_retains_audit_rows():
+    from django.db.models.deletion import ProtectedError
+
+    from core.audit import audit
+    from core.models import AuditEvent, Project, Workspace
+
+    workspace = Workspace.objects.create(name="Keep", slug="keep-audit")
+    project = Project.objects.create(workspace=workspace, name="k", slug="k-audit")
+    event = audit("project.create", project, source="api", workspace=workspace)
+    with pytest.raises(ProtectedError):
+        workspace.delete()
+    assert AuditEvent.objects.filter(pk=event.pk).exists()

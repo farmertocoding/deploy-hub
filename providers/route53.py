@@ -17,6 +17,8 @@ from contextlib import contextmanager
 import boto3
 from botocore.exceptions import ClientError
 
+from core.models import default_workspace
+
 from .aws_creds import boto3_client
 from .base import DnsProvider
 
@@ -80,6 +82,7 @@ def file_r53_fail(zone, error):
     raise_alert(
         "r53-fail",
         f"dns_zone:{zone.name}",
+        workspace=default_workspace(),
         fingerprint=f"r53-fail:{zone.pk}",
         source_engine="route53",
         title=f"Route 53 change failed for {zone.name}",

@@ -53,6 +53,7 @@ test("settings_tabs_partners_after_aws_is_create_partner_not_connect", () => {
   const markup = render(PartnersPanel, {
     partners: [],
     intake: { status: "degraded", mode: "fake", configured: false },
+    systemAdmin: true,
   });
   const text = visibleText(markup);
   assert.match(text, /Create partner/);
@@ -67,6 +68,13 @@ test("settings_tabs_partners_after_aws_is_create_partner_not_connect", () => {
   assert.match(text, /Enable partner API/);
   assert.doesNotMatch(markup, /type="checkbox"/);
   assert.doesNotMatch(markup, /role="switch"/);
+
+  const tenant = visibleText(render(PartnersPanel, {
+    partners: [],
+    intake: { status: "degraded", mode: "fake", configured: false },
+  }));
+  assert.doesNotMatch(tenant, /Enable partner API/);
+  assert.doesNotMatch(tenant, /Disable partner API/);
 });
 
 test("unconfigured_and_post_create_fake_intake_never_connected", () => {

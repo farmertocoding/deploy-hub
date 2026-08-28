@@ -21,17 +21,17 @@ Do not begin a new feature phase before this sequence is complete. The repositor
 
 ### 1.1 Cloudflare operator status — 2026-08-27
 
-The Cloudflare DNS-token human step has been completed, with the following precise boundary:
+The Cloudflare DNS-token and Origin CA-token human steps have been completed, with the following precise boundary:
 
 - A least-privilege user API token was created for exactly one zone, `takko.market`, with `Zone DNS:Edit`.
 - The token was pasted by the operator into **Deploy Hub → Settings → Cloudflare**. Deploy Hub verified it and stored it in the vault; the token value was not recorded in this document or read back from the vault.
-- The resulting account has a DNS token reference. It has no edge-token reference and no Origin CA credential reference.
-- Because the running Hub was in normal operator mode, the Settings endpoint correctly created `takko.market` with `purpose=prod`. This row is therefore **not** evidence that the T3 test plane is ready.
+- The resulting account has both a DNS token reference and an Origin CA token reference. It has no edge-token reference.
+- Because the running Hub was in normal operator mode, the Settings endpoint initially created `takko.market` with `purpose=prod`. On 2026-08-27 the operator-approved local correction changed that row to `purpose=test`; a refusal check confirmed that normal production-mode provider construction now stops before credential loading. The row still is **not**, by itself, evidence that the T3 test runner is ready.
 - `tests/test_t3_cf_live.py` does not consume the product Settings vault row. Its session fixture requires a separately supplied, process-local `HUB_TEST_CF_TOKEN`, observes that token, and creates its own `purpose=test` row in the test database.
 - Do not export the product-vault secret to bridge these paths. At test execution time, the operator must inject the still-available token through an approved ephemeral secret channel, with `HUB_TEST_MODE=1` and `HUB_TEST_ZONE_SLUGS=takko.market` where applicable.
 - Do not run a live DNS write merely to verify setup. The first mutation must be the credential-gated T3 DNS test after an explicit operator confirmation; it creates a uniquely named temporary record and removes it in `finally`.
 
-Origin CA is a separate blocker. Cloudflare deprecated `X-Auth-User-Service-Key` authentication on 2026-03-19 and documents shutdown on 2026-09-30, replacing it with a Bearer API token carrying `Zone → SSL and Certificates → Edit`. The current `providers/cloudflare.py::origin_ca_request()` still sends `X-Auth-User-Service-Key`, while the Settings UI still plants a legacy service-key file. Migrate that code and its tests before asking the operator for any Origin CA credential. Until then, DNS-only Cloudflare proof may proceed, but the credentialed Origin-certificate portion must remain skipped/uncovered rather than using the deprecated path.
+Origin CA code has been migrated off the deprecated path. Cloudflare deprecated `X-Auth-User-Service-Key` authentication on 2026-03-19 and documents shutdown on 2026-09-30. `providers/cloudflare.py::origin_ca_request()` now sends `Authorization: Bearer` and refuses a `v1.0-` service key before any request. On 2026-08-27 the operator created a separate, exact-zone `takko.market` Bearer API token with `Zone → SSL and Certificates → Edit`, supplied it through a hidden local prompt, and Deploy Hub stored it under the account's `origin_ca_key_ref`. A redacted Cloudflare verification confirmed the token was active; the temporary plaintext and prompt helper were deleted, and the value was never printed or read back from the vault. Rebuilt web/worker runtime inspection confirmed the Bearer implementation is loaded, all seven Compose services are running, Redis persistence is healthy, and `manage.py check` reports no issues. The env name for a separately credentialed T3 process remains `HUB_TEST_ORIGIN_CA_KEY`; its value is the Bearer token, not a `v1.0-` service key. Focused verification passed 19 backend tests (with four credential/host-gated live skips), 9 frontend Cloudflare/checklist tests, Ruff, and the frontend production build. No Origin certificate has been issued; that live external mutation requires an explicit action-time operator confirmation and a defined cleanup/revocation path.
 
 ## 2. Why this order
 
@@ -470,7 +470,7 @@ Use `SATURDAYS_site` instead only if the purpose of the run is specifically to e
 - If public DNS is exercised, the test runner receives the single-zone token through an approved ephemeral `HUB_TEST_CF_TOKEN` channel. The product Settings vault row does not satisfy this fixture precondition.
 - The run sets `HUB_TEST_MODE=1`; `takko.market` is present in `HUB_TEST_ZONE_SLUGS`; and the fixture-created `DnsZone` is `purpose=test`.
 - The operator has explicitly approved the first live DNS mutation after reviewing that the test creates only a uniquely named temporary record and deletes it in fixture cleanup.
-- Origin-certificate testing remains disabled until the provider migrates from the deprecated service-key header to a Bearer token with `SSL and Certificates:Edit`.
+- The product account now has a vaulted Bearer token with `SSL and Certificates:Edit`, but T3 still requires its own approved ephemeral `HUB_TEST_ORIGIN_CA_KEY` injection. Do not export or read back the product-vault secret, and do not use a `v1.0-` service key.
 - The old stack, its volumes, and its current production/test-plane DNS are inventoried.
 - A backup/snapshot has been created and its restore procedure tested or already evidenced.
 - The expected health endpoint, warmup time, database/cache mappings, named volumes, and old container name are recorded.
@@ -701,21 +701,22 @@ Rebase/merge each only after its own exit criteria pass. The test-plane evidence
 
 The first work session should do exactly this:
 
-- [ ] Add a negative frontend test that Site actions exclude `target.router_probe`.
-- [ ] Scope `t3SiteActions()` to the three Site-detail T3 actions.
-- [ ] Apply the Ruff import-only fix.
-- [ ] Run all Wave 0 gates in the correct environment and save the results.
-- [ ] Create the action-to-engine inventory from Wave 1.
-- [ ] Make restart, check re-run, preview, and router probe truthfully reflect live readiness.
-- [ ] Write and review the adoption API/lifecycle design note.
-- [ ] Add failing adoption HTTP, lifecycle, concurrency, and secret-boundary tests.
-- [ ] Implement the authenticated asynchronous start/cancel API.
-- [ ] Bind Sites UI state to the real operation response.
-- [ ] Regenerate and verify API client artifacts.
-- [ ] Run the complete Wave 2 gate set.
+- [x] Add a negative frontend test that Site actions exclude `target.router_probe`.
+- [x] Scope `t3SiteActions()` to the three Site-detail T3 actions.
+- [x] Apply the Ruff import-only fix.
+- [x] Run all Wave 0 gates in the correct environment and save the results.
+- [x] Create the action-to-engine inventory from Wave 1.
+- [x] Make restart, check re-run, preview, and router probe truthfully reflect live readiness.
+- [x] Write and review the adoption API/lifecycle design note.
+- [x] Add failing adoption HTTP, lifecycle, concurrency, and secret-boundary tests.
+- [x] Implement the authenticated asynchronous start/cancel API.
+- [x] Bind Sites UI state to the real operation response.
+- [x] Regenerate and verify API client artifacts.
+- [x] Run the complete Wave 2 gate set.
 - [ ] Prepare the TAKKO test-plane entry checklist and obtain only the required authorization/credentials.
-- [x] Create and vault-connect a least-privilege, single-zone DNS token for `takko.market`; do not treat the resulting product `purpose=prod` row as T3 readiness.
-- [ ] Migrate Origin CA authentication to Cloudflare's Bearer-token flow and update the Settings/registry vocabulary before collecting that credential.
+- [x] Create and vault-connect a least-privilege, single-zone DNS token for `takko.market`, correct the local row to `purpose=test`, and verify normal production mode refuses provider construction; do not treat the product vault row alone as T3 readiness.
+- [x] Migrate Origin CA authentication to Cloudflare's Bearer-token flow, refuse legacy service keys, update the Settings/registry vocabulary, and pass focused backend/frontend/static/build verification before collecting that credential.
+- [x] Create, verify, and vault the separate exact-zone Origin CA Bearer token for `takko.market`; delete temporary plaintext, rebuild/restart the runtime, and leave certificate issuance unperformed pending explicit confirmation.
 - [ ] Inject the DNS token ephemerally for the T3 process and verify the triple-key wall without printing or persisting the token.
 - [ ] Obtain explicit operator confirmation immediately before the first temporary DNS upsert/delete test.
 - [ ] Run and record the live adoption and pre-flip cancellation drill.

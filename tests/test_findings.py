@@ -25,8 +25,12 @@ COPY = dict(
 
 def _file(fingerprint="fp-uptime-shop", **overrides):
     from core.findings import finding
+    from core.models import default_workspace
 
-    return finding("uptime", fingerprint, **{**COPY, **overrides})
+    workspace = overrides.pop("workspace", default_workspace())
+    return finding(
+        "uptime", fingerprint, workspace=workspace, **{**COPY, **overrides},
+    )
 
 
 def test_same_fingerprint_updates_last_seen_not_a_second_row():
@@ -52,7 +56,7 @@ def test_accept_risk_requires_a_reason():
     from core.findings import accept_risk
 
     row = _file()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^accept-risk requires a one-line reason \(§F2\)$"):
         accept_risk(row, "")
     with pytest.raises(ValueError):
         accept_risk(row, "   \t")
@@ -137,6 +141,67 @@ def test_every_transition_writes_an_audit_event():
         assert AuditEvent.objects.filter(
             action=action, object_type="Finding", object_id=str(pk)
         ).count() == 1, f"missing audit row for {action}"
+
+
+def test_transition_audit_keeps_actor_source_workspace_and_states():
+    """_transition kwargs are the audit trail. Dropping them is a silent gap.
+
+    What would make this fail: actor=None, source omitted, workspace=None,
+    or dropping from_state / to_state / fingerprint.
+    """
+    from django.contrib.auth import get_user_model
+
+    from core.findings import accept_risk, ack, resolve
+
+    user = get_user_model().objects.create_user(
+        "finding-actor", password="pw-1234567890",
+    )
+    row = _file(fingerprint="fp-transition-kw")
+    ack(row, actor=user)
+    ev = AuditEvent.objects.get(action="finding_acked", object_id=str(row.pk))
+    assert ev.actor_id == user.pk
+    assert ev.source == "api"
+    assert ev.workspace_id == row.workspace_id
+    assert ev.detail["from_state"] == Finding.State.OPEN
+    assert ev.detail["to_state"] == str(Finding.State.ACKED)
+    assert ev.detail["fingerprint"] == "fp-transition-kw"
+
+    resolve(row, actor=user)
+    resolved = AuditEvent.objects.get(action="finding_resolved", object_id=str(row.pk))
+    assert resolved.actor_id == user.pk
+    assert resolved.source == "api"
+
+    other = _file(fingerprint="fp-accept-kw")
+    accept_risk(other, "because-risk", actor=user)
+    accepted = AuditEvent.objects.get(
+        action="finding_risk_accepted", object_id=str(other.pk),
+    )
+    assert accepted.actor_id == user.pk
+    assert accepted.source == "api"
+    assert accepted.workspace_id == other.workspace_id
+    assert accepted.detail["reason"] == "because-risk"
+
+
+def test_accept_risk_publishes_accepted_action(monkeypatch):
+    """The stream event action is `accepted`, not the audit action name.
+
+    What would make this fail: _publish(..., None) or "ACCEPTED"/"XXacceptedXX".
+    """
+    from core.findings import accept_risk, ack, resolve
+
+    captured = []
+    monkeypatch.setattr(
+        "core.findings.events.publish",
+        lambda topic, event, history=False: captured.append(event) or 1,
+    )
+    row = _file(fingerprint="fp-pub-action")
+    ack(row)
+    resolve(_file(fingerprint="fp-pub-res"))
+    accept_risk(_file(fingerprint="fp-pub-acc"), "ok")
+    actions = [event["action"] for event in captured]
+    assert "acked" in actions
+    assert "resolved" in actions
+    assert "accepted" in actions
 
 
 def test_audit_severity_column_stays_in_its_enum():

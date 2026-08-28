@@ -5,8 +5,7 @@
 // impact-shaped headline first (UX-F4 copy itself lands with the deploy payload).
 import React from "react";
 import { EmptyState, ErrorLine, LoadingLine } from "../Chrome.jsx";
-
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box, muted } from "../ui/surface.js";
 
 // The nine §D2 names, in seq order. A payload may send a subset; the stepper
 // still draws every step so a failure at N is visible against the rest.
@@ -29,7 +28,7 @@ export function DeployStatus({ deploy }) {
       <h3 style={{ margin: 0 }}>{deploy.site} — v{deploy.version}</h3>
       {failed && impact && <p role="alert" style={{ margin: 0 }}>{impact}</p>}
       {!failed && deploy.headline && <p style={{ margin: 0 }}>{deploy.headline}</p>}
-      <div style={{ color: "#8b949e" }}>{deploy.state}</div>
+      <div style={{ color: muted }}>{deploy.state}</div>
       <ol style={{ margin: 0, paddingLeft: "1.4em" }}>
         {steps.map((s) => (
           <li key={s.name}>{s.name} — {s.state || s.status}</li>

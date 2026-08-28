@@ -1,0 +1,57 @@
+/* Raw palette — consumed only by themes.css. Screens never reference these. */
+:root {
+  --palette-dark-base: #1d2835;
+  --palette-dark-fog-start: rgba(50, 70, 80, 0.90);
+  --palette-dark-fog-end: #0d101b;
+  --palette-dark-accent: #3cd2a5;
+  --palette-dark-text: rgba(255, 255, 255, 0.75);
+  --palette-dark-border: rgba(255, 255, 255, 0.25);
+  --palette-dark-header: rgba(29, 40, 53, 0.95);
+  --palette-dark-appearance: rgba(68, 85, 94, 0.95);
+  --palette-dark-corner: rgba(255, 255, 255, 0.75);
+  --palette-dark-edge: rgba(255, 255, 255, 0.28);
+  --palette-dark-muted: rgba(255, 255, 255, 0.52);
+  --palette-dark-warning: #e3b341;
+  --palette-dark-danger: #ff7b72;
+  --palette-dark-success: #3cd2a5;
+  --palette-dark-info: #79c0ff;
+  --palette-dark-control: rgba(29, 40, 53, 0.55);
+  --palette-dark-selected: rgba(60, 210, 165, 0.16);
+  --palette-dark-focus: #f0f6fc;
+  --palette-dark-table-rule: rgba(255, 255, 255, 0.12);
+  --palette-dark-chart-grid: rgba(255, 255, 255, 0.12);
+  --palette-dark-critical: rgba(255, 123, 114, 0.18);
+
+  --palette-light-base: #ffffff;
+  --palette-light-fog-start: rgba(255, 255, 255, 0.90);
+  --palette-light-fog-end: rgba(255, 255, 255, 0.99);
+  --palette-light-accent: #147858;
+  --palette-light-text: rgba(0, 0, 0, 0.75);
+  --palette-light-border: rgba(0, 0, 0, 0.20);
+  --palette-light-header: #ffffff;
+  --palette-light-appearance: rgba(255, 255, 255, 0.95);
+  --palette-light-corner: rgba(0, 0, 0, 0.75);
+  --palette-light-edge: rgba(0, 0, 0, 0.16);
+  --palette-light-muted: rgba(0, 0, 0, 0.58);
+  --palette-light-warning: #9a6700;
+  --palette-light-danger: #b62324;
+  --palette-light-success: #147858;
+  --palette-light-info: #0969da;
+  --palette-light-control: rgba(255, 255, 255, 0.72);
+  --palette-light-selected: rgba(36, 157, 121, 0.14);
+  --palette-light-focus: #0d101b;
+  --palette-light-table-rule: rgba(0, 0, 0, 0.10);
+  --palette-light-chart-grid: rgba(0, 0, 0, 0.12);
+  --palette-light-critical: rgba(182, 35, 36, 0.12);
+
+  --hud-font: "Chakra Petch", "Segoe UI", sans-serif;
+  --hud-font-size: 14px;
+  --hud-tracking: 0.75px;
+  --hud-line-height: 1.5;
+  --hud-panel-radius: 4px;
+  --hud-control-radius: 2px;
+  --hud-pattern-size: 75px;
+  --hud-header-height: 52px;
+  --hud-frame-inset: 15px;
+  --hud-corner-size: 10px;
+}

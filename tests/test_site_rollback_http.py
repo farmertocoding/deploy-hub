@@ -70,7 +70,7 @@ def test_site_rollback_http_kwargs_are_ids_only():
 
     from deploys import views
 
-    source = inspect.getsource(views.SiteRollbackView)
+    source = inspect.getsource(views.SiteRollbackView.post)
     assert "rollback(" in source
     assert "token" not in source.lower()
     assert "secret" not in source.lower()

@@ -58,6 +58,29 @@ def test_beat_interval_is_10s_on_probes():
     assert "PARTNER_API_ENABLED =" not in prod
 
 
+def test_partner_api_settings_assignment_does_not_leak_setup():
+    """PartnerApiFlag.set_on writes django.conf.settings (process-global)."""
+    from django.conf import settings
+
+    from core.models import PartnerApiFlag
+
+    PartnerApiFlag.set_on(True)
+    assert settings.PARTNER_API_ENABLED is True
+
+
+def test_partner_api_settings_assignment_does_not_leak_check():
+    """A later test must see the default-off flag, not a leaked True.
+
+    mutmut's clean run is a second in-process pytest.main(); without a
+    per-test reset, test_beat_interval_is_10s_on_probes asserts True is False.
+
+    What would make this fail: set_on leaking True into the next test.
+    """
+    from django.conf import settings
+
+    assert settings.PARTNER_API_ENABLED is False
+
+
 @pytest.mark.req("PART-HUB-POLL")
 def test_empty_intake_url_skips_and_does_not_file_p1():
     """Empty INTAKE_URL is SKIPPED: no CheckRun flood, no unreachable P1.
@@ -254,7 +277,7 @@ def test_intake_client_for_is_fail_closed():
             intake_client_for()
     fake = FakeIntakeClient()
     assert intake_client_for(client=fake) is fake
-    with override_settings(INTAKE_URL="https://intake.example.test"):
+    with override_settings(INTAKE_URL="https://intake.example.test", INTAKE_SERVICE_TOKEN="t"):
         live = intake_client_for()
         assert live is not None
         assert type(live) is not type(fake)

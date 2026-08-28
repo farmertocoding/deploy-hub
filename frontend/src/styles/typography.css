@@ -1,0 +1,50 @@
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/theme/fonts/chakra-petch-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/theme/fonts/chakra-petch-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/theme/fonts/chakra-petch-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../assets/theme/fonts/chakra-petch-latin-700-normal.woff2") format("woff2");
+}
+
+.hud-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: var(--hud-tracking);
+  text-transform: none;
+}
+
+.hud-metric {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.hud-kicker {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+  margin: 0 0 8px;
+}

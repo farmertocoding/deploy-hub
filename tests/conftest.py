@@ -22,6 +22,100 @@ import pytest
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hub.settings.dev")
 django.setup()
 
+# H2: EnrollmentRequiredMiddleware requires this-session OTP (`is_verified()`)
+# after a confirmed device exists. T1 tests historically used Client.login /
+# force_login after creating a TOTP row, which never wrote otp_device_id.
+# Stamp it when a confirmed device is already present so those tests still
+# drive the enrolled+verified path. Tests that assert the unverified hole
+# pop otp_device_id themselves.
+from django.test.client import Client as _DjangoClient  # noqa: E402
+from django_otp import DEVICE_ID_SESSION_KEY  # noqa: E402
+
+
+def _stamp_otp_device(client, user):
+    from django_otp import devices_for_user
+
+    if user is None:
+        return
+    device = next(devices_for_user(user, confirmed=True), None)
+    if device is None:
+        return
+    session = client.session
+    session[DEVICE_ID_SESSION_KEY] = device.persistent_id
+    session.save()
+
+
+_orig_client_login = _DjangoClient.login
+_orig_client_force_login = _DjangoClient.force_login
+_GRANT_DEFAULT_MEMBERSHIP = True
+
+
+def _ensure_test_owner_membership(user):
+    """Give logged-in test users an explicit default-workspace owner row.
+
+    Production never auto-grants; tests that assert the zero-membership
+    refuse path opt out with ``pytest.mark.no_default_membership``.
+    """
+    if not _GRANT_DEFAULT_MEMBERSHIP or user is None or not getattr(user, "pk", None):
+        return
+    from core.models import WorkspaceMembership, default_workspace
+
+    if WorkspaceMembership.objects.filter(user=user).exists():
+        return
+    if user.is_staff or user.is_superuser:
+        return
+    WorkspaceMembership.objects.get_or_create(
+        workspace=default_workspace(),
+        user=user,
+        defaults={"role": "owner"},
+    )
+
+
+def _client_login(self, **credentials):
+    ok = _orig_client_login(self, **credentials)
+    if ok:
+        from django.contrib.auth.models import User
+
+        username = credentials.get("username")
+        if username:
+            user = User.objects.filter(username=username).first()
+            _ensure_test_owner_membership(user)
+            _stamp_otp_device(self, user)
+    return ok
+
+
+def _client_force_login(self, user, backend=None):
+    _ensure_test_owner_membership(user)
+    _orig_client_force_login(self, user, backend=backend)
+    _stamp_otp_device(self, user)
+
+
+_DjangoClient.login = _client_login
+_DjangoClient.force_login = _client_force_login
+
+
+def t1_ready_session(client, user):
+    """Two confirmed passkeys + hardware_touch_at for RequireRecentTouch tests."""
+    import os
+
+    from django.utils import timezone
+    from django_otp_webauthn.models import WebAuthnCredential
+
+    for name in ("yk-a", "yk-b"):
+        if not WebAuthnCredential.objects.filter(user=user, name=name, confirmed=True).exists():
+            WebAuthnCredential.objects.create(
+                user=user,
+                name=name,
+                confirmed=True,
+                credential_id=os.urandom(16),
+                public_key=os.urandom(32),
+                aaguid="00000000-0000-0000-0000-000000000000",
+                transports=["usb"],
+            )
+    session = client.session
+    session["hardware_touch_at"] = timezone.now().isoformat()
+    session.save()
+
 
 # ── conformance run report (SPEC-gate-integrity §3.2 rule 1) ────────────────
 # check.py used to infer coverage from an AST walk, so a marked test could fail,
@@ -33,6 +127,49 @@ django.setup()
 # suppress it entirely — that is what a nested pytest invocation (a test that
 # shells out to pytest, or to check.py) must do so it cannot clobber the report
 # of the run it is executing inside.
+
+@pytest.fixture(autouse=True)
+def _ensure_default_workspace(request):
+    """Create the default workspace inside the test transaction.
+
+    Session-scoped setup is truncated by TransactionTestCase, leaving
+    DnsAccount.workspace_id=1 without a row. Keep this in-test.
+    """
+    global _GRANT_DEFAULT_MEMBERSHIP
+    previous = _GRANT_DEFAULT_MEMBERSHIP
+    _GRANT_DEFAULT_MEMBERSHIP = (
+        request.node.get_closest_marker("no_default_membership") is None
+    )
+    if request.node.get_closest_marker("django_db") is not None:
+        request.getfixturevalue("db")
+        from core.models import default_workspace
+
+        default_workspace()
+    try:
+        yield
+    finally:
+        _GRANT_DEFAULT_MEMBERSHIP = previous
+
+
+@pytest.fixture(autouse=True)
+def _reset_partner_api_enabled_setting():
+    """PartnerApiFlag.set_on assigns django.conf.settings, which is process-global.
+
+    mutmut's clean run is a second in-process pytest.main(); a leaked True
+    makes test_beat_interval_is_10s_on_probes fail after kill-switch tests.
+    """
+    from django.conf import settings
+
+    if not settings.configured:
+        yield
+        return
+    settings.PARTNER_API_ENABLED = False
+    try:
+        yield
+    finally:
+        if settings.configured:
+            settings.PARTNER_API_ENABLED = False
+
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 

@@ -6,6 +6,8 @@ staticfiles/
 .venv*/
 node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 conformance/matrix.json
 conformance/run-report.json
 .pytest_cache/

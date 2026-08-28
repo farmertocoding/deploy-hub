@@ -62,6 +62,7 @@ def finding_event(row, action):
         "fingerprint": row.fingerprint,
         "first_seen": row.first_seen.isoformat(),
         "last_seen": row.last_seen.isoformat(),
+        "workspace_id": row.workspace_id,
     }
 
 
@@ -69,10 +70,10 @@ def _publish(row, action):
     events.publish(FINDINGS_TOPIC, finding_event(row, action))
 
 
-def finding(source_engine, fingerprint, **fields):
-    """Upsert by fingerprint. One line to emit:
+def finding(source_engine, fingerprint, *, workspace, **fields):
+    """Upsert by (workspace, fingerprint). One line to emit:
 
-        finding("uptime", fp, severity="p1", entity="site:x",
+        finding("uptime", fp, workspace=ws, severity="p1", entity="site:x",
                 title=..., body=..., fix_action=...)
 
     Create publishes `filed`; a re-fire of the same fingerprint refreshes
@@ -80,8 +81,12 @@ def finding(source_engine, fingerprint, **fields):
     a RESOLVED row reopens it (audited + published); an ACCEPTED row stays
     accepted until the fingerprint itself changes (§F2).
     """
+    if workspace is None:
+        raise TypeError("finding() requires workspace")
     now = timezone.now()
-    existing = Finding.objects.filter(fingerprint=fingerprint).first()
+    existing = Finding.objects.filter(
+        workspace=workspace, fingerprint=fingerprint,
+    ).first()
     if existing is None:
         # Validate the copy BEFORE the row exists — a refused filing must
         # leave nothing behind.
@@ -94,17 +99,21 @@ def finding(source_engine, fingerprint, **fields):
             with transaction.atomic():
                 row = Finding.objects.create(
                     fingerprint=fingerprint, source_engine=source_engine,
-                    first_seen=now, last_seen=now, **fields,
+                    workspace=workspace, first_seen=now, last_seen=now, **fields,
                 )
         except IntegrityError:
             # Two engines filing the same fingerprint concurrently: the loser
             # takes the update path — still never a second row.
-            return finding(source_engine, fingerprint, **fields)
+            return finding(
+                source_engine, fingerprint, workspace=workspace, **fields,
+            )
         # finding_severity, NOT severity: audit()'s own named `severity` is the
         # info/warning/security enum column — a p1/p2/p3 would land there as a
         # permanently corrupt append-only row. The finding's severity is detail.
-        audit("finding_filed", row, source="system",
-              fingerprint=fingerprint, finding_severity=row.severity)
+        audit(
+            "finding_filed", row, source="system", workspace=workspace,
+            fingerprint=fingerprint, finding_severity=row.severity,
+        )
         _publish(row, "filed")
         return row
 
@@ -119,7 +128,10 @@ def finding(source_engine, fingerprint, **fields):
     _require_copy_values({name: getattr(row, name) for name in _COPY_FIELDS})
     row.save()
     if reopened:
-        audit("finding_reopened", row, source="system", fingerprint=fingerprint)
+        audit(
+            "finding_reopened", row, source="system", workspace=workspace,
+            fingerprint=fingerprint,
+        )
         _publish(row, "reopened")
     return row
 
@@ -161,7 +173,7 @@ def _transition(row, to_state, action, event_action, *, actor, source, **detail)
     from_state = row.state
     row.state = to_state
     row.save()
-    audit(action, row, actor=actor, source=source,
+    audit(action, row, actor=actor, source=source, workspace=row.workspace,
           from_state=from_state, to_state=str(to_state),
           fingerprint=row.fingerprint, **detail)
     _publish(row, event_action)

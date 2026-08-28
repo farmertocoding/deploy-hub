@@ -664,6 +664,8 @@ R8_NEUTERINGS = [
     ({"MAKEFLAGS": "i"}, ()),             # ignore-errors: runs, swallows the failure
     ({"MAKEFLAGS": "q"}, ()),             # question mode: runs nothing
     ({"MAKEFLAGS": "t"}, ()),             # touch instead of running
+    ({"MAKEFLAGS": "j"}, ()),             # parallel jobserver: can start mutation early
+    ({"MAKEFLAGS": "--jobs=4"}, ()),
     ({"MAKEFLAGS": "SHELL=/bin/true"}, ()),        # every recipe through `true`
     ({"MAKEFLAGS": ".SHELLFLAGS=-c true"}, ()),
     ({"MAKEFILES": "/tmp/injected.mk"}, ()),       # inject a whole makefile
@@ -744,13 +746,19 @@ def test_lint_turns_off_the_pip_audit_tty_spinner():
     """pip-audit's default TTY spinner has killed `make lint` in this wrapper.
 
     Empirically: the spinner path hangs ~400s and exits 2; `pip-audit --progress-spinner
-    off` is clean. The gate stays advisory (`|| true`); this only pins the flag that
-    keeps the recipe from dying before that `|| true` can run.
+    off` is clean. The recipe must still be able to fail on a CVE (H9).
     """
     recipe = gates.recipe(REPO, "lint")
     assert "pip-audit --progress-spinner off -r requirements.txt" in recipe, (
         "make lint must disable pip-audit's TTY spinner; the default has killed "
         "the recipe in this wrapper:\n" + recipe)
+    audit_line = next(
+        line for line in recipe.splitlines() if "pip-audit" in line
+    )
+    assert "|| true" not in audit_line, (
+        "H9: pip-audit must be able to fail make lint; || true swallows CVEs:\n"
+        + audit_line
+    )
 
 
 @pytest.mark.parametrize("env_overrides,args", [

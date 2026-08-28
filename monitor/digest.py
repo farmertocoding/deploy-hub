@@ -39,10 +39,12 @@ def _render(heading, rows):
 
 def _file_smtp_failure(exc, recipient):
     from core.findings import finding
+    from core.models import default_workspace
 
     finding(
         "monitor.digest",
         "digest:smtp-failed",
+        workspace=default_workspace(),
         severity=Finding.Severity.P2,
         entity="digest",
         title="Digest SMTP send failed",

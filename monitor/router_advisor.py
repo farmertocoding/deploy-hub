@@ -22,6 +22,7 @@ def _fingerprint(target):
 
 def _open_or_acked(target):
     return Finding.objects.filter(
+        workspace=target.zone.workspace,
         fingerprint=_fingerprint(target),
         state__in=(Finding.State.OPEN, Finding.State.ACKED),
     ).first()
@@ -70,6 +71,7 @@ def probe_nothing_forwarded(target, *, wan_probe=None):
         row = finding(
             SOURCE,
             _fingerprint(target),
+            workspace=target.zone.workspace,
             severity=Finding.Severity.P2,
             entity=f"target:{target.pk}",
             title=TITLE,

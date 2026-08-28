@@ -85,13 +85,17 @@ def _evaluate_eligible(site, *, now):
         _retract(site)
         return None
     cheap_fp = f"{CHEAP_KIND}:{site.pk}"
-    cheap = Finding.objects.filter(fingerprint=cheap_fp).first()
+    cheap = Finding.objects.filter(
+        workspace=site.project.workspace, fingerprint=cheap_fp,
+    ).first()
     if cheap is None or cheap.state == Finding.State.RESOLVED:
         return _file_cheap(site, samples, clock)
     if cheap.state in {Finding.State.OPEN, Finding.State.ACKED}:
         return cheap
     fingerprint = f"{KIND}:{site.pk}"
-    existing = Finding.objects.filter(fingerprint=fingerprint).first()
+    existing = Finding.objects.filter(
+        workspace=site.project.workspace, fingerprint=fingerprint,
+    ).first()
     if existing is not None and existing.state in {
         Finding.State.OPEN,
         Finding.State.ACKED,
@@ -112,6 +116,7 @@ def _evaluate_eligible(site, *, now):
         "scale-out-proposal",
         entity,
         fingerprint=fingerprint,
+        workspace=site.project.workspace,
         title=TITLE,
         body=body,
         fix_action=FIX_ACTION,
@@ -132,6 +137,7 @@ def _file_cheap(site, samples, clock):
         "scale-cheap-remediation",
         entity,
         fingerprint=f"{CHEAP_KIND}:{site.pk}",
+        workspace=site.project.workspace,
         title=CHEAP_TITLE,
         body=body,
         fix_action=CHEAP_FIX_ACTION,
@@ -158,8 +164,11 @@ def _samples(site, clock):
 
 
 def _retract(site):
+    workspace = site.project.workspace
     for kind in (CHEAP_KIND, KIND):
-        row = Finding.objects.filter(fingerprint=f"{kind}:{site.pk}").first()
+        row = Finding.objects.filter(
+            workspace=workspace, fingerprint=f"{kind}:{site.pk}",
+        ).first()
         if row is not None and row.state in {
             Finding.State.OPEN,
             Finding.State.ACKED,

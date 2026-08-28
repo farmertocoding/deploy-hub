@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="75" height="75" viewBox="0 0 75 75">
+  <rect width="75" height="75" fill="none"/>
+  <path d="M15 0v75M30 0v75M45 0v75M60 0v75M0 15h75M0 30h75M0 45h75M0 60h75"
+        stroke="rgba(0,0,0,0.035)" stroke-width="1" fill="none"/>
+  <rect x="0.5" y="0.5" width="74" height="74" fill="none"
+        stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+  <circle cx="0" cy="0" r="1.1" fill="rgba(36,157,121,0.16)"/>
+  <circle cx="75" cy="0" r="1.1" fill="rgba(36,157,121,0.16)"/>
+  <circle cx="0" cy="75" r="1.1" fill="rgba(36,157,121,0.16)"/>
+  <circle cx="75" cy="75" r="1.1" fill="rgba(36,157,121,0.16)"/>
+</svg>

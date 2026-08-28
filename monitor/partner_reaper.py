@@ -114,10 +114,13 @@ def reap_orphans(*, transport=None, transport_for=None):
         )
         for ps in qs:
             site = ps.site
-            name = f"site-{site.name}"
-            if name in seen:
-                continue
-            _stop_named(factory(site.primary_target), name, name)
+            from core.partner_views import _container_names
+
+            for name in _container_names(site):
+                if name in seen:
+                    continue
+                seen.add(name)
+                _stop_named(factory(site.primary_target), name, name)
             SiteInstance.objects.filter(site=site).update(
                 desired_state=SiteInstance.DesiredState.STOPPED,
                 observed_state=SiteInstance.ObservedState.STOPPED,

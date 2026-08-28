@@ -21,6 +21,11 @@ ENROLLMENT_ALLOWED_PREFIXES = (
     "/static/",
 )
 
+# First-run enroll is allowed without is_verified(). Extra factors are not.
+_EXTRA_FACTOR_PREFIXES = (
+    "/api/auth/webauthn/registration/",
+)
+
 LAST_ACTIVITY_KEY = "_hub_last_activity"
 
 
@@ -30,17 +35,35 @@ class EnrollmentRequiredMiddleware:
 
     def __call__(self, request):
         user = getattr(request, "user", None)
-        if (
-            user is not None
-            and user.is_authenticated
-            and request.path.startswith("/api/")
-            and not request.path.startswith(ENROLLMENT_ALLOWED_PREFIXES)
-            and not _has_confirmed_device(user)
-        ):
-            return JsonResponse(
-                {"detail": "Two-factor enrollment required before using the API."},
-                status=403,
-            )
+        if user is not None and user.is_authenticated:
+            if (
+                request.path.startswith(_EXTRA_FACTOR_PREFIXES)
+                and _has_confirmed_device(user)
+                and not _session_verified(user)
+            ):
+                return JsonResponse(
+                    {
+                        "detail": (
+                            "Two-factor verification required before enrolling "
+                            "another factor."
+                        ),
+                    },
+                    status=403,
+                )
+            if (
+                request.path.startswith("/api/")
+                and not request.path.startswith(ENROLLMENT_ALLOWED_PREFIXES)
+            ):
+                if not _has_confirmed_device(user):
+                    return JsonResponse(
+                        {"detail": "Two-factor enrollment required before using the API."},
+                        status=403,
+                    )
+                if not _session_verified(user):
+                    return JsonResponse(
+                        {"detail": "Two-factor verification required before using the API."},
+                        status=403,
+                    )
         return self.get_response(request)
 
 
@@ -48,6 +71,14 @@ def _has_confirmed_device(user):
     from django_otp import devices_for_user
 
     return any(devices_for_user(user, confirmed=True))
+
+
+def _session_verified(user):
+    """OTPMiddleware sets is_verified() from session otp_device_id."""
+    checker = getattr(user, "is_verified", None)
+    if callable(checker):
+        return bool(checker())
+    return False
 
 
 class IdleTimeoutMiddleware:

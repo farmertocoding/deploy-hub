@@ -33,4 +33,7 @@ ACTION_TIERS = (
     {"id": "partner.api_kill_switch", "tier": "T1", "label": "Disable partner API"},
     {"id": "partner.site_takedown", "tier": "T2", "label": "Take down site"},
     {"id": "partner.destination_rank", "tier": "T2", "label": "Rank partner destination"},
+    {"id": "dns.origin_ca_plant", "tier": "T1", "label": "Plant Origin CA token"},
+    {"id": "dns.cloudflare_connect", "tier": "T1", "label": "Connect Cloudflare"},
+    {"id": "aws.connect", "tier": "T1", "label": "Connect AWS"},
 )

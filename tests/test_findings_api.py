@@ -23,8 +23,12 @@ COPY = dict(
 
 def _file(fingerprint="fp-api-shop", **overrides):
     from core.findings import finding
+    from core.models import default_workspace
 
-    return finding("uptime", fingerprint, **{**COPY, **overrides})
+    workspace = overrides.pop("workspace", default_workspace())
+    return finding(
+        "uptime", fingerprint, workspace=workspace, **{**COPY, **overrides},
+    )
 
 
 def _enrolled_client(client):

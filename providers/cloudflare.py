@@ -157,34 +157,27 @@ def observe_token(token, *, timeout=20):
     return {"status": status, "zones": zones, "zone_count": count}
 
 
-def origin_ca_request(origin_ca_key, method, path, payload=None, *, timeout=20):
-    """One Origin CA call. The service key goes into X-Auth-User-Service-Key
-    and nowhere else — never Bearer, never logs, never error text."""
-    if isinstance(origin_ca_key, (bytes, bytearray)):
-        origin_ca_key = origin_ca_key.decode()
-    request = Request(
-        API + path,
-        data=None if payload is None else json.dumps(payload).encode(),
-        headers={
-            "X-Auth-User-Service-Key": origin_ca_key,
-            "Content-Type": "application/json",
-        },
-        method=method,
-    )
-    # nosec justification: scheme is pinned to the https:// API constant.
-    try:
-        with urlopen(request, timeout=timeout) as response:  # nosec B310
-            body = json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        raise CloudflareApiError(
-            f"cloudflare Origin CA {method} {path} failed: HTTP {error.code}",
-            status=error.code,
-        ) from None
-    if not body.get("success", False):
-        raise CloudflareApiError(
-            f"cloudflare Origin CA {method} {path} failed: {body.get('errors')}"
+def refuse_origin_ca_service_key(credential):
+    """Bearer only for Origin CA: refuse the deprecated v1.0- service key.
+
+    Cloudflare deprecated service-key authentication on 2026-03-19 (shutdown
+    2026-09-30). Origin CA issue uses a scoped API token with Zone SSL and
+    Certificates Edit, sent as Authorization Bearer.
+    """
+    token = refuse_global_api_key(credential)
+    if token.startswith("v1.0-"):
+        raise CloudflareError(
+            "refused: Origin CA service key authentication is deprecated; "
+            "plant a Bearer token with Zone SSL and Certificates Edit"
         )
-    return body
+    return token
+
+
+def origin_ca_request(origin_ca_key, method, path, payload=None, *, timeout=20):
+    """One Origin CA call. The token goes into the Authorization header
+    and nowhere else — never a service-key header, logs, or error text."""
+    token = refuse_origin_ca_service_key(origin_ca_key)
+    return api_request(token, method, path, payload, timeout=timeout)
 
 
 def verify_token(token_ref, *, timeout=20):
@@ -371,11 +364,15 @@ class CloudflareDnsProvider(DnsProvider):
 
 
 class CloudflareOriginCertIssuer(OriginCertIssuer):
-    """Origin CA client. The Hub sends a CSR; the private key never leaves."""
+    """Origin CA client. The Hub sends a CSR; the private key never leaves.
+
+    Authenticated with a Bearer API token (Zone SSL and Certificates Edit),
+    never a deprecated Origin CA service key.
+    """
 
     def __init__(self, zone, *, origin_ca_key, timeout=20):
         self.zone = zone
-        self._origin_ca_key = origin_ca_key
+        self._origin_ca_key = refuse_origin_ca_service_key(origin_ca_key)
         self.timeout = timeout
 
     def __repr__(self):
@@ -393,6 +390,13 @@ class CloudflareOriginCertIssuer(OriginCertIssuer):
                 raise CloudflareError(
                     f"this issuer is bound to zone {self.zone.name!r}; "
                     f"refusing a call for a different zone"
+                )
+        zone_name = self.zone.name
+        for host in hostnames:
+            host = str(host)
+            if host != zone_name and not host.endswith("." + zone_name):
+                raise CloudflareError(
+                    f"hostname {host!r} is not under zone {zone_name!r}"
                 )
         csr_text = csr.decode() if isinstance(csr, (bytes, bytearray)) else csr
         body = origin_ca_request(

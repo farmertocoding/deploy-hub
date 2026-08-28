@@ -166,6 +166,7 @@ def _refuse_unproxied(site):
     finding(
         "tls",
         f"unproxied-cert:{site.pk}",
+        workspace=site.project.workspace,
         severity=Finding.Severity.P2,
         entity=f"site:{site.name}",
         title="Unproxied public site cannot get a Hub-issued certificate",

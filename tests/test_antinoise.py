@@ -20,7 +20,10 @@ COPY = dict(
 
 
 def _copy(**overrides):
+    from core.models import default_workspace
+
     fields = dict(COPY)
+    fields.setdefault("workspace", default_workspace())
     fields.update(overrides)
     return fields
 

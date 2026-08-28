@@ -399,7 +399,7 @@ def test_suspend_t1_stop_detach_revoke(client, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_takedown_t2_410_on_site_detail(client):
+def test_takedown_t2_410_on_site_detail(client, monkeypatch):
     """Per-site takedown is T2 on partner site detail; route becomes 410.
 
     Transcribes tests/test_partner_kill_switch.py::
@@ -412,7 +412,7 @@ def test_takedown_t2_410_on_site_detail(client):
     )
 
     test_takedown_control_is_on_partner_site_detail()
-    test_site_takedown_is_t2_and_returns_410(client)
+    test_site_takedown_is_t2_and_returns_410(client, monkeypatch)
 
 
 @pytest.mark.django_db

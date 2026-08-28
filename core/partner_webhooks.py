@@ -128,6 +128,7 @@ def _is_disabled(partner):
     from core.models import Finding
 
     return Finding.objects.filter(
+        workspace=partner.workspace,
         fingerprint=f"hub-egress-degraded:partner:{partner.pk}",
         state__in=(Finding.State.OPEN, Finding.State.ACKED),
     ).exists()
@@ -147,6 +148,7 @@ def _file_egress_degraded(partner):
     raise_alert(
         "hub-egress-degraded",
         entity,
+        workspace=partner.workspace,
         fingerprint=f"hub-egress-degraded:partner:{partner.pk}",
         source_engine="partner_webhooks",
         title="Partner webhook delivery disabled",

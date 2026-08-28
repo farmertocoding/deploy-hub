@@ -6,8 +6,9 @@ ONE pinned verify + zone-set probe. core/views.py is untouched so auth-code
 custody stays clean.
 
 Origin-CA plant (Task 2 / I-plant): a Hub-local file path under an Origin-CA
-subdir becomes vault.put(API_TOKEN, dns_account, ref). Key bytes never enter
-the request or response.
+subdir becomes vault.put(API_TOKEN, dns_account, ref). The file is a Bearer
+token with Zone SSL and Certificates Edit, not a deprecated v1.0- service
+key. Token bytes never enter the request or response.
 """
 import uuid
 from pathlib import Path
@@ -17,11 +18,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
-from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import DnsAccount, DnsZone
+from core.permissions import RequireAction, RequireRecentTouch, RequireWorkspace
+from core.rbac import request_workspace, scoped_get
 from providers import cloudflare
 from vault import service as vault_service
 from vault.models import Secret
@@ -69,7 +72,31 @@ def _refuse(message):
     raise serializers.ValidationError({"token": message})
 
 
+def _observe_origin_ca(token, account):
+    """One-zone Bearer wall for Origin CA, same observation as DNS tokens."""
+    observed = cloudflare.observe_token(token)
+    if observed["status"] != "active":
+        raise cloudflare.CloudflareError(
+            f"token verify returned status {observed['status']!r}, not 'active'"
+        )
+    if observed["zone_count"] != 1:
+        raise cloudflare.CloudflareError(
+            f"token reaches {observed['zone_count']} zones; Origin CA must "
+            "be scoped to exactly one zone"
+        )
+    declared = {zone.provider_zone_id for zone in account.zones.all()}
+    if declared:
+        got = (observed["zones"][0] or {}).get("id")
+        if got not in declared:
+            raise cloudflare.CloudflareError(
+                "Origin CA token zone does not match this DnsAccount"
+            )
+    return observed
+
+
 class CloudflareConnectView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction, RequireRecentTouch]
+    action_id = "dns.cloudflare_connect"
     @extend_schema(
         request=CloudflareConnectSerializer,
         responses={201: CloudflareConnectResultSerializer},
@@ -112,7 +139,11 @@ class CloudflareConnectView(APIView):
         )
         try:
             with transaction.atomic():
+                workspace = request_workspace(request)
+                if workspace is None:
+                    _refuse("Workspace required.")
                 account = DnsAccount.objects.create(
+                    workspace=workspace,
                     provider=DnsAccount.Provider.CLOUDFLARE,
                     label=zone_name,
                     dns_token_ref=ref,
@@ -193,11 +224,14 @@ def _resolve_plant_path(raw):
 
 
 class OriginCaPlantView(APIView):
+    permission_classes = [IsAuthenticated, RequireWorkspace, RequireAction, RequireRecentTouch]
+    action_id = "dns.origin_ca_plant"
     @extend_schema(
         request=OriginCaPlantSerializer,
         responses={200: OriginCaPlantResultSerializer},
     )
     def post(self, request, account_id):
+        account = scoped_get(request, DnsAccount.objects.all(), pk=account_id)
         if _body_has_key_bytes(getattr(request, "data", None)):
             raise serializers.ValidationError(
                 {"path": "body must be {path} only; key bytes are not accepted"}
@@ -205,18 +239,32 @@ class OriginCaPlantView(APIView):
         ser = OriginCaPlantSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         resolved = _resolve_plant_path(ser.validated_data["path"])
-        account = get_object_or_404(DnsAccount, pk=account_id)
+        plaintext = resolved.read_bytes()
+        try:
+            token = cloudflare.refuse_origin_ca_service_key(plaintext)
+        except cloudflare.CloudflareError as exc:
+            raise serializers.ValidationError({"path": str(exc)}) from exc
+        try:
+            _observe_origin_ca(token, account)
+        except cloudflare.CloudflareError as exc:
+            raise serializers.ValidationError({"path": str(exc)}) from exc
         ref = account.origin_ca_key_ref or uuid.uuid4().hex
         vault_service.put(
             kind=Secret.Kind.API_TOKEN,
             owner_type="dns_account",
             owner_id=ref,
-            plaintext=resolved.read_bytes(),
+            plaintext=plaintext,
             actor=request.user,
         )
         if account.origin_ca_key_ref != ref:
             account.origin_ca_key_ref = ref
             account.save(update_fields=["origin_ca_key_ref"])
+        try:
+            resolved.unlink()
+        except OSError as exc:
+            raise serializers.ValidationError(
+                {"path": "vaulted but could not remove the plant file"}
+            ) from exc
         return Response(
             OriginCaPlantResultSerializer({"planted": True}).data,
             status=status.HTTP_200_OK,

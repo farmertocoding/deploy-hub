@@ -199,3 +199,88 @@ def test_capabilities_declares_proxied(monkeypatch):
     """
     provider = _provider(monkeypatch, FakeCloudflare())
     assert "proxied" in provider.capabilities()
+
+
+def _header(headers, name):
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
+
+
+ORIGIN_CA_ISSUE = ("POST", "/certificates")
+ORIGIN_CA_CSR = (
+    "-----BEGIN CERTIFICATE REQUEST-----\n"
+    "t1-dummy-csr-not-a-credential\n"
+    "-----END CERTIFICATE REQUEST-----"
+)
+SERVICE_KEY = (
+    "v1.0-144c9defac04969c7bfad8ef-631a41d003a32d25fe878081ef365c49503f7fada6"
+)
+
+
+def _issuer(monkeypatch, http, *, credential=TOKEN):
+    import providers.cloudflare as cloudflare
+
+    monkeypatch.setattr(cloudflare, "urlopen", http)
+    return cloudflare.CloudflareOriginCertIssuer(_zone(), origin_ca_key=credential)
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_origin_ca_issue_sends_bearer_not_service_key(monkeypatch):
+    """Origin CA issue authenticates with Authorization Bearer.
+
+    What would make this fail: sending X-Auth-User-Service-Key, which
+    Cloudflare deprecated 2026-03-19 and shuts down 2026-09-30.
+    """
+    http = FakeCloudflare({
+        ORIGIN_CA_ISSUE: {
+            "success": True,
+            "result": {
+                "certificate": "-----BEGIN CERTIFICATE-----\nMII\n-----END CERTIFICATE-----",
+                "expires_on": "2030-01-01T00:00:00+00:00",
+            },
+        },
+    })
+    issuer = _issuer(monkeypatch, http)
+    result = issuer.issue(
+        issuer.zone, ["app.example.com"], validity_days=7, csr=ORIGIN_CA_CSR,
+    )
+    assert "BEGIN CERTIFICATE" in result["certificate"]
+    assert http.requests, "issue must hit POST /certificates"
+    headers = http.requests[0][2]
+    assert _header(headers, "Authorization") == f"Bearer {TOKEN}"
+    assert _header(headers, "X-Auth-User-Service-Key") is None
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_origin_ca_refuses_service_key_before_network(monkeypatch):
+    """A v1.0- Origin CA service key never reaches urlopen.
+
+    What would make this fail: still sending X-Auth-User-Service-Key, or
+    interpolating the credential into the refusal.
+    """
+    from providers.cloudflare import CloudflareError
+
+    http = FakeCloudflare()
+    with pytest.raises(CloudflareError) as exc:
+        _issuer(monkeypatch, http, credential=SERVICE_KEY)
+    assert http.requests == []
+    message = str(exc.value)
+    assert SERVICE_KEY not in message
+    assert "Bearer" in message or "deprecated" in message.lower()
+
+
+@pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
+def test_origin_ca_module_does_not_send_service_key_header():
+    """The adapter must not still plant the deprecated header name as a header.
+
+    What would make this fail: a quoted X-Auth-User-Service-Key assignment
+    remaining in providers/cloudflare.py after the Bearer migration.
+    """
+    from pathlib import Path
+
+    src = Path("providers/cloudflare.py").read_text()
+    assert '"X-Auth-User-Service-Key"' not in src
+    assert "'X-Auth-User-Service-Key'" not in src

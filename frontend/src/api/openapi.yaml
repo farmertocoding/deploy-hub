@@ -273,7 +273,7 @@ paths:
           description: ''
   /api/v1/findings/:
     get:
-      operationId: v1_findings_retrieve
+      operationId: v1_findings_list
       parameters:
       - in: query
         name: entity
@@ -322,7 +322,7 @@ paths:
           description: ''
   /api/v1/findings/{id}/:
     get:
-      operationId: v1_findings_retrieve_2
+      operationId: v1_findings_retrieve
       parameters:
       - in: path
         name: id
@@ -386,6 +386,582 @@ paths:
               schema:
                 $ref: '#/components/schemas/FirstRunSnapshot'
           description: ''
+  /api/v1/hud/audit/:
+    get:
+      operationId: v1_hud_audit_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/deployments/:
+    get:
+      operationId: v1_hud_deployments_list
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentList'
+          description: ''
+  /api/v1/hud/deployments/{id}/:
+    get:
+      operationId: v1_hud_deployments_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentDetail'
+          description: ''
+  /api/v1/hud/deployments/{id}/commands/:
+    post:
+      operationId: v1_hud_deployments_commands_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentCommand'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DeploymentCommand'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DeploymentCommand'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '202':
+          description: No response body
+  /api/v1/hud/deployments/{id}/downloads/:
+    post:
+      operationId: v1_hud_deployments_downloads_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DownloadGrant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DownloadGrant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DownloadGrant'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadGrant'
+          description: ''
+  /api/v1/hud/downloads/{token}/:
+    get:
+      operationId: v1_hud_downloads_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/findings/:
+    get:
+      operationId: v1_hud_findings_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/findings/{id}/commands/:
+    post:
+      operationId: v1_hud_findings_commands_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/integrations/:
+    get:
+      operationId: v1_hud_integrations_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/integrations/commands/:
+    post:
+      operationId: v1_hud_integrations_commands_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/members/:
+    get:
+      operationId: v1_hud_members_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_hud_members_create
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+    delete:
+      operationId: v1_hud_members_destroy
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/hud/operations/{id}/:
+    get:
+      operationId: v1_hud_operations_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/overview/:
+    get:
+      operationId: v1_hud_overview_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overview'
+          description: ''
+  /api/v1/hud/partners/:
+    get:
+      operationId: v1_hud_partners_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/partners/commands/:
+    post:
+      operationId: v1_hud_partners_commands_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/projects/:
+    get:
+      operationId: v1_hud_projects_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+    post:
+      operationId: v1_hud_projects_create
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/projects/{id}/commands/:
+    post:
+      operationId: v1_hud_projects_commands_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/projects/test-source/:
+    get:
+      operationId: v1_hud_projects_test_source_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/search/:
+    get:
+      operationId: v1_hud_search_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/secrets/:
+    get:
+      operationId: v1_hud_secrets_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretList'
+          description: ''
+    post:
+      operationId: v1_hud_secrets_create
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/secrets/{id}/rotate-plan/:
+    get:
+      operationId: v1_hud_secrets_rotate_plan_retrieve
+      description: 'Read-only rotation plan: names affected objects. Does not write
+        a new version.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotatePlan'
+          description: ''
+  /api/v1/hud/shell/:
+    get:
+      operationId: v1_hud_shell_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/sites/:
+    get:
+      operationId: v1_hud_sites_list
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteFleetList'
+          description: ''
+  /api/v1/hud/sites/{id}/:
+    get:
+      operationId: v1_hud_sites_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/sites/commands/:
+    post:
+      operationId: v1_hud_sites_commands_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/targets/:
+    get:
+      operationId: v1_hud_targets_retrieve
+      description: APIView with explicit schema metadata so privileged routes stay
+        in OpenAPI.
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/hud/targets/{id}/commands/:
+    post:
+      operationId: v1_hud_targets_item_commands_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
+  /api/v1/hud/targets/commands/:
+    post:
+      operationId: v1_hud_targets_collection_commands_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Command'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Command'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Command'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+          description: ''
   /api/v1/instance/create/:
     get:
       operationId: v1_instance_create_retrieve
@@ -447,8 +1023,8 @@ paths:
   /api/v1/partner-api/kill-switch/:
     post:
       operationId: v1_partner_api_kill_switch_create
-      description: 'T1 partner.api_kill_switch: type partner-api. Enable when OFF,
-        never a toggle.'
+      description: 'T1 partner.api_kill_switch: type partner-api. Explicit enabled,
+        never XOR.'
       tags:
       - v1
       requestBody:
@@ -470,7 +1046,7 @@ paths:
           description: No response body
   /api/v1/partners/:
     get:
-      operationId: v1_partners_retrieve
+      operationId: v1_partners_list
       description: GET is the operator list (no secrets). POST is T1 partner.create.
       tags:
       - v1
@@ -511,7 +1087,7 @@ paths:
           description: ''
   /api/v1/partners/{id}/:
     get:
-      operationId: v1_partners_retrieve_2
+      operationId: v1_partners_retrieve
       description: GET never echoes hubk_ or whsec_.
       parameters:
       - in: path
@@ -1424,6 +2000,16 @@ components:
           maxLength: 4096
         cancel:
           type: boolean
+    AllowedAction:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+      required:
+      - id
+      - label
     AttackState:
       type: object
       properties:
@@ -1568,6 +2154,9 @@ components:
       - id
       - kind
       - schedule
+    BlankEnum:
+      enum:
+      - ''
     CandidateTarget:
       type: object
       properties:
@@ -1613,6 +2202,13 @@ components:
       required:
       - account
       - zone
+    Command:
+      type: object
+      properties:
+        action:
+          type: string
+      required:
+      - action
     Confirm:
       type: object
       properties:
@@ -1626,6 +2222,8 @@ components:
       properties:
         confirm_name:
           type: string
+        enabled:
+          type: boolean
       required:
       - confirm_name
     DemoJob:
@@ -1645,6 +2243,120 @@ components:
           default: false
       required:
       - name
+    DeployPolicyEnum:
+      enum:
+      - auto
+      - confirm
+      - windowed
+      type: string
+      description: |-
+        * `auto` - Auto
+        * `confirm` - Confirm
+        * `windowed` - Windowed
+    DeployStrategyEnum:
+      enum:
+      - blue_green
+      - recreate
+      type: string
+      description: |-
+        * `blue_green` - Blue Green
+        * `recreate` - Recreate
+    DeploymentCommand:
+      type: object
+      properties:
+        action:
+          type: string
+      required:
+      - action
+    DeploymentDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        site:
+          type: string
+        site_id:
+          type: integer
+        version:
+          type: integer
+        state:
+          type: string
+        headline:
+          type: string
+        live_release:
+          type: string
+        desired_release:
+          type: string
+        previous_release:
+          type: string
+          nullable: true
+        target:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        heartbeat_at:
+          type: string
+          format: date-time
+          nullable: true
+        safe_next:
+          type: string
+        safe_next_reason:
+          type: string
+        log_text:
+          type: string
+        log_cursor:
+          type: integer
+        log_truncated:
+          type: boolean
+        artifacts:
+          type: array
+          items: {}
+        steps:
+          type: array
+          items: {}
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - allowed_actions
+      - artifacts
+      - desired_release
+      - disabled_actions
+      - headline
+      - heartbeat_at
+      - id
+      - live_release
+      - log_cursor
+      - log_text
+      - log_truncated
+      - observed_at
+      - previous_release
+      - safe_next
+      - safe_next_reason
+      - site
+      - site_id
+      - state
+      - steps
+      - target
+      - version
+    DeploymentList:
+      type: object
+      properties:
+        observed_at:
+          type: string
+          format: date-time
+        results:
+          type: array
+          items: {}
+      required:
+      - observed_at
+      - results
     DestinationRank:
       type: object
       properties:
@@ -1654,6 +2366,21 @@ components:
             type: integer
       required:
       - destination_order
+    DisabledAction:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        reason:
+          type: string
+        label:
+          type: string
+      required:
+      - code
+      - id
+      - reason
     DnsAccountConnected:
       type: object
       properties:
@@ -1685,6 +2412,20 @@ components:
       required:
       - id
       - name
+    DownloadGrant:
+      type: object
+      properties:
+        resource:
+          $ref: '#/components/schemas/ResourceEnum'
+        step:
+          oneOf:
+          - $ref: '#/components/schemas/StepEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        artifact_id:
+          type: integer
+          minimum: 1
+      required:
+      - resource
     EdgeOwnerEnum:
       enum:
       - host_caddy
@@ -2041,6 +2782,21 @@ components:
           type: boolean
         t1_available:
           type: boolean
+        role:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        is_system_admin:
+          type: boolean
+        hud_ui:
+          type: boolean
+        workspaces:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
       required:
       - authenticated
     OriginCaPlant:
@@ -2125,6 +2881,67 @@ components:
       required:
       - target
       - unjoined
+    Overview:
+      type: object
+      properties:
+        observed_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+        findings:
+          type: object
+          additionalProperties:
+            type: integer
+        deployments:
+          type: object
+          additionalProperties:
+            type: integer
+        site_health:
+          type: object
+          additionalProperties:
+            type: integer
+        target_readiness:
+          type: object
+          additionalProperties:
+            type: integer
+        attention:
+          type: array
+          items: {}
+        active_deployments:
+          type: array
+          items: {}
+        integrations:
+          type: object
+          additionalProperties: {}
+        setup:
+          type: array
+          items: {}
+        links:
+          type: object
+          additionalProperties: {}
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - active_deployments
+      - allowed_actions
+      - attention
+      - deployments
+      - disabled_actions
+      - findings
+      - integrations
+      - links
+      - observed_at
+      - setup
+      - site_health
+      - target_readiness
+      - version
     PartnerCreate:
       type: object
       properties:
@@ -2315,6 +3132,23 @@ components:
         primary_target:
           type: integer
           nullable: true
+        site_name:
+          type: string
+          default: ''
+        environment:
+          type: string
+          default: ''
+        deploy_strategy:
+          allOf:
+          - $ref: '#/components/schemas/DeployStrategyEnum'
+          default: blue_green
+        deploy_policy:
+          allOf:
+          - $ref: '#/components/schemas/DeployPolicyEnum'
+          default: auto
+        deploy_window_cron:
+          type: string
+          default: ''
       required:
       - name
     ProjectSummary:
@@ -2425,6 +3259,14 @@ components:
       - scanned_at
       - summary
       - warnings
+    ResourceEnum:
+      enum:
+      - log
+      - artifact
+      type: string
+      description: |-
+        * `log` - log
+        * `artifact` - artifact
     RollbackResult:
       type: object
       properties:
@@ -2438,6 +3280,39 @@ components:
       - deployment_id
       - original_id
       - status
+    RotatePlan:
+      type: object
+      properties:
+        secret_id:
+          type: integer
+        kind:
+          type: string
+        owner_type:
+          type: string
+        owner_id:
+          type: string
+        fingerprint:
+          type: string
+        affected:
+          type: array
+          items: {}
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - affected
+      - allowed_actions
+      - disabled_actions
+      - fingerprint
+      - kind
+      - owner_id
+      - owner_type
+      - secret_id
     RouterAdvice:
       type: object
       properties:
@@ -2485,6 +3360,64 @@ components:
       - forwarded
       - ok
       - target_id
+    SecretList:
+      type: object
+      properties:
+        observed_at:
+          type: string
+          format: date-time
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecretMeta'
+      required:
+      - observed_at
+      - results
+    SecretMeta:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+        owner_type:
+          type: string
+        owner_id:
+          type: string
+        fingerprint:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        exportable:
+          type: boolean
+        references:
+          type: array
+          items: {}
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - allowed_actions
+      - created_at
+      - disabled_actions
+      - exportable
+      - fingerprint
+      - id
+      - kind
+      - last_used_at
+      - owner_id
+      - owner_type
+      - references
     SeverityEnum:
       enum:
       - p1
@@ -2503,6 +3436,117 @@ components:
           $ref: '#/components/schemas/EdgeOwnerEnum'
       required:
       - edge_owner
+    SiteFleetList:
+      type: object
+      properties:
+        observed_at:
+          type: string
+          format: date-time
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SiteFleetRow'
+        next:
+          type: string
+          nullable: true
+        page:
+          type: integer
+        sort:
+          type: string
+        count:
+          type: integer
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - allowed_actions
+      - count
+      - disabled_actions
+      - next
+      - observed_at
+      - page
+      - results
+      - sort
+    SiteFleetRow:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        project:
+          type: string
+        domain:
+          type: string
+        health:
+          type: string
+        environment:
+          type: string
+        exposure:
+          type: string
+        target:
+          type: string
+        tls:
+          type: string
+        backup:
+          type: string
+        live_release:
+          type: string
+        desired_release:
+          type: string
+        active_deployment:
+          type: integer
+          nullable: true
+        copies:
+          type: integer
+        owner:
+          type: string
+        findings:
+          type: integer
+        last_deploy_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_deploy_actor:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedAction'
+        disabled_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisabledAction'
+      required:
+      - active_deployment
+      - allowed_actions
+      - backup
+      - copies
+      - desired_release
+      - disabled_actions
+      - domain
+      - environment
+      - exposure
+      - findings
+      - health
+      - id
+      - last_deploy_actor
+      - last_deploy_at
+      - live_release
+      - name
+      - observed_at
+      - owner
+      - project
+      - target
+      - tls
     SiteSummary:
       type: object
       properties:
@@ -2567,6 +3611,28 @@ components:
       description: |-
         * `degraded` - degraded
         * `error` - error
+    StepEnum:
+      enum:
+      - build
+      - ship
+      - migrate
+      - start_green
+      - health_check
+      - dns
+      - route_tls
+      - smoke_test
+      - cutover
+      type: string
+      description: |-
+        * `build` - build
+        * `ship` - ship
+        * `migrate` - migrate
+        * `start_green` - start_green
+        * `health_check` - health_check
+        * `dns` - dns
+        * `route_tls` - route_tls
+        * `smoke_test` - smoke_test
+        * `cutover` - cutover
     TargetDelete:
       type: object
       properties:

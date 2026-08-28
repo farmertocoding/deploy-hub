@@ -243,8 +243,13 @@ def test_t1_target_delete_refuses_without_recent_touch(client, monkeypatch):
 @pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
 def test_t1_requires_type_the_name(client, monkeypatch):
     """Hardware touch without typing the target host still refuses."""
+    from core.models import WorkspaceMembership, default_workspace
+
     _patch_webauthn_helper(monkeypatch)
     user = User.objects.create_user("joseph", password="a-long-dev-password")
+    WorkspaceMembership.objects.create(
+        workspace=default_workspace(), user=user, role="owner",
+    )
     _make_cred(user, "yubikey")
     _make_cred(user, "phone")
     target = _make_target("box-1.example.com")
@@ -276,6 +281,35 @@ def test_t1_requires_type_the_name(client, monkeypatch):
     )
     assert ok.status_code == 204, ok.content
     assert not Target.objects.filter(pk=target.pk).exists()
+
+
+@pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
+@pytest.mark.no_default_membership
+def test_t1_target_delete_refuses_zero_membership_after_touch(client, monkeypatch):
+    """A hardware touch does not substitute for a persisted workspace role."""
+    _patch_webauthn_helper(monkeypatch)
+    user = User.objects.create_user("untethered", password="a-long-dev-password")
+    _make_cred(user, "yubikey")
+    _make_cred(user, "phone")
+    target = _make_target("box-2.example.com")
+    _login_password(client, user)
+
+    assert client.post("/api/auth/webauthn/authentication/begin/").status_code == 200
+    touch = client.post(
+        "/api/auth/webauthn/touch/",
+        data=json.dumps({"id": "cred-1", "response": {}}),
+        content_type="application/json",
+    )
+    assert touch.status_code == 200, touch.content
+    refused = client.post(
+        _delete_url(target),
+        data=json.dumps({"confirm_name": "box-2.example.com"}),
+        content_type="application/json",
+    )
+    assert refused.status_code == 403, refused.content
+    from core.models import Target
+
+    assert Target.objects.filter(pk=target.pk).exists()
 
 
 @pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
@@ -459,6 +493,9 @@ T1_HTTP = {
     "site.overflow_join": "/api/v1/sites/{pk}/overflow-join/",
     "site.overflow_scale_in": "/api/v1/sites/{pk}/overflow-scale-in/",
     "site.backup_restore": "/api/v1/sites/{pk}/backups/1/restore/",
+    "dns.origin_ca_plant": "/api/v1/dns-accounts/{pk}/origin-ca-plant/",
+    "dns.cloudflare_connect": "/api/v1/cloudflare/connect/",
+    "aws.connect": "/api/v1/aws/connect/",
 }
 
 

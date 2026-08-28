@@ -106,6 +106,7 @@ def deploy_overflow_copy(
     from deploys.models import Deployment, DeploymentStep
 
     row = Finding.objects.filter(
+        workspace=site.project.workspace,
         fingerprint=f"scale-out-proposal:{site.pk}",
     ).first()
     if row is None or row.state != Finding.State.ACCEPTED:
@@ -210,6 +211,7 @@ def join_overflow_traffic(
     from deploys.steps import ensure_dns
 
     row = Finding.objects.filter(
+        workspace=site.project.workspace,
         fingerprint=f"scale-out-proposal:{site.pk}",
     ).first()
     if row is None or row.state != Finding.State.ACCEPTED:
@@ -377,6 +379,7 @@ def scale_in_overflow(
             inst.save(update_fields=["desired_state", "observed_state"])
 
         row = Finding.objects.filter(
+            workspace=site.project.workspace,
             fingerprint=f"scale-out-proposal:{site.pk}",
         ).first()
         if row is not None and row.state in (

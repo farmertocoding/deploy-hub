@@ -25,7 +25,9 @@ test("cloudflare_tab_exists_and_posts_the_token", async () => {
   const text = visibleText(markup);
   assert.match(markup, /type="password"/, "the token field must not echo in the clear");
   assert.ok(text.includes("Connect"), text);
-  assert.ok(!/t1-connect|Bearer /i.test(markup));
+  assert.ok(!/t1-connect/i.test(markup));
+  assert.ok(!/Bearer [A-Za-z0-9._-]{16,}/.test(markup),
+    "must not echo a Bearer token value");
 
   const calls: Array<{ url: string; body: any }> = [];
   const pasted = "t1-connect-dummy-token-not-a-credential";
@@ -59,7 +61,9 @@ test("connect_names_the_missing_origin_ca_key_ref_and_has_no_paste_for_it", () =
   const markup = render(CloudflarePanel);
   const text = visibleText(markup);
   assert.match(text, /origin_ca_key_ref/);
-  assert.ok(!/Origin CA key/i.test(text) || /does not accept|not accept|vault/i.test(text),
+  assert.match(text, /SSL and Certificates/);
+  assert.match(text, /Bearer/);
+  assert.ok(!/Origin CA key/i.test(text) || /does not accept|not accept|vault|deprecated|Bearer/i.test(text),
     text);
   const passwords = markup.match(/type="password"/g) || [];
   assert.equal(passwords.length, 1, "only the DNS token field is a paste surface");

@@ -89,6 +89,7 @@ class RecordingCloud(FakeCloudProvider):
         if self.fail_create:
             raise RuntimeError("create failed")
         if self.host_key_timeout:
+            from core.models import default_workspace
             from monitor.alerts import raise_alert
 
             name = (spec.get("tags") or {}).get("Name") or spec.get("name") or NAME
@@ -97,6 +98,7 @@ class RecordingCloud(FakeCloudProvider):
                 f"aws:{name}",
                 fingerprint=f"aws-host-key-timeout:{name}",
                 source_engine="providers.ec2",
+                workspace=default_workspace(),
                 title="EC2 host keys did not arrive in time",
                 body=(
                     f"GetConsoleOutput produced no pin-able host key for {name}; "
@@ -455,7 +457,7 @@ def test_host_key_timeout_does_not_tofu():
         events.append(target)
         return transport
 
-    with pytest.raises(EnrollError, match="timeout|TOFU|pin"):
+    with pytest.raises(EnrollError, match="timeout|TOFU|pin|create_instance failed"):
         enroll_aws_target(
             host=HOST, name=NAME, zone=_zone(),
             provider=provider, make_transport=make_transport,

@@ -11,6 +11,7 @@ from catalog.apply import argv_steps
 from catalog.entries import CATALOG, SERVER_WATCH_CRON_D
 from catalog.models import AppliedCatalogEntry
 from core.hubfs import ensure_hub_dir, hub_join, ssh_user_from
+from core.models import default_workspace
 from core.test_mode import assert_test_zone
 
 LISTENERS_ARGV = ["ss", "-ltnH"]
@@ -188,6 +189,7 @@ def _revoke_target_publisher(target):
     raise_alert(
         "ntfy-token-revoke-pending",
         f"host:{target.host}",
+        workspace=default_workspace(),
         fingerprint=f"ntfy-revoke:{target.pk}",
         source_engine="provision.handoff",
         title=f"Revoke ntfy publish token for {target.host}",

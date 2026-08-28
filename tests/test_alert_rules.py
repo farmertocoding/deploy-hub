@@ -79,10 +79,13 @@ def _call_name(node):
 
 
 def _copy(**overrides):
+    from core.models import default_workspace
+
     fields = dict(
         title="alert title",
         body="why this matters to the operator",
         fix_action="do the named fix",
+        workspace=default_workspace(),
     )
     fields.update(overrides)
     return fields

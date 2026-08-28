@@ -138,11 +138,13 @@ def _login(make_transport, target, key_ref):
 
 
 def _incomplete(target, why):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     return raise_alert(
         "ssh-rotation-incomplete",
         f"target:{target.pk}",
+        workspace=default_workspace(),
         fingerprint=f"ssh-rotation-incomplete:{target.pk}",
         source_engine=SOURCE,
         title="SSH key rotation incomplete",
@@ -156,11 +158,13 @@ def _incomplete(target, why):
 
 
 def _stale(target, why):
+    from core.models import default_workspace
     from monitor.alerts import raise_alert
 
     return raise_alert(
         "ssh-rotation-stale-key",
         f"target:{target.pk}",
+        workspace=default_workspace(),
         fingerprint=f"ssh-rotation-stale-key:{target.pk}",
         source_engine=SOURCE,
         title="Stale SSH key after rotation",

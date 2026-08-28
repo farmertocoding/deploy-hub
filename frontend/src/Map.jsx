@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
 
-const box = { padding: 8, background: "#1a1d24", color: "#e6e6e6", border: "1px solid #333" };
+import { box } from "./ui/surface.js";
 
 export const CHIP_AFTER = 6;
 
@@ -47,7 +47,7 @@ export function MapView({ graph, listView = false, onToggle }) {
         </button>
       </div>
       {empty ? (
-        <p style={{ color: "#8b949e" }}>
+        <p style={{ color: "var(--hud-muted)" }}>
           No hosts yet — provision a target and the fleet draws here.
         </p>
       ) : listView ? (
@@ -75,7 +75,7 @@ function FindingChips({ node, x, y }) {
     <g data-kind="finding-chips">
       {items.map((f, i) => (
         <a key={f.id} href={`#/findings/${f.id}`}>
-          <text x={x + 8} y={y - 12 - i * 12} fill="#e3b341" fontSize="11"
+          <text x={x + 8} y={y - 12 - i * 12} fill="var(--hud-warning)" fontSize="11"
             data-finding-id={f.id}>
             {String(f.severity || "").toUpperCase()}
           </text>
@@ -107,7 +107,7 @@ function SvgGraph({ nodes, edges }) {
           <line key={`${e.a}-${e.b}-${e.path}`}
             data-path={e.path}
             x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke="#8b949e" strokeWidth="1.5"
+            stroke="var(--hud-muted)" strokeWidth="1.5"
             strokeDasharray={e.path === "mesh" ? "6 4" : "0"} />
         );
       })}
@@ -130,7 +130,7 @@ function SvgGraph({ nodes, edges }) {
             <NodeLabel node={n} x={p.x} y={p.y} />
             <FindingChips node={n} x={p.x} y={p.y} />
             {chipFor[n.id] != null && (
-              <text x={p.x} y={p.y + 16} fill="#8b949e" fontSize="11">
+              <text x={p.x} y={p.y + 16} fill="var(--hud-muted)" fontSize="11">
                 {chipFor[n.id]} containers
               </text>
             )}

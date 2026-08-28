@@ -63,6 +63,8 @@ class DemoJobView(APIView):
 class TopicSnapshotView(APIView):
     """Snapshot-then-stream (§D7): every snapshot returns {seq, data} from the same counter."""
 
+    serializer_class = serializers.Serializer
+
     def get(self, request, topic):
         # Same choke point as the socket (§D7): snapshot is just the read half of
         # subscribe — an unauthorized topic must fail here exactly as it does there.

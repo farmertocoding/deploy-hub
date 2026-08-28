@@ -1,7 +1,7 @@
 """Flag 24h ephemeral overflow leftovers. Does not terminate (D-113)."""
 from django.utils import timezone
 
-from core.models import AuditEvent, Site, SiteInstance, Target
+from core.models import AuditEvent, Site, SiteInstance, Target, default_workspace
 from monitor.alerts import raise_alert
 
 STALE_S = 86400
@@ -59,6 +59,7 @@ def reap_stale_ephemerals(*, now=None):
         row = raise_alert(
             "ephemeral-overflow-orphan",
             f"target:{target.host}",
+            workspace=default_workspace(),
             fingerprint=f"ephemeral-overflow-orphan:{target.pk}",
             title=TITLE,
             body=body,

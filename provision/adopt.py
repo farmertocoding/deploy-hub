@@ -424,6 +424,7 @@ def _file(site, fingerprint, *, severity, title, body, fix_action):
     return finding(
         "adopt",
         fingerprint,
+        workspace=site.project.workspace,
         severity=severity,
         entity=f"site:{site.pk}",
         title=title,
@@ -463,7 +464,9 @@ def _file_uncompressible(site, public):
 
 def _block_ambiguous_edge(site, filed):
     fingerprint = AMBIGUOUS_FP.format(site_id=site.pk)
-    existing = Finding.objects.filter(fingerprint=fingerprint).first()
+    existing = Finding.objects.filter(
+        workspace=site.project.workspace, fingerprint=fingerprint,
+    ).first()
     if existing is not None and existing.state == Finding.State.RESOLVED:
         return False
     filed.append(
@@ -527,7 +530,9 @@ def apply_edge_owner(site, edge_owner, *, actor=None):
     site.edge_owner = edge_owner
     site.save(update_fields=["edge_owner"])
     fingerprint = AMBIGUOUS_FP.format(site_id=site.pk)
-    row = Finding.objects.filter(fingerprint=fingerprint).first()
+    row = Finding.objects.filter(
+        workspace=site.project.workspace, fingerprint=fingerprint,
+    ).first()
     if row is not None and row.state in (Finding.State.OPEN, Finding.State.ACKED):
         resolve(row, actor=actor, source="api")
     return site

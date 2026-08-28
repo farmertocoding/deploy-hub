@@ -20,18 +20,21 @@ services:
     build: .
     command: daphne -b 0.0.0.0 -p 8000 hub.asgi:application
     environment: &hub-env
-      DJANGO_SETTINGS_MODULE: hub.settings.dev
+      DJANGO_SETTINGS_MODULE: hub.settings.compose
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?set in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       POSTGRES_HOST: db
       REDIS_HOST: redis
+      HUB_VAULT_KEK_BACKEND: local
+      HUB_VAULT_KEYFILE: /etc/deploy-hub/vault.key
     depends_on: [db, redis]
     ports:
       - "127.0.0.1:8000:8000"   # localhost only; Tailscale fronts it in real use
     networks: [internal]
     volumes:
       - hub-backups:/var/lib/deploy-hub/backups   # C7: test-now + command block
+      - hub-vault:/etc/deploy-hub                 # rung-① KEK; never FakeKEK
 
   worker-deploys:
     build: .
@@ -41,11 +44,17 @@ services:
     networks: [internal]
     volumes:
       - hub-backups:/var/lib/deploy-hub/backups   # C7: backup-nightly persist
+      - hub-vault:/etc/deploy-hub
 
   worker-probes:
     build: .
     command: celery -A hub worker -Q probes -c 4 -n probes@%h
-    environment: *hub-env
+    environment:
+      <<: *hub-env
+      POSTGRES_USER: hub_probes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_PROBES:?set in .env}
+      REDIS_PASSWORD: ${REDIS_PASSWORD_PROBES:?set in .env}
+      HUB_VAULT_KEYFILE: ""
     depends_on: [db, redis]
     networks: [internal]
     volumes:
@@ -57,6 +66,8 @@ services:
     environment: *hub-env
     depends_on: [db, redis]
     networks: [internal]
+    volumes:
+      - hub-vault:/etc/deploy-hub
 
   beat:
     build: .
@@ -65,9 +76,11 @@ services:
     depends_on: [db, redis]
     networks: [internal]
 
+
 volumes:
   pgdata:
   hub-backups:
+  hub-vault:
 
 networks:
   internal:

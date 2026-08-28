@@ -4,8 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deploy Hub</title>
+    <script>
+      (function () {
+        var KEY = "deploy-hub.appearance.v1";
+        var stored = null;
+        try { stored = localStorage.getItem(KEY); } catch (e) {}
+        if (stored !== "dark" && stored !== "light" && stored !== "system") stored = null;
+        var theme;
+        if (stored === "dark" || stored === "light") theme = stored;
+        else {
+          var prefers = false;
+          try { prefers = window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) {}
+          theme = prefers ? "dark" : "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
   </head>
-  <body style="margin:0;background:#0f1115;color:#e6e6e6;font-family:ui-monospace,monospace">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
