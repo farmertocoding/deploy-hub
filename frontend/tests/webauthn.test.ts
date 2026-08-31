@@ -103,3 +103,55 @@ test("authentication_begin_json_is_converted_to_arraybuffers_before_get", async 
   assert.equal(typeof touchBodies[0].rawId, "string");
   assert.equal(typeof touchBodies[0].response.signature, "string");
 });
+
+test("registerPasskey in sim does not call the live ceremony", async () => {
+  const original = globalThis.window;
+  (globalThis as any).window = {
+    location: { search: "?sim=enroll", hostname: "127.0.0.1" },
+  };
+  try {
+    const { registerPasskey } = await import("../src/webauthn.js");
+    const result = await registerPasskey("security-key", {
+      apiFn: async (path: string) => {
+        if (path.includes("registration/begin")) {
+          return {
+            status: 200,
+            data: {
+              challenge: b64("challenge"),
+              rp: { id: "localhost", name: "Deploy Hub" },
+              user: { id: b64("user"), name: "sim", displayName: "sim" },
+              pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+            },
+          };
+        }
+        return { status: 200, data: { webauthn_count: 1, recovery_codes: ["a"] } };
+      },
+      createCredential: async () => {
+        throw new Error("This is an invalid domain.");
+      },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.data.webauthn_count, 1);
+  } finally {
+    (globalThis as any).window = original;
+  }
+});
+
+test("registerPasskey on 127.0.0.1 names localhost instead of invalid domain", async () => {
+  const original = globalThis.window;
+  (globalThis as any).window = { location: { search: "", hostname: "127.0.0.1" } };
+  try {
+    const { registerPasskey } = await import("../src/webauthn.js");
+    const result = await registerPasskey("security-key", {
+      apiFn: async () => ({ status: 200, data: {} }),
+      createCredential: async () => {
+        throw new Error("This is an invalid domain.");
+      },
+    });
+    assert.equal(result.status, 0);
+    assert.match(String(result.data.detail), /localhost/);
+    assert.equal(/invalid domain/i.test(String(result.data.detail)), false);
+  } finally {
+    (globalThis as any).window = original;
+  }
+});

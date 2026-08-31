@@ -8,7 +8,13 @@ from datetime import datetime, timedelta
 import pytest
 from django.utils import timezone
 
-from core.models import AlertState, Finding
+from core.models import AlertState, Finding, default_workspace
+from monitor.antinoise import observe as _observe_raw
+
+
+def observe(fingerprint, ok, **kwargs):
+    kwargs.setdefault("workspace", default_workspace())
+    return _observe_raw(fingerprint, ok, **kwargs)
 
 pytestmark = pytest.mark.django_db
 
@@ -29,8 +35,6 @@ def _copy(**overrides):
 
 
 def _fail_until_open(fingerprint, n=3):
-    from monitor.antinoise import observe
-
     row = None
     for _ in range(n):
         row = observe(fingerprint, False)
@@ -82,8 +86,6 @@ def _zone_with_hosts():
 @pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
 def test_two_failures_do_not_open():
     """What would make this fail: alerting on the first or second failed probe."""
-    from monitor.antinoise import observe
-
     fp = "site-down:two-fail"
     assert observe(fp, False) is None
     assert observe(fp, False) is None
@@ -95,8 +97,6 @@ def test_two_failures_do_not_open():
 @pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
 def test_third_consecutive_failure_opens():
     """What would make this fail: needing a fourth fail, or opening without a Finding."""
-    from monitor.antinoise import observe
-
     fp = "site-down:three-fail"
     assert observe(fp, False) is None
     assert observe(fp, False) is None
@@ -112,8 +112,6 @@ def test_third_consecutive_failure_opens():
 @pytest.mark.req("ALERT-ANTINOISE-HYSTERESIS")
 def test_one_success_does_not_close():
     """What would make this fail: closing (or resolving) on a single success."""
-    from monitor.antinoise import observe
-
     fp = "site-down:one-ok"
     _fail_until_open(fp)
     observe(fp, True)
@@ -128,8 +126,6 @@ def test_one_success_does_not_close():
 def test_two_consecutive_successes_close_and_send_recovery():
     """What would make this fail: closing without the UP-after notice, or
     leaving the Finding open after two successes."""
-    from monitor.antinoise import observe
-
     fp = "site-down:recover"
     _fail_until_open(fp)
     observe(fp, True)
@@ -144,8 +140,6 @@ def test_two_consecutive_successes_close_and_send_recovery():
 def test_three_cycles_in_thirty_minutes_collapse_to_one_flapping_p2():
     """What would make this fail: emitting a fourth individual open, or no
     FLAPPING P2 after three open/close cycles."""
-    from monitor.antinoise import observe
-
     fp = "site-down:flappy"
 
     def cycle():
@@ -169,7 +163,7 @@ def test_three_cycles_in_thirty_minutes_collapse_to_one_flapping_p2():
 def test_host_down_suppresses_its_sites_and_names_them():
     """What would make this fail: a site-down Finding beside the host, or a
     host alert that does not name the suppressed sites."""
-    from monitor.antinoise import observe, suppressed_by
+    from monitor.antinoise import suppressed_by
 
     target, sites = _shared_host_sites()
     fp = f"host-down:{target.host}"
@@ -189,7 +183,7 @@ def test_host_down_suppresses_its_sites_and_names_them():
 def test_zone_down_suppresses_its_hosts():
     """What would make this fail: a host-down Finding beside the zone, or a
     zone alert that does not name the suppressed hosts."""
-    from monitor.antinoise import observe, suppressed_by
+    from monitor.antinoise import suppressed_by
 
     zone, hosts = _zone_with_hosts()
     fp = f"zone-down:{zone.slug}"
@@ -434,8 +428,6 @@ def test_storm_finding_resolves_with_recovery_when_rate_drops():
 def test_flapping_finding_resolves_with_recovery_when_stable():
     """What would make this fail: FLAPPING staying OPEN after 30 minutes
     stable, or closing it without the recovery notice."""
-    from monitor.antinoise import observe
-
     fp = "site-down:flappy-resolve"
 
     def cycle():

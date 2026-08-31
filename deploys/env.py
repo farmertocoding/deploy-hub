@@ -84,9 +84,9 @@ def apply_env(site, *, transport=None, dns=None):
     if transport is not None:
         execute(deployment.pk, transport=transport, dns=dns)
     else:
-        from deploys.tasks import run_deploy
+        from deploys.tasks import enqueue_run_deploy
 
-        run_deploy.delay(deployment.pk)
+        enqueue_run_deploy(deployment.pk)
 
     deployment.refresh_from_db()
     return deployment

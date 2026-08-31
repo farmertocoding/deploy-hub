@@ -4,9 +4,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 import time
 
 from django.conf import settings
+from django.core.cache import cache
 
 from core.audit import audit
 from core.models import HudOperation, workspace_of
@@ -31,9 +33,7 @@ def wrap(*, task, workspace_id, resource_type="", resource_id="", producer="hub"
         "producer": producer,
         "issued_at": issued,
         "expires_at": issued + ttl,
-        "nonce": hashlib.sha256(
-            f"{task}:{workspace_id}:{resource_id}:{issued}".encode()
-        ).hexdigest()[:16],
+        "nonce": secrets.token_hex(16),
     }
     payload = json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
     body["sig"] = hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
@@ -55,20 +55,29 @@ def verify(envelope):
     return body
 
 
-_SEEN_NONCES = set()
-
-
-def reauthorize(envelope, *, resource=None):
+def reauthorize(envelope, *, resource=None, task=None, resource_id=None):
     try:
         body = verify(envelope)
     except EnvelopeError as exc:
         audit("task_envelope_rejected", source="celery", severity="security", reason=str(exc))
         raise
     nonce = body.get("nonce")
-    if nonce in _SEEN_NONCES:
+    ttl = max(int(body.get("expires_at") or 0) - int(time.time()), 1)
+    if not cache.add(f"task-envelope-nonce:{nonce}", 1, timeout=ttl):
         audit("task_envelope_rejected", source="celery", severity="security", reason="replay")
         raise EnvelopeError("replayed envelope")
-    _SEEN_NONCES.add(nonce)
+    if task is not None and body.get("task") != task:
+        audit(
+            "task_envelope_rejected", source="celery",
+            severity="security", reason="task mismatch",
+        )
+        raise EnvelopeError("task mismatch")
+    if resource_id is not None and str(body.get("resource_id") or "") != str(resource_id):
+        audit(
+            "task_envelope_rejected", source="celery",
+            severity="security", reason="resource mismatch",
+        )
+        raise EnvelopeError("resource mismatch")
     if resource is not None:
         claimed = body.get("workspace_id")
         actual = getattr(resource, "workspace_id", None)

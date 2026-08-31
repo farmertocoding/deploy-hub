@@ -129,7 +129,8 @@ def test_start_returns_202_with_ids_and_queues_once(auth_client, monkeypatch):
     assert "token" not in body
     run = CheckRun.objects.get(pk=body["checkrun_id"])
     assert set(run.results) == ADOPT_KEYS
-    assert calls == [(site.pk, run.pk, "/explicit/compose.yml")]
+    assert calls[0][:3] == (site.pk, run.pk, "/explicit/compose.yml")
+    assert calls[0][3]["sig"]
 
 
 def test_duplicate_start_does_not_queue_again(auth_client, monkeypatch):
@@ -162,7 +163,8 @@ def test_cancel_before_flip_queues_cleanup(auth_client, monkeypatch):
         _url(site), {"cancel": True}, content_type="application/json",
     )
     assert response.status_code == 202, response.content
-    assert calls == [(site.pk, run.pk)]
+    assert calls[0][:2] == (site.pk, run.pk)
+    assert calls[0][2]["sig"]
 
 
 def test_cancel_after_flip_is_409(auth_client, monkeypatch):

@@ -10,6 +10,13 @@ from .base import *  # noqa: F401,F403
 # the public dev key (round-1 security finding: session/CSRF forgery otherwise).
 if not os.environ.get("HUB_SECRET_KEY"):
     raise ImproperlyConfigured("HUB_SECRET_KEY must be set in prod.")
+if not os.environ.get("HUB_TASK_ENVELOPE_SECRET"):
+    raise ImproperlyConfigured("HUB_TASK_ENVELOPE_SECRET must be set in prod.")
+_require_audit = os.environ.get("HUB_REQUIRE_AUDIT_SHIP", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+if _require_audit and not (os.environ.get("HUB_AUDIT_S3_BUCKET") or "").strip():
+    raise ImproperlyConfigured("HUB_AUDIT_S3_BUCKET must be set in prod.")
 
 DEBUG = False
 

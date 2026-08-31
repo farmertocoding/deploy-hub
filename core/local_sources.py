@@ -107,10 +107,9 @@ def refuse_api_local_path(path):
         return None
     if not local_sources_allowed():
         raise LocalSourceError("local_path is disabled; use git_url")
-    root = configured_source_root()
-    return resolve_local_source(
-        path, require_root=root is not None, must_exist=False,
-    )
+    if configured_source_root() is None:
+        raise LocalSourceError("HUB_LOCAL_SOURCE_ROOT is required")
+    return resolve_local_source(path, require_root=True, must_exist=False)
 
 
 def iter_archive_members(source_dir):

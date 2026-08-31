@@ -10,7 +10,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as any).window = (globalThis as any).window ?? { location: { search: "" } };
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
-import { SETTINGS_TABS, CloudflarePanel, connectCloudflare, plantOriginCa } from "../src/screens/Settings.jsx";
+import {
+  SETTINGS_TABS,
+  CloudflarePanel,
+  connectCloudflare,
+  connectedCloudflareAccounts,
+  plantOriginCa,
+} from "../src/screens/Settings.jsx";
 
 const render = (component: any, props: any = {}) =>
   renderToStaticMarkup(React.createElement(component, props));
@@ -91,6 +97,21 @@ test("plant_posts_path_only_and_connect_stays_token_only", async () => {
   assert.deepEqual(calls[0].body, { path: plantedPath });
   assert.equal(data.planted, true);
   assert.ok(!("origin_ca_key" in calls[0].body));
+});
+
+test("existing_cloudflare_accounts_can_be_selected_for_origin_ca_plant", () => {
+  const accounts = connectedCloudflareAccounts({
+    dns: [
+      { id: 3, provider: "cloudflare", label: "saturdays-succulents.com" },
+      { id: 4, provider: "cloudflare", label: "takko.market" },
+      { id: 5, provider: "route53", label: "example.com" },
+    ],
+  });
+  assert.deepEqual(accounts.map((row: any) => row.id), [3, 4]);
+
+  const markup = render(CloudflarePanel);
+  assert.match(markup, /aria-label="Origin-CA DNS account"/);
+  assert.match(markup, /select an account/);
 });
 
 test("settings_add_passkey_runs_create_ceremony", async () => {

@@ -18,7 +18,7 @@ class Anon:
 def test_authorize_topic_is_the_choke_point():
     user = FakeUser()
     assert authorize_topic(user, "demo.job-1.log")
-    assert authorize_topic(user, "findings")
+    assert not authorize_topic(user, "findings")  # membership required
     assert not authorize_topic(user, "alerts")                 # D-045 alias retired
     assert not authorize_topic(user, "vault.secrets")          # unknown prefix
     assert not authorize_topic(user, "demo.$(evil).log")       # charset

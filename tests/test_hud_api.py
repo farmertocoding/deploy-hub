@@ -813,6 +813,7 @@ def test_slugs_are_unique_per_workspace_not_globally(client, django_user_model):
     assert Project.objects.filter(slug="app").count() == 2
 
 
+@override_settings(HUB_ALLOW_LOCAL_SOURCES=True, HUB_LOCAL_SOURCE_ROOT="/tmp")
 def test_project_create_does_not_bind_a_foreign_workspace_target(client, django_user_model):
     _user, alpha, beta = _two_workspaces(django_user_model, client)
     zone = NetworkZone.objects.create(workspace=beta, name="Beta net", slug="beta-iso-net")

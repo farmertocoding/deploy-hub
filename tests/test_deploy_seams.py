@@ -96,7 +96,9 @@ def test_execute_without_injected_seams_constructs_through_real_factories(monkey
         "deploys.pipeline._default_transport",
         lambda site: PipelineTransport(),
     )
-    run_deploy(deployment2.pk)
+    from deploys.tasks import envelope_for_deploy
+
+    run_deploy(deployment2.pk, envelope_for_deploy(deployment2.pk))
     deployment2.refresh_from_db()
     assert deployment2.status == "succeeded"
     assert ("dns", site2.dns_zone_id) in constructed

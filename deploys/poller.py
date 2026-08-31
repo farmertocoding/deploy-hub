@@ -204,7 +204,7 @@ def poll(*, ls_remote=None, now=None, in_window=None):
     if now is None:
         now = timezone.now()
 
-    from deploys.tasks import run_deploy
+    from deploys.tasks import enqueue_run_deploy
 
     sites = Site.objects.select_related("project").exclude(project__git_url="")
     for site in sites:
@@ -233,7 +233,7 @@ def poll(*, ls_remote=None, now=None, in_window=None):
             continue
         if sha == latest_sha:
             _promote_waiting(
-                site, sha, in_window=in_window, now=now, delay=run_deploy.delay,
+                site, sha, in_window=in_window, now=now, delay=enqueue_run_deploy,
             )
             continue
         if site.deploy_policy == Site.DeployPolicy.CONFIRM:
@@ -247,4 +247,4 @@ def poll(*, ls_remote=None, now=None, in_window=None):
             audit("deploy-waiting", deployment, source="celery", git_sha=sha)
             continue
         deployment = _enqueue(site, sha, latest)
-        run_deploy.delay(deployment.pk)
+        enqueue_run_deploy(deployment.pk)

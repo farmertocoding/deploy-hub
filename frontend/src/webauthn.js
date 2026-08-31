@@ -6,7 +6,16 @@
 // ArrayBuffers; passing the strings throws TypeError in the browser. Complete
 // endpoints parse JSON via parse_registration_credential_json, so ArrayBuffers
 // must be turned back into base64url before fetch.
-import { api } from "./api.js";
+import { api, simState } from "./api.js";
+
+const LOCALHOST_WEBAUTHN =
+  "Passkeys require this page at http://localhost — WebAuthn cannot use 127.0.0.1.";
+
+function originCannotUseWebAuthn(hostname) {
+  const host = hostname ?? (typeof window !== "undefined" ? window.location.hostname : "");
+  return host === "127.0.0.1" || host === "::1" || host === "[::1]"
+    || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+}
 
 function b64urlToBuffer(value) {
   if (value == null || value instanceof ArrayBuffer) return value;
@@ -99,6 +108,12 @@ export async function performHardwareTouch({
 } = {}) {
   const begin = await apiFn("auth/webauthn/authentication/begin/", {});
   if (begin.status !== 200) return begin;
+  if (simState()) {
+    return apiFn("auth/webauthn/touch/", { id: "sim", type: "public-key", response: {} });
+  }
+  if (originCannotUseWebAuthn()) {
+    return { status: 0, data: { detail: LOCALHOST_WEBAUTHN } };
+  }
   let assertion;
   try {
     assertion = await getAssertion(parseRequestOptionsJSON(begin.data));
@@ -114,6 +129,15 @@ export async function registerPasskey(name, {
 } = {}) {
   const begin = await apiFn("auth/webauthn/registration/begin/", {});
   if (begin.status !== 200 && begin.status !== 201) return begin;
+  if (simState()) {
+    return apiFn(
+      "auth/webauthn/registration/complete/",
+      { id: "sim", type: "public-key", response: {}, name },
+    );
+  }
+  if (originCannotUseWebAuthn()) {
+    return { status: 0, data: { detail: LOCALHOST_WEBAUTHN } };
+  }
   let cred;
   try {
     cred = await createCredential(parseCreationOptionsJSON(begin.data));

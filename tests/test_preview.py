@@ -206,7 +206,10 @@ def test_create_preview_does_not_call_run_deploy(monkeypatch):
     from deploys.tasks import run_deploy
 
     called = []
-    monkeypatch.setattr(run_deploy, "delay", lambda pk: called.append(pk))
+    monkeypatch.setattr(
+        run_deploy, "delay",
+        lambda pk, envelope=None, **kwargs: called.append(pk),
+    )
     monkeypatch.setattr(run_deploy, "apply_async", lambda *a, **k: called.append(a))
 
     parent = _parent(name="nodply")

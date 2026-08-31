@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from django.conf import settings
 
 from core.findings import finding, resolve
-from core.models import BackupUnit, Finding, Site, SiteInstance, Target
+from core.models import BackupUnit, Finding, NetworkZone, Site, SiteInstance, Target, workspace_of
 
 SOURCE_ENGINE = "topology"
 
@@ -92,22 +92,38 @@ def _rule_hub_isolation(sites, hub_site_pks, hub_target_pks, public_hosts, activ
     )
     if not (colocated or hub_public):
         return
+    workspaces = {}
+    for site in sites:
+        if site.pk not in hub_site_pks and site.primary_target_id not in hub_target_pks:
+            continue
+        workspace = workspace_of(site)
+        if workspace is not None:
+            workspaces[workspace.pk] = workspace
+    if not workspaces:
+        for target in Target.objects.filter(pk__in=hub_target_pks).select_related("zone"):
+            workspace = workspace_of(target)
+            if workspace is not None:
+                workspaces[workspace.pk] = workspace
+    if not workspaces:
+        return
     active.add(_FP_HUB)
-    _file(
-        _FP_HUB,
-        severity=Finding.Severity.P1,
-        entity="hub",
-        title="Hub is colocated with a public origin",
-        body=(
-            "A public origin on the Hub host can reach fleet SSH keys, the "
-            "vault, and the broker. Hub isolation (§9.6.2 r1) requires a "
-            "dedicated host with no public exposure."
-        ),
-        fix_action=(
-            "Move the public site to another target, or migrate the Hub "
-            "to its own host."
-        ),
-    )
+    for workspace in workspaces.values():
+        _file(
+            _FP_HUB,
+            workspace=workspace,
+            severity=Finding.Severity.P1,
+            entity="hub",
+            title="Hub is colocated with a public origin",
+            body=(
+                "A public origin on the Hub host can reach fleet SSH keys, the "
+                "vault, and the broker. Hub isolation (§9.6.2 r1) requires a "
+                "dedicated host with no public exposure."
+            ),
+            fix_action=(
+                "Move the public site to another target, or migrate the Hub "
+                "to its own host."
+            ),
+        )
 
 
 def _rule_blast_radius(sites, targets, instances, hub_site_pks, active):
@@ -122,6 +138,7 @@ def _rule_blast_radius(sites, targets, instances, hub_site_pks, active):
         listed = ", ".join(names) or f"{len(site_ids)} sites"
         _file(
             fp,
+            target=target,
             severity=Finding.Severity.P2,
             entity=f"target:{target.host}",
             title=f"{target.host} hosts {len(site_ids)} sites",
@@ -157,6 +174,7 @@ def _rule_site_network(sites, targets, instances, hub_site_pks, active):
         active.add(fp)
         _file(
             fp,
+            site=site,
             severity=Finding.Severity.P2,
             entity=f"site:{site.name}",
             title=f"{site.name} has no dedicated Docker network",
@@ -185,6 +203,7 @@ def _rule_db_mesh_only(sites, active):
         active.add(fp)
         _file(
             fp,
+            site=site,
             severity=Finding.Severity.P2,
             entity=f"site:{site.name}",
             title=f"Database for {site.name} is reachable off the mesh",
@@ -218,11 +237,15 @@ def _rule_lan_segment(hub_target_pks, public_hosts, nodes_by_id, active):
             zone_pk = int(str(zone_id).split(":", 1)[1])
         except (IndexError, ValueError):
             continue
+        zone = NetworkZone.objects.filter(pk=zone_pk).first()
+        if zone is None:
+            continue
         fp = _FP_LAN.format(pk=zone_pk)
         active.add(fp)
         label = nodes_by_id.get(zone_id, {}).get("label") or zone_id
         _file(
             fp,
+            zone=zone,
             severity=Finding.Severity.P2,
             entity=f"zone:{label}",
             title=f"Hub and a public origin share LAN {label}",
@@ -249,12 +272,16 @@ def _clear_stale(active):
 
 
 def _file(fingerprint, **fields):
-    from core.models import default_workspace, workspace_of
-
-    workspace = fields.pop("workspace", None) or workspace_of(fields.get("site"))
+    workspace = fields.pop("workspace", None)
+    for key in ("site", "target", "zone"):
+        obj = fields.pop(key, None)
+        if workspace is None:
+            workspace = workspace_of(obj)
+    if workspace is None:
+        raise TypeError("topology finding requires workspace")
     return finding(
         SOURCE_ENGINE, fingerprint,
-        workspace=workspace or default_workspace(),
+        workspace=workspace,
         **fields,
     )
 

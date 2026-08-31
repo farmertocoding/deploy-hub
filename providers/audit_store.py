@@ -50,4 +50,13 @@ class S3AuditStore:
             secret_access_key=self.secret_access_key,
             region_name=self.region,
         )
-        client.put_object(Bucket=self.bucket, Key=key, Body=body)
+        from datetime import datetime, timedelta, timezone
+
+        retain_until = datetime.now(timezone.utc) + timedelta(days=365)
+        client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ObjectLockMode="GOVERNANCE",
+            ObjectLockRetainUntilDate=retain_until,
+        )

@@ -236,6 +236,7 @@ pytest_add_cli_args_test_selection = [
     "tests/test_ws_consumer.py",
     "tests/test_ws_frame_read_loop.py",
     "tests/test_zero_trust_authz.py",
+    "tests/test_zero_trust_blockers.py",
 ]
 
 # ADAPTATION: spec §3 asks for a 60s per-mutant timeout. mutmut 3 has no absolute

@@ -1,10 +1,11 @@
 """Mandatory-2FA enforcement (§6.10) and idle session timeout (D-062).
 
 A session belonging to a user with NO confirmed OTP device may only reach the
-enrollment endpoints (and login/logout/me/schema). Round-1 security finding:
+enrollment endpoints (and login/logout/me). Round-1 security finding:
 without this, a stolen password of a not-yet-enrolled user gives full API access
 — including enrolling the attacker's own device. The gate lives in middleware so
-no future endpoint can forget it.
+no future endpoint can forget it. `/api/schema/` is not in this list: the OpenAPI
+document names every mutating path and requires a verified session.
 
 IdleTimeoutMiddleware enforces existing HUB_SESSION_IDLE_TIMEOUT (~30 min) so a
 stolen live session dies even when the absolute cookie age is still 12 h.
@@ -16,7 +17,6 @@ from django.http import JsonResponse
 
 ENROLLMENT_ALLOWED_PREFIXES = (
     "/api/auth/",     # login, logout, me, totp/*, webauthn/*
-    "/api/schema/",
     "/admin/",        # dev convenience; Tailscale-IP-bound + 2FA in deployment (§B10)
     "/static/",
 )
@@ -79,6 +79,36 @@ def _session_verified(user):
     if callable(checker):
         return bool(checker())
     return False
+
+
+class SecurityHeadersMiddleware:
+    """CSP + Permissions-Policy on every response.
+
+    `/api/` is JSON: default-src 'none' so a browser must not treat the body as
+    a document. Admin HTML needs 'self' plus inline styles Django's admin ships.
+    """
+
+    API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    PAGE_CSP = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if "Content-Security-Policy" not in response:
+            if request.path.startswith("/api/"):
+                response["Content-Security-Policy"] = self.API_CSP
+            else:
+                response["Content-Security-Policy"] = self.PAGE_CSP
+        if "Permissions-Policy" not in response:
+            response["Permissions-Policy"] = self.PERMISSIONS
+        return response
 
 
 class IdleTimeoutMiddleware:

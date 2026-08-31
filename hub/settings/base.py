@@ -1,6 +1,7 @@
 """Base settings — shared by dev and prod. Mockup-first: plain and readable."""
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from celery.schedules import crontab
 
@@ -49,6 +50,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "core.middleware.SecurityHeadersMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -245,9 +247,15 @@ AUDIT_S3_VERSIONING = os.environ.get("HUB_AUDIT_S3_VERSIONING", "1") not in (
 
 # --- Redis (§B4: inside the crown-jewel boundary) ---
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
+REDIS_USER = os.environ.get("REDIS_USER", "")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
-if REDIS_PASSWORD:
-    REDIS_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0"
+if REDIS_USER and REDIS_PASSWORD:
+    REDIS_URL = (
+        f"redis://{quote(REDIS_USER, safe='')}:{quote(REDIS_PASSWORD, safe='')}"
+        f"@{REDIS_HOST}:6379/0"
+    )
+elif REDIS_PASSWORD:
+    REDIS_URL = f"redis://:{quote(REDIS_PASSWORD, safe='')}@{REDIS_HOST}:6379/0"
 else:
     REDIS_URL = f"redis://{REDIS_HOST}:6379/0"
 

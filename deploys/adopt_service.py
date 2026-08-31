@@ -162,7 +162,7 @@ def assemble_adopt_desired(site):
         "site_slug": site.name,
         "manifest_body": body,
         "git_sha": git_sha,
-        "source_dir": getattr(site.project, "local_path", "") or "",
+        "source_dir": _confined_source_dir(site),
         "image_tag": body.get("image_tag") or image_tag(git_sha, body),
         "old_container": old,
         "dns": dns,
@@ -218,16 +218,33 @@ def _refuse_unconfigured_seams(site):
         raise AdoptHttpError("missing " + ", ".join(missing), 503)
 
 
-def _queue_start(site_id, checkrun_id, path):
-    from deploys.tasks import run_adopt
+def _confined_source_dir(site):
+    raw = getattr(site.project, "local_path", "") or ""
+    if not raw:
+        return ""
+    from core.local_sources import configured_source_root, resolve_local_source
 
-    run_adopt.delay(site_id, checkrun_id, path or "")
+    return str(resolve_local_source(
+        raw, require_root=configured_source_root() is not None,
+    ))
+
+
+def _queue_start(site_id, checkrun_id, path):
+    from deploys.tasks import envelope_for_adopt, run_adopt
+
+    run_adopt.delay(
+        site_id, checkrun_id, path or "",
+        envelope_for_adopt(site_id, "deploys.tasks.run_adopt"),
+    )
 
 
 def _queue_cancel(site_id, checkrun_id):
-    from deploys.tasks import cancel_adopt
+    from deploys.tasks import cancel_adopt, envelope_for_adopt
 
-    cancel_adopt.delay(site_id, checkrun_id)
+    cancel_adopt.delay(
+        site_id, checkrun_id,
+        envelope_for_adopt(site_id, "deploys.tasks.cancel_adopt"),
+    )
 
 
 def _load(site_id, checkrun_id):

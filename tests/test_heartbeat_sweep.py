@@ -154,7 +154,10 @@ def test_sweep_stamps_heartbeat_before_requeue(monkeypatch):
     from deploys.tasks import run_deploy
 
     queued = []
-    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+    monkeypatch.setattr(
+        run_deploy, "delay",
+        lambda pk, envelope=None, **kwargs: queued.append(pk),
+    )
 
     stale_at = timezone.now() - STALE_AFTER - timedelta(seconds=1)
     deployment = _running_deployment(
@@ -190,7 +193,10 @@ def test_sweep_does_not_clobber_superseded(monkeypatch):
     from deploys.tasks import run_deploy
 
     queued = []
-    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+    monkeypatch.setattr(
+        run_deploy, "delay",
+        lambda pk, envelope=None, **kwargs: queued.append(pk),
+    )
 
     stale_at = timezone.now() - STALE_AFTER - timedelta(seconds=1)
     finished = _running_deployment(

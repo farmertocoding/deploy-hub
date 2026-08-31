@@ -196,7 +196,19 @@ def adoption_plan(project):
 def _project_tree(project):
     """local_path if set, else the Hub checkout already on a Manifest. No clone."""
     if project.local_path:
-        path = Path(project.local_path)
+        from core.local_sources import (
+            LocalSourceError,
+            configured_source_root,
+            resolve_local_source,
+        )
+
+        try:
+            path = resolve_local_source(
+                project.local_path,
+                require_root=configured_source_root() is not None,
+            )
+        except LocalSourceError:
+            return None
         return path if path.is_dir() else None
     return _existing_hub_checkout(project)
 

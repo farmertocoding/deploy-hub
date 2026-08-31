@@ -12,7 +12,12 @@ def process_hud_outbox(outbox_id, envelope=None):
         return {"ok": False, "reason": "envelope"}
     try:
         row = HudCommandOutbox.objects.select_related("operation").get(pk=outbox_id)
-        reauthorize(envelope, resource=row)
+        reauthorize(
+            envelope,
+            resource=row,
+            task="core.tasks.process_hud_outbox",
+            resource_id=str(outbox_id),
+        )
     except (HudCommandOutbox.DoesNotExist, EnvelopeError):
         return {"ok": False, "reason": "envelope"}
     return process_outbox(outbox_id)

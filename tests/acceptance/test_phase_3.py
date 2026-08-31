@@ -289,19 +289,20 @@ def test_three_failures_open_one_p1_and_two_successes_close_it():
     Transcribes tests/test_antinoise.py::test_third_consecutive_failure_opens and
     ::test_two_consecutive_successes_close_and_send_recovery.
     """
-    from core.models import AlertState, Finding
+    from core.models import AlertState, Finding, default_workspace
     from monitor.antinoise import observe
 
     fp = "site-down:p3-hysteresis"
-    assert observe(fp, False) is None
-    assert observe(fp, False) is None
-    row = observe(fp, False)
+    ws = default_workspace()
+    assert observe(fp, False, workspace=ws) is None
+    assert observe(fp, False, workspace=ws) is None
+    row = observe(fp, False, workspace=ws)
     assert row is not None
     assert row.state == Finding.State.OPEN
     assert AlertState.objects.get(fingerprint=fp).consecutive_fail == 3
 
-    observe(fp, True)
-    notice = observe(fp, True)
+    observe(fp, True, workspace=ws)
+    notice = observe(fp, True, workspace=ws)
     assert notice["title"].startswith("UP after")
     assert Finding.objects.get(fingerprint=fp).state == Finding.State.RESOLVED
     assert AlertState.objects.get(fingerprint=fp).closed_at is not None
@@ -375,7 +376,7 @@ def test_host_down_suppression_collapses_site_alerts():
     """
     from test_antinoise import _fail_until_open, _shared_host_sites
 
-    from core.models import Finding
+    from core.models import Finding, default_workspace
     from monitor.antinoise import observe, suppressed_by
 
     target, sites = _shared_host_sites()
@@ -386,9 +387,10 @@ def test_host_down_suppression_collapses_site_alerts():
         assert f"site:{site.name}" in row.body
         assert suppressed_by(f"site:{site.name}") == f"host:{target.host}"
 
-    observe("site-down:alpha", False)
-    observe("site-down:alpha", False)
-    observe("site-down:alpha", False)
+    ws = default_workspace()
+    observe("site-down:alpha", False, workspace=ws)
+    observe("site-down:alpha", False, workspace=ws)
+    observe("site-down:alpha", False, workspace=ws)
     assert not Finding.objects.filter(fingerprint="site-down:alpha").exists()
 
 
@@ -531,7 +533,7 @@ def test_findings_inbox_requires_a_reason_to_accept_risk():
 
     assert "findings" in ALLOWED_PREFIXES
     assert "alerts" not in ALLOWED_PREFIXES
-    assert authorize_topic(_Authed(), "findings") is True
+    assert authorize_topic(_Authed(), "findings") is False
     assert authorize_topic(_Authed(), "alerts") is False
     auth = (REPO / "realtime" / "authorize.py").read_text(encoding="utf-8")
     assert '"findings"' in auth

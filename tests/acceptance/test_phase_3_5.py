@@ -15,6 +15,15 @@ import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent.parent
+
+
+@pytest.fixture
+def allow_tmp_local_sources(tmp_path, settings):
+    root = tmp_path / "sources"
+    root.mkdir()
+    settings.HUB_ALLOW_LOCAL_SOURCES = True
+    settings.HUB_LOCAL_SOURCE_ROOT = str(root)
+    return root
 DEMO = REPO / "conformance" / "demos" / "phase-3.5.md"
 WAIVER_24H = "REL-P2-HUB-DOWN-SITES-UP+verify-demo+24h-unproven"
 FULL_TEXT_SEC_B2 = "SEC-B2-NO-DNS-TOKENS-ON-TARGETS"
@@ -92,7 +101,7 @@ def _assert_honest_t1_demo():
 
 @pytest.mark.django_db
 @pytest.mark.req("DNS-SITE-ZONE-BIND")
-def test_public_site_binds_dns_zone(client, django_user_model):
+def test_public_site_binds_dns_zone(client, django_user_model, allow_tmp_local_sources):
     """POST /api/v1/projects/ binds Site.dns_zone and primary_target.
 
     Transcribes tests/test_site_dns_bind.py::
@@ -124,7 +133,9 @@ def test_public_site_binds_dns_zone(client, django_user_model):
 
 @pytest.mark.django_db
 @pytest.mark.req("DNS-SITE-ZONE-BIND")
-def test_public_site_create_with_no_eligible_zone_creates_nothing(client, django_user_model):
+def test_public_site_create_with_no_eligible_zone_creates_nothing(
+    client, django_user_model, allow_tmp_local_sources,
+):
     """Zero eligible zones: 409 and zero Project, Site, Finding rows (C1).
 
     Transcribes tests/test_site_dns_bind.py::

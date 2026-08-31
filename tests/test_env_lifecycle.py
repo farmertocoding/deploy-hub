@@ -164,11 +164,14 @@ def test_values_not_in_task_kwargs_or_logs():
     source = ast.parse(Path(inspect.getfile(deploy_tasks)).read_text(encoding="utf-8"))
     for node in ast.walk(source):
         if isinstance(node, ast.FunctionDef) and node.name == "run_deploy":
-            assert [a.arg for a in node.args.args] == ["deployment_id"]
+            assert [a.arg for a in node.args.args][:1] == ["deployment_id"]
+            assert "envelope" in [a.arg for a in node.args.args]
             break
     else:
         pytest.fail("run_deploy is missing from deploys.tasks")
-    assert list(inspect.signature(run_deploy).parameters) == ["deployment_id"]
+    params = list(inspect.signature(run_deploy.run).parameters)
+    assert "deployment_id" in params
+    assert "envelope" in params
 
     site, _original = queued_deployment("envlogs", body=fixture_body("envlogs"))
     put_env(site, {"DATABASE_URL": PLANTED})
@@ -199,7 +202,10 @@ def test_execute_clears_config_stale_after_delay(monkeypatch):
     assert site.config_stale is True
 
     queued = []
-    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+    monkeypatch.setattr(
+        run_deploy, "delay",
+        lambda pk, envelope=None, **kwargs: queued.append(pk),
+    )
     apply_env(site)
     site.refresh_from_db()
     assert site.config_stale is True

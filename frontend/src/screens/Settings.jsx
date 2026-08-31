@@ -36,6 +36,11 @@ export async function plantOriginCa(accountId, path) {
   return api(`v1/dns-accounts/${accountId}/origin-ca-plant/`, { path });
 }
 
+export function connectedCloudflareAccounts(data) {
+  return (Array.isArray(data?.dns) ? data.dns : [])
+    .filter((row) => row?.provider === "cloudflare" && row?.id != null);
+}
+
 export async function connectAws(access_key_id, secret_access_key) {
   return api("v1/aws/connect/", { access_key_id, secret_access_key });
 }
@@ -427,6 +432,7 @@ export function CloudflarePanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [accountId, setAccountId] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const [planted, setPlanted] = useState(false);
   const [plantBusy, setPlantBusy] = useState(false);
   const {
@@ -441,6 +447,17 @@ export function CloudflarePanel() {
     defaultValues: { path: "" },
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    api("v1/hud/integrations/").then(({ status, data }) => {
+      if (cancelled || status !== 200) return;
+      const connected = connectedCloudflareAccounts(data);
+      setAccounts(connected);
+      if (connected.length === 1) setAccountId(connected[0].id);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   async function submit(values) {
     if (busy) return;
     setBusy(true);
@@ -453,6 +470,12 @@ export function CloudflarePanel() {
       const body = parsed.success ? parsed.data : data;
       setResult(body);
       setAccountId(body.account?.id ?? null);
+      if (body.account?.id != null) {
+        setAccounts((rows) => [
+          ...rows.filter((row) => String(row.id) !== String(body.account.id)),
+          body.account,
+        ]);
+      }
       setPlanted(false);
       reset({ token: "" });
       return;
@@ -519,6 +542,19 @@ export function CloudflarePanel() {
         The Hub reads the file; do not paste token bytes here.</p>
       <form onSubmit={plantForm.handleSubmit(submitPlant)}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: 4, flex: "1 1 200px" }}>
+          <small>DNS account</small>
+          <select aria-label="Origin-CA DNS account" value={accountId ?? ""}
+            onChange={(e) => setAccountId(e.target.value ? Number(e.target.value) : null)}
+            style={box}>
+            <option value="">select an account</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.label || `Cloudflare account ${account.id}`}
+              </option>
+            ))}
+          </select>
+        </label>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
           <small>path</small>
           <input type="text" {...plantForm.register("path")} style={box}

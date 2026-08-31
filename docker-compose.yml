@@ -7,13 +7,25 @@ services:
       POSTGRES_DB: hub
       POSTGRES_USER: hub
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD_PROBES: ${POSTGRES_PASSWORD_PROBES:?set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
     networks: [internal]
 
   redis:
     image: redis:7
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set in .env}"]
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set in .env}
+      - --user
+      - hub_probes
+      - on
+      - ">${REDIS_PASSWORD_PROBES:?set in .env}"
+      - "~*"
+      - "&*"
+      - "+@all"
     networks: [internal]   # never a published port (§B4)
 
   web:
@@ -22,6 +34,7 @@ services:
     environment: &hub-env
       DJANGO_SETTINGS_MODULE: hub.settings.compose
       HUB_SECRET_KEY: ${HUB_SECRET_KEY:?set in .env}
+      HUB_TASK_ENVELOPE_SECRET: ${HUB_TASK_ENVELOPE_SECRET:?set in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       POSTGRES_HOST: db
@@ -53,6 +66,7 @@ services:
       <<: *hub-env
       POSTGRES_USER: hub_probes
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_PROBES:?set in .env}
+      REDIS_USER: hub_probes
       REDIS_PASSWORD: ${REDIS_PASSWORD_PROBES:?set in .env}
       HUB_VAULT_KEYFILE: ""
     depends_on: [db, redis]

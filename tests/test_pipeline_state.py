@@ -159,7 +159,6 @@ def test_env_snapshot_goes_through_vault(monkeypatch):
     from deploys import tasks as deploy_tasks
     from deploys.models import DeploymentArtifact
     from deploys.pipeline import load_env_snapshot
-    from deploys.tasks import run_deploy
     from providers.fakes import FakeDnsProvider, FakeOriginCertIssuer
 
     site, _ = _site_with_target(slug="env")
@@ -174,7 +173,8 @@ def test_env_snapshot_goes_through_vault(monkeypatch):
     source = ast.parse(Path(inspect.getfile(deploy_tasks)).read_text(encoding="utf-8"))
     for node in ast.walk(source):
         if isinstance(node, ast.FunctionDef) and node.name == "run_deploy":
-            assert [a.arg for a in node.args.args] == ["deployment_id"]
+            assert [a.arg for a in node.args.args][:1] == ["deployment_id"]
+            assert "envelope" in [a.arg for a in node.args.args]
             break
     else:
         pytest.fail("run_deploy is missing from deploys.tasks")
@@ -191,7 +191,9 @@ def test_env_snapshot_goes_through_vault(monkeypatch):
         lambda site: (FakeDnsProvider(), FakeOriginCertIssuer()),
     )
 
-    run_deploy.delay(deployment.pk)
+    from deploys.tasks import enqueue_run_deploy
+
+    enqueue_run_deploy(deployment.pk)
     bundle.refresh_from_db()
     assert bundle.last_used_at is not None
     deployment.refresh_from_db()

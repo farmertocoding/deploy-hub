@@ -1,6 +1,6 @@
 // Extracted so ?sim=login can mount this without the Shell (C9 / UX-F8).
 import React, { useState } from "react";
-import { api } from "../api.js";
+import { api, simState } from "../api.js";
 import { parseRequestOptionsJSON, serializeCredential } from "../webauthn.js";
 
 import { box } from "../ui/surface.js";
@@ -37,7 +37,14 @@ export function Login({ onLogin }) {
       return;
     }
     let assertion = { id: "sim", response: {} };
-    if (typeof navigator !== "undefined" && navigator.credentials?.get) {
+    const host = typeof window !== "undefined" ? window.location.hostname : "";
+    const ipOrigin = host === "127.0.0.1" || host === "::1" || host === "[::1]";
+    if (ipOrigin && !simState()) {
+      setBusy(false);
+      setError("Passkeys require this page at http://localhost — WebAuthn cannot use 127.0.0.1.");
+      return;
+    }
+    if (!simState() && typeof navigator !== "undefined" && navigator.credentials?.get) {
       try {
         assertion = serializeCredential(
           await navigator.credentials.get({

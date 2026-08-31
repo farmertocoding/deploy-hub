@@ -89,6 +89,8 @@ def test_prod_settings_pin_test_mode_off(monkeypatch, tmp_path):
     from hub.settings import base as base_settings
 
     monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
     monkeypatch.setenv("HUB_TEST_MODE", "1")
     monkeypatch.setenv("HUB_TEST_DATABASE", str(tmp_path / "repointed.sqlite3"))
     try:

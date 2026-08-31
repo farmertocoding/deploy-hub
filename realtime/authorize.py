@@ -26,17 +26,21 @@ def authorize_topic(user, topic):
     exact = tuple(p for p in ALLOWED_PREFIXES if not p.endswith("."))
     if not (topic in exact or topic.startswith(prefixes)):
         return False
-    pk = getattr(user, "pk", None)
-    if pk is None:
-        parts = topic.split(".")
-        if len(parts) >= 2 and parts[0] in ("site", "host", "deploy") and parts[1].isdigit():
-            return False
-        return True
     return _topic_visible(user, topic)
 
 
+def _has_workspace(user):
+    if getattr(user, "pk", None) is None:
+        return False
+    from core.rbac import resolve_workspace
+
+    return resolve_workspace(user) is not None
+
+
 def _topic_visible(user, topic):
-    if topic in ("findings", "map.graph") or topic.startswith("demo."):
+    if topic in ("findings", "map.graph"):
+        return _has_workspace(user)
+    if topic.startswith("demo."):
         return True
     parts = topic.split(".")
     if len(parts) < 2 or not parts[1].isdigit():

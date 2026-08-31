@@ -83,7 +83,10 @@ def _patch_delay(monkeypatch):
     from deploys.tasks import run_deploy
 
     queued = []
-    monkeypatch.setattr(run_deploy, "delay", lambda pk: queued.append(pk))
+    monkeypatch.setattr(
+        run_deploy, "delay",
+        lambda pk, envelope=None, **kwargs: queued.append(pk),
+    )
     return queued
 
 

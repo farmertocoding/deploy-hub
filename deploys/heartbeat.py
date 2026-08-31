@@ -49,8 +49,8 @@ def sweep():
         if deployment.status != Deployment.Status.RUNNING:
             continue
         touch_heartbeat(deployment)
-        from deploys.tasks import run_deploy
+        from deploys.tasks import enqueue_run_deploy
 
-        run_deploy.delay(pk)
+        enqueue_run_deploy(pk)
         resumed.append(pk)
     return {"resumed": resumed, "aborted": aborted}

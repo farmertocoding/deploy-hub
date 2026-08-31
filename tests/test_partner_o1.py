@@ -20,11 +20,12 @@ _PORTS = itertools.count(21000)
 
 
 def _fail_until_open(fingerprint, n=3):
+    from core.models import default_workspace
     from monitor.antinoise import observe
 
     row = None
     for _ in range(n):
-        row = observe(fingerprint, False)
+        row = observe(fingerprint, False, workspace=default_workspace())
     return row
 
 

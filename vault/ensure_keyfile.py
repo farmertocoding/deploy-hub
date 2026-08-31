@@ -14,9 +14,10 @@ DEFAULT_PATH = "/etc/deploy-hub/vault.key"
 
 
 def ensure(path=None):
-    target = pathlib.Path(
-        path or os.environ.get("HUB_VAULT_KEYFILE") or DEFAULT_PATH
-    )
+    env = os.environ.get("HUB_VAULT_KEYFILE")
+    if path is None and env == "":
+        return None
+    target = pathlib.Path(path or env or DEFAULT_PATH)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         size = target.stat().st_size

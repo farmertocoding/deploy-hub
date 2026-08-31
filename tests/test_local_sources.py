@@ -41,8 +41,8 @@ def test_api_local_path_refused_when_sources_disabled(tmp_path):
 
 
 @override_settings(HUB_ALLOW_LOCAL_SOURCES=True, HUB_LOCAL_SOURCE_ROOT="")
-def test_api_local_path_without_root_still_denies_host_escapes(tmp_path):
-    with pytest.raises(LocalSourceError):
+def test_api_local_path_without_root_is_refused(tmp_path):
+    with pytest.raises(LocalSourceError, match="HUB_LOCAL_SOURCE_ROOT"):
         refuse_api_local_path("/etc")
     with pytest.raises(LocalSourceError):
         resolve_local_source("/", require_root=False)

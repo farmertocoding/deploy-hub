@@ -1658,8 +1658,75 @@ const notCovered = (what) => ({
     + `combination, and the simulation will not invent one. Reload to start over.` },
 });
 
+const SIM_AUTH_USER = {
+  authenticated: true,
+  username: "sim",
+  otp_enrolled: true,
+  webauthn_count: 2,
+  totp_enrolled: true,
+  t1_available: true,
+  role: "owner",
+  capabilities: ["hud_ui_v1", "admin_read"],
+  is_system_admin: true,
+  hud_ui: true,
+  workspaces: [],
+};
+
+const SIM_WEBAUTHN_BEGIN = {
+  challenge: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  timeout: 300000,
+  rpId: "localhost",
+  allowCredentials: [],
+  userVerification: "required",
+  extensions: {},
+};
+
+function authScreen(path, body, method) {
+  const verb = (method || (body !== undefined ? "POST" : "GET")).toUpperCase();
+  if (path === "auth/me/" && verb === "GET") {
+    return { status: 200, data: { authenticated: false } };
+  }
+  if (path === "auth/login/" && verb === "POST") {
+    return { status: 200, data: SIM_AUTH_USER };
+  }
+  if (path === "auth/webauthn/login/begin/" && verb === "POST") {
+    return { status: 200, data: SIM_WEBAUTHN_BEGIN };
+  }
+  if (path === "auth/webauthn/authentication/begin/") {
+    return { status: 200, data: SIM_WEBAUTHN_BEGIN };
+  }
+  if (path === "auth/webauthn/touch/") {
+    return { status: 200, data: { ok: true } };
+  }
+  if (path === "auth/webauthn/registration/begin/") {
+    return {
+      status: 200,
+      data: {
+        challenge: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        rp: { id: "localhost", name: "Deploy Hub" },
+        user: { id: "AQ", name: "sim", displayName: "sim" },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+        excludeCredentials: [],
+      },
+    };
+  }
+  if (path === "auth/webauthn/registration/complete/") {
+    return {
+      status: 200,
+      data: {
+        webauthn_count: 1,
+        recovery_codes: ["SIM1-XXXX-XXXX", "SIM2-XXXX-XXXX"],
+      },
+    };
+  }
+  return { status: 404, data: { detail: "unknown simulation" } };
+}
+
 // Each fixture: (path, body, method) => {status, data}
 export const SIM_FIXTURES = {
+  login: authScreen,
+  enroll: authScreen,
+  t1: authScreen,
   // No projects at all — first-run experience.
   empty: (path) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_EMPTY);

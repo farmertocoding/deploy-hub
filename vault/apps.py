@@ -15,6 +15,8 @@ class VaultConfig(AppConfig):
         """
         if settings.DEBUG or getattr(settings, "VAULT_SKIP_STARTUP_CHECK", False):
             return
+        if not getattr(settings, "VAULT_KEYFILE", None):
+            return
         from .kek import get_backend
 
         get_backend().check()   # raises KEKError → boot aborts

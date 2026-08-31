@@ -113,14 +113,14 @@ def record_transition(entity, kind, state, *, at=None):
     )
 
 
-def _observe(fingerprint, ok):
+def _observe(fingerprint, ok, *, workspace):
     """Task 6's hysteresis engine (monitor/antinoise.py::observe). Guarded
     import until that task merges — one line to unguard, never a fork."""
     try:
         from monitor.antinoise import observe
     except ImportError:
         return None
-    return observe(fingerprint, ok)
+    return observe(fingerprint, ok, workspace=workspace)
 
 
 def _probe_sites():
@@ -199,7 +199,7 @@ def _run_cycle(*, http_get=None, now=None):
             detail = ""
         state = "up" if ok else "down"
         transition = record_transition(entity, "http", state, at=now)
-        _observe(f"site-down:{site.name}", ok)
+        _observe(f"site-down:{site.name}", ok, workspace=site.project.workspace)
         row = {
             "entity": entity,
             "ok": ok,

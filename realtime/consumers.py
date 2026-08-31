@@ -104,7 +104,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
         if message.get("topic") == "findings":
             ws_id = (message.get("event") or {}).get("workspace_id")
             user = self.scope.get("user")
-            if ws_id and not await database_sync_to_async(_user_in_workspace)(user, ws_id):
+            if not ws_id or not await database_sync_to_async(_user_in_workspace)(user, ws_id):
                 return
         await self.send(_ws_json(
             {"topic": message["topic"], "seq": message["seq"], "event": message["event"]}

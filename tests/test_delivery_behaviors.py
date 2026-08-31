@@ -33,9 +33,8 @@ def _reset_pager():
 
 
 def _p1(*, fingerprint, entity="site:repeat"):
-    from monitor.alerts import raise_alert
-
     from core.models import default_workspace
+    from monitor.alerts import raise_alert
 
     return raise_alert(
         "prod-site-hard-down",
@@ -139,9 +138,19 @@ def test_daily_digest_runs_at_0800_local_and_contains_only_p3():
     assert schedule.minute == {0}
     assert settings.CELERY_TIMEZONE == settings.TIME_ZONE
 
-    raise_alert("prod-site-hard-down", "site:p1", fingerprint="digest-p1", workspace=default_workspace(), **COPY)
-    raise_alert("feed-data-stale", "feed:p2", fingerprint="digest-p2", workspace=default_workspace(), **COPY)
-    raise_alert("advice-tier", "site:p3", fingerprint="digest-p3", workspace=default_workspace(), **COPY)
+    ws = default_workspace()
+    raise_alert(
+        "prod-site-hard-down", "site:p1", fingerprint="digest-p1",
+        workspace=ws, **COPY,
+    )
+    raise_alert(
+        "feed-data-stale", "feed:p2", fingerprint="digest-p2",
+        workspace=ws, **COPY,
+    )
+    raise_alert(
+        "advice-tier", "site:p3", fingerprint="digest-p3",
+        workspace=ws, **COPY,
+    )
     result = build_digest(timezone.localdate())
     severities = {finding.severity for finding in result["findings"]}
     assert severities <= {Finding.Severity.P3, "p3"}
@@ -176,7 +185,10 @@ def test_weekly_rollup_sends_mail_via_locmem():
     from monitor.alerts import raise_alert
     from monitor.digest import build_weekly_rollup
 
-    raise_alert("advice-tier", "site:p3", fingerprint="rollup-send-p3", workspace=default_workspace(), **COPY)
+    raise_alert(
+        "advice-tier", "site:p3", fingerprint="rollup-send-p3",
+        workspace=default_workspace(), **COPY,
+    )
     mail.outbox.clear()
     week = timezone.localdate()
     result = build_weekly_rollup(week)
@@ -217,8 +229,15 @@ def test_grouped_p2_push_is_delivered_once():
     from monitor.alerts import raise_alert
     from monitor.pager import deliver_grouped, get_pager
 
-    raise_alert("feed-data-stale", "feed:a", fingerprint="stale:group-a", workspace=default_workspace(), **COPY)
-    raise_alert("feed-data-stale", "feed:b", fingerprint="stale:group-b", workspace=default_workspace(), **COPY)
+    ws = default_workspace()
+    raise_alert(
+        "feed-data-stale", "feed:a", fingerprint="stale:group-a",
+        workspace=ws, **COPY,
+    )
+    raise_alert(
+        "feed-data-stale", "feed:b", fingerprint="stale:group-b",
+        workspace=ws, **COPY,
+    )
     pager = get_pager()
     before = len(pager.published)
     n = deliver_grouped(window=600)
@@ -238,8 +257,15 @@ def test_beat_invokes_deliver_grouped():
     assert float(entry["schedule"]) == 300.0
     assert entry["task"] != settings.CELERY_BEAT_SCHEDULE["probe-uptime"]["task"]
 
-    raise_alert("feed-data-stale", "feed:a", fingerprint="stale:beat-a", workspace=default_workspace(), **COPY)
-    raise_alert("feed-data-stale", "feed:b", fingerprint="stale:beat-b", workspace=default_workspace(), **COPY)
+    ws = default_workspace()
+    raise_alert(
+        "feed-data-stale", "feed:a", fingerprint="stale:beat-a",
+        workspace=ws, **COPY,
+    )
+    raise_alert(
+        "feed-data-stale", "feed:b", fingerprint="stale:beat-b",
+        workspace=ws, **COPY,
+    )
     pager = get_pager()
     before = len(pager.published)
     monitor_tasks.deliver_grouped()
@@ -273,8 +299,15 @@ def test_failed_grouped_flush_retries():
     from monitor.alerts import raise_alert
     from monitor.pager import deliver_grouped, get_pager
 
-    raise_alert("feed-data-stale", "feed:a", fingerprint="stale:retry-a", workspace=default_workspace(), **COPY)
-    raise_alert("feed-data-stale", "feed:b", fingerprint="stale:retry-b", workspace=default_workspace(), **COPY)
+    ws = default_workspace()
+    raise_alert(
+        "feed-data-stale", "feed:a", fingerprint="stale:retry-a",
+        workspace=ws, **COPY,
+    )
+    raise_alert(
+        "feed-data-stale", "feed:b", fingerprint="stale:retry-b",
+        workspace=ws, **COPY,
+    )
     pager = get_pager()
     pager.fail = True
     deliver_grouped(window=600)

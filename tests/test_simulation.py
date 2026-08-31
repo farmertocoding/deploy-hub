@@ -21,11 +21,18 @@ def test_seed_loads_and_every_scripted_topic_is_subscribable():
     assert seed["scripted_events"], "seed has scripted events"
     assert len(seed["targets"]) == 4 and len(seed["sites"]) == 6  # §F8 v0 shape
 
-    class AuthedUser:
-        is_authenticated = True
+    from django.contrib.auth import get_user_model
 
+    from core.models import WorkspaceMembership, default_workspace
+
+    user = get_user_model().objects.create_user(
+        "sim-auth", password="pw-1234567890",
+    )
+    WorkspaceMembership.objects.create(
+        workspace=default_workspace(), user=user, role="viewer",
+    )
     for entry in seed["scripted_events"]:
-        assert authorize_topic(AuthedUser(), entry["topic"]), entry["topic"]
+        assert authorize_topic(user, entry["topic"]), entry["topic"]
 
 
 @pytest.mark.req("P0-SIM-REPLAYER")

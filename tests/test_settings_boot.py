@@ -109,6 +109,8 @@ def test_prod_settings_webauthn_rp_from_public_https_url(monkeypatch):
 
     monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
     monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
     from hub.settings import base as base_settings
 
@@ -147,6 +149,8 @@ def test_compose_settings_pin_test_mode_off_and_http_loopback(monkeypatch):
     monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
     monkeypatch.setenv("HUB_TEST_MODE", "1")
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_REQUIRE_AUDIT_SHIP", "0")
     from hub.settings import base as base_settings
 
     importlib.reload(base_settings)
@@ -159,6 +163,28 @@ def test_compose_settings_pin_test_mode_off_and_http_loopback(monkeypatch):
     assert compose.SECURE_SSL_REDIRECT is False
     assert compose.SESSION_COOKIE_SECURE is False
     assert compose.CSRF_COOKIE_SECURE is False
+
+
+def test_compose_settings_trust_vite_login_origin(monkeypatch):
+    """Vite :5173 is the operator SPA origin against compose Daphne :8000.
+
+    What would make this fail: compose inheriting prod CSRF/WebAuthn origins,
+    so Origin: http://localhost:5173 403s login and webauthn/login/begin.
+    """
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_REQUIRE_AUDIT_SHIP", "0")
+    from hub.settings import base as base_settings
+
+    importlib.reload(base_settings)
+    importlib.reload(importlib.import_module("hub.settings.prod"))
+    compose = importlib.reload(importlib.import_module("hub.settings.compose"))
+    assert "http://localhost:5173" in compose.CSRF_TRUSTED_ORIGINS
+    assert "http://127.0.0.1:5173" in compose.CSRF_TRUSTED_ORIGINS
+    assert "http://localhost:5173" in compose.OTP_WEBAUTHN_ALLOWED_ORIGINS
+    assert "http://127.0.0.1:5173" not in compose.OTP_WEBAUTHN_ALLOWED_ORIGINS
+    assert compose.OTP_WEBAUTHN_RP_ID == "localhost"
 
 
 def test_compose_shares_a_vault_keyfile_volume():

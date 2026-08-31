@@ -34,9 +34,8 @@ def _workspace(workspace=None, obj=None):
 
 def observe(fingerprint, ok, *, workspace=None, now=None):
     """Open after 3 consecutive failures; close after 2 consecutive successes."""
-    from core.models import default_workspace
-
-    workspace = workspace or default_workspace()
+    if workspace is None:
+        raise TypeError("observe() requires workspace")
     now = now or timezone.now()
     _maybe_resolve_flap(fingerprint, now, workspace=workspace)
     state, _ = AlertState.objects.get_or_create(

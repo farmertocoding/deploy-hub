@@ -34,9 +34,8 @@ def _reset_pager():
 
 
 def _file_p1(**overrides):
-    from monitor.alerts import raise_alert
-
     from core.models import default_workspace
+    from monitor.alerts import raise_alert
 
     fields = dict(COPY)
     fields.update(overrides)

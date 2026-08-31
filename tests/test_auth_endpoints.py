@@ -283,6 +283,8 @@ def test_issue_r4_11_prod_settings_mark_the_session_cookie_secure(monkeypatch):
 
     monkeypatch.setenv("HUB_SECRET_KEY", "test-only-key-for-settings-import")
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
     prod = importlib.import_module("hub.settings.prod")
     importlib.reload(prod)
 
@@ -444,3 +446,67 @@ def test_passkey_login_matches_me_capabilities(client, monkeypatch):
     )
     assert r.status_code == 200, r.content
     _assert_login_matches_me(client, r.json(), staff=True)
+
+
+@pytest.mark.req("SEC-A1-SESSION-AUTH")
+def test_schema_rejects_anonymous(client):
+    """The OpenAPI document names every mutating path. It is not a public map.
+
+    What would make this fail: SpectacularAPIView staying AllowAny, so
+    GET /api/schema/ is 200 without a session.
+    """
+    r = client.get("/api/schema/")
+    assert r.status_code == 403
+    assert b"openapi" not in r.content.lower()
+
+
+@pytest.mark.req("SEC-610-MANDATORY-2FA")
+def test_schema_rejects_password_only_session(client):
+    """Stolen password-only cookie must not download the API map.
+
+    What would make this fail: /api/schema/ remaining on
+    ENROLLMENT_ALLOWED_PREFIXES so an enrolled-but-unverified session
+    still receives the document.
+    """
+    from django.contrib.auth.models import User
+    from django_otp import DEVICE_ID_SESSION_KEY
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user("schema-thief", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    session = client.session
+    session.pop(DEVICE_ID_SESSION_KEY, None)
+    session.save()
+    r = client.get("/api/schema/")
+    assert r.status_code == 403
+    assert b"openapi" not in r.content.lower()
+
+
+@pytest.mark.req("P0-LOGIN")
+def test_schema_served_to_verified_operator(client):
+    from django.contrib.auth.models import User
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    user = User.objects.create_user("schema-op", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    client.force_login(user)
+    r = client.get("/api/schema/")
+    assert r.status_code == 200, r.content
+    assert b"openapi" in r.content.lower()
+
+
+def test_api_responses_carry_csp_and_permissions_policy(client):
+    """JSON responses must not be a document the browser will interpret.
+
+    What would make this fail: no Content-Security-Policy on /api/auth/me/,
+    or a policy that allows default-src other than 'none'.
+    """
+    r = client.get("/api/auth/me/")
+    assert r.status_code == 200
+    csp = r.headers.get("Content-Security-Policy", "")
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    policy = r.headers.get("Permissions-Policy", "")
+    assert "camera=()" in policy
+    assert "microphone=()" in policy

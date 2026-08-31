@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django_otp.admin import OTPAdminSite
 from drf_spectacular.views import SpectacularAPIView
+from rest_framework.permissions import IsAuthenticated
 
 from core.partner_views import (
     PartnerApiKillSwitchView,
@@ -21,10 +22,17 @@ from core.views import (
 
 admin.site.__class__ = OTPAdminSite
 
+
+class SchemaView(SpectacularAPIView):
+    """OpenAPI is an authenticated operator document, not a public map."""
+
+    permission_classes = [IsAuthenticated]
+
+
 urlpatterns = [
     # §4.5: the schema is generated from serializers; the TS client + zod schemas
     # are generated from this — hand-written duplicates are banned.
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/schema/", SchemaView.as_view(), name="schema"),
     # /admin: Tailscale-IP-bound + 2FA in deployment (§B10); dev convenience here.
     path("admin/", admin.site.urls),
     path("api/", include("realtime.urls")),
