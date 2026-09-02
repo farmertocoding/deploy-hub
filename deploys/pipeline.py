@@ -400,7 +400,7 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
         "zone": zone,
         "dns_zone": dns_zone,
         "domain": domain,
-        "dns_values": list(body.get("dns_values") or ["127.0.0.1"]),
+        "dns_values": list(body.get("dns_values") or []),
         "dns_proxied": bool(getattr(site, "proxied", True)),
         "poll_interval_s": poll,
         "internal_port": int(body.get("internal_port") or 20000),
@@ -437,6 +437,10 @@ def _assemble_desired(deployment, *, transport, dns, sleep, cert_issuer=None):
     joined = _joined_dns_values(site)
     if joined:
         desired["dns_values"] = joined
+    elif not desired["dns_values"]:
+        origin = _origin_ipv4(site)
+        if origin:
+            desired["dns_values"] = [origin]
     desired["dns_set"] = arts.get("dns_set")
     if joined or desired["dns_set"] is None:
         desired["dns_set"] = json.dumps(_desired_dns_records(desired))
@@ -472,6 +476,19 @@ def _joined_dns_values(site):
     if any(addr.is_loopback or addr.is_link_local for addr in addrs):
         return None
     return [str(addr) for addr in addrs]
+
+
+def _origin_ipv4(site):
+    """Joinable public unicast IPv4 from the primary target, or None."""
+    if site is None:
+        return None
+    target = getattr(site, "primary_target", None)
+    host = getattr(target, "host", None)
+    if not host:
+        return None
+    from deploys.overflow import _joinable_ipv4
+
+    return _joinable_ipv4(host)
 
 
 def _json_list(raw):

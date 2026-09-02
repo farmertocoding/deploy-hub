@@ -77,13 +77,19 @@ class TargetCreate(Command):
     object_type = "target"
 
     def validate(self, request, obj, data):
-        host = str(data.get("host") or "").strip()
+        host = str(data.get("host") or data.get("name") or "").strip()
         zone_id = data.get("zone_id")
+        if not zone_id:
+            zones = list(scoped(request, NetworkZone.objects.all()).order_by("pk")[:2])
+            if len(zones) == 1:
+                zone_id = zones[0].pk
+                data["zone_id"] = zone_id
         if not host or not zone_id:
             return Response(
                 {"detail": "host and zone_id are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        data["host"] = host
         return None
 
     def apply(self, request, obj, data):
@@ -128,9 +134,10 @@ class PartnerCreate(Command):
     object_type = "partner"
 
     def validate(self, request, obj, data):
-        slug = str(data.get("slug") or "").strip()
+        slug = str(data.get("slug") or data.get("name") or "").strip()
         if not slug:
             return Response({"detail": "slug is required."}, status=status.HTTP_400_BAD_REQUEST)
+        data["slug"] = slug
         if scoped(request, Partner.objects.all()).filter(slug=slug).exists():
             return Response(
                 {"detail": "Partner slug already exists."},

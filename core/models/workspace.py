@@ -35,6 +35,14 @@ def ensure_default_workspace_row(sender, instance, **kwargs):
         default_workspace()
 
 
+def require_workspace(obj=None, *, workspace=None):
+    """Fail closed: never invent the default tenant for a tenant-scoped row."""
+    chosen = workspace if workspace is not None else workspace_of(obj)
+    if chosen is None:
+        raise TypeError("workspace required")
+    return chosen
+
+
 def workspace_of(obj):
     """Deterministic owner workspace, or None when the object has no tenant."""
     if obj is None:
@@ -42,7 +50,10 @@ def workspace_of(obj):
     workspace = getattr(obj, "workspace", None)
     if workspace is not None:
         return workspace
-    for attr in ("project", "site", "zone", "partner", "finding", "manifest", "operation"):
+    for attr in (
+        "project", "site", "zone", "account", "partner", "finding",
+        "manifest", "operation",
+    ):
         related = getattr(obj, attr, None)
         if related is None:
             continue

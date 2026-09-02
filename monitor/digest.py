@@ -2,32 +2,55 @@
 from django.conf import settings
 from django.core import mail
 
-from core.models import Finding
+from core.models import Finding, Workspace
 
 
-def inbox_findings(**filters):
-    """Same Finding set the inbox list shows: filter + severity, -last_seen."""
-    return Finding.objects.filter(**filters).order_by("severity", "-last_seen")
+def inbox_findings(*, workspace, **filters):
+    """Same Finding set the inbox list shows: one workspace, then severity, -last_seen."""
+    if workspace is None:
+        raise TypeError("inbox_findings requires workspace")
+    return Finding.objects.filter(workspace=workspace, **filters).order_by(
+        "severity", "-last_seen",
+    )
 
 
-def build_digest(day):
+def build_digest(day, *, workspace=None):
     """08:00 local P3 digest. `day` is a date; Beat honours TIME_ZONE."""
-    rows = list(inbox_findings(severity=Finding.Severity.P3))
-    body = _render(f"P3 digest {day}", rows)
-    _send(f"[HUB P3] digest {day}", body)
-    return {"day": day, "findings": rows, "severity": Finding.Severity.P3}
+    mailed = []
+    collected = []
+    for ws in _digest_workspaces(workspace):
+        rows = list(inbox_findings(workspace=ws, severity=Finding.Severity.P3))
+        collected.extend(rows)
+        mailed.append(_send(
+            f"[HUB P3] digest {day} ({ws.slug})",
+            _render(f"P3 digest {day}", rows),
+        ))
+    return {"day": day, "findings": collected, "severity": Finding.Severity.P3, "sent": mailed}
 
 
-def build_weekly_rollup(week):
+def build_weekly_rollup(week, *, workspace=None):
     """Monday 08:00 local. Owner is the alert recipient; findings are the inbox."""
-    rows = list(inbox_findings())
-    body = _render(f"weekly rollup {week}", rows)
-    _send(f"[HUB] weekly rollup {week}", body)
+    mailed = []
+    collected = []
+    for ws in _digest_workspaces(workspace):
+        rows = list(inbox_findings(workspace=ws))
+        collected.extend(rows)
+        mailed.append(_send(
+            f"[HUB] weekly rollup {week} ({ws.slug})",
+            _render(f"weekly rollup {week}", rows),
+        ))
     return {
         "week": week,
         "owner": getattr(settings, "HUB_ALERT_TO", "operator"),
-        "findings": rows,
+        "findings": collected,
+        "sent": mailed,
     }
+
+
+def _digest_workspaces(workspace):
+    if workspace is not None:
+        return [workspace]
+    return list(Workspace.objects.order_by("pk"))
 
 
 def _render(heading, rows):

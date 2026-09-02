@@ -311,7 +311,7 @@ def _has_recent_succeeded_dump(unit, cutoff):
 
 
 def _alert_backup_failure(unit, *, missing=False):
-    from core.models import default_workspace
+    from core.models import require_workspace
     from monitor.alerts import raise_alert
 
     title = (
@@ -322,7 +322,7 @@ def _alert_backup_failure(unit, *, missing=False):
     raise_alert(
         "hub-db-or-backup-failure",
         str(unit.pk),
-        workspace=default_workspace(),
+        workspace=require_workspace(unit),
         fingerprint=f"hub-db-or-backup-failure:{unit.pk}",
         source_engine="provision.backup",
         title=title,

@@ -28,7 +28,12 @@ function HudT1({ pending, onConfirm, onDismiss }) {
       }}
       onConfirm={({ name }) => {
         if (!touched || !name) return;
-        onConfirm?.({ ...pending, name, body: { ...pending.body, name } });
+        const field = pending.confirmName || "name";
+        onConfirm?.({
+          ...pending,
+          name,
+          body: { ...pending.body, name, [field]: name },
+        });
       }}
       onDismiss={onDismiss}
     />

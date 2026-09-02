@@ -397,7 +397,9 @@ def _desired_dns_records(desired):
     site = desired.get("site")
     if not domain and site is not None:
         domain = getattr(site, "domain", None)
-    values = desired.get("dns_values") or ["127.0.0.1"]
+    values = list(desired.get("dns_values") or [])
+    if not values:
+        values = ["127.0.0.1"]
     return [{
         "name": domain,
         "rtype": desired.get("dns_rtype") or "A",
@@ -523,18 +525,37 @@ def _last_known_tls_app(transport):
 
 
 def _probe_caddy_tls(transport):
-    """Live apps/tls object, or {} when the tls app is missing / unreadable."""
-    result = transport.probe(["curl", "-sf", _caddy_tls_admin_url()])
-    if not result.ok or not (result.stdout or "").strip():
+    """Live apps/tls object.
+
+    Returns {} when the tls app is missing (HTTP 404 / empty JSON). Returns
+    None when the GET failed (timeout, 5xx) so callers refuse a wipe PUT.
+    """
+    result = transport.probe([
+        "curl", "-s", "-w", "\n%{http_code}", _caddy_tls_admin_url(),
+    ])
+    raw = (result.stdout or "").strip()
+    body, status = raw, ""
+    if raw and raw[-3:].isdigit() and "\n" in raw:
+        body, _, status = raw.rpartition("\n")
+    if status == "404":
+        return {}
+    if status and status != "200":
+        return None
+    if not result.ok and not status:
+        err = (result.stderr or "").strip()
+        if err == "404" or err.endswith("404"):
+            return {}
+        return None
+    if not body.strip():
         return {}
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(body)
     except json.JSONDecodeError:
-        return {}
+        return None
     app = _as_tls_app(data)
     if app:
         _remember_tls_app(transport, app)
-    return app
+    return app or {}
 
 
 def _origin_tls_entry(files, tag):
@@ -591,8 +612,11 @@ def _put_caddy_origin_certs(desired, route):
     slug = desired["site_slug"]
     tag = f"site-{slug}"
     live = _probe_caddy_tls(transport)
-    if not live:
-        live = _last_known_tls_app(transport)
+    if live is None:
+        cached = _last_known_tls_app(transport)
+        if not cached:
+            raise RuntimeError("caddy tls probe failed; refusing PUT that would wipe sibling certs")
+        live = cached
     if _origin_tls_already_loaded(live, files, tag):
         return
     payload = _merge_caddy_origin_tls(live, files, tag)

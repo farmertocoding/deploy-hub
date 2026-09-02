@@ -94,7 +94,7 @@ def suppressed_by(entity):
     if kind == "site":
         site = (
             Site.objects.filter(name=name)
-            .select_related("primary_target", "primary_target__zone")
+            .select_related("primary_target", "primary_target__zone", "project")
             .first()
         )
         if site is None or site.primary_target_id is None:

@@ -10,13 +10,38 @@ def run_backup_nightly():
     return run_nightly()
 
 
+def envelope_for_provision(target_id):
+    from core.models import Target, require_workspace
+    from core.task_envelope import wrap
+
+    target = Target.objects.select_related("zone").get(pk=target_id)
+    return wrap(
+        task="provision.tasks.provision_host",
+        workspace_id=require_workspace(target).pk,
+        resource_type="Target",
+        resource_id=target_id,
+    )
+
+
 @shared_task
-def provision_host(target_id, *, live_beat_jobs=None, profile="target"):
+def provision_host(target_id, envelope=None, *, live_beat_jobs=None, profile="target"):
     from core.models import Target
     from core.ssh import SshTransport
+    from core.task_envelope import EnvelopeError, reauthorize
     from provision.service import provision_host as run
 
-    target = Target.objects.get(pk=target_id)
+    if envelope is None:
+        return {"ok": False, "reason": "envelope"}
+    target = Target.objects.select_related("zone").get(pk=target_id)
+    try:
+        reauthorize(
+            envelope,
+            resource=target,
+            task="provision.tasks.provision_host",
+            resource_id=str(target_id),
+        )
+    except EnvelopeError:
+        return {"ok": False, "reason": "envelope"}
     result = run(
         target,
         SshTransport(target),

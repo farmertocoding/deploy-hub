@@ -101,7 +101,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 await self.channel_layer.group_discard(topic, self.channel_name)
 
     async def topic_event(self, message):
-        if message.get("topic") == "findings":
+        if message.get("topic") in ("findings", "map.graph"):
             ws_id = (message.get("event") or {}).get("workspace_id")
             user = self.scope.get("user")
             if not ws_id or not await database_sync_to_async(_user_in_workspace)(user, ws_id):

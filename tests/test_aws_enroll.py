@@ -572,6 +572,19 @@ def test_create_finding_fingerprint_is_aws_create_name():
     assert transport.calls == []
 
 
+def test_occupied_host_does_not_become_ready():
+    """provision_host refuse must not leave the Target READY."""
+    from core.models import Target
+    from provision.aws_enroll import EnrollError
+
+    occupied = dict(FRESH)
+    occupied["ss"] = {"stdout": "LISTEN 0 128 0.0.0.0:80\n"}
+    with pytest.raises(EnrollError, match="occupied"):
+        _enroll(transport=FakeTransport(responses=occupied))
+    assert not Target.objects.filter(host=HOST, status=Target.Status.READY).exists()
+    assert Target.objects.filter(host=HOST, status=Target.Status.ERROR).exists()
+
+
 @pytest.mark.req("UX-P5-AWS-OPERATOR")
 def test_cost_visible_on_overlay_before_confirm():
     """T1Overlay.cost is required on instance.create and shown in words before Confirm.

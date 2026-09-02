@@ -62,7 +62,7 @@ def evaluate():
     return active
 
 
-def attach_findings(nodes):
+def attach_findings(nodes, workspace=None):
     """Optional chips: OPEN/ACKED topology Findings keyed onto snapshot nodes."""
     if not nodes:
         return
@@ -72,6 +72,8 @@ def attach_findings(nodes):
         source_engine=SOURCE_ENGINE,
         state__in=(Finding.State.OPEN, Finding.State.ACKED),
     )
+    if workspace is not None:
+        rows = rows.filter(workspace=workspace)
     for row in rows:
         for nid in _node_ids_for(row.fingerprint, instances):
             chips.setdefault(nid, []).append(

@@ -12,6 +12,10 @@ if not os.environ.get("HUB_SECRET_KEY"):
     raise ImproperlyConfigured("HUB_SECRET_KEY must be set in prod.")
 if not os.environ.get("HUB_TASK_ENVELOPE_SECRET"):
     raise ImproperlyConfigured("HUB_TASK_ENVELOPE_SECRET must be set in prod.")
+if os.environ.get("HUB_TASK_ENVELOPE_SECRET") == os.environ.get("HUB_SECRET_KEY"):
+    raise ImproperlyConfigured(
+        "HUB_TASK_ENVELOPE_SECRET must differ from HUB_SECRET_KEY."
+    )
 _require_audit = os.environ.get("HUB_REQUIRE_AUDIT_SHIP", "1").strip().lower() not in {
     "0", "false", "no", "off",
 }

@@ -57,7 +57,7 @@ def enroll_aws_target(
     provider = provider or _cloud_provider(region_name=region_name)
     spec = _public_spec(spec, name=name, instance_type=instance_type)
     cost = _estimate_or_refuse(provider, spec)
-    _budget_or_refuse(cost)
+    _budget_or_refuse(cost, zone)
 
     pem, pub = generate_ed25519_keypair()
     _refuse_private_inject(pub)
@@ -90,9 +90,9 @@ def enroll_aws_target(
     except Exception as exc:
         msg = str(exc).lower()
         if "timeout" in msg or "tofu" in msg:
-            _file_host_key_timeout(name)
+            _file_host_key_timeout(name, zone)
             raise EnrollError("host key timeout; refusing TOFU") from exc
-        _file_create_failed(name)
+        _file_create_failed(name, zone)
         raise EnrollError("create_instance failed") from exc
 
     instance_id = (inst or {}).get("id") or (inst or {}).get("instance_id") or ""
@@ -117,7 +117,11 @@ def enroll_aws_target(
     if make_transport is None:
         make_transport = SshTransport
     transport = make_transport(target)
-    provision_host(target, transport)
+    result = provision_host(target, transport)
+    if not result.allowed:
+        target.status = Target.Status.ERROR
+        target.save(update_fields=["status"])
+        raise EnrollError(result.explanation or "provision_host refused")
     target.status = Target.Status.READY
     target.save(update_fields=["status"])
     return target
@@ -196,7 +200,7 @@ def _estimate_or_refuse(provider, spec):
     return value
 
 
-def _budget_or_refuse(cost):
+def _budget_or_refuse(cost, zone=None):
     raw = str(getattr(settings, "AWS_HOURLY_BUDGET_USD", "") or "").strip()
     if not raw:
         return
@@ -206,13 +210,13 @@ def _budget_or_refuse(cost):
         raise EnrollError("unconfigured hourly cost estimate") from exc
     if float(cost) <= cap:
         return
-    from core.models import default_workspace
+    from core.models import require_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "budget-cap-hit",
         "aws",
-        workspace=default_workspace(),
+        workspace=require_workspace(zone),
         fingerprint="budget-cap-hit:aws",
         source_engine=SOURCE,
         title="AWS hourly budget cap would be exceeded",
@@ -225,14 +229,14 @@ def _budget_or_refuse(cost):
     raise EnrollError("budget cap hit")
 
 
-def _file_create_failed(name):
-    from core.models import default_workspace
+def _file_create_failed(name, zone=None):
+    from core.models import require_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-create-failed",
         f"aws:{name}",
-        workspace=default_workspace(),
+        workspace=require_workspace(zone),
         fingerprint=f"aws-create:{name}",
         source_engine=SOURCE,
         title=f"EC2 create failed for {name}",
@@ -242,13 +246,13 @@ def _file_create_failed(name):
 
 
 def _file_terminate_failed(target):
-    from core.models import default_workspace
+    from core.models import require_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-terminate-failed",
         f"aws:{target.pk}",
-        workspace=default_workspace(),
+        workspace=require_workspace(target),
         fingerprint=f"aws-terminate:{target.pk}",
         source_engine=SOURCE,
         title=f"EC2 terminate failed for {target.host}",
@@ -260,14 +264,14 @@ def _file_terminate_failed(target):
     )
 
 
-def _file_host_key_timeout(name):
-    from core.models import default_workspace
+def _file_host_key_timeout(name, zone=None):
+    from core.models import require_workspace
     from monitor.alerts import raise_alert
 
     raise_alert(
         "aws-host-key-timeout",
         f"aws:{name}",
-        workspace=default_workspace(),
+        workspace=require_workspace(zone),
         fingerprint=f"aws-host-key-timeout:{name}",
         source_engine=SOURCE,
         title="EC2 host keys did not arrive in time",

@@ -50,6 +50,8 @@ def test_compose_redis_unpublished_and_requirepass():
     assert idx + 1 < len(tokens) and str(tokens[idx + 1]).strip(), (
         "requirepass is present but its password argument is empty"
     )
+    assert "+@all" not in tokens, "hub_probes +@all is FLUSHALL/CONFIG on the broker"
+    assert "-@all" in tokens
 
 
 def test_celery_serializers_are_json():

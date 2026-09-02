@@ -25,7 +25,13 @@ services:
       - ">${REDIS_PASSWORD_PROBES:?set in .env}"
       - "~*"
       - "&*"
-      - "+@all"
+      - "-@all"
+      - "+@read"
+      - "+@write"
+      - "+@connection"
+      - "+@script"
+      - "+info"
+      - "+ping"
     networks: [internal]   # never a published port (§B4)
 
   web:

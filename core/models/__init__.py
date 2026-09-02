@@ -38,6 +38,7 @@ from .workspace import (
     default_workspace,
     default_workspace_id,
     ensure_default_workspace_row,
+    require_workspace,
     workspace_of,
 )
 
@@ -82,5 +83,6 @@ __all__ = [
     "WorkspaceMembership",
     "default_workspace",
     "default_workspace_id",
+    "require_workspace",
     "workspace_of",
 ]

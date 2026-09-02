@@ -81,7 +81,7 @@ def ensure_temp_dns(desired):
         _write_checkrun(desired, temp_name=temp, stage="temp_dns")
     zone = site.dns_zone
     dns = desired["dns"]
-    values = list(desired.get("dns_values") or ["127.0.0.1"])
+    values = list(desired.get("dns_values") or [])
     existing = _records_by_name(dns, zone)
     current = existing.get((temp, "A"))
     if (
@@ -141,7 +141,7 @@ def ensure_flip(desired, *, live_compose_path=None):
         return
     zone = site.dns_zone
     dns = desired["dns"]
-    values = list(desired.get("dns_values") or ["127.0.0.1"])
+    values = list(desired.get("dns_values") or [])
     existing = _records_by_name(dns, zone)
     current = existing.get((site.domain, "A"))
     if (

@@ -125,6 +125,22 @@ def test_prod_settings_webauthn_rp_from_public_https_url(monkeypatch):
         importlib.reload(importlib.import_module("hub.settings.prod"))
 
 
+def test_prod_refuses_envelope_secret_equal_to_django_secret(monkeypatch):
+    """A leaked session secret must not also be the task-signing key."""
+    from django.core.exceptions import ImproperlyConfigured
+
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "x" * 50)
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    from hub.settings import base as base_settings
+
+    importlib.reload(base_settings)
+    with pytest.raises(ImproperlyConfigured, match="HUB_TASK_ENVELOPE_SECRET"):
+        importlib.reload(importlib.import_module("hub.settings.prod"))
+
+
 def test_compose_settings_refuse_fake_kek_and_debug():
     """Compose settings inherit prod.py and must not re-enable FakeKEK or DEBUG.
 

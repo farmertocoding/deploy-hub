@@ -259,6 +259,20 @@ elif REDIS_PASSWORD:
 else:
     REDIS_URL = f"redis://{REDIS_HOST}:6379/0"
 
+if REDIS_PASSWORD:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",

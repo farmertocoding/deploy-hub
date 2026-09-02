@@ -9,7 +9,7 @@ from providers.fakes import FakeDnsProvider
 
 DOMAIN = "app.example.com"
 ZONE = "example.com"
-ORIGIN = "127.0.0.1"
+ORIGIN = "203.0.113.10"
 
 
 class CountingDns(FakeDnsProvider):

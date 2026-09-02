@@ -208,7 +208,7 @@ def _dns_records(desired):
     site = desired.get("site")
     if not domain and site is not None:
         domain = getattr(site, "domain", None) or ""
-    values = list(desired.get("dns_values") or ["127.0.0.1"])
+    values = list(desired.get("dns_values") or [])
     return [{
         "name": domain,
         "rtype": desired.get("dns_rtype") or "A",

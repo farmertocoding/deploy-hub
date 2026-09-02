@@ -13,7 +13,7 @@ class MonitorConfig(AppConfig):
         from django.db.models.signals import post_delete, post_save
 
         from core.hud.ports import register_topic
-        from core.models import NetworkZone, Site, SiteInstance, Target
+        from core.models import NetworkZone, Site, SiteInstance, Target, workspace_of
         from monitor.hud_workers import probe_target
 
         from .map_graph import advise_topology, notify_graph_changed
@@ -41,12 +41,12 @@ class MonitorConfig(AppConfig):
             if update_fields is not None:
                 fields = set(update_fields)
                 if relevant is not None and relevant.intersection(fields):
-                    notify_graph_changed()
+                    notify_graph_changed(workspace_of(kwargs.get("instance")))
                     return
                 if advise.intersection(fields):
                     advise_topology()
                 return
-            notify_graph_changed()
+            notify_graph_changed(workspace_of(kwargs.get("instance")))
 
         for model in (NetworkZone, Target, Site, SiteInstance):
             post_save.connect(

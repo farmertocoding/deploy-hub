@@ -8,7 +8,7 @@ so a missed context cannot pick up a real profile.
 import os
 from contextlib import contextmanager
 
-from core.models import default_workspace
+from core.models import require_workspace
 
 from .aws_creds import boto3_client
 
@@ -65,9 +65,12 @@ def instance_profile_policy(target):
 
 def file_ssm_fail(target, *, names=(), reason=""):
     """kind ssm-fail, fingerprint ssm-fail:{target.pk}. Refs, never values."""
+    from core.models import Target
     from monitor.alerts import raise_alert
 
     pk = getattr(target, "pk", target)
+    if not hasattr(target, "zone"):
+        target = Target.objects.filter(pk=pk).select_related("zone").first() or target
     listed = ", ".join(str(item) for item in names if item)
     body = f"SSM parameter operation failed for target {pk} (prefix /deploy-hub/{pk}/"
     if listed:
@@ -78,7 +81,7 @@ def file_ssm_fail(target, *, names=(), reason=""):
     raise_alert(
         "ssm-fail",
         f"target:{pk}",
-        workspace=default_workspace(),
+        workspace=require_workspace(target),
         fingerprint=f"ssm-fail:{pk}",
         source_engine="ssm",
         title=f"SSM parameter operation failed for target {pk}",

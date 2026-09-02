@@ -220,3 +220,94 @@ def test_local_path_requires_configured_root():
 
     with pytest.raises(LocalSourceError, match="HUB_LOCAL_SOURCE_ROOT"):
         refuse_api_local_path("/var/lib/deploy-hub/sources/app")
+
+
+def test_overflow_orphan_stays_in_the_target_workspace():
+    """ZT-13: ephemeral leftovers must not dump into default."""
+    from core.models import NetworkZone, Target
+    from monitor.overflow_reaper import reap_stale_ephemerals
+
+    other = Workspace.objects.create(name="B", slug="zt-overflow-other")
+    zone = NetworkZone.objects.create(workspace=other, name="z", slug="zt-ov-z")
+    target = Target.objects.create(
+        zone=zone, host="b.example.test", kind=Target.Kind.AWS_EC2,
+        lifecycle=Target.Lifecycle.EPHEMERAL, status=Target.Status.READY,
+        provider_ref="i-b",
+    )
+    reap_stale_ephemerals()
+    fp = f"ephemeral-overflow-orphan:{target.pk}"
+    assert Finding.objects.filter(workspace=other, fingerprint=fp).exists()
+    assert not Finding.objects.filter(
+        workspace=default_workspace(), fingerprint=fp,
+    ).exists()
+
+
+def test_digest_does_not_email_another_workspace():
+    """ZT-13: a P3 in workspace B must not appear in workspace A's digest mail."""
+    from django.core import mail
+
+    from core.findings import finding
+    from core.models import Finding as FindingModel
+    from monitor.digest import build_digest
+
+    alpha = Workspace.objects.create(name="A", slug="a-dig")
+    beta = Workspace.objects.create(name="B", slug="b-dig")
+    finding(
+        "t", "p3-a", workspace=alpha, severity=FindingModel.Severity.P3,
+        entity="site:a", title="Alpha only", body="why it matters", fix_action="fix",
+    )
+    finding(
+        "t", "p3-b", workspace=beta, severity=FindingModel.Severity.P3,
+        entity="site:b", title="Beta secret", body="why it matters", fix_action="fix",
+    )
+    mail.outbox.clear()
+    build_digest("2026-09-02", workspace=alpha)
+    body = mail.outbox[-1].body
+    assert "Alpha only" in body
+    assert "Beta secret" not in body
+
+
+def test_unsigned_provision_host_is_refused():
+    """ZT-15: Celery must not SSH-provision from a bare integer id."""
+    from provision.tasks import provision_host
+
+    assert provision_host(1) == {"ok": False, "reason": "envelope"}
+
+
+def test_compose_redis_probes_user_is_not_admin():
+    """ZT-07: hub_probes must not get Redis +@all (FLUSHALL / CONFIG)."""
+    compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
+    tokens = compose["services"]["redis"].get("command") or []
+    assert "+@all" not in tokens
+    assert "-@all" in tokens
+    assert "hub_probes" in tokens
+
+
+def test_public_dns_prefers_joinable_target_host():
+    """First public deploy must use the primary target's public IPv4, not loopback."""
+    from dns_fixtures import default_dns_zone
+
+    from core.models import NetworkZone, Project, Site, Target
+    from deploys.pipeline import _origin_ipv4
+
+    other = Workspace.objects.create(name="DNS", slug="zt-dns-origin")
+    project = Project.objects.create(workspace=other, name="shop", slug="zt-dns-shop")
+    zone = NetworkZone.objects.create(workspace=other, name="z", slug="zt-dns-z")
+    target = Target.objects.create(
+        zone=zone, host="203.0.113.50", status=Target.Status.READY,
+    )
+    site = Site.objects.create(
+        project=project, name="shop", primary_target=target, exposure="public",
+        dns_zone=default_dns_zone(),
+    )
+    assert _origin_ipv4(site) == "203.0.113.50"
+
+
+def test_create_project_requires_workspace():
+    with pytest.raises(TypeError, match="workspace"):
+        from wizard.create import create_project
+
+        create_project({
+            "name": "x", "exposure": "mesh_only",
+            "git_url": "", "git_ref": "", "local_path": "",
+        })

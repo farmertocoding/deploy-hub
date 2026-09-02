@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 
 from core.exception_handlers import django_validation_to_drf_detail
 from core.hud.ports import FleetRefuse
-from core.models import DnsZone, Project, Site, Target, default_workspace
+from core.models import DnsZone, Project, Site, Target
 
 
 def eligible_dns_zones(workspace=None):
@@ -61,7 +61,8 @@ def _bind_primary_target(requested_pk, workspace=None):
 
 def create_project(data, *, user=None, workspace=None):
     """Persist Project + Site for one workspace. ``data`` is ProjectCreateSerializer output."""
-    workspace = workspace or default_workspace()
+    if workspace is None:
+        raise TypeError("create_project requires workspace")
     zone = _bind_dns_zone(data["exposure"], data.get("dns_zone"), workspace)
     target = _bind_primary_target(data.get("primary_target"), workspace)
 

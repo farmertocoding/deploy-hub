@@ -28,13 +28,17 @@ def advise_topology():
         logging.getLogger(__name__).exception("topology advisor failed")
 
 
-def notify_graph_changed():
+def notify_graph_changed(workspace=None):
     """Bump map.graph so snapshot-then-stream clients refetch the tables.
 
     r1–r5 re-evaluate on every graph change (§9.6.2) so the advisor cannot
     drift behind the SVG. Failures in the advisor must not swallow the bump.
     """
-    events.publish(TOPIC, {"kind": "changed"}, history=False)
+    event = {"kind": "changed"}
+    ws_id = getattr(workspace, "pk", None)
+    if ws_id is not None:
+        event["workspace_id"] = ws_id
+    events.publish(TOPIC, event, history=False)
     advise_topology()
 
 
@@ -54,7 +58,7 @@ def graph_snapshot(workspace=None):
     )
     from monitor.topology import attach_findings
 
-    attach_findings(nodes)
+    attach_findings(nodes, workspace=workspace)
     return {"seq": seq, "nodes": nodes, "edges": edges}
 
 

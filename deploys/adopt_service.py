@@ -169,7 +169,7 @@ def assemble_adopt_desired(site):
         "zone": site.dns_zone.name if site.dns_zone_id else "",
         "dns_zone": site.dns_zone,
         "domain": site.domain,
-        "dns_values": list(body.get("dns_values") or ["127.0.0.1"]),
+        "dns_values": list(body.get("dns_values") or []),
         "poll_interval_s": body.get("poll_interval_s", 1),
         "internal_port": int(body.get("internal_port") or 20000),
         "env_names": list(body.get("env_names") or []),
@@ -222,11 +222,9 @@ def _confined_source_dir(site):
     raw = getattr(site.project, "local_path", "") or ""
     if not raw:
         return ""
-    from core.local_sources import configured_source_root, resolve_local_source
+    from core.local_sources import resolve_local_source
 
-    return str(resolve_local_source(
-        raw, require_root=configured_source_root() is not None,
-    ))
+    return str(resolve_local_source(raw, require_root=True))
 
 
 def _queue_start(site_id, checkrun_id, path):

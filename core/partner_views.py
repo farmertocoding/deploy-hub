@@ -30,6 +30,7 @@ from core.models import (
     SiteInstance,
     Target,
     default_workspace,
+    require_workspace,
 )
 from core.permissions import RequireAction, RequireRecentTouch, RequireSystemAdmin, RequireWorkspace
 from core.rbac import SITE_FIELD, TARGET_FIELD, request_workspace, scoped_get
@@ -280,7 +281,7 @@ def auto_trigger_kill_switch(partner, *, reason="abuse"):
     return raise_alert(
         "partner-kill-switch",
         f"partner:{partner.pk}",
-        workspace=default_workspace(),
+        workspace=require_workspace(partner),
         fingerprint=f"partner-kill-switch:{partner.pk}",
         source_engine="core.partner",
         title="Partner API kill-switch auto-triggered",

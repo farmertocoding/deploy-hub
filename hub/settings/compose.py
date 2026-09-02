@@ -9,8 +9,6 @@ import os
 
 # Loopback compose is not an Object-Lock runtime. Prod still requires a bucket.
 os.environ.setdefault("HUB_REQUIRE_AUDIT_SHIP", "0")
-if not os.environ.get("HUB_TASK_ENVELOPE_SECRET"):
-    os.environ["HUB_TASK_ENVELOPE_SECRET"] = os.environ.get("HUB_SECRET_KEY", "")
 
 from .prod import *  # noqa: E402,F401,F403
 

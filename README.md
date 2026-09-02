@@ -27,7 +27,7 @@ python manage.py runserver        # SQLite + in-memory channels + eager Celery
 cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-## Run (compose stack — the real shape)
+## Run (compose stack — lab / clone shape, not production)
 
 ```bash
 cp .env.example .env   # fill the three values
@@ -37,11 +37,13 @@ docker compose exec web python manage.py createsuperuser
 ```
 
 Compose boots `hub.settings.compose`: DEBUG off, FakeKEK refused, `HUB_TEST_MODE`
-pinned False. First start writes a 32-byte KEK at `/etc/deploy-hub/vault.key`
-in the `hub-vault` volume — back that up offline and separately from Postgres.
-`hub.settings.dev` (FakeKEK) is laptop `manage.py` / pytest only. Bare
-`daphne` / `celery -A hub` default to `hub.settings.prod` and refuse to boot
-without `HUB_SECRET_KEY`.
+pinned False, HTTP cookies on loopback only. Production is `hub.settings.prod`
+behind HTTPS (Caddy or Tailscale), with `HUB_TASK_ENVELOPE_SECRET` distinct from
+`HUB_SECRET_KEY` and a lock-verified audit bucket. First start writes a 32-byte
+KEK at `/etc/deploy-hub/vault.key` in the `hub-vault` volume — back that up
+offline and separately from Postgres. `hub.settings.dev` (FakeKEK) is laptop
+`manage.py` / pytest only. Bare `daphne` / `celery -A hub` default to
+`hub.settings.prod` and refuse to boot without `HUB_SECRET_KEY`.
 
 Login is password + TOTP (or a WebAuthn hardware touch for T1 actions).
 Add a TOTP device in `/admin` → *TOTP devices* if you are bootstrapping
