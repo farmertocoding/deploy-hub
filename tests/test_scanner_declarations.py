@@ -34,6 +34,7 @@ by content, but not by path, so `core.secret-scan` has no honest way to know.
 import pathlib
 
 import pytest
+import yaml
 
 from scanner import declarations
 from scanner.modules import fallbacks
@@ -1047,6 +1048,31 @@ def test_a_declaration_file_that_is_not_utf8_is_a_problem_not_a_crash(tmp_path):
     assert any("could not be read" in p for p in loaded.problems), loaded.problems
 
 
+def test_a_declaration_file_is_decoded_as_utf8_even_on_an_ascii_locale(
+        tmp_path, monkeypatch):
+    """`read_text(encoding=None)` follows the operator locale. This fleet writes
+    reasons in Chinese; a C-locale host must still decode the file as UTF-8.
+
+    The interpreter's locale cannot be changed after start, so the None path is
+    intercepted at `Path.read_text` and treated as ascii — the same bytes the
+    C locale would refuse.
+    """
+    real = pathlib.Path.read_text
+
+    def locale_is_ascii(self, *args, encoding=None, errors=None, newline=None):
+        if self.name == declarations.DECLARATION_FILE and encoding is None:
+            encoding = "ascii"
+        return real(self, *args, encoding=encoding, errors=errors, newline=newline)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", locale_is_ascii)
+    loaded = _declared(tmp_path,
+                       _declaration("frontend/scripts/drill", CHINESE_REASON),
+                       name="ascii-locale")
+
+    assert len(loaded.accepted) == 1, loaded.problems
+    assert loaded.accepted[0].reason == CHINESE_REASON
+
+
 def test_a_declaration_file_that_cannot_be_stat_ed_is_a_problem_not_a_crash(tmp_path,
                                                                            monkeypatch):
     """The other unreadable arm, and the one no filesystem this suite can build reaches:
@@ -1233,6 +1259,29 @@ def test_an_unparseable_file_reports_the_parsers_own_first_line(tmp_path):
     assert "not valid YAML" in problems
     assert "while parsing a flow sequence" in problems, problems
     assert "<unicode string>" not in problems, problems
+
+
+def test_an_empty_yaml_error_message_is_still_a_problem_not_a_crash(tmp_path,
+                                                                   monkeypatch):
+    """`if str(exc)` falls back to the exception class name when the parser's
+    message is empty. `if str(None)` is always truthy, so `"".splitlines()[0]`
+    IndexErrors out of `load` — the never-raises promise, broken on an empty
+    YAMLError the same way R7-5 broke it on RecursionError.
+    """
+    root = _tree(tmp_path, dict(_drill_files(), **{"deployhub.yaml": "scanner:\n"}),
+                 name="emptyyamlerr")
+
+    def empty_parse(_raw):
+        raise yaml.YAMLError("")
+
+    monkeypatch.setattr(yaml, "safe_load", empty_parse)
+    loaded = declarations.load(root)   # must not raise
+
+    assert loaded.accepted == ()
+    assert loaded.present is True
+    problems = _problems(loaded)
+    assert "not valid YAML" in problems
+    assert "YAMLError" in problems, problems
 
 
 def test_a_settings_package_refusal_names_the_file_django_would_read(tmp_path):

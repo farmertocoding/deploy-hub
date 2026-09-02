@@ -208,7 +208,17 @@ def test_production_fingerprint_lookups_include_workspace():
         if set(rel.parts) & _SKIP_DIRS:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        # mutmut's sandbox inlines every mutant into the copied module. Those
+        # variants are not production lookups; scanning them makes stats
+        # collection fail closed on a trampoline and leaves every mutant
+        # `not checked`.
+        if "__mutmut_" in source:
+            continue
+        try:
+            tree = ast.parse(source)
         except SyntaxError:
             continue
         for node in ast.walk(tree):

@@ -134,6 +134,10 @@ def test_the_sandbox_copy_includes_scripts_dev_exhaust_conftest_loads():
     conftest = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
     assert "scripts_dev" in conftest and "exhaust.py" in conftest
     assert "scripts_dev" in also_copy
+    blockers = (REPO / "tests" / "test_zero_trust_blockers.py").read_text(
+        encoding="utf-8")
+    assert "postgres-init" in blockers
+    assert "scripts" in also_copy
     phase4 = (REPO / "tests" / "acceptance" / "test_phase_4.py").read_text(encoding="utf-8")
     assert "frontend" in phase4 and "Home.jsx" in phase4
     assert "frontend/src" in also_copy

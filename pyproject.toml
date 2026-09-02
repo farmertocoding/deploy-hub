@@ -271,6 +271,10 @@ also_copy = [
     # (no __init__.py). Omit this and a cold mutants/ rebuild fails stats
     # collection, leaving every mutant not-checked.
     "scripts_dev",
+    # tests/test_zero_trust_blockers.py reads scripts/postgres-init from disk.
+    # Omit this and a cold mutants/ rebuild fails stats collection (is_file()
+    # False) and every mutant stays not-checked.
+    "scripts",
     # tests/acceptance/test_phase_4.py reads product screens and actions from
     # disk. Copy src+tests only — not the whole frontend tree (node_modules).
     "frontend/src",
