@@ -1891,6 +1891,8 @@ export const SIM_FIXTURES = {
   degraded: (path, body, method) => {
     const firstRun = firstRunFixture(path, FIRST_RUN_DONE);
     if (firstRun) return firstRun;
+    const findings = findingsFixture(path);
+    if (findings) return findings;
     if (path === "v1/projects/")
       return { status: 200, data: [UNSCANNED_PROJECT, RESCANNED_PROJECT] };
     if (path === "v1/projects/4/readiness/")
