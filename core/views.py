@@ -94,6 +94,7 @@ class LoginView(APIView):
                 if otp_device is None and consume_recovery_code(user, code):
                     otp_device = next(devices_for_user(user, confirmed=True), None)
             if otp_device is None:
+                _login_failure(ip, username)
                 audit("otp_failed", source="api", severity="security", actor=user,
                       source_ip=client_ip(request))
                 return Response({"detail": "Invalid or missing OTP code."},

@@ -8,6 +8,7 @@ echo them. Fake / empty INTAKE_URL / post-create never Connected.
 The Ed25519 private key is not a Partner column and is never vaulted.
 """
 import base64
+import re
 import secrets
 
 from django.conf import settings
@@ -203,8 +204,14 @@ def _container_name(site):
     return names[0]
 
 
+_SAFE_ROUTE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
+
+
 def _route_id(site):
-    return f"site-{site.name}"
+    name = str(getattr(site, "name", "") or "")
+    if _SAFE_ROUTE.fullmatch(name):
+        return f"site-{name}"
+    return f"site-{site.pk}"
 
 
 def site_route_status(site):

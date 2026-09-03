@@ -20,18 +20,7 @@ services:
       - --requirepass
       - ${REDIS_PASSWORD:?set in .env}
       - --user
-      - hub_probes
-      - on
-      - ">${REDIS_PASSWORD_PROBES:?set in .env}"
-      - "~*"
-      - "&*"
-      - "-@all"
-      - "+@read"
-      - "+@write"
-      - "+@connection"
-      - "+@script"
-      - "+info"
-      - "+ping"
+      - hub_probes on >${REDIS_PASSWORD_PROBES:?set in .env} ~probes* ~_kombu.binding.probes* -@all +@read +@write +@connection +ping +info
     networks: [internal]   # never a published port (§B4)
 
   web:
@@ -75,6 +64,7 @@ services:
       REDIS_USER: hub_probes
       REDIS_PASSWORD: ${REDIS_PASSWORD_PROBES:?set in .env}
       HUB_VAULT_KEYFILE: ""
+      HUB_TASK_ENVELOPE_SECRET: probes-cannot-sign
     depends_on: [db, redis]
     networks: [internal]
     volumes:

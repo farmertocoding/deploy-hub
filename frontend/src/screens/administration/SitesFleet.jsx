@@ -187,7 +187,7 @@ export function AddSiteWizard({ onNav }) {
     <HudFrame variant="panel">
       <h2 className="hud-kicker">ADD SITE</h2>
       <form className="hud-filter" onSubmit={submit}>
-        <label>Project<input name="project" aria-label="Project" /></label>
+        <label>Project<input name="project_id" aria-label="Project" /></label>
         <label>Site name<input name="name" aria-label="Site name" /></label>
         <label>Domain<input name="domain" aria-label="Domain" /></label>
         <Button type="submit" variant="primary">Create site</Button>

@@ -11,6 +11,7 @@ export function HudAppShell({
   events,
   route,
   onNav,
+  onLogout,
   children,
   shell,
 }) {
@@ -41,6 +42,7 @@ export function HudAppShell({
         events={events}
         user={user}
         onNav={onNav}
+        onLogout={onLogout}
         workspace={admin ? "admin" : "operator"}
         shell={snap}
         route={route}

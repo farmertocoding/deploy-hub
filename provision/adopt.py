@@ -198,14 +198,13 @@ def _project_tree(project):
     if project.local_path:
         from core.local_sources import (
             LocalSourceError,
-            configured_source_root,
             resolve_local_source,
         )
 
         try:
             path = resolve_local_source(
                 project.local_path,
-                require_root=configured_source_root() is not None,
+                require_root=True,
             )
         except LocalSourceError:
             return None

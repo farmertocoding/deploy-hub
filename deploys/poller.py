@@ -1,6 +1,6 @@
 """Git polling: compare branch head to last deployed sha and enqueue deploys.
 
-Beat drives `deploys.tasks.poll_git` on queue `probes` every 1–5 min. There is no
+Beat drives `deploys.tasks.poll_git` on queue `control` every 1–5 min. There is no
 Django webhook — T1 injects `ls_remote(url, ref) -> sha` so tests never hit the
 network. `deploys/` still does not import `scanner/`.
 """

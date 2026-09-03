@@ -101,7 +101,7 @@ def deploy_overflow_copy(
     except (AttackRefuse, PartnerOverflowRefuse) as exc:
         raise OverflowDeployError(str(exc)) from exc
 
-    from core.models import Finding, SiteInstance, Target
+    from core.models import Finding, Site, SiteInstance, Target
     from deploys import pipeline
     from deploys.models import Deployment, DeploymentStep
 
@@ -116,7 +116,7 @@ def deploy_overflow_copy(
         target.kind != Target.Kind.AWS_EC2
         or target.lifecycle != Target.Lifecycle.EPHEMERAL
         or target.status != Target.Status.READY
-        or target.pk == site.primary_target_id
+        or Site.objects.filter(primary_target=target).exists()
     ):
         raise OverflowDeployError(
             "overflow target must be a ready ephemeral aws_ec2 that is not "
@@ -224,7 +224,7 @@ def join_overflow_traffic(
         target.kind != Target.Kind.AWS_EC2
         or target.lifecycle != Target.Lifecycle.EPHEMERAL
         or target.status != Target.Status.READY
-        or target.pk == site.primary_target_id
+        or Site.objects.filter(primary_target=target).exists()
     ):
         raise OverflowDeployError(
             "overflow target must be a ready ephemeral aws_ec2 that is not "

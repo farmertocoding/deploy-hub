@@ -292,7 +292,7 @@ CELERY_TASK_ROUTES = {
     "reconcile.*": {"queue": "probes"},
     "scaling.*": {"queue": "control"},
     "core.tasks.*": {"queue": "control"},
-    "deploys.tasks.poll_git": {"queue": "probes"},
+    "deploys.tasks.poll_git": {"queue": "control"},
 }
 CELERY_BEAT_SCHEDULE = {
     "drain-hud-command-outbox": {
@@ -345,7 +345,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 30 * 86400,
     },
     "backup-nightly": {
-        "task": "provision.tasks.run_backup_nightly",
+        "task": "provision.tasks.dispatch_backup_nightly",
         "schedule": crontab(hour=2, minute=0),
     },
     "cf-token-scope-daily": {
@@ -365,7 +365,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 86400.0,
     },
     "ssh-rotate-quarterly": {
-        "task": "provision.tasks.rotate_ssh_keys",
+        "task": "provision.tasks.dispatch_rotate_ssh_keys",
         "schedule": 90 * 86400,
     },
     "probe-uptime": {

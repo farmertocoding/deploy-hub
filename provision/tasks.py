@@ -2,11 +2,39 @@
 from celery import shared_task
 
 
+def envelope_for_backup():
+    from core.task_envelope import wrap
+
+    return wrap(
+        task="provision.tasks.run_backup_nightly",
+        workspace_id=0,
+        resource_type="fleet",
+        resource_id="backup-nightly",
+    )
+
+
 @shared_task(ignore_result=True)
-def run_backup_nightly():
+def dispatch_backup_nightly():
+    """Beat entry: sign, then run. Unsigned `run_backup_nightly` is refused."""
+    return run_backup_nightly(envelope=envelope_for_backup())
+
+
+@shared_task(ignore_result=True)
+def run_backup_nightly(envelope=None):
     """Beat `backup-nightly`. Persist each unit; missing dumps file P1."""
+    from core.task_envelope import EnvelopeError, reauthorize
     from provision.backup import run_nightly
 
+    if envelope is None:
+        return {"ok": False, "reason": "envelope"}
+    try:
+        reauthorize(
+            envelope,
+            task="provision.tasks.run_backup_nightly",
+            resource_id="backup-nightly",
+        )
+    except EnvelopeError:
+        return {"ok": False, "reason": "envelope"}
     return run_nightly()
 
 
@@ -51,10 +79,38 @@ def provision_host(target_id, envelope=None, *, live_beat_jobs=None, profile="ta
     return {"allowed": result.allowed, "explanation": result.explanation}
 
 
+def envelope_for_rotate():
+    from core.task_envelope import wrap
+
+    return wrap(
+        task="provision.tasks.rotate_ssh_keys",
+        workspace_id=0,
+        resource_type="fleet",
+        resource_id="ssh-rotate",
+    )
+
+
 @shared_task
-def rotate_ssh_keys(*, force=False, transport_for=None, now=None):
+def dispatch_rotate_ssh_keys(**kwargs):
+    """Beat entry: sign, then rotate. Unsigned `rotate_ssh_keys` is refused."""
+    return rotate_ssh_keys(envelope=envelope_for_rotate(), **kwargs)
+
+
+@shared_task
+def rotate_ssh_keys(envelope=None, *, force=False, transport_for=None, now=None):
     """Beat ssh-rotate-quarterly: dual-key rotate every READY SSH target."""
+    from core.task_envelope import EnvelopeError, reauthorize
     from provision.ssh_rotate import rotate_all
 
+    if envelope is None:
+        return {"ok": False, "reason": "envelope"}
+    try:
+        reauthorize(
+            envelope,
+            task="provision.tasks.rotate_ssh_keys",
+            resource_id="ssh-rotate",
+        )
+    except EnvelopeError:
+        return {"ok": False, "reason": "envelope"}
     run = rotate_all(transport_for=transport_for, force=force, now=now)
     return {"ok": True, "status": run.status, "kind": run.kind}

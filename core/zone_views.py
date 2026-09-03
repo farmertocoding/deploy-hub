@@ -22,6 +22,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.audit import audit
 from core.models import DnsAccount, DnsZone
 from core.permissions import RequireAction, RequireRecentTouch, RequireWorkspace
 from core.rbac import request_workspace, scoped_get
@@ -163,6 +164,13 @@ class CloudflareConnectView(APIView):
             secret.delete()
             raise
 
+        audit(
+            "dns.cloudflare_connect",
+            source="api",
+            actor=request.user,
+            obj=account,
+            workspace=workspace,
+        )
         return Response(
             CloudflareConnectResultSerializer(
                 {"account": account, "zone": zone}
@@ -259,6 +267,13 @@ class OriginCaPlantView(APIView):
         if account.origin_ca_key_ref != ref:
             account.origin_ca_key_ref = ref
             account.save(update_fields=["origin_ca_key_ref"])
+        audit(
+            "dns.origin_ca_plant",
+            source="api",
+            actor=request.user,
+            obj=account,
+            workspace=request_workspace(request),
+        )
         try:
             resolved.unlink()
         except OSError as exc:

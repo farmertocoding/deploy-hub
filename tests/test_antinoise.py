@@ -171,7 +171,9 @@ def test_host_down_suppresses_its_sites_and_names_them():
     assert row is not None
     for site in sites:
         assert f"site:{site.name}" in row.body
-        assert suppressed_by(f"site:{site.name}") == f"host:{target.host}"
+        assert suppressed_by(
+            f"site:{site.name}", workspace=default_workspace(),
+        ) == f"host:{target.host}"
 
     observe("site-down:alpha", False)
     observe("site-down:alpha", False)
@@ -191,13 +193,46 @@ def test_zone_down_suppresses_its_hosts():
     assert row is not None
     for host in hosts:
         assert f"host:{host.host}" in row.body
-        assert suppressed_by(f"host:{host.host}") == f"zone:{zone.slug}"
+        assert suppressed_by(
+            f"host:{host.host}", workspace=default_workspace(),
+        ) == f"zone:{zone.slug}"
 
     host_fp = f"host-down:{hosts[0].host}"
     observe(host_fp, False)
     observe(host_fp, False)
     observe(host_fp, False)
     assert not Finding.objects.filter(fingerprint=host_fp).exists()
+
+
+def test_host_down_does_not_suppress_same_named_site_in_other_workspace():
+    """Suppression is workspace-scoped. A's host-down must not quiet B's shop.
+
+    What would make this fail: Site.objects.filter(name=name).first() plus
+    AlertState lookup on default_workspace().
+    """
+    from core.models import NetworkZone, Project, Site, Target, Workspace
+    from monitor.antinoise import suppressed_by
+
+    target, sites = _shared_host_sites()
+    _fail_until_open(f"host-down:{target.host}")
+    other = Workspace.objects.create(name="Antinoise other", slug="antinoise-other")
+    project = Project.objects.create(
+        workspace=other, name="other-shop", slug="antinoise-other-proj",
+    )
+    zone = NetworkZone.objects.create(
+        workspace=other, name="antinoise-other-net", slug="antinoise-other-net",
+    )
+    other_target = Target.objects.create(
+        zone=zone, host="other-box.antinoise.example", status=Target.Status.READY,
+    )
+    other_site = Site.objects.create(
+        project=project, name=sites[0].name, primary_target=other_target,
+        exposure=Site.Exposure.MESH_ONLY,
+    )
+    assert suppressed_by(f"site:{other_site.name}", workspace=other) is None
+    assert suppressed_by(f"site:{sites[0].name}", workspace=sites[0].project.workspace) == (
+        f"host:{target.host}"
+    )
 
 
 def test_two_p2_within_ten_minutes_become_one_grouped_push():

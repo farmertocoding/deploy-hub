@@ -722,6 +722,44 @@ def test_enroll_run_twice_zero_mutating_calls():
     del first_mut
 
 
+def test_enroll_does_not_adopt_another_workspace_host():
+    """Same public host in workspace A is not workspace B's Target.
+
+    What would make this fail: enroll_aws_target looking up AWS targets by
+    host globally and returning (or mutating) the other tenant's row.
+    """
+    from core.models import NetworkZone, Target, Workspace
+    from provision.aws_enroll import enroll_aws_target
+
+    other = Workspace.objects.create(name="Other enroll", slug="enroll-other")
+    other_zone = NetworkZone.objects.create(
+        workspace=other, name="enroll-other-net", slug="enroll-other-net",
+    )
+    foreign = Target.objects.create(
+        zone=other_zone,
+        host=HOST,
+        kind=Target.Kind.AWS_EC2,
+        provider_ref="i-foreign",
+        host_key_fingerprint="sha256:foreign",
+        ssh_key_ref="ssh-foreign",
+        status=Target.Status.READY,
+        lifecycle=Target.Lifecycle.EPHEMERAL,
+    )
+    provider = RecordingCloud()
+    transport = FakeTransport(responses=FRESH)
+    zone = _zone("enroll-local")
+    result = enroll_aws_target(
+        host=HOST, name=NAME, zone=zone,
+        provider=provider, make_transport=lambda target: transport,
+    )
+    assert result.pk != foreign.pk
+    assert result.zone_id == zone.pk
+    foreign.refresh_from_db()
+    assert foreign.provider_ref == "i-foreign"
+    assert foreign.ssh_key_ref == "ssh-foreign"
+    assert foreign.zone_id == other_zone.pk
+
+
 def test_aws_enroll_tests_do_not_import_boto3():
     """This module never imports boto3/botocore/moto (D-034 split)."""
     text = pathlib.Path(__file__).read_text(encoding="utf-8")

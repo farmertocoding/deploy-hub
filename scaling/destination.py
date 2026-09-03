@@ -24,6 +24,7 @@ def pick_overflow_home(site, *, now):
         Target.objects.filter(
             status=Target.Status.READY,
             lifecycle=Target.Lifecycle.PERMANENT,
+            zone__workspace=site.project.workspace,
         )
         .exclude(pk=site.primary_target_id)
         .order_by("pk")

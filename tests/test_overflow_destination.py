@@ -378,3 +378,32 @@ def test_idle_pick_does_not_create_a_target():
     assert not _mentions_pick(_fn("_file_cheap"))
     assert not _mentions_pick(_fn("evaluate_all"))
     assert not _mentions_pick(_fn("_acquire_cycle_lock"))
+
+
+@pytest.mark.req("SCALE-OVERFLOW-IDLE-FIRST")
+def test_idle_pick_does_not_name_another_workspace_host():
+    """Idle home is workspace-scoped. Tenant B must not see tenant A's hostname.
+
+    What would make this fail: pick_overflow_home walking every READY permanent
+    Target, so B's scale-out-proposal body names A's host and B cannot rent.
+    """
+    from core.models import NetworkZone, Workspace
+
+    other = Workspace.objects.create(name="Other overflow", slug="ovf-other-ws")
+    other_zone = NetworkZone.objects.create(
+        workspace=other, name="ovf-other-net", slug="ovf-other-net",
+    )
+    idle = Target.objects.create(
+        zone=other_zone,
+        host="idle-other-ws.lan",
+        ssh_key_ref="ssh-idle-other-ws",
+        status=Target.Status.READY,
+        lifecycle=Target.Lifecycle.PERMANENT,
+    )
+    _plant(idle, [NOW], ram=10.0)
+    site = _ready_site("ovf-ws-b")
+    _plant(site.primary_target, _minutes(), ram=90.0)
+    host, _cost, _size = pick_overflow_home(site, now=NOW)
+    assert host != idle.host
+    row = _overflow_after_cheap(site)
+    assert idle.host not in row.body

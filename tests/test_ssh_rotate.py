@@ -287,7 +287,7 @@ def test_ssh_rotate_generate_append_probe_revoke():
 
     entry = settings.CELERY_BEAT_SCHEDULE["ssh-rotate-quarterly"]
     assert float(entry["schedule"]) == 90 * 86400
-    assert entry["task"] == "provision.tasks.rotate_ssh_keys"
+    assert entry["task"] == "provision.tasks.dispatch_rotate_ssh_keys"
 
 
 def test_ssh_rotate_run_twice_zero_mutating_calls():

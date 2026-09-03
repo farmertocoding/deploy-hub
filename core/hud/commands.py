@@ -200,7 +200,7 @@ class SiteCreate(Command):
 
     def validate(self, request, obj, data):
         name = str(data.get("name") or "").strip()
-        project_id = data.get("project_id")
+        project_id = data.get("project_id") or data.get("project")
         if not name or not project_id:
             return Response(
                 {"detail": "name and project_id are required."},
@@ -221,7 +221,8 @@ class SiteCreate(Command):
 
     def apply(self, request, obj, data):
         project = get_object_or_404(
-            scoped(request, Project.objects.all()), pk=data.get("project_id"),
+            scoped(request, Project.objects.all()),
+            pk=data.get("project_id") or data.get("project"),
         )
         environment = (data.get("environment") or "").strip() or Site.Environment.PRODUCTION
         if environment not in Site.Environment.values:

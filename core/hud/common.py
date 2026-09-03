@@ -264,48 +264,23 @@ def workspace_secret_owner_ids(request):
             account.dns_token_ref, account.edge_token_ref, account.origin_ca_key_ref,
             str(account.pk),
         )))
+    site_pks = [str(pk) for pk in sites.values_list("pk", flat=True)]
+    target_ids = [str(pk) for pk in targets.values_list("pk", flat=True)]
+    target_ids.extend(
+        ref for ref in targets.exclude(ssh_key_ref="").values_list("ssh_key_ref", flat=True) if ref
+    )
+    manifest_owner_ids = [str(pk) for pk in manifests.values_list("pk", flat=True)]
+    for site_id, version in manifests.values_list("site_id", "version"):
+        manifest_owner_ids.append(f"{site_id}:v{version}")
+        if version:
+            manifest_owner_ids.append(f"{site_id}:v{version + 1}")
     return {
-        "site": [str(pk) for pk in sites.values_list("pk", flat=True)],
+        "site": site_pks,
         "project": [str(pk) for pk in projects.values_list("pk", flat=True)],
-        "target": [str(pk) for pk in targets.values_list("pk", flat=True)],
-        "partner": [str(pk) for pk in partners.values_list("pk", flat=True)],
-        "manifest": [str(pk) for pk in manifests.values_list("pk", flat=True)],
-        "dns_account": sorted(dns_refs),
-    }
-
-
-def _foreign_secret_owner_ids(workspace):
-    from core.models import DnsAccount, Partner, Project, Site, Target
-
-    others = ~Q(workspace=workspace)
-    site_ids = {
-        str(pk) for pk in Site.objects.exclude(
-            project__workspace=workspace,
-        ).values_list("pk", flat=True)
-    }
-    project_ids = {
-        str(pk) for pk in Project.objects.filter(others).values_list("pk", flat=True)
-    }
-    target_ids = {
-        str(pk) for pk in Target.objects.exclude(
-            zone__workspace=workspace,
-        ).values_list("pk", flat=True)
-    }
-    partner_ids = {str(pk) for pk in Partner.objects.filter(others).values_list("pk", flat=True)}
-    accounts = DnsAccount.objects.filter(others)
-    dns_ids = set()
-    for account in accounts:
-        dns_ids.update(filter(None, (
-            account.dns_token_ref, account.edge_token_ref, account.origin_ca_key_ref,
-            str(account.pk),
-        )))
-    return {
-        "site": site_ids,
-        "project": project_ids,
         "target": target_ids,
-        "partner": partner_ids,
-        "dns_account": dns_ids,
-        "manifest": set(),
+        "partner": [str(pk) for pk in partners.values_list("pk", flat=True)],
+        "manifest": manifest_owner_ids,
+        "dns_account": sorted(dns_refs),
     }
 
 
@@ -317,13 +292,6 @@ def workspace_secrets(request):
     workspace = request_workspace(request)
     if workspace and workspace.slug == "default":
         visible |= ~Q(owner_type__in=RESOURCE_OWNER_TYPES)
-        foreign = _foreign_secret_owner_ids(workspace)
-        for owner_type in RESOURCE_OWNER_TYPES:
-            claimed = foreign.get(owner_type) or set()
-            if claimed:
-                visible |= Q(owner_type=owner_type) & ~Q(owner_id__in=sorted(claimed))
-            else:
-                visible |= Q(owner_type=owner_type)
     return Secret.objects.filter(visible)
 
 

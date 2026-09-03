@@ -3,7 +3,7 @@ import { HudFrame } from "./HudFrame.jsx";
 import { adminReadEnabled } from "../flags.js";
 import { api } from "../api.js";
 
-export function WorkspaceMenu({ user, onNav, defaultOpen = false }) {
+export function WorkspaceMenu({ user, onNav, onLogout, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const root = useRef(null);
   const canAdmin = adminReadEnabled(user);
@@ -80,6 +80,7 @@ export function WorkspaceMenu({ user, onNav, defaultOpen = false }) {
               className="hud-appearance__choice"
               onClick={() => {
                 close();
+                onLogout?.();
                 api("auth/logout/", {}, "POST").finally(() => {
                   if (typeof window !== "undefined") window.location.hash = "#/";
                 });

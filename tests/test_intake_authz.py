@@ -19,11 +19,48 @@ def test_production_intake_requires_service_token():
         intake_client_for()
 
 
+def test_intake_wsgi_refuses_oversized_bodies():
+    """INT-01: CONTENT_LENGTH above the cap must not be read into memory."""
+    from intake.app import make_application
+
+    class Boom:
+        def read(self, n=-1):
+            raise AssertionError(f"intake read {n} bytes of an oversized body")
+
+    captured = []
+
+    def start_response(status, _headers):
+        captured.append(status)
+
+    app = make_application()
+    app(
+        {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/partner/v1/sites",
+            "CONTENT_LENGTH": "2000000",
+            "wsgi.input": Boom(),
+        },
+        start_response,
+    )
+    assert captured and captured[0].startswith("413")
+
+
 @override_settings(DEBUG=False, INTAKE_SERVICE_TOKEN="secret")
 def test_unauthenticated_git_push_item_is_refused():
     assert _item_authenticated({"id": "g1", "type": "git-push"}) is False
     import hashlib
     import hmac
 
-    sig = hmac.new(b"secret", b"g1", hashlib.sha256).hexdigest()
-    assert _item_authenticated({"id": "g1", "type": "git-push", "hub_sig": sig}) is True
+    job = {
+        "id": "g1",
+        "type": "git-push",
+        "git_url": "https://github.com/o/r.git",
+        "ref": "main",
+    }
+    id_only = hmac.new(b"secret", b"g1", hashlib.sha256).hexdigest()
+    assert _item_authenticated({**job, "hub_sig": id_only}) is False
+    payload = "g1\ngit-push\nhttps://github.com/o/r.git\nmain"
+    sig = hmac.new(b"secret", payload.encode(), hashlib.sha256).hexdigest()
+    assert _item_authenticated({**job, "hub_sig": sig}) is True
+    swapped = {**job, "git_url": "https://evil.example/r.git", "hub_sig": sig}
+    assert _item_authenticated(swapped) is False

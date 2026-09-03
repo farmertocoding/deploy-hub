@@ -388,3 +388,23 @@ test("workspace_profile_and_security_do_not_route_through_administration", async
   assert.notEqual(nav.at(-1)?.[0], "admin");
   assert.ok(nav.every((n) => n[0] !== "admin"));
 });
+
+test("sign_out_clears_react_auth_state_immediately", async () => {
+  const { act, create } = await import("react-test-renderer");
+  let cleared = false;
+  const props = {
+    user: { username: "op", capabilities: ["hud_ui_v1"] },
+    onNav: () => {},
+    onLogout: () => { cleared = true; },
+    defaultOpen: true,
+  };
+  let tree: any;
+  await act(() => {
+    tree = create(React.createElement(WorkspaceMenu, props));
+  });
+  const signOut = tree.root.findAllByType("button").find((b: any) => nodeText(b) === "Sign out");
+  assert.ok(signOut, "Sign out menu item");
+  await act(() => signOut.props.onClick({ preventDefault() {} }));
+  assert.equal(cleared, true);
+  tree.unmount();
+});

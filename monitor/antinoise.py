@@ -27,9 +27,12 @@ _after_raise_depth = 0
 
 
 def _workspace(workspace=None, obj=None):
-    from core.models import default_workspace, workspace_of
+    from core.models import workspace_of
 
-    return workspace or workspace_of(obj) or default_workspace()
+    resolved = workspace or workspace_of(obj)
+    if resolved is None:
+        raise TypeError("workspace is required")
+    return resolved
 
 
 def observe(fingerprint, ok, *, workspace=None, now=None):
@@ -88,29 +91,35 @@ def flap_check(fingerprint, *, workspace=None, now=None):
     )
 
 
-def suppressed_by(entity):
+def suppressed_by(entity, *, workspace=None):
     """Host-down suppresses its sites; zone-down suppresses its hosts."""
     kind, _, name = entity.partition(":")
     if kind == "site":
-        site = (
-            Site.objects.filter(name=name)
-            .select_related("primary_target", "primary_target__zone", "project")
-            .first()
+        sites = Site.objects.filter(name=name).select_related(
+            "primary_target", "primary_target__zone", "project",
         )
+        if workspace is not None:
+            sites = sites.filter(project__workspace=workspace)
+        site = sites.first()
         if site is None or site.primary_target_id is None:
             return None
         host = site.primary_target.host
-        if _fingerprint_open(f"host-down:{host}"):
+        if _fingerprint_open(f"host-down:{host}", workspace=workspace):
             return f"host:{host}"
         zone = site.primary_target.zone
-        if zone is not None and _fingerprint_open(f"zone-down:{zone.slug}"):
+        if zone is not None and _fingerprint_open(
+            f"zone-down:{zone.slug}", workspace=workspace,
+        ):
             return f"zone:{zone.slug}"
         return None
     if kind == "host":
-        target = Target.objects.filter(host=name).select_related("zone").first()
+        targets = Target.objects.filter(host=name).select_related("zone")
+        if workspace is not None:
+            targets = targets.filter(zone__workspace=workspace)
+        target = targets.first()
         if target is None:
             return None
-        if _fingerprint_open(f"zone-down:{target.zone.slug}"):
+        if _fingerprint_open(f"zone-down:{target.zone.slug}", workspace=workspace):
             return f"zone:{target.zone.slug}"
         return None
     return None
@@ -172,9 +181,11 @@ def mark_p2_delivered_fps(fps):
 
 def storm_breaker(now):
     """>10 pushes/10 min → one P1 ALERT STORM (n); exit when the rate drops."""
+    from core.models import default_workspace
+
     now = now or timezone.now()
     recent = _recent_pushes(now)
-    workspace = _workspace()
+    workspace = default_workspace()
     storm, _ = AlertState.objects.get_or_create(
         workspace=workspace, fingerprint=STORM_STATE_FP,
     )
@@ -295,8 +306,8 @@ def _annotate_delivery(row, now):
             Finding.State.RESOLVED,
             Finding.State.ACCEPTED,
         }
-        and not _flap_holds(row.fingerprint, now)
-        and suppressed_by(row.entity) is None
+        and not _flap_holds(row.fingerprint, now, workspace=row.workspace)
+        and suppressed_by(row.entity, workspace=row.workspace) is None
         and not _storming_except(row, now)
     )
 
@@ -310,13 +321,15 @@ def _storming_except(row, now):
 def _open(state, fingerprint, now, *, workspace=None):
     workspace = _workspace(workspace, state)
     entity = _entity_of(fingerprint)
-    if _flap_holds(fingerprint, now, workspace=workspace) or suppressed_by(entity):
+    if _flap_holds(fingerprint, now, workspace=workspace) or suppressed_by(
+        entity, workspace=workspace,
+    ):
         return None
     state.opened_at = now
     state.closed_at = None
     _note_transition(state, "open", now)
     state.save()
-    title, body, fix_action = _open_copy(fingerprint, entity)
+    title, body, fix_action = _open_copy(fingerprint, entity, workspace=workspace)
     return _file_open(
         fingerprint, entity, title, body, fix_action, workspace=workspace,
     )
@@ -355,7 +368,7 @@ def _file_open(fingerprint, entity, title, body, fix_action, *, workspace=None):
         return raise_alert("prod-site-hard-down", entity, **kwargs)
     if fingerprint.startswith("zone-down:"):
         return raise_alert("prod-site-hard-down", entity, **kwargs)
-    kind = _site_down_kind(entity)
+    kind = _site_down_kind(entity, workspace=workspace)
     if kind == "staging-or-flapping":
         return raise_alert("staging-or-flapping", entity, **kwargs)
     if kind == "partner-site-hard-down":
@@ -365,16 +378,17 @@ def _file_open(fingerprint, entity, title, body, fix_action, *, workspace=None):
     return raise_alert("prod-site-hard-down", entity, **kwargs)
 
 
-def _site_down_kind(entity):
+def _site_down_kind(entity, *, workspace=None):
     """§2 site-down class from Site/Target env/role (or zone purpose)."""
     kind, _, name = entity.partition(":")
     if kind != "site":
         return "prod-site-hard-down"
-    site = (
-        Site.objects.filter(name=name)
-        .select_related("primary_target", "primary_target__zone", "dns_zone")
-        .first()
+    sites = Site.objects.filter(name=name).select_related(
+        "primary_target", "primary_target__zone", "dns_zone",
     )
+    if workspace is not None:
+        sites = sites.filter(project__workspace=workspace)
+    site = sites.first()
     if site is None:
         return "prod-site-hard-down"
     label = _env_role_label(site)
@@ -461,13 +475,14 @@ def _env_role_label(site):
     return "prod"
 
 
-def _open_copy(fingerprint, entity):
+def _open_copy(fingerprint, entity, *, workspace=None):
     if fingerprint.startswith("host-down:"):
         host = entity.partition(":")[2]
+        sites = Site.objects.filter(primary_target__host=host)
+        if workspace is not None:
+            sites = sites.filter(project__workspace=workspace)
         names = list(
-            Site.objects.filter(primary_target__host=host)
-            .order_by("name")
-            .values_list("name", flat=True)
+            sites.order_by("name").values_list("name", flat=True)
         )
         listed = ", ".join(f"site:{n}" for n in names) or "(none)"
         return (
@@ -477,10 +492,11 @@ def _open_copy(fingerprint, entity):
         )
     if fingerprint.startswith("zone-down:"):
         slug = entity.partition(":")[2]
+        targets = Target.objects.filter(zone__slug=slug)
+        if workspace is not None:
+            targets = targets.filter(zone__workspace=workspace)
         hosts = list(
-            Target.objects.filter(zone__slug=slug)
-            .order_by("host")
-            .values_list("host", flat=True)
+            targets.order_by("host").values_list("host", flat=True)
         )
         listed = ", ".join(f"host:{h}" for h in hosts) or "(none)"
         return (
@@ -597,8 +613,10 @@ def _resolve_engine_finding(row, now):
 
 
 def _push_log(*, workspace=None):
+    from core.models import default_workspace
+
     state, _ = AlertState.objects.get_or_create(
-        workspace=_workspace(workspace), fingerprint=PUSH_LOG_FP,
+        workspace=_workspace(workspace or default_workspace()), fingerprint=PUSH_LOG_FP,
     )
     return state
 
@@ -623,8 +641,10 @@ def _record_push(row, now, title=None, *, counts_for_storm=True):
 
 
 def _recent_pushes(now):
+    from core.models import default_workspace
+
     log = AlertState.objects.filter(
-        workspace=_workspace(), fingerprint=PUSH_LOG_FP,
+        workspace=default_workspace(), fingerprint=PUSH_LOG_FP,
     ).first()
     if log is None:
         return []

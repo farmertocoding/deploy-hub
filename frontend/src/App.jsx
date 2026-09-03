@@ -84,7 +84,7 @@ function AuthenticatedApp() {
   if (user === undefined) return <p style={{ margin: "15vh auto", width: "fit-content" }}>Loading…</p>;
   if (!user) return <Login onLogin={setUser} />;
   if (!user.otp_enrolled) return <Enroll onDone={() => setUser({ ...user, otp_enrolled: true })} />;
-  return <Shell user={user} onReloadIdentity={hydrate} />;
+  return <Shell user={user} onReloadIdentity={hydrate} onLogout={() => setUser(null)} />;
 }
 
 // The nav bar, extracted so tests/nav.test.ts renders the IA without mounting the
@@ -134,7 +134,7 @@ export function OperatorScreens({ route, onNav, width, events, user, onReloadIde
   );
 }
 
-export function Shell({ user, onReloadIdentity }) {
+export function Shell({ user, onReloadIdentity, onLogout }) {
   // ONE multiplexed socket for the whole shell (§3.5): screens subscribe through
   // this client, and the pill beside the username is RT-35's visible state — every
   // screen shows it because it is above all of them. ThemeProvider wraps this
@@ -155,7 +155,7 @@ export function Shell({ user, onReloadIdentity }) {
   );
   if (hudUiEnabled(user)) {
     return (
-      <HudAppShell user={user} events={events} route={route} onNav={onNav} width={width}>
+      <HudAppShell user={user} events={events} route={route} onNav={onNav} onLogout={onLogout} width={width}>
         {screens}
       </HudAppShell>
     );

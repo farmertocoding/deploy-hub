@@ -32,9 +32,13 @@ def _item_authenticated(job):
     if not token:
         return bool(getattr(settings, "DEBUG", False))
     sig = str(job.get("hub_sig") or "")
-    expected = hmac.new(
-        token.encode(), str(job.get("id") or "").encode(), hashlib.sha256,
-    ).hexdigest()
+    payload = "\n".join([
+        str(job.get("id") or ""),
+        str(job.get("type") or ""),
+        str(job.get("git_url") or ""),
+        str(job.get("ref") or ""),
+    ])
+    expected = hmac.new(token.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(sig, expected)
 
 

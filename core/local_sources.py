@@ -118,7 +118,7 @@ def iter_archive_members(source_dir):
     Rejects VCS metadata, env files, vault.key, special files, TOCTOU swaps,
     and oversized trees. Fail closed on read errors.
     """
-    root = resolve_local_source(source_dir, require_root=bool(configured_source_root()))
+    root = resolve_local_source(source_dir, require_root=True)
     total = 0
     count = 0
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):

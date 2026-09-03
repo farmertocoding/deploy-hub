@@ -115,8 +115,7 @@ export function LiveDeploymentView({
               onConfirm={() => onCommand?.(pending)}
               onDismiss={onCancelPending}
             />
-          ) : null}
-          {recovery.map((a) => (
+          ) : recovery.map((a) => (
             <Button
               key={a.id}
               variant={a.id.includes("abort") ? "destructive" : "primary"}
@@ -185,19 +184,30 @@ export default function LiveDeployment({ route, onNav, events }) {
       setPhase(events?.status === "degraded" ? "degraded" : "live");
     });
   };
+  const subscribe = events?.subscribe;
+  const unsubscribe = events?.unsubscribe;
   useEffect(() => {
     let cancelled = false;
-    load().then(() => { if (cancelled) return; });
+    if (!id) { setPhase("live"); return undefined; }
+    api(`v1/hud/deployments/${id}/`).then(({ status, data }) => {
+      if (cancelled) return;
+      if (status === 401) { setPhase("signed-out"); return; }
+      if (status === 403) { setPhase("permission-denied"); return; }
+      if (status === 404) { setPhase("not-found"); return; }
+      if (status !== 200) { setPhase("error"); setError(data?.detail || `HTTP ${status}`); return; }
+      setDeploy(data);
+      setPhase(events?.status === "degraded" ? "degraded" : "live");
+    });
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, events?.status]);
   useEffect(() => {
-    if (!id || !events?.subscribe) return undefined;
-    const topic = `deployments.${id}`;
-    events.subscribe(topic, () => { load(); }, () => (
+    if (!id || !subscribe) return undefined;
+    const topic = `deploy.${id}`;
+    subscribe(topic, () => { load(); }, () => (
       api(`v1/hud/deployments/${id}/`).then(({ data }) => ({ seq: 0, data }))
     ));
-    return () => { events.unsubscribe?.(topic); };
-  }, [id, events]);
+    return () => { unsubscribe?.(topic); };
+  }, [id, subscribe, unsubscribe]);
   return (
     <LiveDeploymentView
       deploy={deploy}

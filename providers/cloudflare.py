@@ -535,7 +535,11 @@ def _parse_expires(raw):
         return timezone.now()
     if hasattr(raw, "year"):
         return raw
-    parsed = parse_datetime(str(raw).replace(" +0000", "+00:00"))
+    text = str(raw).strip()
+    if text.endswith(" UTC"):
+        text = text[: -len(" UTC")]
+    text = text.replace(" +0000", "+00:00").replace("+0000", "+00:00")
+    parsed = parse_datetime(text.strip())
     if parsed is None:
         return timezone.now()
     if timezone.is_naive(parsed):

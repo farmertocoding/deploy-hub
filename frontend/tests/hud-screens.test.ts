@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as any).document = (globalThis as any).document ?? { cookie: "" };
 
 import {
-  filtersFromHash, writeFilters, SitesFleetView, sitesFleetSnapshot,
+  filtersFromHash, writeFilters, SitesFleetView, sitesFleetSnapshot, AddSiteWizard,
 } from "../src/screens/administration/SitesFleet.jsx";
 
 import Overview, { OverviewView } from "../src/screens/administration/Overview.jsx";
@@ -664,4 +664,52 @@ test("live_deployment_confirm_surfaces_command_result", async () => {
   assert.equal(posts[0].action, "deployment.abort");
   const text = nodeText(tree.toJSON());
   assert.match(text, /accepted|77|cancelled/i);
+});
+
+test("live_deployment_second_recovery_click_does_not_skip_confirm", async () => {
+  const LiveDeployment = (await import("../src/screens/administration/LiveDeployment.jsx")).default;
+  (globalThis as any).window.location.search = "";
+  (globalThis as any).document.cookie = "csrftoken=test";
+  const posts: any[] = [];
+  (globalThis as any).fetch = async (url: string, opts: any) => {
+    const method = (opts?.method || "GET").toUpperCase();
+    if (String(url).includes("v1/hud/deployments/11/commands") && method === "POST") {
+      posts.push(JSON.parse(opts.body || "{}"));
+      return {
+        status: 202,
+        json: async () => ({ operation_id: 77, state: "cancelled", action: "deployment.abort" }),
+      };
+    }
+    if (String(url).includes("v1/hud/deployments/11")) {
+      return { status: 200, json: async () => HUD_DEPLOY_FIXTURE };
+    }
+    return { status: 404, json: async () => ({}) };
+  };
+  const { tree, act } = await mount(React.createElement(LiveDeployment, {
+    route: { screen: "admin", id: "deployments/11" },
+    onNav: () => {},
+    width: 1280,
+    events: { status: "live" },
+  }));
+  await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+  await act(() => { click(tree, "Abort and clean up"); });
+  const recoveryAbort = tree.root.findAllByType("button").filter((b: any) => {
+    const text = nodeText(b);
+    return text.includes("Abort and clean up") && !text.includes("Confirm");
+  });
+  assert.equal(recoveryAbort.length, 0, "recovery Abort must hide while Confirm is open");
+  assert.equal(posts.length, 0);
+  await act(async () => {
+    click(tree, "Confirm");
+    await new Promise((r) => setTimeout(r, 20));
+  });
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].action, "deployment.abort");
+});
+
+test("add_site_wizard_posts_project_id_not_project", () => {
+  const markup = render(AddSiteWizard, { onNav: () => {} });
+  assert.match(markup, /name="project_id"/);
+  assert.match(markup, /name="name"/);
+  assert.doesNotMatch(markup, /name="project"/);
 });

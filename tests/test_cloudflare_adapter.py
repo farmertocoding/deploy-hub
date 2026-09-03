@@ -254,6 +254,35 @@ def test_origin_ca_issue_sends_bearer_not_service_key(monkeypatch):
     assert _header(headers, "X-Auth-User-Service-Key") is None
 
 
+def test_origin_ca_expires_on_cloudflare_utc_spelling(monkeypatch):
+    """Cloudflare Origin CA returns '2014-01-01 05:20:00 +0000 UTC', not ISO-8601.
+
+    What would make this fail: parse_datetime returning None so expires_at
+    becomes now() and the next deploy reissues.
+    """
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    import providers.cloudflare as cloudflare
+
+    parsed = cloudflare._parse_expires("2030-01-01 05:20:00 +0000 UTC")
+    assert parsed == datetime(2030, 1, 1, 5, 20, tzinfo=dt_timezone.utc)
+    http = FakeCloudflare({
+        ORIGIN_CA_ISSUE: {
+            "success": True,
+            "result": {
+                "certificate": "-----BEGIN CERTIFICATE-----\nMII\n-----END CERTIFICATE-----",
+                "expires_on": "2030-01-01 05:20:00 +0000 UTC",
+            },
+        },
+    })
+    issuer = _issuer(monkeypatch, http)
+    result = issuer.issue(
+        issuer.zone, ["app.example.com"], validity_days=7, csr=ORIGIN_CA_CSR,
+    )
+    assert result["expires_at"].year == 2030
+
+
 @pytest.mark.req("DNS-CF-PRODUCT-ADAPTER")
 def test_origin_ca_refuses_service_key_before_network(monkeypatch):
     """A v1.0- Origin CA service key never reaches urlopen.

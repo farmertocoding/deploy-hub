@@ -19,6 +19,14 @@ pytestmark = pytest.mark.django_db
 REPO = Path(__file__).resolve().parent.parent
 
 
+def test_antinoise_workspace_helper_does_not_invent_default():
+    """ZT-13 residual: storm/flap helpers must not silently own the default tenant."""
+    from monitor.antinoise import _workspace
+
+    with pytest.raises(TypeError, match="workspace"):
+        _workspace()
+
+
 def test_observe_without_workspace_is_refused():
     """ZT-13: hysteresis must not invent the default tenant.
 
@@ -119,6 +127,9 @@ def test_compose_db_creates_the_probes_role():
     text = init.read_text()
     assert "hub_probes" in text
     assert "POSTGRES_PASSWORD_PROBES" in text
+    assert "REVOKE" in text
+    assert "vault_secret" in text
+    assert "core_workspacemembership" in text
 
 
 def test_unsigned_run_deploy_is_refused():
@@ -274,13 +285,47 @@ def test_unsigned_provision_host_is_refused():
     assert provision_host(1) == {"ok": False, "reason": "envelope"}
 
 
-def test_compose_redis_probes_user_is_not_admin():
-    """ZT-07: hub_probes must not get Redis +@all (FLUSHALL / CONFIG)."""
+def _redis_user_acl():
     compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
     tokens = compose["services"]["redis"].get("command") or []
-    assert "+@all" not in tokens
-    assert "-@all" in tokens
-    assert "hub_probes" in tokens
+    idx = tokens.index("--user")
+    return str(tokens[idx + 1])
+
+
+def test_compose_redis_probes_user_is_not_admin():
+    """ZT-07: hub_probes ACL is one Redis --user string, not +@all on every key."""
+    acl = _redis_user_acl()
+    parts = acl.split()
+    assert parts[0] == "hub_probes"
+    assert "-@all" in parts
+    assert "+@all" not in parts
+    globs = [part for part in parts if part.startswith("~")]
+    assert globs, acl
+    assert "~*" not in globs
+    assert any(part.startswith("~probes") for part in globs)
+    assert all("deploys" not in glob and "control" not in glob for glob in globs)
+    assert all("task-envelope-nonce" not in glob for glob in globs)
+
+
+def test_probes_worker_cannot_sign_deploy_envelopes():
+    """Probe isolation: worker-probes must not inherit HUB_TASK_ENVELOPE_SECRET."""
+    compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
+    env = compose["services"]["worker-probes"]["environment"]
+    secret = str(env.get("HUB_TASK_ENVELOPE_SECRET") or "")
+    assert secret
+    assert "HUB_TASK_ENVELOPE_SECRET" in str(
+        compose["services"]["worker-deploys"].get("environment") or "",
+    )
+    hub_env = compose["services"]["web"]["environment"]
+    assert secret != str(hub_env.get("HUB_TASK_ENVELOPE_SECRET") or "")
+
+
+def test_unsigned_rotate_and_backup_are_refused():
+    """ZT-15 residual: Beat mutators must not run from a bare broker publish."""
+    from provision.tasks import rotate_ssh_keys, run_backup_nightly
+
+    assert rotate_ssh_keys() == {"ok": False, "reason": "envelope"}
+    assert run_backup_nightly() == {"ok": False, "reason": "envelope"}
 
 
 def test_public_dns_prefers_joinable_target_host():

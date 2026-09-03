@@ -151,5 +151,10 @@ export const ACTION_TIERS = [
     "id": "aws.connect",
     "tier": "T1",
     "label": "Connect AWS"
+  },
+  {
+    "id": "secret.create",
+    "tier": "T1",
+    "label": "Store secret"
   }
 ];

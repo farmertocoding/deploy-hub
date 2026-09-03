@@ -15,7 +15,7 @@
 // testable under node --test with an injected socket and injected timers
 // (tests/degraded.test.ts): renderToStaticMarkup runs no effects, so a hook-shaped
 // socket client is a state machine no test in this tree can reach.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // RT-35's number, exported so the pill's "polling every N s" copy (Chrome.jsx) is
 // derived from the interval that actually polls and the two cannot drift.
@@ -186,6 +186,10 @@ export function useEvents() {
     return () => client.close();
   }, []);
   const client = clientRef.current;
-  return { status: conn.status, asOf: conn.asOf,
-           subscribe: client.subscribe, unsubscribe: client.unsubscribe };
+  return useMemo(() => ({
+    status: conn.status,
+    asOf: conn.asOf,
+    subscribe: client.subscribe,
+    unsubscribe: client.unsubscribe,
+  }), [conn.status, conn.asOf, client]);
 }

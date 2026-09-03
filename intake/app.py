@@ -24,6 +24,12 @@ _COMPILED = tuple(
     for method, path in PUBLIC_ROUTE_FAMILIES
 )
 
+MAX_BODY_BYTES = 1_000_000
+
+
+class BodyTooLarge(Exception):
+    """CONTENT_LENGTH above MAX_BODY_BYTES. Do not read wsgi.input."""
+
 
 def _read_body(environ):
     try:
@@ -32,6 +38,8 @@ def _read_body(environ):
         length = 0
     if length <= 0:
         return b""
+    if length > MAX_BODY_BYTES:
+        raise BodyTooLarge
     return environ["wsgi.input"].read(length)
 
 
@@ -176,7 +184,10 @@ def make_application(state=None):
         template, groups = _match(method, path)
         if template is None:
             return _empty(start_response, "404 Not Found")
-        body = _read_body(environ)
+        try:
+            body = _read_body(environ)
+        except BodyTooLarge:
+            return _empty(start_response, "413 Payload Too Large")
         headers = _partner_headers(environ)
         try:
             verify(method, path, body, headers, state.public_keys)

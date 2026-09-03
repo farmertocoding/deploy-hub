@@ -15,6 +15,7 @@ export function TopBar({
   events,
   user,
   onNav,
+  onLogout,
   workspace = "operator",
   shell = {},
   route,
@@ -180,7 +181,7 @@ export function TopBar({
         <StatusPill status={eventStatus} asOf={events?.asOf} />
       )}
       <AppearanceMenu />
-      <WorkspaceMenu user={user} onNav={onNav} />
+      <WorkspaceMenu user={user} onNav={onNav} onLogout={onLogout} />
     </header>
   );
 }

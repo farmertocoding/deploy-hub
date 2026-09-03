@@ -11,7 +11,13 @@ def hub_join(*parts, ssh_user=None):
     root = hub_root(ssh_user)
     if not parts:
         return root
-    return root + "/" + "/".join(str(p).lstrip("/") for p in parts)
+    pieces = []
+    for part in parts:
+        text = str(part).replace("\\", "/")
+        if any(seg == ".." for seg in text.split("/")):
+            raise ValueError("hub path must stay under the hub prefix")
+        pieces.append(text.lstrip("/"))
+    return root + "/" + "/".join(pieces)
 
 
 def ssh_user_from(desired_or_target):

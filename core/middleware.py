@@ -127,6 +127,8 @@ class IdleTimeoutMiddleware:
             timeout = int(getattr(settings, "HUB_SESSION_IDLE_TIMEOUT", 30 * 60))
             if last is not None and (now - float(last)) > timeout:
                 logout(request)
-            else:
+            elif not (
+                request.method == "GET" and request.path.rstrip("/") == "/api/auth/me"
+            ):
                 request.session[LAST_ACTIVITY_KEY] = now
         return self.get_response(request)

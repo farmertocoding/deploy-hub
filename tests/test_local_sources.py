@@ -48,6 +48,22 @@ def test_api_local_path_without_root_is_refused(tmp_path):
         resolve_local_source("/", require_root=False)
 
 
+@override_settings(HUB_ALLOW_LOCAL_SOURCES=True, HUB_LOCAL_SOURCE_ROOT="")
+def test_archive_and_adopt_require_the_source_root(tmp_path):
+    """ZT-22: a stored local_path must not archive host-wide when the root is unset."""
+    project = tmp_path / "app"
+    project.mkdir()
+    (project / "main.py").write_text("print(1)\n")
+    with pytest.raises(LocalSourceError, match="HUB_LOCAL_SOURCE_ROOT"):
+        list(iter_archive_members(str(project)))
+    from provision.adopt import _project_tree
+
+    class Fake:
+        local_path = str(project)
+
+    assert _project_tree(Fake()) is None
+
+
 @override_settings(HUB_ALLOW_LOCAL_SOURCES=True)
 def test_confinement_rejects_root_etc_escapes_and_the_source_root(tmp_path, settings):
     root, project = _tree(tmp_path)

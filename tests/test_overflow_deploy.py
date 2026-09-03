@@ -590,3 +590,28 @@ def test_evaluate_site_still_does_not_create_a_deployment_on_lock_wave():
     Calls the 6.8 proof; do not remake that test with this id.
     """
     test_evaluate_site_still_does_not_create_a_deployment()
+
+
+@pytest.mark.req("SCALE-OVERFLOW-SAME-IMAGE")
+def test_overflow_refuses_another_sites_primary_ec2():
+    """Overflow copy must not land on a different site's primary AWS box.
+
+    enroll_aws_target marks AWS targets EPHEMERAL, so the only gate was
+    'not this site's primary'. A same-workspace neighbor primary still matched.
+    """
+    from core.overflow_deploys import OverflowDeployError
+    from deploys.overflow import deploy_overflow_copy
+
+    site_a, _row = _accepted_overflow("ovf-pri-a")
+    _plant_live_tag(site_a)
+    site_b, _ignored = _accepted_overflow("ovf-pri-b")
+    primary_b = site_b.primary_target
+    primary_b.kind = Target.Kind.AWS_EC2
+    primary_b.lifecycle = Target.Lifecycle.EPHEMERAL
+    primary_b.status = Target.Status.READY
+    primary_b.save(update_fields=["kind", "lifecycle", "status"])
+
+    before = Deployment.objects.filter(manifest__site=site_a).count()
+    with pytest.raises(OverflowDeployError, match="not .*primary"):
+        deploy_overflow_copy(site_a, primary_b, transport=PipelineTransport())
+    assert Deployment.objects.filter(manifest__site=site_a).count() == before

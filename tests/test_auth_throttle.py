@@ -42,6 +42,41 @@ def test_login_throttles_after_repeated_failures(client, django_user_model, sett
     assert AuditEvent.objects.filter(action="login_throttled").exists()
 
 
+def test_otp_failures_count_toward_the_login_throttle(client, django_user_model):
+    """ZT-19: a correct password plus wrong OTP must fill the same 10/min bucket."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from core.models import AuditEvent
+
+    user = django_user_model.objects.create_user("otp-lock", password="pw-1234567890")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    cache.clear()
+    for _ in range(10):
+        r = client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "username": "otp-lock",
+                "password": "pw-1234567890",
+                "otp_code": "000000",
+            }),
+            content_type="application/json",
+            REMOTE_ADDR="8.8.8.8",
+        )
+        assert r.status_code == 400
+    blocked = client.post(
+        "/api/auth/login/",
+        data=json.dumps({
+            "username": "otp-lock",
+            "password": "pw-1234567890",
+            "otp_code": "000000",
+        }),
+        content_type="application/json",
+        REMOTE_ADDR="8.8.8.8",
+    )
+    assert blocked.status_code == 400
+    assert AuditEvent.objects.filter(action="login_throttled").exists()
+
+
 def test_permission_denial_is_audited(client, django_user_model):
     from django_otp.plugins.otp_totp.models import TOTPDevice
 

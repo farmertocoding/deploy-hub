@@ -1,10 +1,13 @@
 """HUD administration read models and command authorization."""
+import json
+
 import pytest
 from django.test import override_settings
 from dns_fixtures import default_dns_zone
 
 from core.models import (
     AuditEvent,
+    DnsAccount,
     Finding,
     HudCommandOutbox,
     HudOperation,
@@ -56,6 +59,24 @@ def _site(name="prod", project_name="shop", host=None):
         project=project, name=name, domain=f"{name}.example.test",
         dns_zone=zone, primary_target=target, exposure="mesh_only",
     )
+
+
+def test_secret_create_requires_recent_hardware_touch(admin, client):
+    """FE-03: vault writes are T1. A stolen session without touch must not store plaintext."""
+    r = client.post(
+        "/api/v1/hud/secrets/",
+        data=json.dumps({
+            "kind": "api_token",
+            "owner_type": "site",
+            "owner_id": "1",
+            "value": "sk-test",
+        }),
+        content_type="application/json",
+    )
+    assert r.status_code == 403
+    detail = str(r.json().get("detail") or "").lower()
+    assert "touch" in detail or "passkey" in detail
+    assert Secret.objects.count() == 0
 
 
 @pytest.mark.no_default_membership
@@ -129,10 +150,11 @@ def test_no_deployment_delete_route(admin, client):
 
 
 def test_secrets_metadata_omits_ciphertext_and_search_misses_values(admin, client):
+    account = DnsAccount.objects.create(provider="cloudflare", label="hud-dns")
     vault_put(
         kind=Secret.Kind.API_TOKEN,
         owner_type="dns_account",
-        owner_id="2",
+        owner_id=str(account.pk),
         plaintext=b"super-secret-token-do-not-leak",
     )
     r = client.get("/api/v1/hud/secrets/")
@@ -148,6 +170,43 @@ def test_secrets_metadata_omits_ciphertext_and_search_misses_values(admin, clien
     miss = client.get("/api/v1/hud/secrets/?q=super-secret-token-do-not-leak")
     assert miss.status_code == 200
     assert miss.json()["results"] == []
+
+
+def test_default_workspace_secrets_omit_other_tenant_owner_ids(admin, client):
+    """Default HUD must not list another tenant's SSH key or env-bundle refs.
+
+    owner_id is target-{pk}-ssh-{hex} / {site.pk}:v{n}, not the resource PK, so
+    a default-workspace catch-all that only subtracts foreign PKs leaks them.
+    """
+    from core.models import NetworkZone, Workspace
+
+    other = Workspace.objects.create(name="Beta secrets", slug="beta-secrets")
+    zone = NetworkZone.objects.create(
+        workspace=other, name="beta-net", slug="beta-net",
+    )
+    target = Target.objects.create(
+        zone=zone, host="beta.example.test", ssh_key_ref="target-99-ssh-deadbeef",
+    )
+    vault_put(
+        kind=Secret.Kind.SSH_PRIVATE_KEY,
+        owner_type="target",
+        owner_id="target-99-ssh-deadbeef",
+        plaintext=b"FOREIGN-SSH-KEY",
+    )
+    vault_put(
+        kind=Secret.Kind.ENV_BUNDLE,
+        owner_type="manifest",
+        owner_id=f"{target.pk}:v1",
+        plaintext=b"FOREIGN-ENV-BUNDLE",
+    )
+    r = client.get("/api/v1/hud/secrets/")
+    assert r.status_code == 200
+    owner_ids = {row["owner_id"] for row in r.json()["results"]}
+    assert "target-99-ssh-deadbeef" not in owner_ids
+    assert f"{target.pk}:v1" not in owner_ids
+    raw = r.content.decode()
+    assert "FOREIGN-SSH-KEY" not in raw
+    assert "FOREIGN-ENV-BUNDLE" not in raw
 
 
 def test_last_owner_cannot_be_retired(admin, client):

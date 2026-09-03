@@ -392,7 +392,7 @@ def test_missing_nightly_files_same_kind(backup_dir):
     assert AuditEvent.objects.filter(action="backup-failed").exists()
 
     entry = settings.CELERY_BEAT_SCHEDULE["backup-nightly"]
-    assert entry["task"] == provision_tasks.run_backup_nightly.name
+    assert entry["task"] == provision_tasks.dispatch_backup_nightly.name
     assert "kwargs" not in entry
 
 

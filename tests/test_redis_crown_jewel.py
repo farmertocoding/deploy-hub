@@ -50,8 +50,12 @@ def test_compose_redis_unpublished_and_requirepass():
     assert idx + 1 < len(tokens) and str(tokens[idx + 1]).strip(), (
         "requirepass is present but its password argument is empty"
     )
-    assert "+@all" not in tokens, "hub_probes +@all is FLUSHALL/CONFIG on the broker"
-    assert "-@all" in tokens
+    user_idx = tokens.index("--user")
+    acl = str(tokens[user_idx + 1])
+    parts = acl.split()
+    assert "+@all" not in parts, "hub_probes +@all is FLUSHALL/CONFIG on the broker"
+    assert "-@all" in parts
+    assert "~*" not in parts, "hub_probes ~* can LPUSH the deploys queue"
 
 
 def test_celery_serializers_are_json():

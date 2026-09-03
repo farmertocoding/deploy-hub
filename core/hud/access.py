@@ -16,6 +16,7 @@ from core.hud.common import (
 )
 from core.hud.permissions import RequireAdminRead
 from core.models import WorkspaceMembership
+from core.permissions import RequireRecentTouch
 from core.rbac import ROLES, request_workspace, workspace_membership
 from vault.models import Secret
 
@@ -77,7 +78,13 @@ def secret_row(secret):
 
 
 class SecretsView(HudAPIView):
-    permission_classes = [IsAuthenticated, RequireAdminRead]
+    permission_classes = [IsAuthenticated, RequireAdminRead, RequireRecentTouch]
+    action_id = "secret.create"
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsAuthenticated(), RequireAdminRead()]
+        return [IsAuthenticated(), RequireAdminRead(), RequireRecentTouch()]
 
     @extend_schema(responses={200: SecretListSerializer})
     def get(self, request):

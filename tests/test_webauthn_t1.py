@@ -425,6 +425,26 @@ def test_idle_timeout_expires_session(client):
     assert gated.status_code in (401, 403)
 
 
+@pytest.mark.req("SEC-A2-WEBAUTHN-PHASE4")
+def test_auth_me_poll_does_not_refresh_idle_timeout(client, settings):
+    """FE-02: an open tab's /api/auth/me/ poll must not keep a stolen session alive."""
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    from core.middleware import LAST_ACTIVITY_KEY
+
+    user = User.objects.create_user("idle-poll", password="a-long-dev-password")
+    TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
+    _login_password(client, user)
+    stamped = time.time() - 10
+    session = client.session
+    session[LAST_ACTIVITY_KEY] = stamped
+    session.save()
+    live = client.get("/api/auth/me/")
+    assert live.status_code == 200
+    assert live.json()["authenticated"] is True
+    assert float(client.session[LAST_ACTIVITY_KEY]) == pytest.approx(stamped, abs=0.5)
+
+
 @pytest.mark.req("SEC-F5-T1-HARDWARE-TOUCH")
 def test_login_webauthn_and_recovery_do_not_write_hardware_touch_at(client, monkeypatch):
     """Login assertions and recovery codes authenticate, never T1 (Security F1)."""
@@ -496,6 +516,7 @@ T1_HTTP = {
     "dns.origin_ca_plant": "/api/v1/dns-accounts/{pk}/origin-ca-plant/",
     "dns.cloudflare_connect": "/api/v1/cloudflare/connect/",
     "aws.connect": "/api/v1/aws/connect/",
+    "secret.create": "/api/v1/hud/secrets/",
 }
 
 

@@ -763,3 +763,66 @@ def test_unwired_evaluate_quotas_deploy_create_fails_loud(monkeypatch):
     with pytest.raises(RuntimeError, match="not wired"):
         evaluate_quotas(partner, "POST", "/partner/v1/sites/x/deployments")
     django_apps.get_app_config("deploys").ready()
+
+
+def _ready_partner(slug):
+    partner, _vectors = _signed_partner(slug)
+    zone = _zone(f"{slug}-zone")
+    box = _target(zone, f"{slug}.lan")
+    partner.destination_order = [box.pk]
+    partner.save(update_fields=["destination_order"])
+    return partner
+
+
+@override_settings(PARTNER_API_ENABLED=True)
+def test_tenant_ref_path_segments_never_reach_caddy_route_ids():
+    """tenant_ref is untrusted partner input and becomes Site.name / Caddy id.
+
+    What would make this fail: interpolating tenant_ref with / or .. into
+    Site.name so curl DELETE http://127.0.0.1:2019/id/site-…/../config/apps/http
+    collapses onto the Hub Caddy admin API.
+    """
+    from core.models import PartnerSite, Site
+    from core.partner_jobs import PartnerRefuse, materialize
+    from core.partner_views import _route_id
+
+    partner = _ready_partner("p-pathinj")
+    with pytest.raises(PartnerRefuse) as exc:
+        materialize(
+            partner,
+            _job(partner, tenant_ref="x/../../config/apps/http"),
+        )
+    assert exc.value.reason == "invalid-tenant-ref"
+    assert not PartnerSite.objects.filter(partner=partner).exists()
+    assert not Site.objects.filter(name__contains="..").exists()
+    assert not Site.objects.filter(name__contains="/").exists()
+
+    safe = _plain_site("p-pathinj-safe")
+    assert _route_id(safe) == f"site-{safe.name}"
+    safe.name = "x/../../config/apps/http"
+    assert "/" not in _route_id(safe)
+    assert ".." not in _route_id(safe)
+
+
+@override_settings(PARTNER_API_ENABLED=True)
+def test_partner_domain_cannot_take_over_another_partner_hostname():
+    """Partner A claiming a hostname must block Partner B from the same name.
+
+    What would make this fail: _refuse_partner_base comparing only non-partner
+    sites, so the last Caddy match.host write wins on a shared destination.
+    """
+    from core.models import PartnerSite
+    from core.partner_jobs import PartnerRefuse, materialize
+
+    a = _ready_partner("p-dom-a")
+    first = materialize(
+        a, _job(a, tenant_ref="alpha", extra={"domain": "taken.apps.invalid"}),
+    )
+    assert first is not None
+    b = _ready_partner("p-dom-b")
+    with pytest.raises(PartnerRefuse) as exc:
+        materialize(
+            b, _job(b, tenant_ref="beta", extra={"domain": "taken.apps.invalid"}),
+        )
+    assert exc.value.reason == "partner-base"
+    assert not PartnerSite.objects.filter(partner=b).exists()

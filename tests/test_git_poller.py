@@ -128,7 +128,7 @@ def test_new_head_enqueues_deploy(monkeypatch):
         if entry["task"] == poll_git.name
     )
     assert 60 <= float(schedule) <= 300
-    assert settings.CELERY_TASK_ROUTES[poll_git.name]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES[poll_git.name]["queue"] == "control"
 
 
 @pytest.mark.req("PIPE-M2-GIT-POLLING")

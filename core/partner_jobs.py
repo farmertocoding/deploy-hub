@@ -4,6 +4,7 @@ Does not import intake. The partner router maps K3 actions to partner_job.*
 handlers — never ACTION_TIERS T1/T2 internal ids. Querysets filter on Partner.
 """
 import json
+import re
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -26,6 +27,10 @@ PARTNER_ROUTER = {
     "site.delete": "partner_job.delete_site",
     "domain.delete": "partner_job.delete_domain",
 }
+
+# tenant_ref becomes Site.name and the Caddy admin route id. Slash / .. is
+# curl-path injection against 127.0.0.1:2019, not a tenant slug.
+_TENANT_REF_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 _SOURCE_REASONS = (
     ("dockerfile", "dockerfile"),
@@ -119,6 +124,7 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
     from core.partner_verify import evaluate_quotas
 
     payload = _payload(job)
+    payload["tenant_ref"] = _tenant_ref(payload)
     _refuse_source(payload)
     digest = _require_template(payload)
     target = _destination(partner, payload)
@@ -126,7 +132,7 @@ def materialize(partner, job, *, transport=None, registry=None, now=None):
     _refuse_cohost(target)
     _require_tunnel(target)
     domain = _domain(partner, payload)
-    _refuse_partner_base(domain)
+    _refuse_partner_base(domain, partner=partner, tenant_ref=payload["tenant_ref"])
 
     existing = _existing_deployment(partner, job.get("id"))
     if existing is not None:
@@ -199,7 +205,7 @@ def _destination(partner, payload):
     if specified is not None and int(specified) not in order:
         raise PartnerRefuse("destination-not-ranked")
     pk = int(specified) if specified is not None else order[0]
-    target = Target.objects.filter(pk=pk).first()
+    target = Target.objects.filter(pk=pk, zone__workspace=partner.workspace).first()
     if target is None:
         raise PartnerRefuse("destination-missing")
     if target.pk not in order:
@@ -271,24 +277,47 @@ def _require_tunnel(target):
     raise PartnerRefuse("tunnel-required")
 
 
+def _tenant_ref(payload):
+    raw = str(payload.get("tenant_ref") or "").strip().casefold() or "default"
+    if not _TENANT_REF_RE.fullmatch(raw):
+        raise PartnerRefuse("invalid-tenant-ref")
+    return raw
+
+
 def _domain(partner, payload):
+    from django.core.exceptions import ValidationError
+
+    from core.validators import validate_domain
+
     explicit = (payload.get("domain") or payload.get("hostname") or "").strip()
     if explicit:
-        return explicit.casefold()
+        try:
+            return validate_domain(explicit)
+        except ValidationError as exc:
+            raise PartnerRefuse("invalid-domain") from exc
     subdomain = (payload.get("subdomain") or payload.get("tenant_ref") or "").strip()
     if not subdomain:
         return ""
-    return f"{subdomain}.apps.invalid"
+    try:
+        return validate_domain(f"{subdomain}.apps.invalid")
+    except ValidationError as exc:
+        raise PartnerRefuse("invalid-domain") from exc
 
 
-def _refuse_partner_base(domain):
+def _refuse_partner_base(domain, *, partner=None, tenant_ref=None):
     from core.models import PartnerSite, Site
 
     if not domain:
         return
     needle = domain.casefold()
-    partnered = PartnerSite.objects.values_list("site_id", flat=True)
-    for site in Site.objects.exclude(pk__in=partnered):
+    qs = Site.objects.all()
+    if partner is not None and tenant_ref is not None:
+        own = PartnerSite.objects.filter(
+            partner=partner, tenant_ref=tenant_ref,
+        ).first()
+        if own is not None:
+            qs = qs.exclude(pk=own.site_id)
+    for site in qs:
         other = (site.domain or "").casefold()
         if not other:
             continue

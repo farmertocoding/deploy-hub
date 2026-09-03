@@ -42,7 +42,11 @@ def enroll_aws_target(
 
     name = name or host
     existing = (
-        Target.objects.filter(host=host, kind=Target.Kind.AWS_EC2)
+        Target.objects.filter(
+            host=host,
+            kind=Target.Kind.AWS_EC2,
+            zone__workspace=zone.workspace,
+        )
         .order_by("pk")
         .first()
     )

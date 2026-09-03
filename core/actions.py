@@ -36,4 +36,5 @@ ACTION_TIERS = (
     {"id": "dns.origin_ca_plant", "tier": "T1", "label": "Plant Origin CA token"},
     {"id": "dns.cloudflare_connect", "tier": "T1", "label": "Connect Cloudflare"},
     {"id": "aws.connect", "tier": "T1", "label": "Connect AWS"},
+    {"id": "secret.create", "tier": "T1", "label": "Store secret"},
 )
