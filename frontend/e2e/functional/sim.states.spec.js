@@ -33,7 +33,9 @@ test("unknown sim name does not fetch /api", async ({ page }) => {
     if (new URL(req.url()).pathname.startsWith("/api/")) apiCalls.push(req.url());
   });
   await page.goto(simUrl("not-a-fixture", "#/"));
-  await page.waitForTimeout(500);
+  // Event-based settle: shell + Home spinner prove the sim short-circuit ran (no /api fetch).
+  await expect(page.getByRole("navigation", { name: /Operator/i })).toBeVisible();
+  await expect(page.getByText(/Loading home/i)).toBeVisible();
   expect(apiCalls).toEqual([]);
 });
 
