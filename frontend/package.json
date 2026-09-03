@@ -13,6 +13,7 @@
     "test:visual": "playwright test e2e/admin.visual.spec.js",
     "test:visual:update": "playwright test e2e/admin.visual.spec.js --update-snapshots",
     "test:a11y": "playwright test e2e/admin.a11y.spec.js",
+    "test:functional": "playwright test e2e/functional e2e/adversarial",
     "quality": "npm run lint && npm run test:unit && npm run build"
   },
   "dependencies": {
