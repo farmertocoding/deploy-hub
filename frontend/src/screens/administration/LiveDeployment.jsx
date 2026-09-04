@@ -173,30 +173,25 @@ export default function LiveDeployment({ route, onNav, events }) {
   const [pending, setPending] = useState(null);
   const [drawer, setDrawer] = useState(null);
   const [commandResult, setCommandResult] = useState(null);
+  const applyDeploy = ({ status, data }) => {
+    if (status === 401) { setPhase("signed-out"); return; }
+    if (status === 403) { setPhase("permission-denied"); return; }
+    if (status === 404) { setPhase("not-found"); return; }
+    if (status !== 200) { setPhase("error"); setError(data?.detail || `HTTP ${status}`); return; }
+    setDeploy(data);
+    setPhase(events?.status === "degraded" ? "degraded" : "live");
+  };
   const load = () => {
     if (!id) { setPhase("live"); return Promise.resolve(); }
-    return api(`v1/hud/deployments/${id}/`).then(({ status, data }) => {
-      if (status === 401) { setPhase("signed-out"); return; }
-      if (status === 403) { setPhase("permission-denied"); return; }
-      if (status === 404) { setPhase("not-found"); return; }
-      if (status !== 200) { setPhase("error"); setError(data?.detail || `HTTP ${status}`); return; }
-      setDeploy(data);
-      setPhase(events?.status === "degraded" ? "degraded" : "live");
-    });
+    return api(`v1/hud/deployments/${id}/`).then(applyDeploy);
   };
   const subscribe = events?.subscribe;
   const unsubscribe = events?.unsubscribe;
   useEffect(() => {
     let cancelled = false;
     if (!id) { setPhase("live"); return undefined; }
-    api(`v1/hud/deployments/${id}/`).then(({ status, data }) => {
-      if (cancelled) return;
-      if (status === 401) { setPhase("signed-out"); return; }
-      if (status === 403) { setPhase("permission-denied"); return; }
-      if (status === 404) { setPhase("not-found"); return; }
-      if (status !== 200) { setPhase("error"); setError(data?.detail || `HTTP ${status}`); return; }
-      setDeploy(data);
-      setPhase(events?.status === "degraded" ? "degraded" : "live");
+    api(`v1/hud/deployments/${id}/`).then((result) => {
+      if (!cancelled) applyDeploy(result);
     });
     return () => { cancelled = true; };
   }, [id, events?.status]);
