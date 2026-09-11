@@ -46,7 +46,9 @@ def test_two_workspaces_file_the_same_fingerprint_independently():
 
 
 def test_finding_requires_workspace():
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^finding\(\) requires workspace$"):
+        finding("uptime", "no-ws", workspace=None, **COPY)
+    with pytest.raises(TypeError, match="workspace"):
         finding("uptime", "no-ws", **COPY)
 
 

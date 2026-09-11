@@ -304,6 +304,32 @@ test("login_success_hydrates_capabilities_and_admin_guard_without_reload", async
   assert.deepEqual(nav.at(-1)?.[0], "home");
 });
 
+test("confirm_action_locks_after_the_first_click", async () => {
+  const { act, create } = await import("react-test-renderer");
+  let n = 0;
+  let tree: any;
+  await act(() => {
+    tree = create(React.createElement(ConfirmAction, {
+      label: "Abort and clean up",
+      summary: "Abort shop/prod v4",
+      onConfirm: () => { n += 1; },
+      onDismiss: () => {},
+    }));
+  });
+  const findConfirm = () => tree.root.findAllByType("button").find((b: any) =>
+    String(b.props.className || "").includes("hud-btn--primary"),
+  );
+  const first = findConfirm();
+  assert.ok(first, "Confirm button must exist");
+  await act(() => first.props.onClick({ preventDefault() {} }));
+  assert.equal(n, 1);
+  const locked = findConfirm();
+  assert.equal(locked.props["aria-busy"], true);
+  assert.equal(locked.props["aria-disabled"], true);
+  await act(() => locked.props.onClick({ preventDefault() {} }));
+  assert.equal(n, 1, "ConfirmAction must ignore Enter-spam after the first confirm");
+});
+
 test("confirm_action_shows_before_after_and_is_a_modal", () => {
   const markup = render(ConfirmAction, {
     label: "Abort and clean up",

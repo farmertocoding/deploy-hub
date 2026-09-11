@@ -112,6 +112,7 @@ generate-client:
 # Generated mirror must match the committed serializers (stale = red, §4.5).
 check-generated: generate-client
 	git diff --exit-code frontend/src/api/ || (echo "generated client is stale — run 'make generate-client' and commit" && exit 1)
+	test -z "$$(git ls-files --others --exclude-standard frontend/src/api/)" || (echo "untracked generated files under frontend/src/api/ — run 'make generate-client' and commit" && exit 1)
 
 dev:
 	docker compose up --build

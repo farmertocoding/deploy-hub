@@ -21,6 +21,24 @@ _require_audit = os.environ.get("HUB_REQUIRE_AUDIT_SHIP", "1").strip().lower() n
 }
 if _require_audit and not (os.environ.get("HUB_AUDIT_S3_BUCKET") or "").strip():
     raise ImproperlyConfigured("HUB_AUDIT_S3_BUCKET must be set in prod.")
+_require_pager = os.environ.get("HUB_REQUIRE_LIVE_PAGER", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+if _require_pager and os.environ.get("HUB_PAGER_BACKEND", "fake").strip().lower() in {
+    "", "fake",
+}:
+    raise ImproperlyConfigured(
+        "HUB_PAGER_BACKEND must be a live pager in prod (not fake).",
+    )
+if os.environ.get("HUB_VAULT_KEK_BACKEND", "local") == "local":
+    _keyfile = os.environ.get("HUB_VAULT_KEYFILE", "/etc/deploy-hub/vault.key")
+    _allow_empty = os.environ.get("HUB_ALLOW_EMPTY_VAULT_KEYFILE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not _keyfile and not _allow_empty:
+        raise ImproperlyConfigured(
+            "HUB_VAULT_KEYFILE must be set in prod for local KEK.",
+        )
 
 DEBUG = False
 
@@ -47,7 +65,9 @@ HUB_TEST_MODE = False
 # WebAuthn RP ID / origins must be the real Hub hostname. base.py defaults
 # localhost for laptop pytest; a prod box inheriting that cannot complete
 # a hardware ceremony (H3).
-_raw_public_url = (os.environ.get("HUB_PUBLIC_URL") or "https://hub.local").strip()
+if not (os.environ.get("HUB_PUBLIC_URL") or "").strip():
+    raise ImproperlyConfigured("HUB_PUBLIC_URL must be set in prod.")
+_raw_public_url = os.environ.get("HUB_PUBLIC_URL").strip()
 _public = urlparse(_raw_public_url)
 _host = (_public.hostname or "").lower()
 if _public.scheme != "https" or _host in {"localhost", "127.0.0.1", "::1"} or not _host:

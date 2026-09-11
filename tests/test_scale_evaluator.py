@@ -1042,7 +1042,7 @@ def test_evaluate_scale_proposals_beat_is_60s_on_probes():
     assert float(entry["schedule"]) == 60.0
     assert not entry["task"].startswith("scaling.")
     assert "scaling.tasks" not in entry["task"]
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
     assert settings.CELERY_TASK_ROUTES["scaling.*"]["queue"] == "control"
     assert not (REPO / "scaling" / "tasks.py").exists()
     assert beat["evaluate-scale-proposals"]["task"] != beat["collect-all-targets"]["task"]

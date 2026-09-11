@@ -519,6 +519,8 @@ def test_issue_r7_11_the_confirm_question_has_no_default(tmp_path):
     assert len(questions) == 1, questions
     assert questions[0].kind == "bool"
     assert questions[0].default is None, "a declaration confirm arrived pre-answered"
+    assert questions[0].default is not True
+    assert questions[0].default is not False
     assert "frontend/scripts/drill" in questions[0].prompt
     assert DRILL_REASON in questions[0].prompt
 

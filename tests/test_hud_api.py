@@ -172,6 +172,20 @@ def test_secrets_metadata_omits_ciphertext_and_search_misses_values(admin, clien
     assert miss.json()["results"] == []
 
 
+def test_default_workspace_secrets_omit_platform_rows(admin, client):
+    """ZT-20 residual: default HUD must not OR in aws/ntfy vault metadata."""
+    vault_put(
+        kind=Secret.Kind.CLOUD_CREDENTIAL,
+        owner_type="aws",
+        owner_id="hub-aws",
+        plaintext=b"AKIATESTNOTAREALKEY",
+    )
+    r = client.get("/api/v1/hud/secrets/")
+    assert r.status_code == 200
+    owners = {row["owner_type"] for row in r.json()["results"]}
+    assert "aws" not in owners
+
+
 def test_default_workspace_secrets_omit_other_tenant_owner_ids(admin, client):
     """Default HUD must not list another tenant's SSH key or env-bundle refs.
 

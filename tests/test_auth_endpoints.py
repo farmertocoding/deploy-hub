@@ -8,6 +8,15 @@ from django.test import Client
 pytestmark = pytest.mark.django_db
 
 
+def _own_default(user):
+    from core.models import WorkspaceMembership, default_workspace
+
+    WorkspaceMembership.objects.get_or_create(
+        workspace=default_workspace(), user=user, defaults={"role": "owner"},
+    )
+    return user
+
+
 def _login(client, username="joseph", password="a-long-dev-password"):
     from django.contrib.auth.models import User
 
@@ -285,6 +294,8 @@ def test_issue_r4_11_prod_settings_mark_the_session_cookie_secure(monkeypatch):
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
     prod = importlib.import_module("hub.settings.prod")
     importlib.reload(prod)
 
@@ -334,9 +345,10 @@ def _assert_login_matches_me(client, login_body, *, staff):
 def test_password_login_matches_me_and_staff_gets_admin_read(client):
     from django.contrib.auth.models import User
 
-    User.objects.create_user(
+    user = User.objects.create_user(
         "staff-pw", password="a-long-dev-password", is_staff=True, is_superuser=True,
     )
+    _own_default(user)
     r = client.post(
         "/api/auth/login/",
         data=json.dumps({"username": "staff-pw", "password": "a-long-dev-password"}),
@@ -374,6 +386,7 @@ def test_totp_login_matches_me_capabilities(client):
     user = User.objects.create_user(
         "staff-totp", password="a-long-dev-password", is_staff=True,
     )
+    _own_default(user)
     device = TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     totp = TOTP(device.bin_key, device.step, device.t0, device.digits, device.drift)
     totp.time = time.time()
@@ -402,6 +415,7 @@ def test_recovery_code_login_matches_me_capabilities(client):
     user = User.objects.create_user(
         "staff-rec", password="a-long-dev-password", is_superuser=True,
     )
+    _own_default(user)
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     RecoveryCode.objects.create(user=user, code_hash=hash_recovery_code("rescue12345aaaa"))
     r = client.post(
@@ -427,6 +441,7 @@ def test_passkey_login_matches_me_capabilities(client, monkeypatch):
     user = User.objects.create_user(
         "staff-pk", password="a-long-dev-password", is_staff=True, is_superuser=True,
     )
+    _own_default(user)
     TOTPDevice.objects.create(user=user, name="phone", confirmed=True)
     _make_cred(user, name="yubikey")
     begin = client.post(

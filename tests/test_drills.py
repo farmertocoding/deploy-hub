@@ -179,7 +179,7 @@ def test_beat_schedule_lists_three_drills():
     assert float(restore["schedule"]) == 30 * DAY
     assert float(pager["schedule"]) == 30 * DAY
     assert hub.get("kwargs", {}).get("duration_s") == 1800
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
 
 
 @pytest.mark.req("HARNESS-DRILLS-BEAT")

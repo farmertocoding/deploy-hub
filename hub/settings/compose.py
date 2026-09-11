@@ -9,6 +9,8 @@ import os
 
 # Loopback compose is not an Object-Lock runtime. Prod still requires a bucket.
 os.environ.setdefault("HUB_REQUIRE_AUDIT_SHIP", "0")
+os.environ.setdefault("HUB_REQUIRE_LIVE_PAGER", "0")
+os.environ.setdefault("HUB_PUBLIC_URL", "https://hub.local")
 
 from .prod import *  # noqa: E402,F401,F403
 

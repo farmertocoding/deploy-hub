@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../../api.js";
+import { api, simState } from "../../api.js";
 import { HudFrame } from "../../ui/HudFrame.jsx";
 import { Button } from "../../ui/Button.jsx";
 import { Status } from "../../ui/Status.jsx";
 import { AsyncRegion } from "../../ui/AsyncRegion.jsx";
+import { T1Overlay } from "../../Tiers.jsx";
+import { performHardwareTouch } from "../../webauthn.js";
 import { adminHref, defaultActionHandlers, hudGet, hudPost, parseHashQuery, writeHashQuery } from "./contract.js";
 import { CollectionScreen } from "./CollectionScreen.jsx";
 import { useHudLoad } from "./useHudLoad.js";
@@ -67,6 +69,8 @@ export function AccessSecretsView({
   onReloadPermissions,
 }) {
   const selected = rows.find((r) => String(r.id) === String(selectedId));
+  const [secretPending, setSecretPending] = useState(null);
+  const [secretTouched, setSecretTouched] = useState(false);
   if (phase === "permission-denied" || phase === "signed-out") {
     return (
       <AsyncRegion
@@ -233,31 +237,60 @@ export function AccessSecretsView({
         <HudFrame variant="panel">
           <h2 className="hud-kicker">ADD SECRET</h2>
           <p>Value is accepted once over a protected input and is never returned.</p>
-          <form className="hud-filter" onSubmit={(e) => { e.preventDefault(); onWizardSubmit?.("secret", Object.fromEntries(new FormData(e.target))); }}>
-            <label>Kind
-              <select name="kind" aria-label="Secret kind" defaultValue="api_token">
-                <option value="api_token">api_token</option>
-                <option value="cloud_credential">cloud_credential</option>
-                <option value="backup_key">backup_key</option>
-              </select>
-            </label>
-            <label>Owner type
-              <select name="owner_type" aria-label="Owner type" defaultValue="site">
-                <option value="site">site</option>
-                <option value="dns_account">dns_account</option>
-                <option value="aws">aws</option>
-              </select>
-            </label>
-            <label>Owner
-              <select name="owner_id" aria-label="Owner id">
-                {(rows || []).map((r) => (
-                  <option key={r.id} value={r.owner_id}>{r.owner_type}:{r.owner_id}</option>
-                ))}
-              </select>
-            </label>
-            <label>Value<input name="value" type="password" aria-label="Secret value" /></label>
-            <Button type="submit" variant="primary">Store secret</Button>
-          </form>
+          {secretPending ? (
+            <T1Overlay
+              label="Store secret"
+              summary="T1 — type the owner id and touch a security key."
+              onTouch={async () => {
+                if (simState()) {
+                  setSecretTouched(true);
+                  return;
+                }
+                const result = await performHardwareTouch();
+                if (result?.status === 200) setSecretTouched(true);
+              }}
+              onConfirm={({ name }) => {
+                if (!secretTouched || !name || name !== String(secretPending.owner_id || "")) {
+                  return false;
+                }
+                onWizardSubmit?.("secret", secretPending);
+                setSecretPending(null);
+                setSecretTouched(false);
+                return true;
+              }}
+              onDismiss={() => { setSecretPending(null); setSecretTouched(false); }}
+            />
+          ) : (
+            <form className="hud-filter" onSubmit={(e) => {
+              e.preventDefault();
+              setSecretTouched(false);
+              setSecretPending(Object.fromEntries(new FormData(e.target)));
+            }}>
+              <label>Kind
+                <select name="kind" aria-label="Secret kind" defaultValue="api_token">
+                  <option value="api_token">api_token</option>
+                  <option value="cloud_credential">cloud_credential</option>
+                  <option value="backup_key">backup_key</option>
+                </select>
+              </label>
+              <label>Owner type
+                <select name="owner_type" aria-label="Owner type" defaultValue="site">
+                  <option value="site">site</option>
+                  <option value="dns_account">dns_account</option>
+                  <option value="aws">aws</option>
+                </select>
+              </label>
+              <label>Owner
+                <select name="owner_id" aria-label="Owner id">
+                  {(rows || []).map((r) => (
+                    <option key={r.id} value={r.owner_id}>{r.owner_type}:{r.owner_id}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Value<input name="value" type="password" aria-label="Secret value" /></label>
+              <Button type="submit" variant="primary">Store secret</Button>
+            </form>
+          )}
         </HudFrame>
       ) : null}
       {wizard === "invite" ? (

@@ -341,7 +341,7 @@ const PartnerList = z
   .object({
     partners: z.array(PartnerPublic),
     intake: IntakeStatus,
-    api_enabled: z.boolean(),
+    api_enabled: z.boolean().nullish(),
     candidate_targets: z.array(CandidateTarget),
   })
   .passthrough();

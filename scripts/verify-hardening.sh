@@ -51,6 +51,8 @@ main() {
             fail "fail2ban ignoreip still whitelists ${TAILNET_SLASH10}"
         elif [[ -n "${HUB_MESH_IP}" ]] && grep -E '^[[:space:]]*ignoreip' "${JAIL_LOCAL}" | grep -q "${HUB_MESH_IP}"; then
             ok "fail2ban ignoreip is HUB_MESH_IP ${HUB_MESH_IP}"
+        elif [[ -n "${HUB_MESH_IP}" ]]; then
+            fail "fail2ban ignoreip missing HUB_MESH_IP ${HUB_MESH_IP}"
         else
             ok "fail2ban ignoreip is not the tailnet /10"
         fi
@@ -64,10 +66,12 @@ main() {
         fail "chrony inactive"
     fi
 
-    if [[ -f /etc/docker/daemon.json ]]; then
+    if [[ -f /etc/docker/daemon.json ]] &&
+        grep -q '"live-restore"[[:space:]]*:[[:space:]]*true' /etc/docker/daemon.json &&
+        grep -q '"no-new-privileges"[[:space:]]*:[[:space:]]*true' /etc/docker/daemon.json; then
         ok "docker daemon.json"
     else
-        fail "missing /etc/docker/daemon.json"
+        fail "missing /etc/docker/daemon.json live-restore/no-new-privileges"
     fi
 
     # A `type dummy` tailscale0 is a manufactured standin, not a mesh: it

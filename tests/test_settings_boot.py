@@ -112,6 +112,7 @@ def test_prod_settings_webauthn_rp_from_public_https_url(monkeypatch):
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
     monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
     from hub.settings import base as base_settings
 
     importlib.reload(base_settings)
@@ -167,6 +168,8 @@ def test_compose_settings_pin_test_mode_off_and_http_loopback(monkeypatch):
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_REQUIRE_AUDIT_SHIP", "0")
+    monkeypatch.setenv("HUB_REQUIRE_LIVE_PAGER", "0")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
     from hub.settings import base as base_settings
 
     importlib.reload(base_settings)
@@ -191,6 +194,8 @@ def test_compose_settings_trust_vite_login_origin(monkeypatch):
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_REQUIRE_AUDIT_SHIP", "0")
+    monkeypatch.setenv("HUB_REQUIRE_LIVE_PAGER", "0")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
     from hub.settings import base as base_settings
 
     importlib.reload(base_settings)

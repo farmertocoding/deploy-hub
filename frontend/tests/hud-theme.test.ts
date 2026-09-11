@@ -127,10 +127,18 @@ test("theme_change_keeps_route", () => {
 });
 
 test("index_html_resolves_theme_before_react_and_accepts_only_dark_light_system", () => {
-  const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../index.html"), "utf8");
-  assert.match(html, /deploy-hub\.appearance\.v1/);
-  assert.match(html, /data-theme/);
-  assert.match(html, /prefers-color-scheme: dark/);
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const html = readFileSync(join(dir, "../index.html"), "utf8");
+  const boot = readFileSync(join(dir, "../public/theme-boot.js"), "utf8");
+  const vite = readFileSync(join(dir, "../vite.config.js"), "utf8");
+  assert.match(html, /theme-boot\.js/);
+  assert.doesNotMatch(html, /<script>\s*\(function/);
+  assert.match(vite, /Content-Security-Policy/);
+  assert.match(vite, /script-src 'self'/);
+  assert.doesNotMatch(vite, /script-src [^;]*'unsafe-inline'/);
+  assert.match(boot, /deploy-hub\.appearance\.v1/);
+  assert.match(boot, /data-theme/);
+  assert.match(boot, /prefers-color-scheme: dark/);
   assert.doesNotMatch(html, /background:#0f1115/);
 });
 

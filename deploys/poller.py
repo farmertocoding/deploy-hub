@@ -56,6 +56,12 @@ def git_ls_remote(url, ref):
     if not git:
         return ""
     try:
+        # Re-resolve immediately before connect so a DNS rebind after the
+        # first check cannot aim ls-remote at IMDS/private space.
+        validate_git_url(url, resolve=True)
+    except ValidationError:
+        return ""
+    try:
         result = subprocess.run(  # nosec B603 — argv list; `--` before url/ref
             [
                 git,

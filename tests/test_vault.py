@@ -413,6 +413,8 @@ def test_prod_settings_refuse_fake_kek(monkeypatch):
     monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
     monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "fake")
     with pytest.raises(ImproperlyConfigured, match="not permitted in prod"):
         importlib.reload(importlib.import_module("hub.settings.prod"))

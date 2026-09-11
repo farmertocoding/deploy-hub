@@ -381,7 +381,11 @@ def test_dockerfile_or_git_source_refuses():
         with pytest.raises(PartnerRefuse) as exc:
             materialize(
                 partner,
-                _job(partner, tenant_ref=f"src-{next(iter(extra))}", extra=extra),
+                _job(
+                    partner,
+                    tenant_ref="src-" + next(iter(extra)).lower().replace("_", "-")[:20],
+                    extra=extra,
+                ),
             )
         assert exc.value.reason in {
             "dockerfile", "build", "jobs_image", "git-source",

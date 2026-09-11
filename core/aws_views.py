@@ -59,7 +59,7 @@ class AwsConnectView(APIView):
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
-            return [IsAuthenticated(), RequireWorkspace()]
+            return [IsAuthenticated(), RequireWorkspace(), RequireSystemAdmin()]
         return [IsAuthenticated(), RequireSystemAdmin(), RequireRecentTouch()]
 
     @extend_schema(responses={200: AwsStatusSerializer})

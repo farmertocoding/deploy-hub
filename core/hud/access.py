@@ -17,7 +17,7 @@ from core.hud.common import (
 from core.hud.permissions import RequireAdminRead
 from core.models import WorkspaceMembership
 from core.permissions import RequireRecentTouch
-from core.rbac import ROLES, request_workspace, workspace_membership
+from core.rbac import ROLES, request_workspace
 from vault.models import Secret
 
 FORBIDDEN_SECRET_FIELDS = (
@@ -199,9 +199,6 @@ class MembersView(HudAPIView):
             .select_related("user")
             .order_by("user__id")[:50]
         )
-        membership = workspace_membership(request.user, workspace)
-        if not memberships and getattr(membership, "is_bootstrap", False):
-            memberships = [membership]
         results = []
         for row in memberships:
             u = row.user

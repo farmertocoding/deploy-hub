@@ -380,14 +380,15 @@ def test_host_down_suppression_collapses_site_alerts():
     from monitor.antinoise import observe, suppressed_by
 
     target, sites = _shared_host_sites()
+    ws = default_workspace()
     fp = f"host-down:{target.host}"
     row = _fail_until_open(fp)
     assert row is not None
     for site in sites:
         assert f"site:{site.name}" in row.body
-        assert suppressed_by(f"site:{site.name}") == f"host:{target.host}"
-
-    ws = default_workspace()
+        assert suppressed_by(
+            f"site:{site.name}", workspace=ws,
+        ) == f"host:{target.host}"
     observe("site-down:alpha", False, workspace=ws)
     observe("site-down:alpha", False, workspace=ws)
     observe("site-down:alpha", False, workspace=ws)

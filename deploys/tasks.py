@@ -72,11 +72,39 @@ def sweep_stale_deployments():
     return sweep()
 
 
+def envelope_for_poll_git():
+    from core.task_envelope import wrap
+
+    return wrap(
+        task="deploys.tasks.poll_git",
+        workspace_id=0,
+        resource_type="fleet",
+        resource_id="poll-git",
+    )
+
+
 @shared_task
-def poll_git():
-    """Beat entry: git polling lives on `control` so it can sign run_deploy."""
+def dispatch_poll_git():
+    """Beat entry: sign, then poll. Unsigned ``poll_git`` is refused."""
+    return poll_git(envelope=envelope_for_poll_git())
+
+
+@shared_task
+def poll_git(envelope=None):
+    """Git polling lives on `control` so it can sign run_deploy."""
+    from core.task_envelope import EnvelopeError, reauthorize
     from deploys.poller import poll
 
+    if envelope is None:
+        return {"ok": False, "reason": "envelope"}
+    try:
+        reauthorize(
+            envelope,
+            task="deploys.tasks.poll_git",
+            resource_id="poll-git",
+        )
+    except EnvelopeError:
+        return {"ok": False, "reason": "envelope"}
     return poll()
 
 

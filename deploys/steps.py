@@ -23,6 +23,23 @@ VAULT_CONTEXT_MARKERS = frozenset({
 })
 
 
+def _sanitize_remote_argv(argv):
+    """Refuse host-escape flags on operator-supplied remote argv."""
+    parts = [str(part) for part in argv]
+    if not parts:
+        return []
+    blocked = {
+        "--privileged", "--pid=host", "--network=host", "--net=host",
+        "--userns=host", "--ipc=host",
+    }
+    for part in parts:
+        if part in blocked or part.startswith("--privileged"):
+            raise ValueError(f"remote argv flag refused: {part}")
+        if part in {"-v", "--volume", "--mount", "--device"}:
+            raise ValueError(f"remote argv flag refused: {part}")
+    return parts
+
+
 def image_tag(git_sha, manifest_body):
     """Deterministic tag: git sha plus a stable hash of canonical Manifest.body."""
     digest = hashlib.sha256(
@@ -196,11 +213,11 @@ def ensure_migrate(desired):
         migrate_argv = body.get("migrate_argv") or body.get("pre_cutover")
 
     if backup_argv:
-        result = _run(transport, list(backup_argv), heartbeat)
+        result = _run(transport, _sanitize_remote_argv(backup_argv), heartbeat)
         if not result.ok:
             raise RuntimeError(f"backup failed: {result.stderr}")
     if migrate_argv:
-        result = _run(transport, list(migrate_argv), heartbeat)
+        result = _run(transport, _sanitize_remote_argv(migrate_argv), heartbeat)
         if not result.ok:
             raise RuntimeError(f"migrate failed: {result.stderr}")
 
@@ -645,7 +662,8 @@ def _caddy_listen_hostport(desired):
     listen = (_caddy_route(desired, route_id).get("listen") or [":443"])[0]
     if listen.startswith(":"):
         return f"127.0.0.1{listen}"
-    return listen
+    port = str(listen).rsplit(":", 1)[-1]
+    return f"127.0.0.1:{port}"
 
 
 def _smoke_uses_https(desired):
@@ -897,6 +915,44 @@ def _listen_port(desired):
     return 8080
 
 
+_PUBLISH_FLAGS = {"-p", "--publish"}
+_BLOCKED_DOCKER_FLAGS = (
+    "--privileged", "--pid", "--network", "--net", "-v", "--volume",
+    "--mount", "--device", "--cap-add", "--security-opt", "--userns",
+    "--ipc", "--cgroupns", "--add-host", "--pid=host", "--network=host",
+    "--net=host",
+)
+
+
+def _sanitize_docker_run_extra(extra):
+    """Allow loopback publishes only. Never splice --privileged / host mounts."""
+    if not extra:
+        return []
+    items = [str(part) for part in extra]
+    out = []
+    i = 0
+    while i < len(items):
+        flag = items[i]
+        lowered = flag.lower()
+        blocked_hit = any(
+            lowered == blocked or lowered.startswith(blocked + "=")
+            for blocked in _BLOCKED_DOCKER_FLAGS
+        )
+        if blocked_hit:
+            raise ValueError(f"docker_run_extra flag refused: {flag}")
+        if flag in _PUBLISH_FLAGS:
+            if i + 1 >= len(items):
+                raise ValueError("docker_run_extra -p requires a spec")
+            spec = items[i + 1]
+            if not spec.startswith("127.0.0.1:"):
+                raise ValueError("docker_run_extra publish must bind 127.0.0.1")
+            out.extend([flag, spec])
+            i += 2
+            continue
+        raise ValueError(f"docker_run_extra flag refused: {flag}")
+    return out
+
+
 def _docker_run_argv(desired, name):
     argv = ["docker", "run", "-d", "--name", name]
     if desired.get("env_file"):
@@ -905,7 +961,7 @@ def _docker_run_argv(desired, name):
     if extra is None:
         extra = (desired.get("manifest_body") or {}).get("docker_run_extra")
     if extra:
-        argv.extend(list(extra))
+        argv.extend(_sanitize_docker_run_extra(extra))
     body = desired.get("manifest_body") or {}
     for spec in _volume_specs(desired["site_slug"], body):
         argv.extend(["-v", f"{spec['name']}:{spec['container_path']}"])

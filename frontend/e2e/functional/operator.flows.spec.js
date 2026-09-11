@@ -48,6 +48,6 @@ test("Cloudflare settings shows path-only Origin-CA plant", async ({ page }) => 
   await expect(page.getByText(/v1\.0- service key/i)).toBeVisible();
   await expect(page.getByLabel("Origin-CA DNS account")).toBeVisible();
   await expect(page.locator('input[type="password"]')).toHaveCount(1);
-  await expect(page.getByRole("button", { name: /^Plant$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Plant Origin CA/i })).toBeVisible();
   await expect(page.locator("form").filter({ hasText: "path" }).locator('input[type="text"]')).toBeVisible();
 });

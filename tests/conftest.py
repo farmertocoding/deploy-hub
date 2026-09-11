@@ -62,8 +62,6 @@ def _ensure_test_owner_membership(user):
 
     if WorkspaceMembership.objects.filter(user=user).exists():
         return
-    if user.is_staff or user.is_superuser:
-        return
     WorkspaceMembership.objects.get_or_create(
         workspace=default_workspace(),
         user=user,
@@ -149,6 +147,19 @@ def _ensure_default_workspace(request):
         yield
     finally:
         _GRANT_DEFAULT_MEMBERSHIP = previous
+
+
+@pytest.fixture(autouse=True)
+def _local_source_root_for_t1():
+    """Archive/adopt always require a configured root. Tests use tmp_path and the repo."""
+    from django.conf import settings
+
+    previous = getattr(settings, "HUB_LOCAL_SOURCE_ROOT", "")
+    if settings.configured and not str(previous or "").strip():
+        settings.HUB_LOCAL_SOURCE_ROOT = "/"
+    yield
+    if settings.configured:
+        settings.HUB_LOCAL_SOURCE_ROOT = previous
 
 
 @pytest.fixture(autouse=True)

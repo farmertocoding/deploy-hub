@@ -130,6 +130,12 @@ def test_compose_db_creates_the_probes_role():
     assert "REVOKE" in text
     assert "vault_secret" in text
     assert "core_workspacemembership" in text
+    assert "GRANT SELECT ON ALL TABLES" in text
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" not in text
+    assert "deploys_manifest" in text
+    assert "core_project" in text
+    assert "undefined_table" not in text
+    assert "to_regclass" in text
 
 
 def test_unsigned_run_deploy_is_refused():
@@ -177,6 +183,12 @@ def test_s3_put_sends_object_lock_headers(monkeypatch):
     captured = {}
 
     class FakeClient:
+        def get_object_lock_configuration(self, **kwargs):
+            return {"ObjectLockConfiguration": {"ObjectLockEnabled": "Enabled"}}
+
+        def get_bucket_versioning(self, **kwargs):
+            return {"Status": "Enabled"}
+
         def put_object(self, **kwargs):
             captured.update(kwargs)
 
@@ -326,6 +338,147 @@ def test_unsigned_rotate_and_backup_are_refused():
 
     assert rotate_ssh_keys() == {"ok": False, "reason": "envelope"}
     assert run_backup_nightly() == {"ok": False, "reason": "envelope"}
+
+
+def test_unsigned_collect_tick_and_poll_git_are_refused():
+    """ZT-15 residual: collect/reconcile/poll must not run from a bare publish."""
+    from deploys.tasks import poll_git
+    from monitor.tasks import collect_all
+    from reconcile.tasks import tick_all
+
+    assert collect_all() == {"ok": False, "reason": "envelope"}
+    assert tick_all() == {"ok": False, "reason": "envelope"}
+    assert poll_git() == {"ok": False, "reason": "envelope"}
+
+
+def test_prod_refuses_fake_pager(monkeypatch):
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.delenv("HUB_PAGER_BACKEND", raising=False)
+    monkeypatch.delenv("HUB_REQUIRE_LIVE_PAGER", raising=False)
+    from hub.settings import base as base_settings
+
+    importlib.reload(base_settings)
+    with pytest.raises(ImproperlyConfigured, match="PAGER"):
+        importlib.reload(importlib.import_module("hub.settings.prod"))
+
+
+def test_prod_refuses_missing_public_url(monkeypatch):
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
+    monkeypatch.delenv("HUB_PUBLIC_URL", raising=False)
+    from hub.settings import base as base_settings
+
+    importlib.reload(base_settings)
+    with pytest.raises(ImproperlyConfigured, match="HUB_PUBLIC_URL"):
+        importlib.reload(importlib.import_module("hub.settings.prod"))
+
+
+def test_prod_refuses_empty_vault_keyfile(monkeypatch):
+    monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
+    monkeypatch.setenv("HUB_VAULT_KEK_BACKEND", "local")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
+    monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
+    monkeypatch.setenv("HUB_VAULT_KEYFILE", "")
+    monkeypatch.delenv("HUB_ALLOW_EMPTY_VAULT_KEYFILE", raising=False)
+    from hub.settings import base as base_settings
+
+    importlib.reload(base_settings)
+    with pytest.raises(ImproperlyConfigured, match="VAULT_KEYFILE"):
+        importlib.reload(importlib.import_module("hub.settings.prod"))
+
+
+def test_compose_redis_default_user_is_not_admin():
+    compose = yaml.safe_load((REPO / "docker-compose.yml").read_text())
+    tokens = compose["services"]["redis"].get("command") or []
+    users = []
+    for i, tok in enumerate(tokens):
+        if tok == "--user" and i + 1 < len(tokens):
+            users.append(str(tokens[i + 1]))
+    default = next(acl for acl in users if acl.startswith("default "))
+    assert "-@admin" in default.split() or "-flushall" in default.split()
+    assert "-flushall" in default.split()
+    assert "-config" in default.split()
+
+
+def test_s3_put_requires_live_object_lock_configuration(monkeypatch):
+    class Unlocked:
+        def get_object_lock_configuration(self, **kwargs):
+            return {"ObjectLockConfiguration": {"ObjectLockEnabled": "Disabled"}}
+
+        def get_bucket_versioning(self, **kwargs):
+            return {"Status": "Enabled"}
+
+        def put_object(self, **kwargs):
+            raise AssertionError("put must not run without lock")
+
+    monkeypatch.setattr(
+        "providers.aws_creds.boto3_client", lambda *a, **k: Unlocked(),
+    )
+    from core.audit_ship import AuditShipError
+    from providers.audit_store import S3AuditStore
+
+    store = S3AuditStore(
+        bucket="hub-audit",
+        access_key_id="AKIATEST",
+        secret_access_key="secret",
+        object_lock=True,
+        versioning=True,
+    )
+    with pytest.raises(AuditShipError, match="object lock"):
+        store.put("audit/1.json", b"{}")
+
+
+def test_docker_run_extra_refuses_privileged():
+    from deploys.steps import _sanitize_docker_run_extra
+
+    assert _sanitize_docker_run_extra(["-p", "127.0.0.1:20000:80"]) == [
+        "-p", "127.0.0.1:20000:80",
+    ]
+    with pytest.raises(ValueError, match="refused"):
+        _sanitize_docker_run_extra(["--privileged"])
+    with pytest.raises(ValueError, match="refused"):
+        _sanitize_docker_run_extra(["-v", "/:/host"])
+
+
+def test_hub_root_refuses_path_ssh_user():
+    from core.hubfs import hub_root
+
+    assert hub_root("deploy") == "/home/deploy/.hub"
+    with pytest.raises(ValueError, match="ssh_user"):
+        hub_root("../etc")
+    with pytest.raises(ValueError, match="ssh_user"):
+        hub_root("root/../../tmp")
+
+
+def test_django_check_is_clean():
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, str(REPO / "manage.py"), "check", "--settings=hub.settings.dev"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_otp_admin_site_wraps_django_admin():
+    from django.contrib import admin
+    from django_otp.admin import OTPAdminSite
+
+    assert admin.site.__class__ is OTPAdminSite or issubclass(
+        admin.site.__class__, OTPAdminSite,
+    )
 
 
 def test_public_dns_prefers_joinable_target_host():

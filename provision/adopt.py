@@ -224,7 +224,12 @@ def _existing_hub_checkout(project):
         source = (manifest.body or {}).get("source_dir") or ""
         if not source:
             continue
-        path = Path(source)
+        from core.local_sources import LocalSourceError, resolve_local_source
+
+        try:
+            path = resolve_local_source(source, require_root=True)
+        except LocalSourceError:
+            continue
         if path.is_dir():
             return path
     return None

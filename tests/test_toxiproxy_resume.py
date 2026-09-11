@@ -173,6 +173,7 @@ def _spawn_worker(pk, db_path):
     env.pop("HUB_TEST_CRASH_AFTER_STEP", None)
     env.pop("HUB_TEST_CRASH_SIGNAL", None)
     env["PYTHONPATH"] = os.pathsep.join([str(REPO), env.get("PYTHONPATH", "")])
+    env.setdefault("HUB_LOCAL_SOURCE_ROOT", "/")
     return subprocess.Popen(
         [sys.executable, "-m", "deploys.worker_entry", str(pk)],
         cwd=str(REPO),

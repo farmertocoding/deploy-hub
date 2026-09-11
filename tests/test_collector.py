@@ -132,7 +132,6 @@ def test_one_session_returns_full_contract(tmp_path):
     a contract key from collect_once.py, or putting to a path deploy cannot SFTP.
     """
     from monitor.collector import collect
-    from monitor.tasks import collect_all
 
     transport, log = _transport(tmp_path)
     result = collect(_target(), transport, sleep=_noop)
@@ -143,15 +142,17 @@ def test_one_session_returns_full_contract(tmp_path):
     assert len(puts) == 1
     assert puts[0][1] == WRITABLE_REMOTE
 
+    from monitor.tasks import dispatch_collect_all
+
     beat = {entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()}
-    assert collect_all.name in beat
+    assert dispatch_collect_all.name in beat
     schedule = next(
         entry["schedule"]
         for entry in settings.CELERY_BEAT_SCHEDULE.values()
-        if entry["task"] == collect_all.name
+        if entry["task"] == dispatch_collect_all.name
     )
     assert float(schedule) == 60.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
 
 
 @pytest.mark.req("REL-C3-ONE-COLLECTOR-SESSION")

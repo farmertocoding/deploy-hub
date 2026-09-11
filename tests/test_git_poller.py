@@ -120,12 +120,14 @@ def test_new_head_enqueues_deploy(monkeypatch):
     v1 = Manifest.objects.get(site=site, version=1)
     assert v1.body["git_sha"] == OLD_SHA
 
+    from deploys.tasks import dispatch_poll_git
+
     beat = {entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()}
-    assert poll_git.name in beat
+    assert dispatch_poll_git.name in beat
     schedule = next(
         entry["schedule"]
         for entry in settings.CELERY_BEAT_SCHEDULE.values()
-        if entry["task"] == poll_git.name
+        if entry["task"] == dispatch_poll_git.name
     )
     assert 60 <= float(schedule) <= 300
     assert settings.CELERY_TASK_ROUTES[poll_git.name]["queue"] == "control"

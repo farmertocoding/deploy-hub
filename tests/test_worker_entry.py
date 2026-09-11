@@ -91,6 +91,8 @@ def test_prod_settings_pin_test_mode_off(monkeypatch, tmp_path):
     monkeypatch.setenv("HUB_SECRET_KEY", "x" * 50)
     monkeypatch.setenv("HUB_TASK_ENVELOPE_SECRET", "e" * 50)
     monkeypatch.setenv("HUB_AUDIT_S3_BUCKET", "hub-audit-test")
+    monkeypatch.setenv("HUB_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("HUB_PAGER_BACKEND", "ntfy")
     monkeypatch.setenv("HUB_TEST_MODE", "1")
     monkeypatch.setenv("HUB_TEST_DATABASE", str(tmp_path / "repointed.sqlite3"))
     try:
@@ -161,6 +163,7 @@ def test_fake_child_still_completes_a_deployment(fake_child_db):
     env.pop("HUB_TEST_CRASH_AFTER_STEP", None)
     env.pop("HUB_TEST_CRASH_SIGNAL", None)
     env["PYTHONPATH"] = str(REPO)
+    env.setdefault("HUB_LOCAL_SOURCE_ROOT", "/")
 
     proc = subprocess.run(
         [sys.executable, "-m", "deploys.worker_entry", str(deployment.pk), "--fake"],

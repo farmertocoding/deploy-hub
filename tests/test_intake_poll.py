@@ -42,7 +42,7 @@ def test_beat_interval_is_10s_on_probes():
     entry = settings.CELERY_BEAT_SCHEDULE["poll-intake-outbox"]
     assert entry["task"] == monitor_tasks.poll_intake_outbox.name
     assert float(entry["schedule"]) == 10.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
     assert CheckRun.Kind.INTAKE_POLL not in DRILL_PERIODS
     assert settings.INTAKE_URL == ""
     assert settings.PARTNER_API_ENABLED is False

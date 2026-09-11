@@ -599,6 +599,38 @@ test("plan_rotation_hits_rotate_plan_endpoint_and_is_wired", async () => {
   assert.equal(captured, null);
 });
 
+test("secret_wizard_opens_t1_overlay_instead_of_posting", async () => {
+  const { act, create } = await import("react-test-renderer");
+  (globalThis as any).FormData = class {
+    constructor(_form: any) {}
+    *[Symbol.iterator]() {
+      yield ["kind", "api_token"];
+      yield ["owner_type", "site"];
+      yield ["owner_id", "1"];
+      yield ["value", "sk-test"];
+    }
+  };
+  let posted: any = null;
+  let tree: any;
+  await act(() => {
+    tree = create(React.createElement(AccessSecretsView, {
+      rows: [HUD_SECRET_FIXTURE],
+      members: [],
+      memberDisabled: [],
+      wizard: "secret",
+      onWizardSubmit: (kind: string, fields: any) => { posted = { kind, fields }; },
+    }));
+  });
+  const form = tree.root.findAllByType("form").find((f: any) =>
+    f.findAllByType("select").some((s: any) => s.props.name === "kind"),
+  );
+  assert.ok(form, "secret wizard form must exist");
+  await act(() => form.props.onSubmit({ preventDefault() {}, target: {} }));
+  const text = JSON.stringify(tree.toJSON());
+  assert.match(text, /type the name/i);
+  assert.equal(posted, null, "secret.create must not POST before T1 confirm");
+});
+
 test("overview_retry_issues_a_second_snapshot_request", async () => {
   (globalThis as any).window.location.search = "";
   (globalThis as any).window.location.hash = "#/admin/overview";

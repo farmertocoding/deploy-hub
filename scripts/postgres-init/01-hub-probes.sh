@@ -10,13 +10,35 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 	\$\$;
 	GRANT CONNECT ON DATABASE $POSTGRES_DB TO hub_probes;
 	GRANT USAGE ON SCHEMA public TO hub_probes;
-	GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO hub_probes;
+	GRANT SELECT ON ALL TABLES IN SCHEMA public TO hub_probes;
 	GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO hub_probes;
-	REVOKE ALL ON TABLE vault_secret FROM hub_probes;
-	REVOKE ALL ON TABLE vault_backupunit FROM hub_probes;
-	REVOKE INSERT, UPDATE, DELETE ON TABLE core_workspacemembership FROM hub_probes;
-	REVOKE INSERT, UPDATE, DELETE ON TABLE auth_user FROM hub_probes;
-	REVOKE ALL ON TABLE django_session FROM hub_probes;
+	DO \$\$
+	DECLARE
+	    r record;
+	    fleet text[] := ARRAY[
+	        'vault_secret', 'vault_backupunit',
+	        'core_workspacemembership', 'auth_user', 'django_session',
+	        'core_project', 'core_site', 'core_siteinstance',
+	        'deploys_manifest', 'deploys_deployment', 'deploys_deploymentstep',
+	        'core_partner', 'core_partnersite'
+	    ];
+	    probe text[] := ARRAY[
+	        'core_target', 'core_finding',
+	        'core_alertdelivery', 'core_alertstate', 'core_checkrun'
+	    ];
+	BEGIN
+	    FOR r IN SELECT unnest(fleet) AS tablename LOOP
+	        IF to_regclass('public.' || r.tablename) IS NOT NULL THEN
+	            EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON TABLE %I FROM hub_probes', r.tablename);
+	        END IF;
+	    END LOOP;
+	    FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+	        AND (tablename LIKE 'monitor_%' OR tablename = ANY(probe))
+	    LOOP
+	        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO hub_probes', r.tablename);
+	    END LOOP;
+	END
+	\$\$;
 	ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO hub_probes;
 	ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO hub_probes;
 EOSQL

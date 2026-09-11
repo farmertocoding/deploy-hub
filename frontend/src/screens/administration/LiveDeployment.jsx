@@ -220,10 +220,18 @@ export default function LiveDeployment({ route, onNav, events }) {
           onNav("admin", "sites");
           return;
         }
-        if (!pending) { setPending(action); return; }
+        if (!pending) {
+          const key = (
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `hud-${Date.now()}`
+          );
+          setPending({ ...action, idempotency_key: key });
+          return;
+        }
         const { status, data } = await api(
           `v1/hud/deployments/${id}/commands/`,
-          { action: action.id },
+          { action: action.id, idempotency_key: pending.idempotency_key },
         );
         if (status === 202) {
           setCommandResult({

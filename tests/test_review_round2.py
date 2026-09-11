@@ -78,7 +78,10 @@ def test_git_ls_remote_ssh_does_not_see_hub_agent(monkeypatch):
 
     sha = git_ls_remote("ssh://git@example.test/o/r.git", "main")
     assert sha == "deadbeef"
-    assert seen == [{"url": "ssh://git@example.test/o/r.git", "resolve": True}]
+    assert seen == [
+        {"url": "ssh://git@example.test/o/r.git", "resolve": True},
+        {"url": "ssh://git@example.test/o/r.git", "resolve": True},
+    ]
     env = captured["env"]
     assert env is not None, "git must pass an isolated env, not inherit the Hub process"
     assert "SSH_AUTH_SOCK" not in env
@@ -104,7 +107,10 @@ def test_git_ls_remote_http_disables_redirects_and_credential_helper(monkeypatch
 
     sha = git_ls_remote("https://example.test/o/r.git", "main")
     assert sha == "deadbeef"
-    assert seen == [{"url": "https://example.test/o/r.git", "resolve": True}]
+    assert seen == [
+        {"url": "https://example.test/o/r.git", "resolve": True},
+        {"url": "https://example.test/o/r.git", "resolve": True},
+    ]
     argv = captured["argv"]
     assert "ls-remote" in argv
     assert "http.followRedirects=false" in argv

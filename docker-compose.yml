@@ -21,6 +21,8 @@ services:
       - ${REDIS_PASSWORD:?set in .env}
       - --user
       - hub_probes on >${REDIS_PASSWORD_PROBES:?set in .env} ~probes* ~_kombu.binding.probes* -@all +@read +@write +@connection +ping +info
+      - --user
+      - default on >${REDIS_PASSWORD:?set in .env} ~* +@all -@admin -flushall -flushdb -config -shutdown -debug -module
     networks: [internal]   # never a published port (§B4)
 
   web:
@@ -64,6 +66,7 @@ services:
       REDIS_USER: hub_probes
       REDIS_PASSWORD: ${REDIS_PASSWORD_PROBES:?set in .env}
       HUB_VAULT_KEYFILE: ""
+      HUB_ALLOW_EMPTY_VAULT_KEYFILE: "1"
       HUB_TASK_ENVELOPE_SECRET: probes-cannot-sign
     depends_on: [db, redis]
     networks: [internal]

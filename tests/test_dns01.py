@@ -385,7 +385,7 @@ def test_beat_hub_dns01_renew_daily_is_registered():
     entry = settings.CELERY_BEAT_SCHEDULE["hub-dns01-renew-daily"]
     assert entry["task"] == monitor_tasks.renew_hub_dns01.name
     assert float(entry["schedule"]) == 86400.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
     assert "kwargs" not in entry
     assert "args" not in entry
     dumped = str(entry)

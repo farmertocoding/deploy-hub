@@ -33,6 +33,7 @@ export default [
     rules: {
       ...js.configs.recommended.rules,
       "react/jsx-uses-vars": "error",
+      "react/no-danger": "error",
       "react-hooks/rules-of-hooks": "error",
       "no-unused-vars": ["error", {
         argsIgnorePattern: "^_",

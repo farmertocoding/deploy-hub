@@ -8,7 +8,7 @@ test("Origin-CA plant with empty path does not POST token bytes", async ({ page 
   });
   await openOperator(page, { hash: "#/settings" });
   await page.getByRole("button", { name: "Cloudflare" }).click();
-  await page.getByRole("button", { name: /^Plant$/i }).click();
+  await page.getByRole("button", { name: /Plant Origin CA/i }).click();
   const plantPosts = posts.filter((p) => p.url.includes("origin-ca-plant"));
   expect(plantPosts).toEqual([]);
 });

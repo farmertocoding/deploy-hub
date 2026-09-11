@@ -168,7 +168,7 @@ def test_missed_drill_writes_audit_event():
     beat = settings.CELERY_BEAT_SCHEDULE["detect-missed-drills"]
     assert beat["task"] == detect_missed_drills.name
     assert float(beat["schedule"]) == 3600.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
 
 
 def test_checkrun_kind_backup_closed_schema():

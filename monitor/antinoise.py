@@ -103,6 +103,7 @@ def suppressed_by(entity, *, workspace=None):
         site = sites.first()
         if site is None or site.primary_target_id is None:
             return None
+        workspace = workspace or getattr(site.project, "workspace", None)
         host = site.primary_target.host
         if _fingerprint_open(f"host-down:{host}", workspace=workspace):
             return f"host:{host}"
@@ -427,7 +428,9 @@ def _maybe_file_partner_aggregate(entity):
     partner = binding.partner
     down = 0
     for ps in partner.partner_sites.select_related("site"):
-        if _fingerprint_open(f"site-down:{ps.site.name}"):
+        if _fingerprint_open(
+            f"site-down:{ps.site.name}", workspace=partner.workspace,
+        ):
             down += 1
     if down < 2:
         return None

@@ -341,14 +341,14 @@ export function AwsStatusBanner({ connected, reason, accountLast4, region }) {
   );
 }
 
-export function AwsPanel({ systemAdmin = false }) {
+export function AwsPanel({ systemAdmin = false } = {}) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [awsOk, setAwsOk] = useState(false);
   const [statusReason, setStatusReason] = useState("set HUB_AWS_CREDENTIALS_REF");
   const {
     register, handleSubmit, setError, reset, clearErrors,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm({
     resolver: zodResolver(schemas.AwsConnect),
     defaultValues: { access_key_id: "", secret_access_key: "" },
@@ -415,9 +415,11 @@ export function AwsPanel({ systemAdmin = false }) {
               <input type="password" {...register("secret_access_key")} style={box}
                 autoComplete="off" aria-invalid={!!errors.secret_access_key} />
             </label>
-            <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
-              {busy ? "Connecting…" : "Connect"}
-            </button>
+            <ActionButton
+              row={tierFor("aws.connect")}
+              confirmName="aws"
+              onRun={() => handleSubmit(submit)()}
+            />
           </form>
           {errors.root && (
             <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>{errors.root.message}</div>
@@ -437,7 +439,7 @@ export function CloudflarePanel() {
   const [plantBusy, setPlantBusy] = useState(false);
   const {
     register, handleSubmit, setError, reset, clearErrors,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm({
     resolver: zodResolver(schemas.CloudflareConnect),
     defaultValues: { token: "" },
@@ -521,9 +523,11 @@ export function CloudflarePanel() {
           <input type="password" {...register("token")} style={box}
             autoComplete="off" aria-invalid={!!errors.token} />
         </label>
-        <button style={{ padding: 8 }} disabled={isSubmitting || busy}>
-          {busy ? "Connecting…" : "Connect"}
-        </button>
+        <ActionButton
+          row={tierFor("dns.cloudflare_connect")}
+          confirmName="cloudflare"
+          onRun={() => handleSubmit(submit)()}
+        />
       </form>
       {errors.token && (
         <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>{errors.token.message}</div>
@@ -560,9 +564,11 @@ export function CloudflarePanel() {
           <input type="text" {...plantForm.register("path")} style={box}
             autoComplete="off" aria-invalid={!!plantForm.formState.errors.path} />
         </label>
-        <button style={{ padding: 8 }} disabled={plantForm.formState.isSubmitting || plantBusy}>
-          {plantBusy ? "Planting…" : "Plant"}
-        </button>
+        <ActionButton
+          row={tierFor("dns.origin_ca_plant")}
+          confirmName="origin-ca"
+          onRun={() => plantForm.handleSubmit(submitPlant)()}
+        />
       </form>
       {plantForm.formState.errors.path && (
         <div style={{ color: "var(--hud-danger)", marginTop: 8 }}>
@@ -613,8 +619,12 @@ export function SecurityPanel({ user }) {
         <button style={{ padding: 8 }} onClick={startTotp}>Enroll TOTP</button>
       ) : (
         <form onSubmit={confirmTotp} style={{ display: "grid", gap: 8 }}>
-          <div style={{ background: "#fff", padding: 12, width: "fit-content" }}
-            dangerouslySetInnerHTML={{ __html: qr.qr_svg }} />
+          <img
+            alt="TOTP QR"
+            width="180"
+            height="180"
+            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.qr_svg || "")}`}
+          />
           <input style={box} aria-label="6-digit code" placeholder="6-digit code"
             value={code} onChange={(e) => setCode(e.target.value)} />
           <button style={{ padding: 8 }}>Confirm TOTP</button>

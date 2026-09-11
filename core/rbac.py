@@ -2,8 +2,9 @@
 
 Capabilities are always evaluated for one workspace. A user who owns
 workspace A does not acquire owner rights while viewing workspace B. Global
-Django staff/superuser flags only bootstrap the legacy ``default`` workspace;
-other workspaces require an explicit membership.
+Django staff/superuser flags do not grant a workspace role. Every workspace,
+including ``default``, requires an explicit membership. ``is_superuser`` remains
+the only platform-global flag (``RequireSystemAdmin``).
 
 ``hud_ui_v1`` is a role capability for Administration members. Operator-shell
 chrome is the ``HUD_UI_V1`` setting, returned on the session as ``hud_ui``.
@@ -100,12 +101,6 @@ def _hud_capabilities(role):
     return sorted(caps)
 
 
-def _default_workspace():
-    from core.models import default_workspace
-
-    return default_workspace()
-
-
 def is_system_admin(user):
     """Platform-global authority. Independent of the selected workspace."""
     return bool(
@@ -114,25 +109,12 @@ def is_system_admin(user):
 
 
 def workspace_membership(user, workspace):
-    """Return persisted membership, or staff bootstrap on the default workspace."""
+    """Return persisted membership. Staff flags never invent a role."""
     if not user or not getattr(user, "is_authenticated", False) or not workspace:
         return None
     from core.models import WorkspaceMembership
 
-    row = WorkspaceMembership.objects.filter(user=user, workspace=workspace).first()
-    if row:
-        return row
-    if workspace.slug != "default":
-        return None
-    if user.is_staff or user.is_superuser:
-        return type("BootstrapMembership", (), {
-            "workspace": workspace,
-            "workspace_id": workspace.pk,
-            "user": user,
-            "role": "owner" if user.is_superuser else "admin",
-            "is_bootstrap": True,
-        })()
-    return None
+    return WorkspaceMembership.objects.filter(user=user, workspace=workspace).first()
 
 
 def resolve_workspace(user, workspace_ref=None):
@@ -156,9 +138,6 @@ def resolve_workspace(user, workspace_ref=None):
     )
     if membership:
         return membership.workspace
-    default = _default_workspace()
-    if workspace_membership(user, default):
-        return default
     return None
 
 
@@ -180,10 +159,6 @@ def capabilities_for(user, workspace):
     membership = workspace_membership(user, workspace)
     if not membership:
         return []
-    if getattr(membership, "is_bootstrap", False) and not (
-        user.is_staff or user.is_superuser
-    ):
-        return []
     return _hud_capabilities(membership.role)
 
 
@@ -197,10 +172,6 @@ def user_role(user, workspace=None):
     membership = workspace_membership(user, workspace or resolve_workspace(user))
     if not membership:
         return ""
-    if getattr(membership, "is_bootstrap", False) and not (
-        user.is_staff or user.is_superuser
-    ):
-        return ""
     return membership.role
 
 
@@ -213,7 +184,7 @@ def has_capability(user, name, workspace=None):
 
 
 def has_operator_capability(user, name, workspace=None):
-    """Mutating operator APIs require a persisted membership (or staff bootstrap)."""
+    """Mutating operator APIs require a persisted membership."""
     workspace = workspace or resolve_workspace(user)
     return has_capability(user, name, workspace)
 
@@ -235,16 +206,6 @@ def workspace_payload(user):
         "role": row.role,
         "capabilities": _hud_capabilities(row.role),
     } for row in rows]
-    default = _default_workspace() if (user.is_staff or user.is_superuser) else None
-    if default and not any(item["id"] == default.pk for item in payload):
-        role = "owner" if user.is_superuser else "admin"
-        payload.append({
-            "id": default.pk,
-            "slug": default.slug,
-            "name": default.name,
-            "role": role,
-            "capabilities": _hud_capabilities(role),
-        })
     return payload
 
 

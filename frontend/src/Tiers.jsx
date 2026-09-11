@@ -13,11 +13,23 @@ import { box, warning, success, danger } from "./ui/surface.js";
 // one that knows ("abc123 → def456, 2 migrations"). role="dialog" + the summary as
 // visible text, not a tooltip (the R9-7 lesson, applied before the defect this time).
 export function ConfirmDialog({ label, summary, onConfirm, onDismiss }) {
+  const [busy, setBusy] = useState(false);
+  const lockRef = useRef(false);
   return (
     <div role="dialog" aria-label={label}
       style={{ ...box, marginTop: 8, borderColor: warning }}>
       <p style={{ marginTop: 0 }}>{summary}</p>
-      <button style={{ ...box, marginRight: 8 }} onClick={onConfirm}>
+      <button
+        style={{ ...box, marginRight: 8 }}
+        aria-busy={busy || undefined}
+        aria-disabled={busy || undefined}
+        onClick={() => {
+          if (lockRef.current) return;
+          lockRef.current = true;
+          setBusy(true);
+          onConfirm?.();
+        }}
+      >
         Confirm — {label}</button>
       <button style={box} onClick={onDismiss}>Cancel</button>
     </div>
@@ -51,6 +63,8 @@ function costLine(cost) {
 
 export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss }) {
   const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const lockRef = useRef(false);
   const costText = costLine(cost);
   return (
     <div role="dialog" aria-label={`${label} step-up`}
@@ -68,8 +82,18 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
       <div style={{ marginTop: 8 }}>
         <button style={{ ...box, marginRight: 8 }} onClick={onTouch}>
           Touch security key</button>
-        <button style={{ ...box, marginRight: 8 }}
-          onClick={() => onConfirm({ name })}>Confirm — {label}</button>
+        <button
+          style={{ ...box, marginRight: 8 }}
+          aria-busy={busy || undefined}
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (lockRef.current) return;
+            const result = onConfirm?.({ name });
+            if (result !== true) return;
+            lockRef.current = true;
+            setBusy(true);
+          }}
+        >Confirm — {label}</button>
         <button style={box} onClick={onDismiss}>Cancel</button>
       </div>
     </div>

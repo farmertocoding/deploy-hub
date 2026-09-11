@@ -1,4 +1,4 @@
-"""Collector and missed-drill Beat entries. Live on queue ``probes`` via ``monitor.*``."""
+"""Collector and missed-drill Beat entries. Live on queue ``control`` via ``monitor.*``."""
 import time
 
 from celery import shared_task
@@ -6,13 +6,42 @@ from celery import shared_task
 from core.audit import audit
 
 
+def envelope_for_collect():
+    from core.task_envelope import wrap
+
+    return wrap(
+        task="monitor.tasks.collect_all",
+        workspace_id=0,
+        resource_type="fleet",
+        resource_id="collect-all",
+    )
+
+
 @shared_task(ignore_result=True)
-def collect_all(*, transport_for=None, sleep=None, now=None, monotonic=None):
+def dispatch_collect_all(**kwargs):
+    """Beat entry: sign, then collect. Unsigned ``collect_all`` is refused."""
+    return collect_all(envelope=envelope_for_collect(), **kwargs)
+
+
+@shared_task(ignore_result=True)
+def collect_all(*, envelope=None, transport_for=None, sleep=None, now=None, monotonic=None):
     from core import locks
     from core.models import Target
     from core.ssh import SshTransport
+    from core.task_envelope import EnvelopeError, reauthorize
     from monitor.collector import collect
     from monitor.traffic import ingest as ingest_traffic
+
+    if envelope is None:
+        return {"ok": False, "reason": "envelope"}
+    try:
+        reauthorize(
+            envelope,
+            task="monitor.tasks.collect_all",
+            resource_id="collect-all",
+        )
+    except EnvelopeError:
+        return {"ok": False, "reason": "envelope"}
 
     factory = transport_for or SshTransport
     mono = monotonic or time.monotonic

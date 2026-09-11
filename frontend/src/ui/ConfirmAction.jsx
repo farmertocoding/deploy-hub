@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { HudFrame } from "./HudFrame.jsx";
 import { Button } from "./Button.jsx";
 
@@ -18,6 +18,14 @@ export function ConfirmAction({
   onDismiss,
 }) {
   const dialogRef = useRef(null);
+  const lockRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const confirm = () => {
+    if (lockRef.current || refusal) return;
+    lockRef.current = true;
+    setBusy(true);
+    onConfirm?.();
+  };
   useEffect(() => {
     const node = dialogRef.current;
     const previous = typeof document !== "undefined" ? document.activeElement : null;
@@ -68,7 +76,7 @@ export function ConfirmAction({
           <p>Rollback: {rollback || "not named"}</p>
           {policy ? <p>Policy: {policy}</p> : null}
           {refusal ? <p className="hud-async__reason">{refusal}</p> : null}
-          <Button variant="primary" onClick={onConfirm} disabled={Boolean(refusal)}>
+          <Button variant="primary" onClick={confirm} busy={busy} disabled={Boolean(refusal)}>
             Confirm — {label}
           </Button>
           {" "}

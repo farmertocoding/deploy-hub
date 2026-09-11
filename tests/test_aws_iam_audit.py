@@ -229,7 +229,7 @@ def test_absent_ref_skips_and_does_not_green_live_aws():
     assert entry["task"] == monitor_tasks.audit_aws_iam_scope.name
     assert float(entry["schedule"]) == 86400.0
     assert "kwargs" not in entry
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
 
     src = pathlib.Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)

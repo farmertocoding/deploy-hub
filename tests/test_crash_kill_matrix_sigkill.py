@@ -102,6 +102,7 @@ def _spawn_worker(pk, db_path, *, fake=True, crash_after, timeout=30):
     if not fake:
         env["HUB_TEST_FAKE_DNS"] = "1"
     env["PYTHONPATH"] = os.pathsep.join([str(REPO), env.get("PYTHONPATH", "")])
+    env.setdefault("HUB_LOCAL_SOURCE_ROOT", "/")
     cmd = [sys.executable, "-m", "deploys.worker_entry", str(pk)]
     if fake:
         cmd.append("--fake")

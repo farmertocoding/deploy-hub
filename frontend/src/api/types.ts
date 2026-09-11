@@ -1683,7 +1683,7 @@ export interface components {
         PartnerList: {
             partners: components["schemas"]["PartnerPublic"][];
             intake: components["schemas"]["IntakeStatus"];
-            api_enabled: boolean;
+            api_enabled?: boolean | null;
             candidate_targets: components["schemas"]["CandidateTarget"][];
         };
         PartnerPublic: {

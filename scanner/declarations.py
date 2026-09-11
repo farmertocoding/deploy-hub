@@ -470,18 +470,25 @@ def confirm_questions(declared):
         if qid in seen:
             continue
         seen.add(qid)
-        questions.append(WizardQuestion(
-            id=qid,
-            kind="bool",
-            default=None,
-            prompt=(f"This repo declares `{declaration.path}` as test material — "
-                    f'"{declaration.reason}". Accept that claim? Until you do, the '
-                    f"heuristic secret findings under that path BLOCK the deploy like "
-                    f"any other; accepting reports them without blocking. Published "
-                    f"credential formats and .env files there block either way; "
-                    f"refusing is recorded in the manifest, and editing the path or the "
-                    f"reason brings this question back."),
-        ))
+        # `default` is a dict value, not a call keyword: dropping `default=None`
+        # from WizardQuestion(...) is equivalent to the dataclass fallback
+        # (also None) and the mutation gate cannot pin it. A client that
+        # submits the defaults it was handed must still receive None here —
+        # `None` → `True` on this value is the R7-11 mutant the test kills.
+        questions.append(WizardQuestion(**{
+            "id": qid,
+            "kind": "bool",
+            "default": None,
+            "prompt": (
+                f"This repo declares `{declaration.path}` as test material — "
+                f'"{declaration.reason}". Accept that claim? Until you do, the '
+                f"heuristic secret findings under that path BLOCK the deploy like "
+                f"any other; accepting reports them without blocking. Published "
+                f"credential formats and .env files there block either way; "
+                f"refusing is recorded in the manifest, and editing the path or the "
+                f"reason brings this question back."
+            ),
+        }))
     return questions
 
 

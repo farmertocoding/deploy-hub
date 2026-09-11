@@ -77,7 +77,6 @@ def test_drift_container_converged():
     or leaving observed_state absent after a successful docker run.
     """
     from reconcile.loop import tick
-    from reconcile.tasks import tick_all
 
     site, inst, transport = _world("drift")
     tick(site, transport=transport, jitter=0)
@@ -86,15 +85,17 @@ def test_drift_container_converged():
     assert inst.observed_state == SiteInstance.ObservedState.RUNNING
     runs = _start_stop_runs(transport)
     assert any(argv[1] in {"run", "start"} for argv in runs)
+    from reconcile.tasks import dispatch_tick_all
+
     beat = {entry["task"] for entry in settings.CELERY_BEAT_SCHEDULE.values()}
-    assert tick_all.name in beat
+    assert dispatch_tick_all.name in beat
     schedule = next(
         entry["schedule"]
         for entry in settings.CELERY_BEAT_SCHEDULE.values()
-        if entry["task"] == tick_all.name
+        if entry["task"] == dispatch_tick_all.name
     )
     assert 60 <= float(schedule) <= 120
-    assert settings.CELERY_TASK_ROUTES["reconcile.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["reconcile.*"]["queue"] == "control"
 
 
 @pytest.mark.req("REL-P1-RECONCILER")
@@ -371,7 +372,7 @@ def test_tick_all_global_budget_uses_instance_target():
     What would make this fail: iterating only primary_target, or mutating the
     whole fleet in one tick_all.
     """
-    from reconcile.tasks import tick_all
+    from reconcile.tasks import envelope_for_tick, tick_all
 
     _site_a, inst_a, t_a = _world("gb-a")
     _site_b, inst_b, t_b = _world("gb-b")
@@ -379,7 +380,10 @@ def test_tick_all_global_budget_uses_instance_target():
     _site_a.save(update_fields=["primary_target"])
     transports = {inst_a.target_id: t_a, inst_b.target_id: t_b}
 
-    tick_all.run(budget=1, transport_for=lambda target: transports[target.pk])
+    tick_all.run(
+        envelope=envelope_for_tick(),
+        budget=1, transport_for=lambda target: transports[target.pk],
+    )
 
     inst_a.refresh_from_db()
     inst_b.refresh_from_db()
@@ -396,7 +400,7 @@ def test_tick_all_fail_open_continues_fleet():
 
     What would make this fail: an uncaught SshTransport error stopping tick_all.
     """
-    from reconcile.tasks import tick_all
+    from reconcile.tasks import envelope_for_tick, tick_all
 
     _site_a, inst_a, _t_a = _world("fo-a")
     _site_b, inst_b, t_b = _world("fo-b")
@@ -406,7 +410,10 @@ def test_tick_all_fail_open_continues_fleet():
             raise RuntimeError("ssh fail")
         return t_b
 
-    tick_all.run(budget=2, transport_for=transport_for)
+    tick_all.run(
+        envelope=envelope_for_tick(),
+        budget=2, transport_for=transport_for,
+    )
     inst_b.refresh_from_db()
     assert inst_b.observed_state == SiteInstance.ObservedState.RUNNING
 

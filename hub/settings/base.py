@@ -288,8 +288,8 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_DEFAULT_QUEUE = "deploys"
 CELERY_TASK_ROUTES = {
-    "monitor.*": {"queue": "probes"},
-    "reconcile.*": {"queue": "probes"},
+    "monitor.*": {"queue": "control"},
+    "reconcile.*": {"queue": "control"},
     "scaling.*": {"queue": "control"},
     "core.tasks.*": {"queue": "control"},
     "deploys.tasks.poll_git": {"queue": "control"},
@@ -308,15 +308,15 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 30.0,
     },
     "poll-git-heads": {
-        "task": "deploys.tasks.poll_git",
+        "task": "deploys.tasks.dispatch_poll_git",
         "schedule": 120.0,
     },
     "reconcile-tick-all": {
-        "task": "reconcile.tasks.tick_all",
+        "task": "reconcile.tasks.dispatch_tick_all",
         "schedule": 90.0,
     },
     "collect-all-targets": {
-        "task": "monitor.tasks.collect_all",
+        "task": "monitor.tasks.dispatch_collect_all",
         "schedule": 60.0,
     },
     "evaluate-scale-proposals": {

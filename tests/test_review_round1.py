@@ -4,8 +4,9 @@ that would make it fail; they must go red on HEAD 8855ef6.
 import json
 
 import pytest
+from django.test import override_settings
 from dns_fixtures import default_dns_zone
-from pipeline_fakes import PipelineTransport, fixture_body, queued_deployment
+from pipeline_fakes import REPO, PipelineTransport, fixture_body, queued_deployment
 
 from core.models import AuditEvent, NetworkZone, Project, Site, Target
 from core.transport import CommandResult, FakeTransport
@@ -134,7 +135,7 @@ def test_collect_all_result_omits_log_chunk_bytes(monkeypatch):
     What would make this fail: returning collect() payloads, or omitting ignore_result.
     """
     from monitor import collector as collector_mod
-    from monitor.tasks import collect_all
+    from monitor.tasks import collect_all, envelope_for_collect
 
     target = _target(slug="clog")
 
@@ -146,7 +147,10 @@ def test_collect_all_result_omits_log_chunk_bytes(monkeypatch):
         }
 
     monkeypatch.setattr(collector_mod, "collect", fake_collect)
-    result = collect_all(transport_for=lambda _t: FakeTransport(), sleep=lambda _s: None)
+    result = collect_all(
+        envelope=envelope_for_collect(),
+        transport_for=lambda _t: FakeTransport(), sleep=lambda _s: None,
+    )
     assert PLANTED_LOG not in json.dumps(result)
     assert "log_chunk" not in json.dumps(result)
     assert result.get("ok") is True
@@ -158,6 +162,7 @@ def test_collect_all_result_omits_log_chunk_bytes(monkeypatch):
 # --- 3. deploys/pipeline.py: env-file put, never body/artifacts/logs/argv ---
 
 
+@override_settings(HUB_ALLOW_LOCAL_SOURCES=True, HUB_LOCAL_SOURCE_ROOT=str(REPO))
 def test_execute_injects_env_via_env_file_not_argv_or_artifacts():
     """load_env_snapshot lands in a 0600 env file and docker --env-file; values stay off exhaust.
 
@@ -221,6 +226,29 @@ def test_execute_injects_env_via_env_file_not_argv_or_artifacts():
 
 
 # --- 4. deploys/poller.py: validate git URL before ls-remote ---
+
+
+def test_git_ls_remote_refuses_rebind_to_link_local(monkeypatch):
+    """A host that is public at check time must not ls-remote after rebinding to IMDS."""
+    from deploys.poller import git_ls_remote
+
+    calls = {"n": 0}
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 1:
+            return [(2, 1, 6, "", ("8.8.8.8", 0))]
+        return [(2, 1, 6, "", ("169.254.169.254", 0))]
+
+    monkeypatch.setattr("core.validators.socket.getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr("deploys.poller.shutil.which", lambda _n: "/usr/bin/git")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("git must not run after a blocked rebind")
+
+    monkeypatch.setattr("deploys.poller.subprocess.run", boom)
+    assert git_ls_remote("https://rebind.example.test/repo.git", "main") == ""
+    assert calls["n"] >= 2
 
 
 def test_poll_skips_link_local_url_without_invoking_git(monkeypatch):
@@ -402,7 +430,7 @@ def test_collect_all_jitter_offsets_from_tick_start(monkeypatch, tmp_path):
     from test_collector import CollectorTransport, _run_producer
 
     from monitor.collector import jitter_s
-    from monitor.tasks import collect_all
+    from monitor.tasks import collect_all, envelope_for_collect
 
     a = _target(slug="jita")
     b = _target(slug="jitb")
@@ -419,6 +447,7 @@ def test_collect_all_jitter_offsets_from_tick_start(monkeypatch, tmp_path):
     stdout, _log = _run_producer(tmp_path, target_id=a.pk)
     transport = CollectorTransport(stdout=stdout)
     collect_all(
+        envelope=envelope_for_collect(),
         transport_for=lambda _t: transport,
         sleep=sleep,
         monotonic=mono,
@@ -441,14 +470,17 @@ def test_collect_all_skips_target_when_collect_lock_held(tmp_path):
 
     from core import locks
     from monitor.collector import collect
-    from monitor.tasks import collect_all
+    from monitor.tasks import collect_all, envelope_for_collect
 
     target = _target(slug="ovlap")
     stdout, _log = _run_producer(tmp_path, target_id=target.pk)
     transport = CollectorTransport(stdout=stdout)
     lock = locks.acquire("target", target.pk, "collect", "tick-other")
     assert lock is not None
-    collect_all(transport_for=lambda _t: transport, sleep=_noop)
+    collect_all(
+        envelope=envelope_for_collect(),
+        transport_for=lambda _t: transport, sleep=_noop,
+    )
     puts = [remote for kind, remote in transport.calls if kind == "put"]
     assert puts == []
     probes = [

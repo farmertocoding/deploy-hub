@@ -289,9 +289,6 @@ def workspace_secrets(request):
     visible = Q(pk__in=[])
     for owner_type, ids in owners.items():
         visible |= Q(owner_type=owner_type, owner_id__in=ids)
-    workspace = request_workspace(request)
-    if workspace and workspace.slug == "default":
-        visible |= ~Q(owner_type__in=RESOURCE_OWNER_TYPES)
     return Secret.objects.filter(visible)
 
 

@@ -426,7 +426,7 @@ def test_beat_entry_runs_reaper_daily_on_queue_probes():
     entry = settings.CELERY_BEAT_SCHEDULE["ephemeral-overflow-reaper-daily"]
     assert entry["task"] == monitor_tasks.reap_stale_overflow_ephemerals.name
     assert float(entry["schedule"]) == 86400.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
     assert "kwargs" not in entry
     beat = settings.CELERY_BEAT_SCHEDULE
     assert entry["task"] != beat["evaluate-scale-proposals"]["task"]

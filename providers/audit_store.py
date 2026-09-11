@@ -35,21 +35,45 @@ class S3AuditStore:
             versioning=bool(getattr(settings, "AUDIT_S3_VERSIONING", True)),
         )
 
-    def put(self, key, body):
-        if not self.object_lock or not self.versioning:
-            raise AuditShipError("object lock required")
-        if not self.bucket:
-            raise AuditShipError("absent bucket")
-        if not self.access_key_id or not self.secret_access_key:
-            raise AuditShipError("audit store credentials missing")
+    def _client(self):
         from providers.aws_creds import boto3_client
 
-        client = boto3_client(
+        return boto3_client(
             "s3",
             access_key_id=self.access_key_id,
             secret_access_key=self.secret_access_key,
             region_name=self.region,
         )
+
+    def ensure_object_lock(self):
+        """Fail closed unless the live bucket reports Object Lock + versioning."""
+        if not self.bucket:
+            raise AuditShipError("absent bucket")
+        if not self.access_key_id or not self.secret_access_key:
+            raise AuditShipError("audit store credentials missing")
+        client = self._client()
+        try:
+            conf = client.get_object_lock_configuration(Bucket=self.bucket)
+            vers = client.get_bucket_versioning(Bucket=self.bucket)
+        except AuditShipError:
+            raise
+        except Exception as exc:
+            raise AuditShipError("object lock required") from exc
+        enabled = (
+            (conf or {}).get("ObjectLockConfiguration", {}).get("ObjectLockEnabled")
+            == "Enabled"
+        )
+        versioned = (vers or {}).get("Status") == "Enabled"
+        if not enabled or not versioned:
+            raise AuditShipError("object lock required")
+        self.object_lock = True
+        self.versioning = True
+        return client
+
+    def put(self, key, body):
+        if not self.object_lock or not self.versioning:
+            raise AuditShipError("object lock required")
+        client = self.ensure_object_lock()
         from datetime import datetime, timedelta, timezone
 
         retain_until = datetime.now(timezone.utc) + timedelta(days=365)

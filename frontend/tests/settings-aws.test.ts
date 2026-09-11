@@ -34,6 +34,7 @@ test("aws_tab_exists_paste_is_write_only_degraded_empty_and_error", async () => 
   const passwords = markup.match(/type="password"/g) || [];
   assert.equal(passwords.length, 2, "access key id and secret are write-only");
   assert.match(text, /HUB_AWS_CREDENTIALS_REF/);
+  assert.match(text, /Connect AWS/);
 
   const pastedId = "t1-aws-access-key-id-not-a-credential";
   const pastedSecret = "t1-aws-secret-access-key-not-a-credential";

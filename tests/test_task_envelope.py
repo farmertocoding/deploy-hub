@@ -82,6 +82,11 @@ def test_drain_hud_outbox_two_rows_same_second_both_reauthorize(monkeypatch):
     user = get_user_model().objects.create_user(
         "env-drain", password="pw-1234567890", is_staff=True, is_superuser=True,
     )
+    from core.models import WorkspaceMembership, default_workspace
+
+    WorkspaceMembership.objects.get_or_create(
+        workspace=default_workspace(), user=user, defaults={"role": "owner"},
+    )
     factory = RequestFactory()
     request = factory.post("/api/v1/hud/targets/commands/")
     request.user = user
@@ -135,6 +140,11 @@ def test_hud_outbox_worker_requires_signed_envelope(monkeypatch):
 
     user = get_user_model().objects.create_user(
         "env-op", password="pw-1234567890", is_staff=True, is_superuser=True,
+    )
+    from core.models import WorkspaceMembership, default_workspace
+
+    WorkspaceMembership.objects.get_or_create(
+        workspace=default_workspace(), user=user, defaults={"role": "owner"},
     )
     factory = RequestFactory()
     request = factory.post("/api/v1/hud/targets/commands/")

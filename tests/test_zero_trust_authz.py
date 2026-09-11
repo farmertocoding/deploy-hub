@@ -23,6 +23,7 @@ from core.rbac import (
     ROLE_CAPABILITIES,
     has_operator_capability,
     user_capabilities,
+    user_role,
     workspace_membership,
 )
 
@@ -81,6 +82,20 @@ def _target(host="zt-box.example.test"):
         lifecycle=Target.Lifecycle.PERMANENT,
         status=Target.Status.READY,
     )
+
+
+@pytest.mark.no_default_membership
+def test_staff_without_membership_is_not_default_owner(django_user_model):
+    """ZT-18: is_staff / is_superuser is not a WorkspaceMembership."""
+    staff = _otp_user(django_user_model, "staff-no-row", staff=True)
+    root = _otp_user(django_user_model, "root-no-row", superuser=True)
+    workspace = default_workspace()
+    assert workspace_membership(staff, workspace) is None
+    assert workspace_membership(root, workspace) is None
+    assert user_role(staff, workspace) == ""
+    assert user_role(root, workspace) == ""
+    assert has_operator_capability(staff, "secrets.manage", workspace) is False
+    assert has_operator_capability(root, "config.write", workspace) is False
 
 
 @pytest.mark.no_default_membership
@@ -302,6 +317,12 @@ def test_tenant_owner_cannot_mutate_global_partner_flag_or_aws_binding(
     assert "aws.connect" not in me["capabilities"]
     assert "system.admin" not in me["capabilities"]
 
+    listed = client.get("/api/v1/partners/", **_headers("tenant-a"))
+    assert listed.status_code == 200, listed.content
+    assert "api_enabled" not in listed.json() or listed.json().get("api_enabled") is None
+    aws_status = client.get("/api/v1/aws/connect/", **_headers("tenant-a"))
+    assert aws_status.status_code == 403, aws_status.content
+
 
 @pytest.mark.no_default_membership
 def test_system_admin_can_mutate_globals_independent_of_workspace(
@@ -431,6 +452,13 @@ def test_resolve_workspace_refuses_unauthenticated_and_empty_ref_uses_membership
     assert resolve_workspace(None) is None
     assert resolve_workspace(owner, "") == other
     assert resolve_workspace(owner, str(other.pk)) == other
+    nobody = _otp_user(django_user_model, "resolve-nobody")
+    default_workspace()
+    assert WorkspaceMembership.objects.filter(user=nobody).count() == 0
+    assert resolve_workspace(nobody) is None
+    assert resolve_workspace(nobody, "default") is None
+    staff = _otp_user(django_user_model, "resolve-staff", staff=True)
+    assert resolve_workspace(staff) is None
     factory = RequestFactory()
     request = factory.get("/api/v1/hud/overview/")
     request.user = owner
@@ -557,10 +585,10 @@ def test_require_recent_touch_ignores_other_users_and_unconfirmed(
 
 
 def test_workspace_payload_unique_ids_and_unauthenticated_empty(django_user_model):
-    """Staff bootstrap must not duplicate the default workspace row.
+    """Staff flags must not invent a default-workspace row.
 
     What would make this fail: getattr(None, "is_authenticated"), item["XXidXX"],
-    or skipping membership rows.
+    skipping membership rows, or restoring staff bootstrap.
     """
     from django.contrib.auth.models import AnonymousUser
 
@@ -578,7 +606,7 @@ def test_workspace_payload_unique_ids_and_unauthenticated_empty(django_user_mode
     assert all(item["slug"] and item["role"] for item in payload)
     staff = _otp_user(django_user_model, "payload-staff", staff=True)
     staff_ids = [item["id"] for item in workspace_payload(staff)]
-    assert default_workspace().pk in staff_ids
+    assert default_workspace().pk not in staff_ids
     assert len(staff_ids) == len(set(staff_ids))
     keys = {"id", "slug", "name", "role", "capabilities"}
     for item in payload:
@@ -588,16 +616,10 @@ def test_workspace_payload_unique_ids_and_unauthenticated_empty(django_user_mode
         assert item["role"] in ROLE_CAPABILITIES
         assert "hud_ui_v1" in item["capabilities"]
     staff_payload = workspace_payload(staff)
-    for item in staff_payload:
-        assert set(item) == keys
-        if item["slug"] == "default":
-            assert item["role"] == "admin"
-            assert "hud_ui_v1" in item["capabilities"]
+    assert staff_payload == []
     superuser = _otp_user(django_user_model, "payload-root", superuser=True)
     root_payload = workspace_payload(superuser)
-    assert [item["id"] for item in root_payload].count(default_workspace().pk) == 1
-    root_default = next(item for item in root_payload if item["slug"] == "default")
-    assert root_default["role"] == "owner"
+    assert [item["id"] for item in root_payload].count(default_workspace().pk) == 0
     _membership(default_workspace(), staff, "admin")
     again = workspace_payload(staff)
     assert [item["id"] for item in again].count(default_workspace().pk) == 1
@@ -676,7 +698,7 @@ def test_request_workspace_header_id_cache_and_ref_flag(django_user_model):
     assert user_capabilities(owner) == user_capabilities(owner, resolved)
     assert user_role(owner) == "viewer"
     staff = _otp_user(django_user_model, "hdr-staff", staff=True)
-    assert user_role(staff, default_workspace()) == "admin"
+    assert user_role(staff, default_workspace()) == ""
     from django.contrib.auth.models import AnonymousUser
     assert resolve_workspace(AnonymousUser()) is None
     numeric = Workspace.objects.create(name="Numeric", slug="999001")

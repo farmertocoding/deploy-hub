@@ -1,10 +1,20 @@
 """Deploy-writable Hub paths on a target. Never world-writable /tmp (B108)."""
+import re
 
 DEFAULT_USER = "deploy"
+_SSH_USER = re.compile(r"^[A-Za-z_][A-Za-z0-9._-]{0,31}$")
+
+
+def _safe_ssh_user(ssh_user):
+    user = ssh_user or DEFAULT_USER
+    text = str(user)
+    if "/" in text or ".." in text or not _SSH_USER.fullmatch(text):
+        raise ValueError("ssh_user is not a safe account name")
+    return text
 
 
 def hub_root(ssh_user=None):
-    return f"/home/{ssh_user or DEFAULT_USER}/.hub"
+    return f"/home/{_safe_ssh_user(ssh_user)}/.hub"
 
 
 def hub_join(*parts, ssh_user=None):

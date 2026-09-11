@@ -34,7 +34,7 @@ from core.models import (
     require_workspace,
 )
 from core.permissions import RequireAction, RequireRecentTouch, RequireSystemAdmin, RequireWorkspace
-from core.rbac import SITE_FIELD, TARGET_FIELD, request_workspace, scoped_get
+from core.rbac import SITE_FIELD, TARGET_FIELD, is_system_admin, request_workspace, scoped_get
 from vault import service as vault_service
 from vault.models import Secret
 from vault.ssh import generate_ed25519_raw
@@ -98,7 +98,7 @@ class PartnerPublicSerializer(serializers.Serializer):
 class PartnerListSerializer(serializers.Serializer):
     partners = PartnerPublicSerializer(many=True)
     intake = IntakeStatusSerializer()
-    api_enabled = serializers.BooleanField()
+    api_enabled = serializers.BooleanField(required=False, allow_null=True)
     candidate_targets = CandidateTargetSerializer(many=True)
 
 
@@ -129,12 +129,13 @@ def _mint_whsec():
     return WHSEC_PREFIX + base64.b64encode(secrets.token_bytes(24)).decode("ascii")
 
 
-def _intake_payload():
+def _intake_payload(workspace=None):
     from core.models import CheckRun
 
     url = str(getattr(settings, "INTAKE_URL", "") or "").strip()
+    scoped = workspace or default_workspace()
     error = Finding.objects.filter(
-        workspace=default_workspace(),
+        workspace=scoped,
         fingerprint="partner-intake-unreachable",
     ).exclude(state=Finding.State.RESOLVED).exists()
     latest = (
@@ -346,16 +347,14 @@ class PartnerListCreateView(APIView):
             _public_partner(row)
             for row in Partner.objects.filter(workspace=workspace).order_by("pk")
         ]
-        return Response(
-            PartnerListSerializer(
-                {
-                    "partners": partners,
-                    "intake": _intake_payload(),
-                    "api_enabled": partner_api_enabled(),
-                    "candidate_targets": _candidate_targets(workspace),
-                }
-            ).data
-        )
+        body = {
+            "partners": partners,
+            "intake": _intake_payload(workspace),
+            "candidate_targets": _candidate_targets(workspace),
+        }
+        if is_system_admin(request.user):
+            body["api_enabled"] = partner_api_enabled()
+        return Response(PartnerListSerializer(body).data)
 
     @extend_schema(
         request=PartnerCreateSerializer,

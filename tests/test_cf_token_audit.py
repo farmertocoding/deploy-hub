@@ -504,7 +504,7 @@ def test_beat_entry_runs_the_audit_daily_on_queue_probes(monkeypatch):
     entry = settings.CELERY_BEAT_SCHEDULE["cf-token-scope-daily"]
     assert entry["task"] == monitor_tasks.audit_cf_token_scope.name
     assert float(entry["schedule"]) == 86400.0
-    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "probes"
+    assert settings.CELERY_TASK_ROUTES["monitor.*"]["queue"] == "control"
     assert "kwargs" not in entry  # no args at all, so never a token in args
 
     _account(zones=(("zid-a", "audit.example"),))

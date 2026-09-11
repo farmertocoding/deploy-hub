@@ -15,6 +15,7 @@ __all__ = [
     "GIT_SHA",
     "NPM_CI_DOCKERFILE",
     "READY_JSON",
+    "REPO",
     "SAMPLE_NODE_SITE",
     "PipelineTransport",
     "fixture_body",

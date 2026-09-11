@@ -202,6 +202,16 @@ def test_accept_risk_publishes_accepted_action(monkeypatch):
     assert "acked" in actions
     assert "resolved" in actions
     assert "accepted" in actions
+    filed = next(event for event in captured if event["action"] == "filed")
+    assert set(filed) == {
+        "kind", "action", "id", "source_engine", "severity", "entity",
+        "title", "body", "fix_action", "state", "fingerprint",
+        "first_seen", "last_seen", "workspace_id",
+    }
+    assert filed["kind"] == "finding"
+    assert filed["id"] == row.pk
+    assert filed["fingerprint"] == "fp-pub-action"
+    assert filed["workspace_id"] == row.workspace_id
 
 
 def test_audit_severity_column_stays_in_its_enum():
@@ -223,6 +233,9 @@ def test_audit_severity_column_stays_in_its_enum():
 
     filed = AuditEvent.objects.get(action="finding_filed", object_id=str(row.pk))
     assert filed.detail["finding_severity"] == "p1"
+    assert filed.source == "system"
+    assert filed.workspace_id == row.workspace_id
+    assert filed.detail["fingerprint"] == "fp-sev-1"
 
 
 def test_concurrent_create_retry_survives_an_open_transaction(monkeypatch):
@@ -264,7 +277,169 @@ def test_finding_copy_carries_what_why_and_exact_fix():
     for missing in ("title", "body", "fix_action"):
         with pytest.raises(ValueError, match=missing):
             _file(fingerprint=f"fp-copy-{missing}", **{missing: "   "})
+        with pytest.raises(ValueError, match=missing):
+            _file(fingerprint=f"fp-copy-empty-{missing}", **{missing: ""})
+        with pytest.raises(ValueError, match=missing):
+            _file(fingerprint=f"fp-copy-none-{missing}", **{missing: None})
     assert Finding.objects.count() == 0
 
     row = _file(fingerprint="fp-copy-ok")
     assert row.title and row.body and row.fix_action
+
+
+_COPY_REFUSAL = (
+    r"^a Finding must carry a non-blank title "
+    r"\(§6.6 copy: what / why it matters / exact fix\)$"
+)
+
+
+def test_finding_refuses_explicit_none_workspace():
+    """workspace=None must fail inside finding(), not only as a missing kwarg.
+
+    What would make this fail: dropping the None guard, or raising TypeError
+    with a mutated / empty message.
+    """
+    from core.findings import finding
+
+    with pytest.raises(TypeError, match=r"^finding\(\) requires workspace$"):
+        finding("uptime", "fp-none-ws", workspace=None, **COPY)
+
+
+def test_finding_copy_refuses_empty_none_and_omitted_fields():
+    """Whitespace-only is already pinned; empty, None, and a missing key
+    must refuse too — `or "XXXX"` would accept them.
+
+    What would make this fail: `fields.get(name, "XXXX")`, `(value or "XXXX")`,
+    or a mutated §6.6 refusal string.
+    """
+    from core.findings import finding
+    from core.models import default_workspace
+
+    for blank, fingerprint in (("", "fp-copy-empty"), (None, "fp-copy-none")):
+        with pytest.raises(ValueError, match=_COPY_REFUSAL):
+            _file(fingerprint=fingerprint, title=blank)
+
+    kwargs = {k: v for k, v in COPY.items() if k != "title"}
+    with pytest.raises(ValueError, match=_COPY_REFUSAL):
+        finding(
+            "uptime", "fp-copy-omit",
+            workspace=default_workspace(), **kwargs,
+        )
+    assert Finding.objects.filter(
+        fingerprint__in=("fp-copy-empty", "fp-copy-none", "fp-copy-omit"),
+    ).count() == 0
+
+
+def test_omitted_copy_field_is_validated_as_empty_string(monkeypatch):
+    """The create path must pass `""` for a missing copy field, not None.
+
+    What would make this fail: `fields.get(name, None)` or dropping the
+    default so `.get` returns None.
+    """
+    import core.findings as findings
+    from core.models import default_workspace
+
+    seen = []
+    real = findings._require_copy_values
+
+    def wrapped(copy):
+        seen.append(dict(copy))
+        return real(copy)
+
+    monkeypatch.setattr(findings, "_require_copy_values", wrapped)
+    kwargs = {k: v for k, v in COPY.items() if k != "title"}
+    with pytest.raises(ValueError, match=_COPY_REFUSAL):
+        findings.finding(
+            "uptime", "fp-copy-get-default",
+            workspace=default_workspace(), **kwargs,
+        )
+    assert seen
+    assert seen[0]["title"] == ""
+    assert seen[0]["body"] == COPY["body"]
+    assert seen[0]["fix_action"] == COPY["fix_action"]
+
+
+def test_finding_event_wire_shape_is_the_inbox_contract():
+    """Task 13 inbox keys. Renaming a wire key is a silent consumer break.
+
+    What would make this fail: `"XXkindXX"` / `"KIND"` or any other key
+    decoration on the published event dict.
+    """
+    from core.findings import finding_event
+
+    row = _file(fingerprint="fp-wire")
+    assert finding_event(row, "filed") == {
+        "kind": "finding",
+        "action": "filed",
+        "id": row.pk,
+        "source_engine": row.source_engine,
+        "severity": row.severity,
+        "entity": row.entity,
+        "title": row.title,
+        "body": row.body,
+        "fix_action": row.fix_action,
+        "state": row.state,
+        "fingerprint": row.fingerprint,
+        "first_seen": row.first_seen.isoformat(),
+        "last_seen": row.last_seen.isoformat(),
+        "workspace_id": row.workspace_id,
+    }
+
+
+def test_finding_create_passes_first_seen_and_last_seen(monkeypatch):
+    """Filing must set both timestamps at the create() call, not rely on
+    the model default happening to match.
+
+    What would make this fail: dropping first_seen=now or last_seen=now
+    from Finding.objects.create.
+    """
+    captured = {}
+    real = Finding.objects.create
+
+    def wrapped(*args, **kwargs):
+        captured.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(Finding.objects, "create", wrapped)
+    row = _file(fingerprint="fp-seen")
+    assert "first_seen" in captured
+    assert "last_seen" in captured
+    assert captured["first_seen"] == captured["last_seen"]
+    assert row.first_seen == captured["first_seen"]
+    assert row.last_seen == captured["last_seen"]
+
+
+def test_finding_filed_and_reopened_audit_call_kwargs(monkeypatch):
+    """finding() must pass source, workspace, and fingerprint into audit().
+
+    Stored-row inference would hide workspace=None; the call site is the
+    contract. What would make this fail: source omitted/"XXsystemXX"/"SYSTEM",
+    workspace=None, or dropping fingerprint=.
+    """
+    import core.findings as findings
+    from core.findings import resolve
+
+    calls = []
+    real_audit = findings.audit
+
+    def wrapped(*args, **kwargs):
+        calls.append(kwargs)
+        return real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(findings, "audit", wrapped)
+    row = _file(fingerprint="fp-filed-kw")
+    filed = calls[0]
+    assert filed["source"] == "system"
+    assert filed["workspace"] == row.workspace
+    assert filed["fingerprint"] == "fp-filed-kw"
+    assert filed["finding_severity"] == "p1"
+
+    resolve(row)
+    calls.clear()
+    again = _file(fingerprint="fp-filed-kw")
+    assert again.pk == row.pk
+    assert again.state == Finding.State.OPEN
+    reopened = calls[0]
+    assert reopened["source"] == "system"
+    assert reopened["workspace"] == row.workspace
+    assert reopened["fingerprint"] == "fp-filed-kw"

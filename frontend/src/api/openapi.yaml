@@ -3001,12 +3001,12 @@ components:
           $ref: '#/components/schemas/IntakeStatus'
         api_enabled:
           type: boolean
+          nullable: true
         candidate_targets:
           type: array
           items:
             $ref: '#/components/schemas/CandidateTarget'
       required:
-      - api_enabled
       - candidate_targets
       - intake
       - partners
