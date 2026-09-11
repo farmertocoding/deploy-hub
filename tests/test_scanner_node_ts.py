@@ -238,7 +238,7 @@ def test_readiness_gate_pattern_detected_and_ungated_flagged(tmp_path, pristine_
     # drop the gating term -> pattern check flips (enforcement stays pipeline-side)
     site = copy_fixture(tmp_path)
     replace_once(site / SERVER_INDEX,
-                 "ready: backfillDone && feed.connected,", "ready: true,")
+                 "ready: backfillDone,", "ready: true,")
     flipped = {c.id: c for c in node_ts.module.checks(site)}
     assert flipped["node-ts.readiness-pattern"].tier == "warning"
     assert "unconditionally" in flipped["node-ts.readiness-pattern"].title
@@ -287,7 +287,7 @@ def mutate_remove_sigterm(site):  # MUTATIONS.md #2
 
 def mutate_remove_ready_gate(site):  # MUTATIONS.md #3
     replace_once(site / SERVER_INDEX,
-                 "ready: backfillDone && feed.connected,", "ready: true,")
+                 "ready: backfillDone,", "ready: true,")
 
 
 def mutate_remove_heartbeat(site):  # MUTATIONS.md #4

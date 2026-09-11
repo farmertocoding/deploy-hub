@@ -1291,7 +1291,7 @@ class NodeTsScannerModule:
                 detail=f"ready: {expression} — no warm-up gating; a cold instance "
                        "reports ready before backfill completes.",
                 fix_hint="Gate ready on the warm-up condition (e.g. "
-                         "`ready: backfillDone && feed.connected`) so cutover waits "
+                         "`ready: backfillDone`) so cutover waits "
                          "for a warm engine; the pipeline gate (PIPE-S4-READINESS-"
                          "GATE) enforces it at deploy time.")
         shape = [f for f in ("live", "checks") if re.search(rf"\b{f}\s*:", text)]
