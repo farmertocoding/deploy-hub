@@ -198,10 +198,17 @@ def test_accept_risk_publishes_accepted_action(monkeypatch):
     ack(row)
     resolve(_file(fingerprint="fp-pub-res"))
     accept_risk(_file(fingerprint="fp-pub-acc"), "ok")
+    resolved = _file(fingerprint="fp-pub-reopen")
+    resolve(resolved)
+    _file(fingerprint="fp-pub-reopen")
     actions = [event["action"] for event in captured]
     assert "acked" in actions
     assert "resolved" in actions
     assert "accepted" in actions
+    assert "reopened" in actions
+    assert None not in actions
+    assert "REOPENED" not in actions
+    assert "XXreopenedXX" not in actions
     filed = next(event for event in captured if event["action"] == "filed")
     assert set(filed) == {
         "kind", "action", "id", "source_engine", "severity", "entity",
