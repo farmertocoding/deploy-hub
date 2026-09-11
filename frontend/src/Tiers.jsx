@@ -20,6 +20,7 @@ export function ConfirmDialog({ label, summary, onConfirm, onDismiss }) {
       style={{ ...box, marginTop: 8, borderColor: warning }}>
       <p style={{ marginTop: 0 }}>{summary}</p>
       <button
+        type="button"
         style={{ ...box, marginRight: 8 }}
         aria-busy={busy || undefined}
         aria-disabled={busy || undefined}
@@ -31,7 +32,7 @@ export function ConfirmDialog({ label, summary, onConfirm, onDismiss }) {
         }}
       >
         Confirm — {label}</button>
-      <button style={box} onClick={onDismiss}>Cancel</button>
+      <button type="button" style={box} onClick={onDismiss}>Cancel</button>
     </div>
   );
 }
@@ -44,7 +45,7 @@ export function UndoToast({ label, seconds, onUndo }) {
   return (
     <div role="status"
       style={{ ...box, marginTop: 8, borderColor: success, display: "inline-block" }}>
-      ✓ {label} — <button style={box} onClick={onUndo}>Undo ({seconds} s)</button>
+      ✓ {label} — <button type="button" style={box} onClick={onUndo}>Undo ({seconds} s)</button>
     </div>
   );
 }
@@ -80,9 +81,10 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
         placeholder="type the name"
         onChange={(e) => setName(e.target.value)} />
       <div style={{ marginTop: 8 }}>
-        <button style={{ ...box, marginRight: 8 }} onClick={onTouch}>
+        <button type="button" style={{ ...box, marginRight: 8 }} onClick={onTouch}>
           Touch security key</button>
         <button
+          type="button"
           style={{ ...box, marginRight: 8 }}
           aria-busy={busy || undefined}
           aria-disabled={busy || undefined}
@@ -94,7 +96,7 @@ export function T1Overlay({ label, cost, summary, onTouch, onConfirm, onDismiss 
             setBusy(true);
           }}
         >Confirm — {label}</button>
-        <button style={box} onClick={onDismiss}>Cancel</button>
+        <button type="button" style={box} onClick={onDismiss}>Cancel</button>
       </div>
     </div>
   );
@@ -135,7 +137,7 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
   if (p.stepUp === "required") {
     return (
       <span style={{ marginRight: 8 }}>
-        <button style={box} onClick={() => runner.click({ expected: confirmName })}>
+        <button type="button" style={box} onClick={() => runner.click({ expected: confirmName })}>
           {row.label}</button>
         {state.phase === "steppingUp" && (
           <T1Overlay label={row.label}
@@ -156,7 +158,7 @@ export function ActionButton({ row, summary, confirmName, cost, onRun, onUndo })
   }
   return (
     <span style={{ marginRight: 8 }}>
-      <button style={box} onClick={() => runner.click()}>{row.label}</button>
+      <button type="button" style={box} onClick={() => runner.click()}>{row.label}</button>
       {state.phase === "confirming" && (
         <ConfirmDialog label={row.label} summary={summary}
           onConfirm={() => runner.confirm()} onDismiss={() => runner.dismiss()} />

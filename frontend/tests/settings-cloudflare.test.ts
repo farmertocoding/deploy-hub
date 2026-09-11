@@ -100,6 +100,126 @@ test("plant_posts_path_only_and_connect_stays_token_only", async () => {
   assert.ok(!("origin_ca_key" in calls[0].body));
 });
 
+function nodeText(node: any): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (node.props?.children) return nodeText(node.props.children);
+  if (node.children) return nodeText(node.children);
+  return "";
+}
+
+function clickLabel(tree: any, label: string) {
+  const btn = tree.root.findAllByType("button").find((b: any) => nodeText(b).includes(label));
+  assert.ok(btn, `missing button ${label}`);
+  assert.equal(btn.props.type, "button", `${label} must be type=button so a Settings form does not submit`);
+  btn.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  return btn;
+}
+
+async function completeT1(tree: any, act: any, confirmLabel: string, typedName: string) {
+  await act(async () => {
+    clickLabel(tree, "Touch security key");
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  const nameInput = tree.root.findAllByType("input")
+    .find((n: any) => n.props["aria-label"] === "type the name");
+  assert.ok(nameInput, "T1 overlay name field");
+  await act(() => { nameInput.props.onChange({ target: { value: typedName } }); });
+  await act(() => { clickLabel(tree, confirmLabel); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+}
+
+test("cloudflare_and_origin_ca_form_submit_do_not_post_until_t1_confirm", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  (globalThis as any).window.location.search = "";
+  (globalThis as any).window.location.hostname = "localhost";
+  (globalThis as any).document.cookie = "csrftoken=test";
+  if (!(globalThis as any).navigator) {
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
+  }
+  Object.defineProperty((globalThis as any).navigator, "credentials", {
+    configurable: true,
+    value: { get: async () => ({ id: "cred", type: "public-key", response: {} }) },
+  });
+
+  const tokenPosts: any[] = [];
+  const plantPosts: any[] = [];
+  (globalThis as any).fetch = async (url: string, opts: any = {}) => {
+    const path = String(url);
+    const method = opts.method || (opts.body !== undefined ? "POST" : "GET");
+    if (path.includes("cloudflare/connect/") && method === "POST") {
+      tokenPosts.push(JSON.parse(opts.body));
+      return {
+        status: 201,
+        json: async () => ({
+          account: { id: 3, provider: "cloudflare", label: "connect.example" },
+          zone: { id: 2, name: "connect.example", provider_zone_id: "zid", purpose: "prod" },
+        }),
+      };
+    }
+    if (path.includes("origin-ca-plant/") && method === "POST") {
+      plantPosts.push({ url: path, body: JSON.parse(opts.body) });
+      return { status: 200, json: async () => ({ planted: true }) };
+    }
+    if (path.includes("authentication/begin")) {
+      return { status: 200, json: async () => ({ challenge: "Y2hhbGxlbmdl" }) };
+    }
+    if (path.includes("auth/webauthn/touch")) {
+      return { status: 200, json: async () => ({ touched: true }) };
+    }
+    if (path.includes("v1/hud/integrations")) {
+      return {
+        status: 200,
+        json: async () => ({
+          dns: [{ id: 3, provider: "cloudflare", label: "connect.example" }],
+        }),
+      };
+    }
+    return { status: 200, json: async () => ({}) };
+  };
+
+  const { act, create } = await import("react-test-renderer");
+  let tree: any;
+  await act(async () => {
+    tree = create(React.createElement(CloudflarePanel));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  const tokenInput = tree.root.findAllByType("input").find((n: any) => n.props.type === "password");
+  assert.ok(tokenInput);
+  await act(() => {
+    tokenInput.props.onChange({ target: { value: "cf-token-not-a-credential", name: tokenInput.props.name } });
+  });
+  const connectForm = tree.root.findAllByType("form")[0];
+  await act(() => connectForm.props.onSubmit({ preventDefault() {} }));
+  assert.equal(tokenPosts.length, 0, "Enter must not POST the Cloudflare token");
+
+  await act(() => { clickLabel(tree, "Connect Cloudflare"); });
+  assert.match(nodeText(tree.toJSON()), /type the name/i);
+  assert.equal(tokenPosts.length, 0, "Connect click must open T1, not POST");
+  await completeT1(tree, act, "Confirm — Connect Cloudflare", "cloudflare");
+  assert.equal(tokenPosts.length, 1);
+  assert.equal(tokenPosts[0].token, "cf-token-not-a-credential");
+
+  const pathInput = tree.root.findAllByType("input").find((n: any) => n.props.type === "text");
+  assert.ok(pathInput);
+  await act(() => {
+    pathInput.props.onChange({ target: { value: "/etc/deploy-hub/origin-ca/key", name: pathInput.props.name } });
+  });
+  const plantForm = tree.root.findAllByType("form")[1];
+  await act(() => plantForm.props.onSubmit({ preventDefault() {} }));
+  assert.equal(plantPosts.length, 0, "Enter must not plant Origin CA");
+
+  await act(() => { clickLabel(tree, "Plant Origin CA"); });
+  assert.equal(plantPosts.length, 0, "Plant click must open T1, not POST");
+  await completeT1(tree, act, "Confirm — Plant Origin CA token", "origin-ca");
+  assert.equal(plantPosts.length, 1);
+  assert.deepEqual(plantPosts[0].body, { path: "/etc/deploy-hub/origin-ca/key" });
+});
+
 test("existing_cloudflare_accounts_can_be_selected_for_origin_ca_plant", () => {
   const accounts = connectedCloudflareAccounts({
     dns: [

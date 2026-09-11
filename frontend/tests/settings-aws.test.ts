@@ -73,6 +73,96 @@ test("aws_tab_exists_paste_is_write_only_degraded_empty_and_error", async () => 
   assert.ok(!/\bConnected\b/.test(JSON.stringify(err.data)));
 });
 
+function nodeText(node: any): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (node.props?.children) return nodeText(node.props.children);
+  if (node.children) return nodeText(node.children);
+  return "";
+}
+
+function clickLabel(tree: any, label: string) {
+  const btn = tree.root.findAllByType("button").find((b: any) => nodeText(b).includes(label));
+  assert.ok(btn, `missing button ${label}`);
+  assert.equal(btn.props.type, "button", `${label} must be type=button so a Settings form does not submit`);
+  btn.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  return btn;
+}
+
+test("aws_connect_form_submit_and_click_do_not_post_until_t1_confirm", async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  (globalThis as any).window.location.search = "";
+  (globalThis as any).window.location.hostname = "localhost";
+  (globalThis as any).document.cookie = "csrftoken=test";
+  if (!(globalThis as any).navigator) {
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
+  }
+  Object.defineProperty((globalThis as any).navigator, "credentials", {
+    configurable: true,
+    value: { get: async () => ({ id: "cred", type: "public-key", response: {} }) },
+  });
+
+  const credentialPosts: any[] = [];
+  (globalThis as any).fetch = async (url: string, opts: any = {}) => {
+    const path = String(url);
+    const method = opts.method || (opts.body !== undefined ? "POST" : "GET");
+    if (path.includes("v1/aws/connect/") && method === "POST") {
+      credentialPosts.push(JSON.parse(opts.body));
+      return {
+        status: 201,
+        json: async () => ({ account_id_last4: "9012", region: "us-east-1" }),
+      };
+    }
+    if (path.includes("authentication/begin")) {
+      return { status: 200, json: async () => ({ challenge: "Y2hhbGxlbmdl" }) };
+    }
+    if (path.includes("auth/webauthn/touch")) {
+      return { status: 200, json: async () => ({ touched: true }) };
+    }
+    return { status: 200, json: async () => ({ connected: false, reason: "set HUB_AWS_CREDENTIALS_REF" }) };
+  };
+
+  const { act, create } = await import("react-test-renderer");
+  let tree: any;
+  await act(async () => {
+    tree = create(React.createElement(AwsPanel, { systemAdmin: true }));
+    await Promise.resolve();
+  });
+
+  const passwords = tree.root.findAllByType("input").filter((n: any) => n.props.type === "password");
+  assert.equal(passwords.length, 2);
+  await act(() => {
+    passwords[0].props.onChange({ target: { value: "AKIATEST", name: passwords[0].props.name } });
+    passwords[1].props.onChange({ target: { value: "secret-test", name: passwords[1].props.name } });
+  });
+
+  const form = tree.root.findByType("form");
+  await act(() => form.props.onSubmit({ preventDefault() {} }));
+  assert.equal(credentialPosts.length, 0, "Enter/form submit must not POST AWS credentials");
+
+  await act(() => { clickLabel(tree, "Connect AWS"); });
+  assert.match(nodeText(tree.toJSON()), /type the name/i);
+  assert.equal(credentialPosts.length, 0, "Connect click must open T1, not POST");
+
+  await act(async () => {
+    clickLabel(tree, "Touch security key");
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  const nameInput = tree.root.findAllByType("input")
+    .find((n: any) => n.props["aria-label"] === "type the name");
+  assert.ok(nameInput, "T1 overlay name field");
+  await act(() => {
+    nameInput.props.onChange({ target: { value: "aws" } });
+  });
+  await act(() => { clickLabel(tree, "Confirm — Connect AWS"); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  assert.equal(credentialPosts.length, 1, "POST only after hardware touch + typed name");
+  assert.equal(credentialPosts[0].access_key_id, "AKIATEST");
+  assert.equal(credentialPosts[0].secret_access_key, "secret-test");
+});
+
 test("aws_status_banner_hides_empty_ref_lie_after_connect", () => {
   const empty = visibleText(render(AwsStatusBanner, {
     connected: false, reason: "set HUB_AWS_CREDENTIALS_REF",

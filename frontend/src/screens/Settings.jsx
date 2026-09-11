@@ -403,7 +403,7 @@ export function AwsPanel({ systemAdmin = false } = {}) {
       )}
       {systemAdmin && (
         <>
-          <form onSubmit={handleSubmit(submit)}
+          <form onSubmit={(event) => { event.preventDefault(); }}
             style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
             <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
               <small>access key id</small>
@@ -516,7 +516,7 @@ export function CloudflarePanel() {
         on the account in the vault. Plant a Bearer API token with Zone → SSL
         and Certificates → Edit; it does not accept a paste, and it does not
         accept a deprecated Origin CA service key.</p>
-      <form onSubmit={handleSubmit(submit)}
+      <form onSubmit={(event) => { event.preventDefault(); }}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 240px" }}>
           <small>API token</small>
@@ -544,7 +544,7 @@ export function CloudflarePanel() {
         <code>/var/lib/deploy-hub/origin-ca/</code>. The file must be a Bearer
         token with Zone SSL and Certificates Edit, not a v1.0- service key.
         The Hub reads the file; do not paste token bytes here.</p>
-      <form onSubmit={plantForm.handleSubmit(submitPlant)}
+      <form onSubmit={(event) => { event.preventDefault(); }}
         style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 4, flex: "1 1 200px" }}>
           <small>DNS account</small>

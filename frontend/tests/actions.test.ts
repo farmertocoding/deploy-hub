@@ -230,6 +230,22 @@ test("instance_create_overlay_shows_cost_in_words_and_copy_says_target", () => {
   const costAt = create.indexOf("$0.05/h");
   assert.ok(costAt >= 0 && costAt < confirmAt, "cost must paint before Confirm");
 
+  const overlayMarkup = render(T1Overlay, {
+    label: "Connect AWS",
+    onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
+  });
+  assert.equal((overlayMarkup.match(/type="button"/g) || []).length, 3,
+    "Touch, Confirm, and Cancel must not be implicit submit controls");
+  const confirmMarkup = render(ConfirmDialog, {
+    label: "Deploy", summary: "abc → def", onConfirm: () => {}, onDismiss: () => {},
+  });
+  assert.equal((confirmMarkup.match(/type="button"/g) || []).length, 2,
+    "Confirm and Cancel must not be implicit submit controls");
+  const actionMarkup = render(ActionButton, {
+    row: tierFor("aws.connect"), onRun: () => {},
+  });
+  assert.match(actionMarkup, /type="button"/);
+
   const del = visibleText(render(T1Overlay, {
     label: "Delete target",
     onTouch: () => {}, onConfirm: () => {}, onDismiss: () => {},
