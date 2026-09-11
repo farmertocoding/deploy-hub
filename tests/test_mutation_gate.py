@@ -308,6 +308,8 @@ def test_a_waiver_only_silences_a_mutant_that_is_actually_surviving(tmp_path,
     exists, fails the gate: a spent waiver is a judgement nobody re-made, sitting in the
     file reading as current, which is the same rot `_read_entry` refuses in a stale
     declaration and the same rot round 6 found in a duplicated waiver line.
+    Timeout is not spent: the same id can survive as equivalent on one host and
+    hit the per-mutant clock on another.
     """
     import mutation_gate
 
@@ -329,6 +331,9 @@ def test_a_waiver_only_silences_a_mutant_that_is_actually_surviving(tmp_path,
 
     results({"pkg.f__mutmut_1": "survived"})
     assert mutation_gate.main([]) == 0
+
+    results({"pkg.f__mutmut_1": "timeout"})
+    assert mutation_gate.main([]) == 0, "timeout spent a Darwin survive-waiver"
 
     results({"pkg.f__mutmut_1": "killed"})
     assert mutation_gate.main([]) == 1, "a spent waiver passed"

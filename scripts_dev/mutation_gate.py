@@ -54,9 +54,10 @@ recorded in `WAIVERS.md` under the fingerprint above, one line per mutant, justi
 individually, in the same file and the same format as every other waiver in this repo.
 Two things keep that from becoming a baseline by another name:
 
-  * a waiver whose mutant is NOT surviving fails the gate. A waiver that has been fixed,
-    or whose mutant no longer exists after a refactor, is dead text claiming a judgement
-    nobody re-made — the same rot `_read_entry` refuses in a stale declaration;
+  * a waiver whose mutant is KILLED fails the gate. Timeout/segfault is the clock or
+    the trampoline dying — the same mutant can SURVIVE as equivalent on Darwin and
+    TIMEOUT on Linux GNU/Python, so a spent-on-timeout rule makes the waiver list
+    unportable. A mutant that no longer exists after a refactor is still spent;
   * they are in WAIVERS.md, which the round reads. A waiver nobody sees is a baseline.
 
 mutmut's own `# pragma: no mutate` was NOT used for these. It sits on the production
@@ -249,13 +250,15 @@ def main(argv=None):
                       if status not in PASSING
                       and not (name in waived and status in WAIVABLE))
 
-    # A waiver for a mutant that is not surviving is a judgement nobody re-made.
+    # A waiver for a mutant that is killed is a judgement nobody re-made.
+    # timeout/segfault stay compatible with a survive-waiver: Darwin may report
+    # survived (equivalent) while Linux reports timeout on the same id.
     for name in sorted(waived):
         if name not in results:
             waiver_problems.append(
                 f"WAIVERS.md waives {name}, which is not a mutant of the configured "
                 f"scope any more — the waiver outlived the code it excused")
-        elif results[name][0] in PASSING:
+        elif results[name][0] == "killed":
             waiver_problems.append(
                 f"WAIVERS.md waives {name}, which is now '{results[name][0]}' — the "
                 f"waiver is spent; delete the line")
