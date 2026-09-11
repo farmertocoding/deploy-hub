@@ -24,6 +24,12 @@
 # that changes: re-read this comment then.
 _MF_HEAD := $(firstword $(MAKEFLAGS))
 _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
+# GNU Make 4.3 (Ubuntu / GHA) leaves $(MAKEFLAGS) empty at parse time when -j
+# arrived through the environment, then still starts a jobserver. 4.4+ and
+# 3.81 put the flag in $(MAKEFLAGS). printenv sees the original either way.
+_ENV_MF := $(shell printenv MAKEFLAGS 2>/dev/null)
+_ENV_HEAD := $(firstword $(_ENV_MF))
+_ENV_SHORT := $(if $(findstring =,$(_ENV_HEAD)),,$(filter-out -%,$(_ENV_HEAD)))
 #
 # `SHELL=` is the one input that does NOT survive into `$(MAKEFLAGS)` as a word — make
 # absorbs it into the variable — so it is caught by its origin instead. It is also the
@@ -39,9 +45,9 @@ _MF_SHORT := $(if $(findstring =,$(_MF_HEAD)),,$(filter-out -%,$(_MF_HEAD)))
 # injected one via MAKEFILES, which is caught below. A real override still shows origin
 # `command line` or `environment` and is still refused.
 _MF_BAD := $(strip \
-	$(foreach c,n i q t o j,$(findstring $(c),$(_MF_SHORT))) \
+	$(foreach c,n i q t o j,$(findstring $(c),$(_MF_SHORT)$(_ENV_SHORT))) \
 	$(filter --dry-run --just-print --recon --ignore-errors --question --touch --jobs% -j% --jobserver%,\
-		$(MAKEFLAGS)) \
+		$(MAKEFLAGS) $(_ENV_MF)) \
 	$(filter --eval% .SHELLFLAGS=%,$(MAKEFLAGS)) \
 	$(filter-out file default undefined,$(origin SHELL))$(filter-out file default undefined,$(origin .SHELLFLAGS)) \
 	$(MAKEFILES))

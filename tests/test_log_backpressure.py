@@ -9,6 +9,7 @@ new file's head; Caddy's native roller is a versioned catalog entry so target
 disk is bounded no matter what the Hub does.
 """
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -24,6 +25,17 @@ PRODUCER = Path(producer.__file__).resolve()
 # ride a sampled pull in any key.
 MARKER = "PLANTED-RAW-LINE-do-not-ship"
 TS = datetime(2026, 8, 22, 10, 0, 5, tzinfo=UTC).timestamp()
+
+
+def _replace_with_new_inode(log, body):
+    """POSIX rename onto the path so the inode actually changes.
+
+    Overlay/tmpfs can recycle the inode of unlink+create; logrotate's rename
+    does not. What would make this fail: treating truncate-in-place as rotation.
+    """
+    tmp = log.with_name(log.name + ".new")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, log)
 
 
 def _line(status=200, ip="203.0.113.7", host="example.com", size=512, ts=TS):
@@ -213,10 +225,9 @@ def test_rotated_inode_resets_offset_without_losing_the_new_file(tmp_path):
     old = before["log_chunk"]
     assert old["offset"] > 0
 
-    log.unlink()  # rotation: same path, new inode, MORE bytes than the old offset
     fresh = [_line(201, ip=f"192.0.2.{i + 2}") for i in range(10)]
     body = "\n".join(fresh) + "\n"
-    log.write_text(body, encoding="utf-8")
+    _replace_with_new_inode(log, body)
     assert log.stat().st_ino != old["inode"]
     assert log.stat().st_size > old["offset"]
 
@@ -292,8 +303,7 @@ def test_rotated_pull_is_a_recorded_fact_in_trafficstat(tmp_path):
     old = before["log_chunk"]
     assert "rotated" not in old  # a plain pull carries no discontinuity flag
 
-    log.unlink()  # roll: whatever the old file grew past `offset` is gone
-    log.write_text(_line(200) + "\n" + _line(404) + "\n", encoding="utf-8")
+    _replace_with_new_inode(log, _line(200) + "\n" + _line(404) + "\n")
     after, _ = _run(log, offset=old["offset"], inode=old["inode"],
                     target_id=target.pk)
     chunk = after["log_chunk"]

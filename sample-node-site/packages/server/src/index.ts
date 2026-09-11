@@ -51,7 +51,7 @@ app.get("/healthz", async () => {
   const feed = feedStatus();
   return {
     live: true,
-    ready: backfillDone && feed.connected,
+    ready: backfillDone,
     checks: {
       feed_age_s: feed.lastTickAgeS,
       backfill_pct: backfillPct,

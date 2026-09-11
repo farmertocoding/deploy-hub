@@ -1061,10 +1061,11 @@ def test_a_declaration_file_is_decoded_as_utf8_even_on_an_ascii_locale(
     """
     real = pathlib.Path.read_text
 
-    def locale_is_ascii(self, *args, encoding=None, errors=None, newline=None):
-        if self.name == declarations.DECLARATION_FILE and encoding is None:
-            encoding = "ascii"
-        return real(self, *args, encoding=encoding, errors=errors, newline=newline)
+    def locale_is_ascii(self, *args, **kwargs):
+        # Path.read_text(..., newline=) is 3.13+; CI is 3.12. Forward kwargs as-is.
+        if self.name == declarations.DECLARATION_FILE and not args and not kwargs.get("encoding"):
+            kwargs["encoding"] = "ascii"
+        return real(self, *args, **kwargs)
 
     monkeypatch.setattr(pathlib.Path, "read_text", locale_is_ascii)
     loaded = _declared(tmp_path,
