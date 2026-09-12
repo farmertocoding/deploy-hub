@@ -41,8 +41,12 @@ export function feedStatus() {
 }
 
 export function startIngestion(hooks: IngestHooks): void {
-  void backfill(hooks);
-  void streamLoop(hooks);
+  // Ready flips on backfillDone; starting ccxt.pro.binance in parallel lets
+  // watchTrades starve checkpoint writes so /healthz checks freeze mid-warm.
+  void (async () => {
+    await backfill(hooks);
+    void streamLoop(hooks);
+  })();
 }
 
 /**
@@ -121,7 +125,9 @@ async function resumeFromCheckpoint(path: string): Promise<number> {
 }
 
 async function writeCheckpoint(path: string, ts: number): Promise<void> {
-  const { writeFile } = await import("node:fs/promises");
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const slash = path.lastIndexOf("/");
+  if (slash > 0) await mkdir(path.slice(0, slash), { recursive: true });
   await writeFile(path, String(ts), "utf8");
 }
 

@@ -157,6 +157,25 @@ def _docker_available():
     return probe.returncode == 0
 
 
+@pytest.mark.req("PIPE-S4-READINESS-GATE")
+def test_ingestion_awaits_backfill_before_live_stream():
+    """startIngestion must finish backfill before ccxt.pro.binance.
+
+    What would make this fail: `void backfill(hooks); void streamLoop(hooks);`
+    so watchTrades occupies the event loop, /healthz checks freeze at a
+    partial backfill_pct, and ensure_health_check raises 'healthz checks
+    frozen while not ready' (CI T2 test_t2_real_node_image_builds_on_vfs).
+    """
+    ingest = SAMPLE_NODE_SITE / "packages" / "server" / "src" / "ingest.ts"
+    text = ingest.read_text(encoding="utf-8")
+    start = text.split("export function startIngestion", 1)[1]
+    start = start.split("async function backfill", 1)[0]
+    assert "await backfill(hooks)" in start, start
+    assert "streamLoop(hooks)" in start, start
+    assert start.index("await backfill(hooks)") < start.index("streamLoop(hooks)")
+    assert "void backfill(hooks)" not in start
+
+
 # --- T2: real SshTransport against the shared hub_target fixture ---
 
 T2_SERVE_PY = """\
