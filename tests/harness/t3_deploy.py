@@ -306,7 +306,7 @@ def install_guest_docker(vm):
     )
 
 
-CADDY_VERSION = "2.8.4"
+CADDY_VERSION = "2.11.7"
 CADDY_UNIT = REPO / "images" / "hub-test-target" / "caddy.service"
 T3_CADDYFILE = '{\n\tauto_https off\n}\n:80 {\n\trespond "hub-t3-vm" 200\n}\n'
 

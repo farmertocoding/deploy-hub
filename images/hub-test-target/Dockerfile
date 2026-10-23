@@ -25,7 +25,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Caddy binary (both amd64 and arm64). Package repos are not assumed.
-ARG CADDY_VERSION=2.8.4
+ARG CADDY_VERSION=2.11.7
 RUN arch="$(dpkg --print-architecture)" \
     && curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${arch}.tar.gz" \
         | tar -xz -C /usr/local/bin caddy \
